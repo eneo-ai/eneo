@@ -105,6 +105,11 @@ class AudioRuntimeDeps:
     stage_transcript_source: Callable[
         [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
+    # Holds the attempt's inline transcript until its activation writes it on
+    # the run row; None drops one that a later file-backed transcript replaced.
+    stage_run_transcript: Callable[
+        [TranscriptSourceReference, InlineTranscript | None], None
+    ]
     transcription_call_observer: "ProviderCallObserver | None" = None
 
 
@@ -310,17 +315,29 @@ async def resolve_transcribe_and_attach_audio_input(
         )[0]
         assert isinstance(text_reference, FileBackedStepText)
 
-    transcript_value = text_reference or inline_transcript(
-        text=transcription_result.text,
-        source_step_id=request.step.step_id,
-        source_attempt_no=request.attempt_no,
-    )
-    await persist_transcription_on_run_input(
-        flow_run_repo=deps.flow_run_repo,
-        run=request.run,
-        transcript=transcript_value,
-    )
-    if text_reference is not None:
+    transcript_value: FileBackedStepText | InlineTranscript
+    if text_reference is None:
+        transcript_value = inline_transcript(
+            text=transcription_result.text,
+            source_step_id=request.step.step_id,
+            source_attempt_no=request.attempt_no,
+        )
+        # Written on the run row when the attempt is activated: no row lock is
+        # held while a later source is downloaded and transcribed, and a
+        # failure before activation leaves nothing. This step's readers see it.
+        request.run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript_value
+        ).apply_to(request.run.input_payload_json)
+        deps.stage_run_transcript(reference, transcript_value)
+    else:
+        transcript_value = text_reference
+        # Committed now; it replaces an inline one an earlier source staged.
+        deps.stage_run_transcript(reference, None)
+        await persist_transcription_on_run_input(
+            flow_run_repo=deps.flow_run_repo,
+            run=request.run,
+            transcript=transcript_value,
+        )
         # Later input validation may roll back before attempt activation.
         await deps.commit()
     apply_transcription_to_context(context=request.context, transcript=transcript_value)

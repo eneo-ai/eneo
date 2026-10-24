@@ -5,16 +5,18 @@ An audio step is run on a real session with stubs that stop at each wait: the
 audio download being spooled, a transcription request and a completion
 request. While a stub is stopped the test looks at the database: no backend
 whose transaction began before the wait may still be idle in it or hold a
-relation lock, and `flow_runs` can take a schema lock within a second. A step
-that reads its audio files one source at a time also stops at its second
-mapped completion call, and its later sources wait in the transaction that
-wrote the first source's transcript.
+relation lock, `flow_runs` can take a schema lock within a second, and the
+worker's heartbeat can renew the run. A step that reads its audio files one
+source at a time also stops at its second mapped completion call. Its inline
+transcript is written when the attempt is activated, so no later source waits
+with the run row locked.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import contextvars
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -34,12 +36,23 @@ from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
 from eneo.files.text import TEXT_EXTRACTION_WARNINGS
 from eneo.files.transcriber import TranscribedAudio
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowExecutionOwnershipLost
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunExecutionOwner,
+    FlowRunRepository,
     flow_run_execution_owner,
 )
+from eneo.flows.infrastructure.flow_transcript_source_repo import (
+    FlowTranscriptSourceRepository,
+)
+from eneo.flows.runtime.step_result_builder import build_default_failed_input_payload
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
+from eneo.main.exceptions import TypedIOValidationException
 from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallResultFacts,
     TranscriptionCallRequestFacts,
@@ -68,6 +81,8 @@ _AUDIO = b"audio supplied to the transcription provider"
 # How long each wait is held after the test has noted when it began.
 _HOLD_SECONDS = 0.2
 _LOCK_TIMEOUT = "1s"
+# The audio files a step that reads one source at a time is given.
+_PER_SOURCE_FILES = ("first.wav", "second.wav")
 _DOCUMENTS_CONTRACT: dict[str, object] = {
     "type": "object",
     "required": ["documents"],
@@ -120,6 +135,7 @@ class _Held:
     idle_in_transaction: int
     relation_locks: int
     flow_runs_alterable: bool
+    heartbeat_renewable: bool
 
 
 @dataclass(frozen=True)
@@ -130,6 +146,7 @@ class _Case:
     metadata: dict[str, object]
     waits: _Waits
     sources: int
+    owner: FlowRunExecutionOwner
 
 
 async def _audio_stream() -> AsyncIterator[bytes]:
@@ -146,8 +163,14 @@ def _held_download(download: Any, waits: _Waits) -> Any:
     return replace(download, chunks=chunks(), verified_path=None)
 
 
-def _transcriber(waits: _Waits) -> Any:
+def _transcriber(waits: _Waits, *, failing_call: int | None = None) -> Any:
+    calls = 0
+
     async def transcribe(audio_file: Any, model: Any, *, observer: Any, **_: Any):
+        nonlocal calls
+        calls += 1
+        if calls == failing_call:
+            raise RuntimeError("The transcription provider failed.")
         call_id = await observer.started(
             TranscriptionCallRequestFacts(
                 request_schema_version=2,
@@ -164,7 +187,7 @@ def _transcriber(waits: _Waits) -> Any:
                 response_model="whisper-1", provider_response_id=None
             ),
         )
-        return TranscribedAudio(text="Mötet började.", duration_seconds=12.0)
+        return TranscribedAudio(text=f"Mötet, del {calls}.", duration_seconds=12.0)
 
     return SimpleNamespace(transcribe=transcribe)
 
@@ -249,9 +272,7 @@ async def held_audio_step(
         )
         file_ids = [
             await _seed_audio(container=container, admin_user=admin_user, name=name)
-            for name in (
-                ("first.wav", "second.wav") if per_source else ("meeting.wav",)
-            )
+            for name in (_PER_SOURCE_FILES if per_source else ("meeting.wav",))
         ]
         await _bind_runtime_uploaded_files(
             session=session,
@@ -329,8 +350,8 @@ async def held_audio_step(
                 completion_model_id=completion_model_id,
                 answers=(
                     [
-                        '{"documents":[{"title":"First"}]}',
-                        '{"documents":[{"title":"Second"}]}',
+                        f'{{"documents":[{{"title":"Source {number}"}}]}}'
+                        for number in range(1, len(file_ids) + 1)
                     ]
                     if per_source
                     else ["Meeting notes."]
@@ -347,7 +368,7 @@ async def held_audio_step(
                         "enabled": True,
                         "input_format": "audio",
                         "execution_mode": "per_source",
-                        "max_files": 2,
+                        "max_files": len(file_ids),
                     }
                 },
             )
@@ -363,11 +384,11 @@ async def held_audio_step(
         # Read on the executor's session, as the executor reads the run before
         # its step: the transaction that read opens is what a wait must not hold.
         run = await executor.flow_run_repo.get(run_id=run.id, tenant_id=run.tenant_id)
-        owner_token = flow_run_execution_owner.set(
-            FlowRunExecutionOwner(
-                run_id=run.id, tenant_id=run.tenant_id, revision=run.revision
-            )
+        # As the worker does: the step runs as the run's execution owner.
+        owner = FlowRunExecutionOwner(
+            run_id=run.id, tenant_id=run.tenant_id, revision=run.revision
         )
+        owner_token = flow_run_execution_owner.set(owner)
         try:
             yield _Case(
                 executor=executor,
@@ -382,6 +403,7 @@ async def held_audio_step(
                 },
                 waits=waits,
                 sources=len(file_ids),
+                owner=owner,
             )
         finally:
             flow_run_execution_owner.reset(owner_token)
@@ -419,15 +441,15 @@ async def _transactions_held_since(since: datetime) -> tuple[int, int]:
     return int(idle or 0), int(locks or 0)
 
 
-async def _flow_runs_alterable() -> bool:
+async def _within_lock_timeout(
+    work: Callable[[Any], Awaitable[bool]],
+) -> bool:
+    """Whether `work` gets its locks within the lock timeout; it is rolled back."""
     async with sessionmanager.session() as probe:
         transaction = await probe.begin()
         try:
             await probe.execute(sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))
-            await probe.execute(
-                sa.text("ALTER TABLE flow_runs ADD COLUMN lock_probe integer")
-            )
-            return True
+            return await work(probe)
         except DBAPIError as exc:
             sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(
                 exc.orig, "pgcode", None
@@ -439,7 +461,29 @@ async def _flow_runs_alterable() -> bool:
             await transaction.rollback()
 
 
-async def _what_the_wait_holds(phase: str) -> _Held:
+async def _flow_runs_alterable() -> bool:
+    async def alter(probe: Any) -> bool:
+        await probe.execute(
+            sa.text("ALTER TABLE flow_runs ADD COLUMN lock_probe integer")
+        )
+        return True
+
+    return await _within_lock_timeout(alter)
+
+
+async def _heartbeat_renewable(owner: FlowRunExecutionOwner) -> bool:
+    """Whether the worker's heartbeat could renew the run's lease now."""
+
+    async def renew(probe: Any) -> bool:
+        renewed = await FlowRunRepository(probe).renew_execution_heartbeats(
+            owners=[owner]
+        )
+        return owner in renewed
+
+    return await _within_lock_timeout(renew)
+
+
+async def _what_the_wait_holds(case: _Case, phase: str) -> _Held:
     since = await _database_now()
     await asyncio.sleep(_HOLD_SECONDS)
     idle, locks = await _transactions_held_since(since)
@@ -448,10 +492,21 @@ async def _what_the_wait_holds(phase: str) -> _Held:
         idle_in_transaction=idle,
         relation_locks=locks,
         flow_runs_alterable=await _flow_runs_alterable(),
+        heartbeat_renewable=await _heartbeat_renewable(case.owner),
     )
 
 
-async def _run_holding_each_wait(case: _Case) -> list[_Held]:
+async def _committed_run(case: _Case) -> Any:
+    async with sessionmanager.session() as fresh, fresh.begin():
+        return await FlowRunRepository(fresh).get(
+            run_id=case.run.id, tenant_id=case.run.tenant_id
+        )
+
+
+async def _run_holding_each_wait(
+    case: _Case,
+    at_wait: Callable[[_Case, str], Awaitable[_Held | None]] = _what_the_wait_holds,
+) -> list[_Held]:
     execution = asyncio.create_task(
         case.executor._execute_step(  # pyright: ignore[reportPrivateUsage]
             step=case.step,
@@ -473,7 +528,9 @@ async def _run_holding_each_wait(case: _Case) -> list[_Held]:
                 assert done, "The step neither reached a wait nor finished."
                 break
             phase, released = reached.result()
-            held.append(await _what_the_wait_holds(phase))
+            observed = await at_wait(case, phase)
+            if observed is not None:
+                held.append(observed)
             released.set()
         await execution
     finally:
@@ -482,31 +539,128 @@ async def _run_holding_each_wait(case: _Case) -> list[_Held]:
     return held
 
 
-async def test_a_wait_holds_a_transaction_only_once_the_step_wrote(
+async def test_no_wait_holds_a_transaction_before_activation(
     held_audio_step: _Case,
 ):
-    held = await _run_holding_each_wait(held_audio_step)
+    case = held_audio_step
+    # The step runs as the run's execution owner, as on the worker.
+    assert flow_run_execution_owner.get() == case.owner
+
+    held = await _run_holding_each_wait(case)
 
     # Every source is transcribed before the first completion call is sent.
-    sources = held_audio_step.sources
+    sources = case.sources
     assert [wait.phase for wait in held] == (
         ["audio spool", "transcription"] * sources + ["completion"] * sources
     )
-    # A transaction that has only read is ended before each wait. Source one's
-    # inline transcript is written on the locked run row and stays uncommitted
-    # until the attempt is activated, so every later source is downloaded and
-    # transcribed in that transaction: the exposure that remains until inline
-    # transcripts are written at activation.
-    wrote = range(2, 2 * sources)
+    # A transaction that has only read is ended before each wait, and an inline
+    # transcript is written when the attempt is activated: no later source is
+    # downloaded or transcribed with the run row locked, and the heartbeat
+    # renews the run's lease at every wait.
     assert [
         (
             wait.phase,
             wait.idle_in_transaction,
             wait.relation_locks > 0,
             wait.flow_runs_alterable,
+            wait.heartbeat_renewable,
         )
         for wait in held
-    ] == [
-        (wait.phase, 1, True, False) if index in wrote else (wait.phase, 0, False, True)
-        for index, wait in enumerate(held)
-    ]
+    ] == [(wait.phase, 0, False, True, True) for wait in held]
+    # Activation wrote and committed the last source's transcript.
+    transcript = (await _committed_run(case)).input_payload_json["transkribering"]
+    assert transcript["kind"] == "inline_transcript"
+    assert f"Mötet, del {sources}." in transcript["text"]
+    assert transcript["reference"]["source_attempt_no"] == 1
+
+
+@pytest.mark.parametrize("held_audio_step", ["per_source"], indirect=True)
+async def test_a_cancel_during_a_later_source_lands_at_once(
+    held_audio_step: _Case, admin_user: Any, test_tenant: Any
+):
+    """A user cancels while source two is being transcribed. The cancel is not
+    held behind the step, and the step then stops at activation without
+    writing the transcript."""
+    case = held_audio_step
+    phases: list[str] = []
+
+    async def cancel() -> FlowRunStatus:
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")
+            )
+            container = Container(
+                session=providers.Object(session),
+                user=providers.Object(admin_user),
+                tenant=providers.Object(test_tenant),
+            )
+            result = await container.flow_run_terminalizer().terminalize_run(
+                run_id=case.run.id,
+                tenant_id=case.run.tenant_id,
+                target_status=FlowRunStatus.CANCELLED,
+                source=FlowRunLifecycleSource.USER_CANCEL,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.USER_CANCEL,
+                    code=FlowApiErrorCode.RUN_USER_CANCELLED,
+                    message="Run cancelled by user.",
+                ),
+                cancelled_at=datetime.now(timezone.utc),
+            )
+        return result.run.status
+
+    async def at_wait(case: _Case, phase: str) -> None:
+        phases.append(phase)
+        if phases == ["audio spool", "transcription"] * 2:
+            # As a request does: without the run's execution owner.
+            status = await asyncio.create_task(cancel(), context=contextvars.Context())
+            assert status is FlowRunStatus.CANCELLED
+
+    with pytest.raises(FlowExecutionOwnershipLost):
+        await _run_holding_each_wait(case, at_wait)
+
+    assert phases == ["audio spool", "transcription"] * 2
+    run = await _committed_run(case)
+    assert run.status is FlowRunStatus.CANCELLED
+    assert "transkribering" not in run.input_payload_json
+
+
+@pytest.mark.parametrize("held_audio_step", ["per_source"], indirect=True)
+async def test_a_failure_on_a_later_source_persists_no_inline_transcript(
+    held_audio_step: _Case,
+):
+    case = held_audio_step
+    executor = case.executor
+    executor.transcribers = _transcribers(_transcriber(case.waits, failing_call=2))
+    claimed = await executor.flow_run_repo.get_step_result(
+        run_id=case.run.id, step_id=case.step.step_id, tenant_id=case.run.tenant_id
+    )
+
+    async def release(case: _Case, phase: str) -> None:
+        return None
+
+    with pytest.raises(TypedIOValidationException) as caught:
+        await _run_holding_each_wait(case, release)
+    await executor._handle_typed_step_failure(  # pyright: ignore[reportPrivateUsage]
+        run_id=case.run.id,
+        tenant_id=case.run.tenant_id,
+        step=case.step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=caught.value,
+        failed_input_payload=caught.value.input_payload_json
+        or build_default_failed_input_payload(input_source=case.step.input_source),
+    )
+
+    run = await _committed_run(case)
+    assert run.status is FlowRunStatus.FAILED
+    assert "transkribering" not in run.input_payload_json
+    async with sessionmanager.session() as fresh, fresh.begin():
+        assert (
+            await FlowTranscriptSourceRepository(session=fresh).get_for_attempt(
+                tenant_id=case.run.tenant_id,
+                run_id=case.run.id,
+                step_id=case.step.step_id,
+                attempt_no=1,
+            )
+            is not None
+        )

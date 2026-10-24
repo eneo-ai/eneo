@@ -360,6 +360,17 @@ class _ToolPreflight:
     recorded_levels: Mapping[int, int | None]
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingTranscript:
+    """What an attempt's transcription leaves for its activation to publish:
+    the transcript source and, while the latest transcript is inline, that
+    transcript for the run row. A file-backed one is committed when written."""
+
+    reference: TranscriptSourceReference
+    preparation: TranscriptSourcePreparation
+    run_transcript: InlineTranscript | None = None
+
+
 class _FlowDeletedDuringRun(Exception):
     """The run's flow was deleted after the run's last flow-deleted check."""
 
@@ -731,8 +742,7 @@ class FlowRunExecutor:
         self.flow_run_repo = flow_run_repo
         self.transcript_words_repo = transcript_words_repo
         self._pending_transcript_sources: dict[
-            tuple[UUID, UUID, int],
-            tuple[TranscriptSourceReference, TranscriptSourcePreparation],
+            tuple[UUID, UUID, int], _PendingTranscript
         ] = {}
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
@@ -1462,6 +1472,19 @@ class FlowRunExecutor:
                                 version_metadata=version_metadata,
                                 attempt_no=attempt_no,
                             )
+                            if (
+                                run.id,
+                                step.step_id,
+                                attempt_no,
+                            ) in self._pending_transcript_sources:
+                                # Activation publishes the transcript and its
+                                # source; without it both would be lost.
+                                raise FlowRuntimeInvariantError(
+                                    "A step that transcribed audio completed "
+                                    "without activating its attempt "
+                                    f"(step_id={step.step_id}, "
+                                    f"attempt_no={attempt_no})."
+                                )
                             result.output.materials = state.resolved_materials
                             result.output.max_inline_text_bytes = (
                                 self.max_inline_text_bytes
@@ -1877,7 +1900,9 @@ class FlowRunExecutor:
             for prepared_step in prepared_steps:
                 metadata = prepared_step.prepared.step_input.transcription_metadata
                 if metadata is not None:
-                    metadata["source"] = pending_source[0].model_dump(mode="json")
+                    metadata["source"] = pending_source.reference.model_dump(
+                        mode="json"
+                    )
         completion_configuration, execution_inputs = _attempt_completion_evidence(
             prepared_steps
         )
@@ -1944,7 +1969,7 @@ class FlowRunExecutor:
         )
         if pending_source is not None:
             resolved_input = with_transcript_source_reference(
-                resolved_input, pending_source[0]
+                resolved_input, pending_source.reference
             )
         activated = await self.flow_run_repo.activate_step_attempt(
             run_id=run.id,
@@ -1964,6 +1989,9 @@ class FlowRunExecutor:
                 "Flow step attempt closed before input evidence activation "
                 f"(step_id={step.step_id}, attempt_no={attempt_no})."
             )
+        if pending_source is not None and pending_source.run_transcript is not None:
+            # The run row is already locked by the activation above.
+            await self._persist_run_transcript(run, pending_source.run_transcript)
         await self._publish_transcript_source(
             run_id=run.id,
             step_id=step.step_id,
@@ -1972,7 +2000,7 @@ class FlowRunExecutor:
             flow_id=run.flow_id,
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run.id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run.id, step.step_id, attempt_no)
         if attempt_start is not None:
             persisted_attempt_input = parse_flow_step_attempt_input(
                 activated.input_payload_json
@@ -2139,7 +2167,11 @@ class FlowRunExecutor:
         # The run was lost either because it was terminalized (report the
         # honest terminal outcome, as a late write always did) or because
         # recovery gave it to another owner or back to the queue (only then
-        # is "ownership lost" the whole truth).
+        # is "ownership lost" the whole truth). Either way no transcript the
+        # run staged is published.
+        for run_id_, step_id, attempt_no in list(self._pending_transcript_sources):
+            if run_id_ == run_id:
+                self._forget_pending_transcript(run_id, step_id, attempt_no)
         try:
             return await self._return_after_terminalized_step_write(
                 run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
@@ -2238,6 +2270,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None,
     ) -> dict[str, Any]:
         await self._rollback()
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         if current_execution_ownership_lost():
             raise FlowExecutionOwnershipLost()
         attempt_start = _attempt_start_for_step(state=state, step=step)
@@ -2384,6 +2417,7 @@ class FlowRunExecutor:
                 await self._rollback()
             else:
                 await self._commit()
+            self._forget_pending_transcript(run_id, step.step_id, attempt_no)
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
@@ -2410,7 +2444,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         return failure_plan.return_result
 
     async def _handle_generic_step_failure(
@@ -2551,6 +2585,7 @@ class FlowRunExecutor:
                 await self._rollback()
             else:
                 await self._commit()
+            self._forget_pending_transcript(run_id, step.step_id, attempt_no)
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
@@ -2582,7 +2617,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         return failure_plan.return_result
 
     async def _persist_successful_step(
@@ -2798,6 +2833,7 @@ class FlowRunExecutor:
             logger=logger,
             transcription_call_observer=transcription_call_observer,
             stage_transcript_source=self._stage_transcript_source,
+            stage_run_transcript=self._stage_run_transcript,
             transcript_source_preparation=transcript_source_preparation,
         )
 
@@ -2806,11 +2842,31 @@ class FlowRunExecutor:
     ) -> None:
         key = (reference.run_id, reference.step_id, reference.attempt_no)
         pending = self._pending_transcript_sources.get(key)
-        if pending is not None and pending[1] is not source:
+        if pending is not None and pending.preparation is not source:
             raise FlowRuntimeInvariantError(
                 "A transcription attempt must share its preparation state."
             )
-        self._pending_transcript_sources[key] = (reference, source)
+        self._pending_transcript_sources[key] = _PendingTranscript(
+            reference=reference, preparation=source
+        )
+
+    def _stage_run_transcript(
+        self, reference: TranscriptSourceReference, transcript: InlineTranscript | None
+    ) -> None:
+        key = (reference.run_id, reference.step_id, reference.attempt_no)
+        pending = self._pending_transcript_sources.get(key)
+        if pending is None:
+            raise FlowRuntimeInvariantError(
+                "A run transcript was staged before its transcript source."
+            )
+        self._pending_transcript_sources[key] = replace(
+            pending, run_transcript=transcript
+        )
+
+    def _forget_pending_transcript(
+        self, run_id: UUID, step_id: UUID, attempt_no: int
+    ) -> None:
+        self._pending_transcript_sources.pop((run_id, step_id, attempt_no), None)
 
     def _attach_pending_transcript_source(
         self, result: FlowStepResult, attempt_no: int
@@ -2820,7 +2876,7 @@ class FlowRunExecutor:
         )
         if pending is not None:
             result.input_payload_json = with_transcript_source_reference(
-                result.input_payload_json, pending[0]
+                result.input_payload_json, pending.reference
             )
 
     async def _publish_transcript_source(
@@ -2836,12 +2892,11 @@ class FlowRunExecutor:
 
         pending = self._pending_transcript_sources.get((run_id, step_id, attempt_no))
         if pending is not None:
-            reference, source = pending
             await FlowTranscriptSourceRepository(session=self.session).insert(
                 tenant_id=tenant_id,
                 flow_id=flow_id,
-                reference=reference,
-                source=source.source,
+                reference=pending.reference,
+                source=pending.preparation.source,
             )
             await persist_transcript_words(
                 transcript_words_repo=self.transcript_words_repo,
@@ -2849,7 +2904,7 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
                 step_id=step_id,
-                preparation=source,
+                preparation=pending.preparation,
             )
 
     async def _resolve_step_input(
@@ -2873,7 +2928,9 @@ class FlowRunExecutor:
         deps = self._build_step_input_resolution_deps(
             transcription_call_observer,
             attempt_no=attempt_no,
-            transcript_source_preparation=pending[1] if pending is not None else None,
+            transcript_source_preparation=(
+                pending.preparation if pending is not None else None
+            ),
         )
         return await resolve_step_input_runtime(
             attempt_no=attempt_no,

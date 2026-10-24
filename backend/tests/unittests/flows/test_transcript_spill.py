@@ -86,7 +86,8 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
     executor.file_service.get_audio_download = spool_contract.downloads(
         list(files.values())
     )
-    executor.transcribers.model.transcribe.side_effect = [
+    order: list[str] = []
+    transcripts = iter(
         TranscribedAudio(
             text,
             10.0,
@@ -94,15 +95,32 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
             transcript_segments=(TranscriptSegment(text, 0, 10, speaker="SPEAKER_00"),),
         )
         for text in ("First transcript.", "Second transcript.")
-    ]
-    assistant.get_response.side_effect = [
-        SimpleNamespace(
-            completion='{"documents":[{"title":"First"}]}', total_token_count=11
-        ),
-        SimpleNamespace(
-            completion='{"documents":[{"title":"Second"}]}', total_token_count=13
-        ),
-    ]
+    )
+    responses = iter(
+        SimpleNamespace(completion=completion, total_token_count=tokens)
+        for completion, tokens in (
+            ('{"documents":[{"title":"First"}]}', 11),
+            ('{"documents":[{"title":"Second"}]}', 13),
+        )
+    )
+
+    async def transcribe(*_, **__):
+        order.append("transcription")
+        return next(transcripts)
+
+    async def get_response(**_):
+        order.append("completion")
+        return next(responses)
+
+    persist = repo.update_input_payload.side_effect
+
+    async def update_input_payload(**kwargs):
+        order.append("run transcript")
+        return await persist(**kwargs)
+
+    executor.transcribers.model.transcribe.side_effect = transcribe
+    assistant.get_response.side_effect = get_response
+    repo.update_input_payload.side_effect = update_input_payload
     insert = AsyncMock()
     monkeypatch.setattr(FlowTranscriptSourceRepository, "insert", insert)
     step = _runtime_step(
@@ -158,6 +176,20 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
     )
     assert executor.transcribers.model.transcribe.await_count == 2
     assert assistant.get_response.await_count == 2
+    # The run's transcript is written once, at activation: after every source
+    # is transcribed and before the first completion call.
+    assert order == [
+        "transcription",
+        "transcription",
+        "run transcript",
+        "completion",
+        "completion",
+    ]
+    written = repo.update_input_payload.await_args.kwargs[
+        "input_payload_patch"
+    ].to_merge_dict()["transkribering"]
+    assert "Second transcript." in written["text"]
+    assert "First transcript." not in written["text"]
     insert.assert_awaited_once()
     source = insert.await_args.kwargs["source"]
     assert [segment["text"] for segment in source.segments] == [
@@ -731,3 +763,5 @@ async def test_spilled_transcript_is_durable_before_input_binding_failure(
         )
     repo.activate_step_attempt.assert_not_awaited()
     assert executor.session.commit.await_count == int(oversized)
+    # An inline transcript is written only at activation, which never came.
+    assert repo.update_input_payload.await_count == int(oversized)

@@ -155,6 +155,9 @@ class StepInputResolutionDeps:
     stage_transcript_source: Callable[
         [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
+    stage_run_transcript: Callable[
+        [TranscriptSourceReference, InlineTranscript | None], None
+    ]
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowOutsideInputResolution]]
     resolve_tool_input: ResolveToolInputFn
@@ -379,6 +382,7 @@ async def resolve_step_input(
                 open_audio_download=open_audio_download,
                 transcription_call_observer=deps.transcription_call_observer,
                 stage_transcript_source=deps.stage_transcript_source,
+                stage_run_transcript=deps.stage_run_transcript,
             )
             record_step_phase(FlowStepPhase.TRANSCRIPTION)
             audio_resolution = await resolve_transcribe_and_attach_audio_input(

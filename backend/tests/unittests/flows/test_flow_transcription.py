@@ -173,6 +173,7 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
             apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
             commit=AsyncMock(),
             stage_transcript_source=lambda reference, source: None,
+            stage_run_transcript=lambda reference, transcript: None,
         ),
     )
 
@@ -534,7 +535,7 @@ def _state() -> RunExecutionState:
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_transcribes_in_request_order_and_persists_transcript(
+async def test_audio_resolve_transcribes_in_request_order_and_stages_transcript(
     spool_contract, user
 ):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
@@ -605,7 +606,12 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
     assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"] == resolved.text
     assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == resolved.text
     assert resolved.text.startswith("tx:b.wav:sv")
-    assert flow_run_repo.update_input_payload.await_count == 1
+    # The inline transcript is written on the run row when the attempt is
+    # activated, not while the input is resolved.
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    staged = executor._pending_transcript_sources[(run.id, step.step_id, 1)]
+    assert staged.run_transcript is not None
+    assert staged.run_transcript.text == resolved.text
     assert resolved.transcription_metadata is not None
     assert resolved.transcription_metadata["files_count"] == 2
     assert resolved.transcription_metadata["language"] == "sv"
@@ -1675,8 +1681,10 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
             max_duration_seconds=3600, max_decoded_bytes=2**31
         ),
     )
+    staged = []
     deps = AudioRuntimeDeps(
         stage_transcript_source=lambda reference, source: None,
+        stage_run_transcript=lambda reference, transcript: staged.append(transcript),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcribers=transcribers,
@@ -1708,7 +1716,8 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     )
     assert context[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
     assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
-    flow_run_repo.update_input_payload.assert_awaited_once()
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    assert [transcript.text for transcript in staged] == ["transcribed text"]
     audit_service.log_async.assert_awaited_once()
     call = audit_service.log_async.await_args.kwargs
     assert call["action"] == ActionType.FLOW_RUN_AUDIO_TRANSCRIBED
@@ -1770,8 +1779,10 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
         max_audio_files=10,
         max_inline_text_bytes=1024,
     )
+    staged = []
     deps = AudioRuntimeDeps(
         stage_transcript_source=lambda reference, source: None,
+        stage_run_transcript=lambda reference, transcript: staged.append(transcript),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcribers=AsyncMock(),
@@ -1789,5 +1800,6 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
     )
 
     assert result.text == "transcribed text"
-    flow_run_repo.update_input_payload.assert_awaited_once()
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    assert [transcript.text for transcript in staged] == ["transcribed text"]
     audit_service.log_async.assert_awaited_once()
