@@ -22,6 +22,7 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
@@ -56,7 +57,7 @@ import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
-import { ConversationLayout } from "./conversation-layout";
+import { ComposerDock, ConversationLayout } from "./conversation-layout";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -95,6 +96,9 @@ type PendingQuestionState = {
 };
 
 /** Which answer's activity is shown, on which tab, and which source to focus. */
+/** Below Tailwind's `sm`: a phone's start state docks its composer (decision 5). */
+const PHONE_START = "(width < 40rem)";
+
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
 /**
@@ -254,17 +258,38 @@ function ConversationView({
     return { tokens, turns };
   });
 
-  // Focus hand-off: the first question swaps the centred start composer for
-  // the docked one (and a first question that fails before it is sent swaps
+  // Focus hand-off: the first question swaps the start composer for the
+  // docked one (and a first question that fails before it is sent swaps
   // back); keep keyboard focus in the composer (WCAG 2.4.3).
-  const startComposerRef = useRef<HTMLDivElement>(null);
   const dockElement = useRef<HTMLDivElement | null>(null);
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Phones dock the start composer where it stays (decision 5): CSS picks
+  // from the first paint, and once the width is known the other place goes.
+  const phoneStart = useMediaMatch(PHONE_START);
+  /** The start composer's field the user has: docked on phones, centred from 640px. */
+  const startTextarea = () =>
+    ((phoneStart ?? window.matchMedia(PHONE_START).matches)
+      ? startDockTextareaRef
+      : startTextareaRef
+    ).current;
+  const startField = useEffectEvent(startTextarea);
   const refocusComposer = useRef(false);
+  // Crossing 640px (a phone turned, a window resized) swaps the start
+  // composer's place, and the field being typed in goes with it: the new
+  // one takes the focus. A removed field fires no blur, so this stays set.
+  const startHadFocus = useRef(false);
+  const trackStartFocus = {
+    onFocus: () => void (startHadFocus.current = true),
+    onBlur: () => void (startHadFocus.current = false)
+  };
+  useEffect(() => {
+    if (startHadFocus.current && document.activeElement === document.body) startField()?.focus();
+  }, [phoneStart]);
   const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescue(startTextareaRef.current);
+    if (focusComposerIfLost) rescue(startField());
   }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
@@ -530,7 +555,7 @@ function ConversationView({
     reportStarted(started);
     if (refocusComposer.current) {
       refocusComposer.current = false;
-      (started ? dockTextareaRef : startTextareaRef).current?.focus();
+      (started ? dockTextareaRef.current : startField())?.focus();
     }
   }, [started]);
 
@@ -579,16 +604,17 @@ function ConversationView({
    * composer at once and waits in the conversation until all of them are on
    * the server (`awaitUploads`), or is withdrawn if they never are.
    */
-  function sendQuestion(question: string, resendFiles?: SentFiles) {
+  function sendQuestion(question: string, resendFiles?: SentFiles, fromComposer = false) {
     if (!question || sending || usage.willExceedContext) return;
     // A quote from a file or a view opens the question; it is sent once.
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
     if (!resendFiles) panel.clearQuote();
     if (!started) {
-      refocusComposer.current = Boolean(
-        startComposerRef.current?.contains(document.activeElement ?? null)
-      );
+      // A tapped Send button holds no focus in Safari: a question from the
+      // composer keeps it in the composer whatever has focus now.
+      refocusComposer.current =
+        fromComposer || Boolean(document.activeElement?.closest("[data-start-composer]"));
     }
     const request = requestOptions();
     // A retry leaves the composer alone unless it holds the retried question.
@@ -785,7 +811,7 @@ function ConversationView({
   const composerProps = {
     value: input,
     onChange: setInput,
-    onSubmit: () => sendQuestion(input.trim()),
+    onSubmit: () => sendQuestion(input.trim(), undefined, true),
     sendBlocked,
     busy: sending,
     // A stop while the question still waits for its uploads takes it back.
@@ -866,26 +892,51 @@ function ConversationView({
   if (!started) {
     return (
       <>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
             onPickStarter={(prompt) => {
               setInput(prompt);
-              startTextareaRef.current?.focus();
+              startTextarea()?.focus();
             }}
             composer={
-              <div ref={startComposerRef} className="flex w-full flex-col gap-3">
-                {errorNotice}
-                <Composer
-                  {...composerProps}
-                  variant="start"
-                  partnerToken={partnerToken}
-                  textareaRef={startTextareaRef}
-                />
-              </div>
+              phoneStart !== true && (
+                // From 640px: centred under the greeting until the conversation starts.
+                <div
+                  data-start-composer=""
+                  {...trackStartFocus}
+                  className="flex w-full flex-col gap-3 max-sm:hidden"
+                >
+                  {errorNotice}
+                  <Composer
+                    {...composerProps}
+                    variant="start"
+                    partnerToken={partnerToken}
+                    textareaRef={startTextareaRef}
+                  />
+                </div>
+              )
             }
           />
         </div>
+        {phoneStart !== false && (
+          // Phones: docked from the first frame where it stays once the
+          // conversation starts, so nothing moves when the question is sent.
+          <ComposerDock className="sm:hidden">
+            <div
+              data-start-composer=""
+              {...trackStartFocus}
+              className="mx-auto flex w-full max-w-[680px] flex-col gap-3"
+            >
+              {errorNotice}
+              <Composer
+                {...composerProps}
+                partnerToken={partnerToken}
+                textareaRef={startDockTextareaRef}
+              />
+            </div>
+          </ComposerDock>
+        )}
         {/* One file input for the view's lifetime (same position in both layouts). */}
         {fileInputElement}
       </>

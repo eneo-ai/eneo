@@ -4,7 +4,8 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, renderToHtml, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
@@ -140,6 +141,70 @@ describe("ChatView start state", () => {
     const { container } = renderInApp(<Harness partner={personal} />);
     await screen.findByRole("region", { name: "Dina assistenter" });
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("ChatView start state on a phone (decisions 5 and 8)", () => {
+  const follows = (later: Node, earlier: Node) =>
+    Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("docks the composer from the first frame, under the greeting, suggestions and assistants", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={personal} />);
+    const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });
+    // One composer once the width is known; read after everything it docks under.
+    const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    expect(follows(textarea, quickLinks)).toBe(true);
+    expect(screen.getByRole("heading", { level: 2, name: "Prova att fråga" })).toBeTruthy();
+  });
+
+  it("fills and focuses the docked composer from a suggestion, and keeps focus there once asked", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={personal} />);
+    fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
+    const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
+    expect(document.activeElement).toBe(textarea);
+
+    fireEvent.change(textarea, { target: { value: "Gör en plan för flytten" } });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    await screen.findByRole("log", { name: "Konversation" });
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "Fråga Personlig assistent" })
+    );
+  });
+
+  it("keeps focus in the composer when a tapped Send holds none (Safari)", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={personal} />);
+    const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    // Safari does not focus a tapped button: focus has left the field.
+    textarea.blur();
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    await screen.findByRole("log", { name: "Konversation" });
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "Fråga Personlig assistent" })
+    );
+  });
+
+  it("moves the focus with the composer when the phone is turned past 640px", () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={personal} />);
+    const docked = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    docked.focus();
+    fireEvent.change(docked, { target: { value: "Ett halvskrivet utkast" } });
+
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    const centred = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    expect(centred).not.toBe(docked);
+    expect(document.activeElement).toBe(centred);
+    expect((centred as HTMLTextAreaElement).value).toBe("Ett halvskrivet utkast");
+  });
+
+  it("renders both places before the width is known, for CSS to pick from the first paint", () => {
+    const html = renderToHtml(<Harness partner={personal} />);
+    expect(html.match(/<textarea/g)).toHaveLength(2);
   });
 });
 
