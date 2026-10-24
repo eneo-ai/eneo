@@ -3,7 +3,8 @@
 The ORM metadata declares the indexes; the revision creates them concurrently.
 The drift check reflects the database and compares each ORM-declared index of the
 flows-owned tables: after the revision there is no difference, and before it the
-only differences are the new indexes. The new indexes are also compared by their
+only differences are the new indexes. Indexes later revisions add are absent here
+and checked by their own revision's test. The new indexes are also compared by their
 normalized DDL text (columns, expressions and predicate), so a wrong column in an
 IS NOT NULL predicate fails.
 
@@ -22,12 +23,14 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
 
-import eneo.database.tables  # noqa: F401
 from alembic import command
 from alembic.config import Config
-from eneo.database.tables import flow_tables
-from eneo.database.tables.base_class import Base
 from tests.integration.migrations.alembic_test_utils import at_revision
+from tests.integration.migrations.flow_index_drift import (
+    ddl_text,
+    flow_owned_tables,
+    index_drift,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -72,6 +75,15 @@ _RETIRED_TABLE_INDEXES = {
     ),
 }
 NEW_INDEX_NAMES = ORM_INDEX_NAMES | _RETIRED_TABLE_INDEXES.keys()
+# ORM-declared indexes that later revisions add, absent at REVISION and checked by
+# their own revision's test (202610241000: test_flow_run_listing_indexes_round_trip).
+_LATER_INDEX_NAMES = frozenset(
+    {
+        "ix_flow_runs_flow_listing",
+        "ix_flow_runs_flow_user_listing",
+        "ix_flow_runs_flow_service_listing",
+    }
+)
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -111,69 +123,8 @@ def round_trip_db(test_settings):
         conn.close()
 
 
-def _flow_owned_tables() -> list[sa.Table]:
-    return [
-        cls.__table__
-        for cls in vars(flow_tables).values()
-        if isinstance(cls, type)
-        and cls.__module__ == flow_tables.__name__
-        and issubclass(cls, Base)
-        and hasattr(cls, "__table__")
-    ]
-
-
-def _normalized(parts: list[str]) -> list[str]:
-    # Reflection reports the sort direction in dialect options, not in the column.
-    return [part.lower().replace(" ", "").removesuffix("desc") for part in parts]
-
-
-def _index_drift(engine: sa.Engine) -> dict[str, str]:
-    """ORM-declared indexes of the flows-owned tables the database lacks or defines differently.
-
-    Alembic's autogenerate cannot run over this metadata (the builder tables form a
-    foreign-key cycle), so the declared shape is compared with the reflected one.
-    """
-    inspector = sa.inspect(engine)
-    drift: dict[str, str] = {}
-    for table in _flow_owned_tables():
-        # A table a later revision adds is checked by that revision's own test.
-        if not inspector.has_table(table.name):
-            continue
-        reflected = {
-            index["name"]: index for index in inspector.get_indexes(table.name)
-        }
-        for index in table.indexes:
-            actual = reflected.get(index.name)
-            if actual is None:
-                drift[index.name] = "missing"
-                continue
-            declared_columns = [
-                expression.name
-                if isinstance(expression, sa.Column)
-                else str(expression)
-                for expression in index.expressions
-            ]
-            actual_columns = actual.get("expressions") or actual["column_names"]
-            declared_where = index.dialect_options["postgresql"]["where"]
-            if _normalized(declared_columns) != _normalized(actual_columns):
-                drift[index.name] = f"columns {actual_columns}"
-            elif bool(index.unique) != bool(actual["unique"]):
-                drift[index.name] = "uniqueness"
-            elif (declared_where is None) != (
-                "postgresql_where" not in actual["dialect_options"]
-            ):
-                drift[index.name] = "partial predicate"
-            elif list(index.dialect_options["postgresql"]["include"] or []) != list(
-                actual.get("include_columns") or []
-            ):
-                drift[index.name] = "include columns"
-    return drift
-
-
-def _ddl_text(ddl: str) -> str:
-    """Comparable form of an index definition: ORM CreateIndex vs pg_indexes.indexdef."""
-    text = ddl.lower().replace("public.", "").replace(" using btree", "")
-    return "".join(ch for ch in text if ch not in ' ()"\n;')
+def _index_drift_at_revision(engine: sa.Engine) -> dict[str, str]:
+    return index_drift(engine, introduced_later=_LATER_INDEX_NAMES)
 
 
 def _definition_drift(conn) -> dict[str, tuple[str, str]]:
@@ -190,7 +141,7 @@ def _definition_drift(conn) -> dict[str, tuple[str, str]]:
                 dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
             )
         )
-        for table in _flow_owned_tables()
+        for table in flow_owned_tables()
         for index in table.indexes
         if index.name in ORM_INDEX_NAMES
     }
@@ -201,7 +152,7 @@ def _definition_drift(conn) -> dict[str, tuple[str, str]]:
     return {
         name: (declared[name], actual.get(name, "<missing>"))
         for name in declared
-        if _ddl_text(declared[name]) != _ddl_text(actual.get(name, "<missing>"))
+        if ddl_text(declared[name]) != ddl_text(actual.get(name, "<missing>"))
     }
 
 
@@ -218,7 +169,7 @@ def _invalid_index_count(conn) -> int:
 
 
 def test_upgrade_matches_the_orm_metadata_and_leaves_no_invalid_index(round_trip_db):
-    assert _index_drift(round_trip_db["engine"]) == {}
+    assert _index_drift_at_revision(round_trip_db["engine"]) == {}
     assert _definition_drift(round_trip_db["conn"]) == {}
     assert _invalid_index_count(round_trip_db["conn"]) == 0
 
@@ -233,7 +184,7 @@ def test_downgrade_removes_exactly_the_new_indexes_and_upgrade_restores_them(
     )
 
     command.downgrade(cfg, PRE_REVISION)
-    drift = _index_drift(engine)
+    drift = _index_drift_at_revision(engine)
     assert set(drift.values()) == {"missing"}
     assert set(drift) == ORM_INDEX_NAMES
     assert {
@@ -243,7 +194,7 @@ def test_downgrade_removes_exactly_the_new_indexes_and_upgrade_restores_them(
     } == NEW_INDEX_NAMES
 
     command.upgrade(cfg, REVISION)
-    assert _index_drift(engine) == {}
+    assert _index_drift_at_revision(engine) == {}
     assert _definition_drift(conn) == {}
     assert _invalid_index_count(conn) == 0
 
@@ -265,6 +216,6 @@ def test_rerun_after_a_failed_concurrent_build_replaces_the_invalid_index(
     command.stamp(cfg, PRE_REVISION)
     command.upgrade(cfg, REVISION)
     assert _invalid_index_count(conn) == 0
-    assert _index_drift(round_trip_db["engine"]) == {}
+    assert _index_drift_at_revision(round_trip_db["engine"]) == {}
     # Only the invalid leftover is rebuilt; a valid index is left alone.
     assert _index_oid(conn, "ix_flow_runs_principal_user_id") == valid_oid

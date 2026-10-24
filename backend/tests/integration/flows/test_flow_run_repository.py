@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Awaitable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from time import monotonic
@@ -42,6 +43,11 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
+from eneo.flows.domain.flow_run_listing import (
+    FlowRunListing,
+    FlowRunListOrder,
+    FlowRunListSort,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
 )
@@ -53,7 +59,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
     parse_flow_step_attempt_input,
 )
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.enums import FLOW_RUN_STATUS_FILTER_ORDER, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
@@ -5212,3 +5218,529 @@ async def test_retry_prefix_measurement_and_identities_do_not_hydrate_payloads(
             run_id=context.run_id, tenant_id=uuid4(), step_orders=(1,)
         )
         assert empty.step_count == empty.logical_bytes == 0
+
+
+@dataclass(frozen=True)
+class _ListedRun:
+    id: UUID
+    principal_user_id: UUID | None
+    principal_service_id: UUID | None
+    status: str
+    run_label: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class _ListedRunHistory:
+    tenant_id: UUID
+    flow_id: UUID
+    other_flow_id: UUID
+    user_id: UUID
+    colleague_id: UUID
+    service_principal_id: UUID
+    starter_names: dict[UUID, tuple[str, ...]]
+    runs: tuple[_ListedRun, ...]
+
+
+_LIST_SORTS: tuple[FlowRunListSort, ...] = (
+    "created_at",
+    "started_at",
+    "status",
+    "duration",
+)
+_LIST_ORDERS: tuple[FlowRunListOrder, ...] = ("asc", "desc")
+_LISTED_RUN_BASE = datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc)
+# (starter, created, started, finished, status, label); times are minutes after
+# the base. Creation times tie, queued runs have no start, a start can fall
+# after a later run's creation, and durations tie (1 and 0 minutes), so every
+# order reaches its tie-breaks.
+_LISTED_RUN_SPECS = (
+    ("user", 0, 0, 10, "completed", "Case alpha"),
+    ("colleague", 0, 1, 2, "failed", None),
+    ("service", 0, None, None, "queued", None),
+    ("user", 1, 5, 6, "completed", None),
+    ("colleague", 2, 2, 12, "completed", "alpha follow-up"),
+    ("service", 2, 3, 4, "failed", "Case beta"),
+    ("user", 3, None, None, "queued", None),
+    ("user", 3, 3, None, "running", None),
+    ("service", 4, 4, 14, "completed", None),
+    ("colleague", 5, None, 5, "cancelled", None),
+    ("user", 5, 5, 5, "completed", None),
+    ("user", 6, None, None, "queued", "ALPHA"),
+)
+
+
+async def _create_listed_flow(
+    session,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+) -> tuple[UUID, UUID]:
+    """A listed flow and a second flow of the same tenant, each at version 1."""
+    model = await completion_model_factory(session, "gpt-4o-mini")
+    space = await space_factory(session, "Flows run listing space", [model.id])
+    assistant = await assistant_factory(
+        session, "Flow listing assistant", model.id, space_id=space.id
+    )
+    flow_ids: list[UUID] = []
+    for name in ("Listed flow", "Other flow"):
+        flow = await FlowRepository(session=session).create(
+            flow=_build_flow(
+                tenant_id=tenant_id,
+                space_id=space.id,
+                user_id=user_id,
+                assistant_id=assistant.id,
+            ).model_copy(update={"name": name}),
+            tenant_id=tenant_id,
+        )
+        await FlowVersionRepository(session=session).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={"steps": []},
+            tenant_id=tenant_id,
+        )
+        flow_ids.append(flow.id)
+    return flow_ids[0], flow_ids[1]
+
+
+async def _seed_listed_run_history(
+    session,
+    *,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+) -> _ListedRunHistory:
+    tenant_id = admin_user.tenant_id
+    flow_id, other_flow_id = await _create_listed_flow(
+        session,
+        tenant_id=tenant_id,
+        user_id=admin_user.id,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    colleague = await user_factory(
+        session, username="Robin Lister", email="robin.lister@example.com"
+    )
+    service_principal_id, service_key_id = await _insert_service_key(
+        session,
+        tenant_id=tenant_id,
+        created_by_user_id=admin_user.id,
+        display_name="Nightly import",
+    )
+    run_repo = FlowRunRepository(session=session)
+
+    async def create_run(starter: str, target_flow_id: UUID) -> UUID:
+        if starter == "service":
+            run = await run_repo.create(
+                flow_id=target_flow_id,
+                flow_version=1,
+                principal_type=PrincipalType.SERVICE_KEY.value,
+                principal_service_id=service_principal_id,
+                created_by_api_key_id=service_key_id,
+                runtime_service_permission=ApiKeyPermission.ADMIN,
+                tenant_id=tenant_id,
+                input_payload_json={},
+                preseed_steps=[],
+            )
+        else:
+            run = await run_repo.create(
+                flow_id=target_flow_id,
+                flow_version=1,
+                principal_user_id=(
+                    admin_user.id if starter == "user" else colleague.id
+                ),
+                tenant_id=tenant_id,
+                input_payload_json={},
+                preseed_steps=[],
+            )
+        return run.id
+
+    def at(minutes: int | None) -> datetime | None:
+        return (
+            None if minutes is None else _LISTED_RUN_BASE + timedelta(minutes=minutes)
+        )
+
+    runs: list[_ListedRun] = []
+    for starter, created, started, finished, status, label in _LISTED_RUN_SPECS:
+        run_id = await create_run(starter, flow_id)
+        listed = _ListedRun(
+            id=run_id,
+            principal_user_id=(
+                None
+                if starter == "service"
+                else admin_user.id
+                if starter == "user"
+                else colleague.id
+            ),
+            principal_service_id=service_principal_id if starter == "service" else None,
+            status=status,
+            run_label=label,
+            created_at=cast(datetime, at(created)),
+            started_at=at(started),
+            finished_at=at(finished),
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .values(
+                status=status,
+                run_label=label,
+                created_at=listed.created_at,
+                started_at=listed.started_at,
+                finished_at=listed.finished_at,
+                execution_heartbeat_at=listed.started_at
+                if status == "running"
+                else None,
+            )
+        )
+        runs.append(listed)
+    # Another flow's run, labelled to match the search, is never listed.
+    other_run_id = await create_run("user", other_flow_id)
+    await session.execute(
+        sa.update(FlowRuns)
+        .where(FlowRuns.id == other_run_id)
+        .values(run_label="alpha elsewhere", created_at=at(4))
+    )
+    return _ListedRunHistory(
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        other_flow_id=other_flow_id,
+        user_id=admin_user.id,
+        colleague_id=colleague.id,
+        service_principal_id=service_principal_id,
+        starter_names={
+            admin_user.id: (admin_user.username, admin_user.email),
+            colleague.id: (colleague.username, colleague.email),
+            service_principal_id: ("Nightly import",),
+        },
+        runs=tuple(runs),
+    )
+
+
+def _listed_scopes(history: _ListedRunHistory) -> dict[str, dict[str, object]]:
+    """The run lists a caller can ask for: a tenant admin's, a member's own,
+    a service key's own, and searches over labels and starter names."""
+    return {
+        "admin": {},
+        "user": {"principal_user_id": history.user_id},
+        "colleague": {"principal_user_id": history.colleague_id},
+        "service": {"principal_service_id": history.service_principal_id},
+        "label search": {"search": "alpha"},
+        "starter search": {"search": "robin"},
+        "service search": {"search": "nightly"},
+        "own search": {"principal_user_id": history.user_id, "search": "alpha"},
+        "no match": {"principal_user_id": history.user_id, "search": "zz-none"},
+    }
+
+
+def _in_scope(
+    history: _ListedRunHistory, run: _ListedRun, scope: dict[str, object]
+) -> bool:
+    if (
+        "principal_user_id" in scope
+        and run.principal_user_id != scope["principal_user_id"]
+    ):
+        return False
+    if (
+        "principal_service_id" in scope
+        and run.principal_service_id != scope["principal_service_id"]
+    ):
+        return False
+    search = cast(str | None, scope.get("search"))
+    if search is None:
+        return True
+    starter = cast(UUID, run.principal_user_id or run.principal_service_id)
+    texts = (run.run_label or "", *history.starter_names[starter])
+    return any(search.lower() in text.lower() for text in texts)
+
+
+def _expected_run_order(runs: list[_ListedRun], *, sort: str, order: str) -> list[UUID]:
+    """``run_list_order`` restated over Python values: stable sorts from the
+    last tie-break to the first."""
+    descending = order == "desc"
+    newest_first = sorted(runs, key=lambda run: (run.created_at, run.id), reverse=True)
+    if sort == "created_at":
+        ordered = sorted(
+            runs, key=lambda run: (run.created_at, run.id), reverse=descending
+        )
+    elif sort == "started_at":
+        ordered = sorted(
+            runs,
+            key=lambda run: (run.started_at or run.created_at, run.created_at, run.id),
+            reverse=descending,
+        )
+    elif sort == "status":
+        position = {
+            status.value: index
+            for index, status in enumerate(FLOW_RUN_STATUS_FILTER_ORDER)
+        }
+        ordered = sorted(
+            newest_first, key=lambda run: position[run.status], reverse=descending
+        )
+    else:
+        finished = [run for run in newest_first if run.finished_at is not None]
+        ordered = sorted(
+            finished,
+            key=lambda run: cast(datetime, run.finished_at)
+            - (run.started_at or run.created_at),
+            reverse=descending,
+        ) + [run for run in newest_first if run.finished_at is None]
+    return [run.id for run in ordered]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_list_pages_follow_the_documented_order_for_every_sort(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    user_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        history = await _seed_listed_run_history(
+            session,
+            admin_user=admin_user,
+            user_factory=user_factory,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_repo = FlowRunRepository(session=session)
+        mismatches: list[tuple[str, str, str, int, list[UUID], list[UUID]]] = []
+        for scope_name, scope in _listed_scopes(history).items():
+            principals = {key: value for key, value in scope.items() if key != "search"}
+            listed = [run for run in history.runs if _in_scope(history, run, scope)]
+            for sort in _LIST_SORTS:
+                for order in _LIST_ORDERS:
+                    expected = _expected_run_order(listed, sort=sort, order=order)
+                    listing = FlowRunListing.of(
+                        search=cast(str | None, scope.get("search")),
+                        sort=sort,
+                        order=order,
+                    )
+                    for offset in (None, 0, 2, 4):
+                        page = await run_repo.list_statuses(
+                            tenant_id=history.tenant_id,
+                            flow_id=history.flow_id,
+                            limit=None if offset is None else 2,
+                            offset=offset,
+                            listing=listing,
+                            **principals,  # type: ignore[arg-type]
+                        )
+                        window = (
+                            expected
+                            if offset is None
+                            else expected[offset : offset + 2]
+                        )
+                        actual = [run.id for run in page]
+                        if actual != window:
+                            mismatches.append(
+                                (scope_name, sort, order, offset or 0, window, actual)
+                            )
+
+    assert mismatches == []
+    # The fixture exercises what it claims: ties, missing starts, every scope.
+    assert len({run.created_at for run in history.runs}) < len(history.runs)
+    assert any(run.started_at is None for run in history.runs)
+    assert all(
+        any(_in_scope(history, run, scope) for run in history.runs)
+        for name, scope in _listed_scopes(history).items()
+        if name != "no match"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_status_counts_equal_a_tally_of_the_listed_runs(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    user_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        history = await _seed_listed_run_history(
+            session,
+            admin_user=admin_user,
+            user_factory=user_factory,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_repo = FlowRunRepository(session=session)
+        for scope_name, scope in _listed_scopes(history).items():
+            tally = Counter(
+                run.status for run in history.runs if _in_scope(history, run, scope)
+            )
+            counts = await run_repo.count_statuses(
+                tenant_id=history.tenant_id,
+                flow_id=history.flow_id,
+                **scope,  # type: ignore[arg-type]
+            )
+            assert counts == {
+                status: tally.get(status.value, 0) for status in FlowRunStatus
+            }, scope_name
+
+
+def _plan_index_scans(
+    explain: dict[str, object],
+) -> list[tuple[str, object, object]]:
+    """Each plan node's type, index and scan direction."""
+    plan = _json_object(explain.get("Plan"), label="EXPLAIN Plan")
+    return [
+        (
+            cast(str, node["Node Type"]),
+            node.get("Index Name"),
+            node.get("Scan Direction"),
+        )
+        for node in _plan_nodes(plan)
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_count(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    user_factory,
+    test_settings,
+):
+    """Plan eligibility only, with sequential and bitmap scans disabled (a
+    fixture this small is cheaper to read whole): the started_at
+    page of each run list (an admin's, a light starter's own, a service key's
+    own) can be read in index order without a sort, and a vacuumed flow's
+    status count from the index alone. A starter with most of a flow's runs
+    may read the flow index instead, as it should. The plans measured at
+    scale are in revision 202610241000; the tests above pin correctness."""
+    async with db_container() as container:
+        session = container.session()
+        history = await _seed_listed_run_history(
+            session,
+            admin_user=admin_user,
+            user_factory=user_factory,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.execute(
+            sa.text(
+                "INSERT INTO flow_runs (flow_id, flow_version, tenant_id, "
+                "principal_type, principal_user_id, principal_service_id, "
+                "runtime_service_permission, status, created_at, started_at, "
+                "finished_at) "
+                "SELECT CASE WHEN n <= 3000 THEN CAST(:flow_id AS uuid) "
+                "ELSE CAST(:other_flow_id AS uuid) END, 1, :tenant_id, "
+                "CASE WHEN starter = 'service' THEN 'service_key' "
+                "ELSE 'user' END, "
+                "CASE WHEN starter = 'colleague' THEN CAST(:colleague_id AS uuid) "
+                "WHEN starter = 'user' THEN CAST(:user_id AS uuid) END, "
+                "CASE WHEN starter = 'service' THEN CAST(:service_id AS uuid) END, "
+                "CASE WHEN starter = 'service' THEN 'admin' END, "
+                "'completed', "
+                "CAST(:base AS timestamptz) - n * interval '1 minute', "
+                "CAST(:base AS timestamptz) - n * interval '1 minute' "
+                "+ interval '1 second', "
+                "CAST(:base AS timestamptz) - n * interval '1 minute' "
+                "+ interval '30 seconds' "
+                # The listed flow holds a fifth of the tenant's runs, mostly
+                # the user's; the colleague's and the key's runs are few there
+                # and many in the other flow.
+                "FROM (SELECT n, CASE "
+                "WHEN n % 50 = 0 OR (n > 3000 AND n % 2 = 0) THEN 'service' "
+                "WHEN n % 30 = 0 OR n > 3000 THEN 'colleague' "
+                "ELSE 'user' END AS starter "
+                "FROM generate_series(1, 15000) AS n) AS filler"
+            ),
+            {
+                "flow_id": history.flow_id,
+                "other_flow_id": history.other_flow_id,
+                "tenant_id": history.tenant_id,
+                "colleague_id": str(history.colleague_id),
+                "user_id": str(history.user_id),
+                "service_id": str(history.service_principal_id),
+                "base": _LISTED_RUN_BASE,
+            },
+        )
+    # An index-only scan pays off once the visibility map marks the pages.
+    engine = sa.create_engine(
+        test_settings.sync_database_url, isolation_level="AUTOCOMMIT"
+    )
+    try:
+        with engine.connect() as autocommit:
+            autocommit.execute(sa.text("VACUUM (ANALYZE) flow_runs"))
+    finally:
+        engine.dispose()
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL enable_seqscan = off"))
+        await session.execute(sa.text("SET LOCAL enable_bitmapscan = off"))
+        run_repo = FlowRunRepository(session=session)
+        bind = session.sync_session.bind
+        assert bind is not None
+        connection = await session.connection()
+
+        async def plan_of(
+            read: Awaitable[object],
+        ) -> list[tuple[str, object, object]]:
+            with _capture_queries(bind) as captured:
+                await read
+            assert len(captured) == 1
+            explain = await connection.exec_driver_sql(
+                f"EXPLAIN (FORMAT JSON) {captured[0].sql}", captured[0].parameters
+            )
+            return _plan_index_scans(_decode_explain(explain.scalar_one()))
+
+        pages = {
+            "ix_flow_runs_flow_listing": {},
+            "ix_flow_runs_flow_user_listing": {
+                "principal_user_id": history.colleague_id
+            },
+            "ix_flow_runs_flow_service_listing": {
+                "principal_service_id": history.service_principal_id
+            },
+        }
+        for index_name, principals in pages.items():
+            for order in _LIST_ORDERS:
+                nodes = await plan_of(
+                    run_repo.list_statuses(
+                        tenant_id=history.tenant_id,
+                        flow_id=history.flow_id,
+                        limit=26,
+                        offset=0,
+                        listing=FlowRunListing.of(sort="started_at", order=order),
+                        **principals,  # type: ignore[arg-type]
+                    )
+                )
+                direction = "Forward" if order == "desc" else "Backward"
+                assert ("Index Scan", index_name, direction) in nodes, (
+                    index_name,
+                    order,
+                    nodes,
+                )
+                assert not any("Sort" in node[0] for node in nodes), nodes
+
+        count_nodes = await plan_of(
+            run_repo.count_statuses(
+                tenant_id=history.tenant_id, flow_id=history.flow_id
+            )
+        )
+        assert any(
+            node[:2] == ("Index Only Scan", "ix_flow_runs_flow_listing")
+            for node in count_nodes
+        ), count_nodes

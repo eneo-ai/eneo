@@ -174,6 +174,28 @@ def _principal_fk_index(table_name: str, column: str) -> Index:
     )
 
 
+def _flow_run_listing_index(name: str, *starter: str, **options: Any) -> Index:
+    """A flow's runs (or one starter's, for runs listed as their own) in the
+    started_at order of ``run_list_order``, so a run list page is read in
+    index order without a sort.
+
+    Measured on 305k runs, 200k in one flow (revision 202610241000): the
+    started_at page went from 27k buffers to 26, and a starter's own page
+    from up to 25k buffers to 7-28. ``ix_flow_runs_flow_id_status`` serves
+    lookups by flow_id alone.
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        *starter,
+        sa.text("coalesce(started_at, created_at) DESC"),
+        sa.text("created_at DESC"),
+        sa.text("id DESC"),
+        **options,
+    )
+
+
 def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
     return ",".join(f"('{left}','{right}')" for left, right in values)
 
@@ -834,7 +856,6 @@ class FlowRuns(BasePublic):
     flow_id: Mapped[UUID] = mapped_column(
         ForeignKey(Flows.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     flow_version: Mapped[int] = mapped_column(nullable=False)
     principal_type: Mapped[str] = mapped_column(
@@ -1071,6 +1092,19 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text(
                 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
             ),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_listing", postgresql_include=("status",)
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_user_listing",
+            "principal_user_id",
+            postgresql_where=sa.text("principal_user_id IS NOT NULL"),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_service_listing",
+            "principal_service_id",
+            postgresql_where=sa.text("principal_service_id IS NOT NULL"),
         ),
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),
