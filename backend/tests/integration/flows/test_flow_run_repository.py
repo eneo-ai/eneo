@@ -91,8 +91,8 @@ from eneo.flows.runtime.step_result_builder import (
     build_terminal_attempt_input,
 )
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.integration.flows.statement_capture_support import capture_queries
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-    _capture_queries,
     _decode_explain,
     _json_object,
 )
@@ -488,7 +488,7 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
         assert exported["provenance_json"] == attempt.provenance_json
         bind = session.sync_session.bind
         assert bind is not None
-        with _capture_queries(bind) as queries:
+        with capture_queries(bind) as queries:
             identities = await repo.list_step_result_identities(
                 run_id=child.id, tenant_id=context.tenant_id
             )
@@ -5081,7 +5081,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         candidate_limit = limit + 1
         bind = session.sync_session.bind
         assert bind is not None
-        with _capture_queries(bind) as captured:
+        with capture_queries(bind) as captured:
             bounded = await run_repo.list_step_attempts(
                 run_id=run.id,
                 tenant_id=tenant_id,
@@ -5698,7 +5698,7 @@ async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_cou
         async def plan_of(
             read: Awaitable[object],
         ) -> list[tuple[str, object, object]]:
-            with _capture_queries(bind) as captured:
+            with capture_queries(bind) as captured:
                 await read
             assert len(captured) == 1
             explain = await connection.exec_driver_sql(

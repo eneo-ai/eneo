@@ -1263,11 +1263,10 @@ async def test_export_refuses_aggregate_stored_bytes_before_loading(
 async def test_view_bounds_other_fan_out_sections_and_records_omissions(user) -> None:
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[])
-    service.flow_run_repo.measure_evidence_sections.return_value = replace(
-        FlowRunEvidenceMeasurements.empty(),
-        step_result_row_count=(
-            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1
-        ),
+    _set_section_row_count(
+        service,
+        section="step_results",
+        row_count=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1,
     )
     admitted = _step_result_record(run, step_order=1)
     service.flow_run_repo.list_step_results.return_value = [
@@ -1343,18 +1342,18 @@ async def test_view_refuses_to_materialize_a_section_over_its_logical_budget(
 ) -> None:
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[])
-    service.flow_run_repo.measure_evidence_sections.return_value = replace(
-        FlowRunEvidenceMeasurements.empty(),
-        result_file_row_count=1,
-        result_file_logical_json_bytes=(
-            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES + 1
-        ),
-    )
+    # The bounded read admits no row: the one row is over the section's
+    # logical byte budget, so the view says so instead of loading it.
+    _set_section_row_count(service, section="result_files", row_count=1)
 
     bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
 
-    assert service.flow_run_repo.list_result_files.await_args.kwargs["limit"] == (
+    read_kwargs = service.flow_run_repo.list_result_files.await_args.kwargs
+    assert read_kwargs["limit"] == (
         flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+    )
+    assert read_kwargs["logical_byte_budget"] == (
+        flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
     )
     assert bundle.debug_export["run"]["summary"]["omissions"] == [
         {
@@ -1710,17 +1709,12 @@ async def test_history_sections_record_row_and_byte_omissions(
         created_at=checkpoint.created_at,
         revision=2,
     )
-    measurement = FlowRunReviewCheckpointEvidenceMeasurement(
+    _set_section_row_count(
+        service,
+        section=section,
         row_count=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1,
-        stored_json_bytes=0,
-        logical_json_bytes=0
-        if reason == "row_limit"
-        else flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES + 1,
     )
     if section == "review_checkpoint_edits":
-        service.flow_run_review_checkpoint_repo.measure_edit_evidence.return_value = (
-            measurement
-        )
         reader = (
             service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run
         )
@@ -1734,9 +1728,6 @@ async def test_history_sections_record_row_and_byte_omissions(
             payload_sha256_after="b" * 64,
         )
     else:
-        service.transcript_corrections_repo.measure_revision_evidence.return_value = (
-            measurement
-        )
         reader = service.transcript_corrections_repo.list_revisions_for_run
         item = FlowTranscriptCorrectionRevision(
             **common,
@@ -1758,4 +1749,220 @@ async def test_history_sections_record_row_and_byte_omissions(
         tenant_id=run.tenant_id,
         limit=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS,
         logical_byte_budget=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+    )
+
+
+def _seed_view_section_rows(
+    service: FlowRunEvidenceService, rows: dict[str, int]
+) -> None:
+    """Answer the view preflight's row counts the way the real repositories do."""
+    for section, row_count in rows.items():
+        _set_section_row_count(service, section=section, row_count=row_count)
+
+
+@pytest.mark.asyncio
+async def test_view_of_a_small_run_reports_no_omissions(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    _seed_view_section_rows(service, {"step_results": 0, "provider_calls": 0})
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    summary = bundle.debug_export["run"]["summary"]
+    assert summary["omissions"] == []
+    assert summary["knowledge_evidence_view"] is None
+    assert len(bundle.step_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_view_reports_every_section_omission_in_read_order(
+    user, monkeypatch
+) -> None:
+    """Pins the omission manifest the row-count preflight produces.
+
+    Every row-counted section is short of its count here, so each records the
+    omission kind its returned rows imply, in the order the view reads them.
+    """
+    from tests.unittests.flows.test_flow_run_evidence import _review_checkpoint_for_run
+
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_ROWS", 2
+    )
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    _seed_view_section_rows(
+        service,
+        {
+            "step_results": 3,
+            "review_checkpoints": 2,
+            "review_checkpoint_edits": 3,
+            "transcript_correction_revisions": 1,
+            "result_files": 1,
+            "provider_calls": 1,
+            "webhook_deliveries": 1,
+            "runtime_input_files": 1,
+        },
+    )
+    service.flow_run_repo.list_step_results.return_value = [
+        _step_result_record(run, step_order=1),
+        _step_result_record(run, step_order=2),
+    ]
+    service.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run.return_value = [
+        _review_checkpoint_for_run(run)
+    ]
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    assert bundle.debug_export["run"]["summary"]["omissions"] == [
+        {
+            "reason": "row_limit",
+            "section": "step_results",
+            "rows_omitted": 1,
+            "count_truncated": True,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "review_checkpoints",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "review_checkpoint_edits",
+            "rows_omitted": 3,
+            "count_truncated": True,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "transcript_correction_revisions",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "result_files",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "provider_calls",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "webhook_deliveries",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "parent_section_omitted",
+            "section": "runtime_input_files",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+    ]
+
+
+_SECTION_BYTE_MEASURES = (
+    ("flow_run_repo", "measure_evidence_sections"),
+    ("flow_version_repo", "measure_definition_evidence"),
+    ("flow_run_review_checkpoint_repo", "measure_evidence"),
+    ("flow_run_review_checkpoint_repo", "measure_edit_evidence"),
+    ("transcript_corrections_repo", "measure_revision_evidence"),
+    ("provider_call_repo", "measure_evidence"),
+    ("webhook_delivery_repo", "measure_evidence"),
+)
+
+
+@pytest.mark.asyncio
+async def test_view_preflight_counts_rows_without_measuring_section_bytes(
+    user,
+) -> None:
+    """Omissions consume only row counts, and every view read keeps its own
+    byte budget, so the view never sizes section JSON. The attempt preflight
+    still sizes attempts: it decides whether the attempt load is narrowed."""
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+
+    await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    for repo_name, method_name in _SECTION_BYTE_MEASURES:
+        getattr(getattr(service, repo_name), method_name).assert_not_awaited()
+    service.transcript_source_service.measure_for_export.assert_not_awaited()
+    service.flow_run_repo.measure_step_attempt_evidence.assert_awaited_once_with(
+        run_id=run.id, tenant_id=run.tenant_id, candidate_limit=ceiling + 1
+    )
+    row_scope = {"run_id": run.id, "tenant_id": run.tenant_id}
+    # Attempts are sized above, so the view skips the attempt row count.
+    service.flow_run_repo.measure_evidence_row_counts.assert_awaited_once_with(
+        **row_scope, ceiling=ceiling, count_step_attempts=False
+    )
+    for counter in (
+        service.flow_run_review_checkpoint_repo.measure_evidence_row_count,
+        service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count,
+        service.transcript_corrections_repo.measure_revision_evidence_row_count,
+        service.webhook_delivery_repo.measure_evidence_row_count,
+    ):
+        counter.assert_awaited_once_with(**row_scope, ceiling=ceiling)
+    service.provider_call_repo.measure_evidence_row_count.assert_awaited_once_with(
+        **row_scope, ceiling=EMBEDDED_PROVIDER_CALL_LIMIT
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detail", ["raw", "redacted"])
+async def test_export_preflight_still_measures_every_section_in_order(
+    user, detail
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    awaited: list[str] = []
+
+    def record(name, mock):
+        result = mock.return_value
+
+        def side_effect(*_args, **_kwargs):
+            awaited.append(name)
+            return result
+
+        mock.side_effect = side_effect
+
+    measures = (
+        ("flow_run_repo", "measure_evidence_sections"),
+        ("flow_version_repo", "measure_definition_evidence"),
+        ("flow_run_repo", "measure_step_attempt_evidence"),
+        *_SECTION_BYTE_MEASURES[2:],
+        ("transcript_source_service", "measure_for_export"),
+    )
+    for repo_name, method_name in measures:
+        record(
+            f"{repo_name}.{method_name}",
+            getattr(getattr(service, repo_name), method_name),
+        )
+
+    await service.export_evidence_json(run_id=run.id, detail=detail)
+
+    assert awaited == [
+        f"{repo_name}.{method_name}" for repo_name, method_name in measures
+    ]
+    candidate_limit = EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1
+    service.flow_run_repo.measure_evidence_sections.assert_awaited_once_with(
+        run_id=run.id, tenant_id=run.tenant_id, candidate_limit=candidate_limit
+    )
+    service.provider_call_repo.measure_evidence.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        candidate_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+    )
+    service.transcript_source_service.measure_for_export.assert_awaited_once_with(
+        run_id=run.id, candidate_limit=candidate_limit
+    )
+    # The export refuses on the attempt row count, so it keeps counting attempts.
+    service.flow_run_repo.measure_evidence_row_counts.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        ceiling=EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
     )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 from typing import Any, cast
@@ -90,6 +91,13 @@ _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
 )
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _URL_TRAILING_PROSE_PUNCTUATION = ".,;:!?)]}"
+# The same few payload keys recur in every record of a bundle, so their
+# classification is cached. A key is arbitrary JSON text, so an entry bound
+# alone could keep 4,096 megabyte keys resident for the process lifetime; only
+# identifier-sized keys are cached. Field, header and query-parameter names
+# sit far below 256 characters, which caps retained key text near 1 MiB.
+_SENSITIVE_KEY_CACHE_SIZE = 4096
+_MAX_CACHED_KEY_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -115,7 +123,12 @@ class StringRedactionResult:
 def is_sensitive_key(key: str | None) -> bool:
     if key is None:
         return False
+    if len(key) > _MAX_CACHED_KEY_LENGTH:
+        return _classify_key(key)
+    return _classify_cached_key(key)
 
+
+def _classify_key(key: str) -> bool:
     normalized_key = _normalize_key(key)
     if not normalized_key:
         return False
@@ -149,6 +162,11 @@ def is_sensitive_key(key: str | None) -> bool:
     if "credential" in key_tokens or "credentials" in key_tokens:
         return True
     return False
+
+
+_classify_cached_key = functools.lru_cache(maxsize=_SENSITIVE_KEY_CACHE_SIZE)(
+    _classify_key
+)
 
 
 def redact_url_secrets(value: str) -> str:

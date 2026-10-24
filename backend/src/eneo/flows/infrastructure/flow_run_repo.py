@@ -2182,8 +2182,14 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         ceiling: int,
+        count_step_attempts: bool = True,
     ) -> FlowRunEvidenceRowCounts:
-        """Read at most ceiling+1 identities for each emitted fan-out."""
+        """Read at most ceiling+1 identities for each emitted fan-out.
+
+        A caller that sizes attempts some other way passes
+        ``count_step_attempts=False`` to skip that count; ``step_attempts`` is
+        then reported as 0 and must not be read.
+        """
         candidate_limit = ceiling + 1
         step_attempts = (
             sa.select(FlowStepAttempts.id)
@@ -2226,10 +2232,13 @@ class FlowRunRepository:
         )
         counts: list[int] = []
         for candidates in (
-            step_attempts,
+            step_attempts if count_step_attempts else None,
             result_files,
             runtime_input_files,
         ):
+            if candidates is None:
+                counts.append(0)
+                continue
             counts.append(
                 int(
                     await self.session.scalar(

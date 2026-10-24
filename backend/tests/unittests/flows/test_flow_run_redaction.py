@@ -4,6 +4,7 @@ from urllib.parse import unquote
 
 import pytest
 
+from eneo.flows import flow_run_redaction
 from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
@@ -487,3 +488,71 @@ def test_key_and_value_fields_outside_a_credential_shape_stay_readable(
     payload: dict[str, object],
 ) -> None:
     assert redact_payload(payload) == payload
+
+
+@pytest.fixture
+def empty_key_cache():
+    flow_run_redaction._classify_cached_key.cache_clear()
+    yield flow_run_redaction._classify_cached_key
+    flow_run_redaction._classify_cached_key.cache_clear()
+
+
+_CLASSIFIED_KEYS = (
+    "Authorization",
+    "X-Api-Key",
+    "session_cookie",
+    "accessToken",
+    "next_page_token",
+    "client-secret",
+    "step_order",
+    "provider_response_id",
+    "text",
+    "",
+    "___",
+)
+
+
+def test_cached_key_classification_matches_the_uncached_rule(
+    empty_key_cache,
+) -> None:
+    for key in _CLASSIFIED_KEYS:
+        first = is_sensitive_key(key)
+        assert first is flow_run_redaction._classify_key(key)
+        assert is_sensitive_key(key) is first
+
+    info = empty_key_cache.cache_info()
+    assert info.maxsize == 4096
+    assert info.misses == len(_CLASSIFIED_KEYS)
+    assert info.hits == len(_CLASSIFIED_KEYS)
+
+
+def test_a_missing_key_is_never_sensitive_and_never_cached(empty_key_cache) -> None:
+    assert is_sensitive_key(None) is False
+    assert empty_key_cache.cache_info().currsize == 0
+
+
+def test_oversized_keys_are_classified_without_entering_the_cache(
+    empty_key_cache,
+) -> None:
+    limit = flow_run_redaction._MAX_CACHED_KEY_LENGTH
+    sensitive = "x" * limit + "_token"
+    readable = "x" * (limit + 1)
+
+    assert is_sensitive_key(sensitive) is True
+    assert is_sensitive_key(readable) is False
+    assert empty_key_cache.cache_info().currsize == 0
+
+    at_limit = "x" * (limit - len("_token")) + "_token"
+    assert is_sensitive_key(at_limit) is True
+    assert empty_key_cache.cache_info().currsize == 1
+
+
+def test_key_cache_evicts_the_least_recent_key_at_its_bound(empty_key_cache) -> None:
+    maxsize = empty_key_cache.cache_info().maxsize
+    for index in range(maxsize + 1):
+        is_sensitive_key(f"field_{index}")
+
+    assert empty_key_cache.cache_info().currsize == maxsize
+    misses = empty_key_cache.cache_info().misses
+    is_sensitive_key("field_0")
+    assert empty_key_cache.cache_info().misses == misses + 1

@@ -148,6 +148,12 @@ _EVIDENCE_EXPORT_TOO_LARGE_HINT = (
 
 
 @dataclass(frozen=True, slots=True)
+class _EvidenceSectionRowCount:
+    section: EvidenceSectionIdentifier
+    row_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class _EvidenceSectionUsage:
     section: EvidenceSectionIdentifier
     row_count: int
@@ -625,155 +631,18 @@ class FlowRunEvidenceService:
                 access_kind=access_kind,
                 history=history,
             )
-        if access_kind != "evidence_view":
-            await self._refuse_export_rows_before_size_measurement(
-                run_id=resolved_run.id,
-                detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
-            )
-        measurement_candidate_limit = (
-            RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1
-            if access_kind == "evidence_view"
-            else EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1
-        )
-        run_measurements = await self.flow_run_repo.measure_evidence_sections(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            candidate_limit=measurement_candidate_limit,
-        )
-        version_measurement = await self.flow_version_repo.measure_definition_evidence(
-            flow_id=resolved_run.flow_id,
-            version=resolved_run.flow_version,
-            tenant_id=self.user.tenant_id,
-        )
-        attempt_evidence_size = await self.flow_run_repo.measure_step_attempt_evidence(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            candidate_limit=measurement_candidate_limit,
-        )
-        review_measurement = (
-            await self.flow_run_review_checkpoint_repo.measure_evidence(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-                candidate_limit=measurement_candidate_limit,
-            )
-        )
-        edit_measurement = (
-            await self.flow_run_review_checkpoint_repo.measure_edit_evidence(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-                candidate_limit=measurement_candidate_limit,
-            )
-        )
-        correction_measurement = (
-            await self.transcript_corrections_repo.measure_revision_evidence(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-                candidate_limit=measurement_candidate_limit,
-            )
-        )
-        provider_call_measurement = await self.provider_call_repo.measure_evidence(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            candidate_limit=(
-                provider_call_limit + 1
-                if access_kind == "evidence_view"
-                else PROVIDER_CALL_EXPORT_MAX_EVENTS + 1
-            ),
-        )
-        webhook_measurement = await self.webhook_delivery_repo.measure_evidence(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            candidate_limit=measurement_candidate_limit,
-        )
-        section_usages = (
-            _EvidenceSectionUsage(
-                section="review_checkpoint_edits",
-                row_count=edit_measurement.row_count,
-                stored_json_bytes=edit_measurement.stored_json_bytes,
-                logical_json_bytes=edit_measurement.logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="transcript_correction_revisions",
-                row_count=correction_measurement.row_count,
-                stored_json_bytes=correction_measurement.stored_json_bytes,
-                logical_json_bytes=correction_measurement.logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="run",
-                row_count=run_measurements.run_row_count,
-                stored_json_bytes=run_measurements.run_stored_json_bytes,
-                logical_json_bytes=run_measurements.run_logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="definition_snapshot",
-                row_count=version_measurement.row_count,
-                stored_json_bytes=version_measurement.stored_json_bytes,
-                logical_json_bytes=version_measurement.logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="step_results",
-                row_count=run_measurements.step_result_row_count,
-                stored_json_bytes=run_measurements.step_result_stored_json_bytes,
-                logical_json_bytes=run_measurements.step_result_logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="step_attempts",
-                row_count=attempt_evidence_size.attempt_count,
-                stored_json_bytes=attempt_evidence_size.stored_json_bytes,
-                logical_json_bytes=attempt_evidence_size.logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="result_files",
-                row_count=run_measurements.result_file_row_count,
-                stored_json_bytes=0,
-                logical_json_bytes=run_measurements.result_file_logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="runtime_input_files",
-                row_count=run_measurements.runtime_input_file_row_count,
-                stored_json_bytes=0,
-                logical_json_bytes=(
-                    run_measurements.runtime_input_file_logical_json_bytes
-                ),
-            ),
-            _EvidenceSectionUsage(
-                section="review_checkpoints",
-                row_count=review_measurement.row_count,
-                stored_json_bytes=review_measurement.stored_json_bytes,
-                logical_json_bytes=review_measurement.logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="webhook_deliveries",
-                row_count=webhook_measurement.row_count,
-                stored_json_bytes=0,
-                logical_json_bytes=0,
-            ),
-            _EvidenceSectionUsage(
-                section="provider_calls",
-                row_count=provider_call_measurement.row_count,
-                stored_json_bytes=0,
-                logical_json_bytes=provider_call_measurement.logical_json_bytes,
-            ),
-        )
-        if access_kind != "evidence_view":
-            source_measurement = (
-                await self.transcript_source_service.measure_for_export(
-                    run_id=resolved_run.id, candidate_limit=measurement_candidate_limit
-                )
-            )
-            section_usages += (
-                _EvidenceSectionUsage(
-                    section="transcript_sources",
-                    row_count=source_measurement.row_count,
-                    stored_json_bytes=source_measurement.stored_json_bytes,
-                    logical_json_bytes=source_measurement.logical_json_bytes,
-                ),
-            )
         attempt_limit: int | None = None
         logical_byte_budget: int | None = None
         passage_byte_budget: int | None = None
         view_omissions: list[RunViewEvidenceOmission] = []
+        view_section_rows: tuple[_EvidenceSectionRowCount, ...] = ()
         if access_kind == "evidence_view":
+            (
+                attempt_evidence_size,
+                view_section_rows,
+            ) = await self._measure_view_preflight(
+                run_id=resolved_run.id, provider_call_limit=provider_call_limit
+            )
             if (
                 attempt_evidence_size.attempt_count > RUN_VIEW_MAX_LOADED_ATTEMPTS
                 or attempt_evidence_size.stored_provenance_bytes
@@ -788,10 +657,14 @@ class FlowRunEvidenceService:
                 logical_byte_budget = RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
                 passage_byte_budget = RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
         else:
-            self._refuse_export_beyond_preflight(
-                attempt_evidence_size,
-                section_usages=section_usages,
-                detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
+            detail: EvidenceExportDetail = (
+                "raw" if access_kind == "evidence_export_raw" else "redacted"
+            )
+            await self._refuse_export_rows_before_size_measurement(
+                run_id=resolved_run.id, detail=detail
+            )
+            await self._refuse_export_beyond_measured_size(
+                run=resolved_run, detail=detail
             )
         is_view = access_kind == "evidence_view"
         view_read_kwargs = (
@@ -815,7 +688,7 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "step_results"),
+                usage=self._section_usage(view_section_rows, "step_results"),
                 returned_count=len(step_results),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
@@ -893,7 +766,7 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "review_checkpoints"),
+                usage=self._section_usage(view_section_rows, "review_checkpoints"),
                 returned_count=len(review_checkpoints),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
@@ -912,14 +785,14 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "review_checkpoint_edits"),
+                usage=self._section_usage(view_section_rows, "review_checkpoint_edits"),
                 returned_count=len(review_checkpoint_edits),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
             self._record_view_omission(
                 omissions=view_omissions,
                 usage=self._section_usage(
-                    section_usages, "transcript_correction_revisions"
+                    view_section_rows, "transcript_correction_revisions"
                 ),
                 returned_count=len(correction_revisions),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
@@ -946,7 +819,7 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "result_files"),
+                usage=self._section_usage(view_section_rows, "result_files"),
                 returned_count=len(result_files),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
@@ -967,7 +840,7 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "provider_calls"),
+                usage=self._section_usage(view_section_rows, "provider_calls"),
                 returned_count=provider_calls.count,
                 row_limit=provider_call_limit,
             )
@@ -981,7 +854,7 @@ class FlowRunEvidenceService:
         if is_view:
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "webhook_deliveries"),
+                usage=self._section_usage(view_section_rows, "webhook_deliveries"),
                 returned_count=len(webhook_deliveries),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
@@ -1033,10 +906,10 @@ class FlowRunEvidenceService:
                 )
             )
         if is_view:
-            step_result_usage = self._section_usage(section_usages, "step_results")
+            step_result_usage = self._section_usage(view_section_rows, "step_results")
             self._record_view_omission(
                 omissions=view_omissions,
-                usage=self._section_usage(section_usages, "runtime_input_files"),
+                usage=self._section_usage(view_section_rows, "runtime_input_files"),
                 returned_count=sum(
                     len(files)
                     for files in runtime_input_file_metadata_by_step_result_id.values()
@@ -1075,6 +948,210 @@ class FlowRunEvidenceService:
             ),
             knowledge_evidence_view=knowledge_evidence_view,
             omissions=view_omissions,
+        )
+
+    async def _measure_view_preflight(
+        self, *, run_id: UUID, provider_call_limit: int
+    ) -> tuple[StepAttemptEvidenceSize, tuple[_EvidenceSectionRowCount, ...]]:
+        """Size what an interactive view must decide before it loads.
+
+        Attempts are sized because that decides whether their load narrows.
+        Every other view read carries its own row and byte budget and reports
+        omissions from row counts alone, so those sections are only counted:
+        each count reads at most ``ceiling + 1`` identities, so a count above
+        the ceiling is a lower bound.
+        """
+        ceiling = RUN_VIEW_MAX_LOADED_SECTION_ROWS
+        tenant_id = self.user.tenant_id
+        run_counts = await self.flow_run_repo.measure_evidence_row_counts(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            ceiling=ceiling,
+            count_step_attempts=False,
+        )
+        attempt_evidence_size = await self.flow_run_repo.measure_step_attempt_evidence(
+            run_id=run_id, tenant_id=tenant_id, candidate_limit=ceiling + 1
+        )
+        section_rows = (
+            _EvidenceSectionRowCount(
+                section="review_checkpoint_edits",
+                row_count=await self.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                ),
+            ),
+            _EvidenceSectionRowCount(
+                section="transcript_correction_revisions",
+                row_count=await self.transcript_corrections_repo.measure_revision_evidence_row_count(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                ),
+            ),
+            _EvidenceSectionRowCount(
+                section="step_results", row_count=run_counts.step_results
+            ),
+            _EvidenceSectionRowCount(
+                section="result_files", row_count=run_counts.result_files
+            ),
+            _EvidenceSectionRowCount(
+                section="runtime_input_files",
+                row_count=run_counts.runtime_input_files,
+            ),
+            _EvidenceSectionRowCount(
+                section="review_checkpoints",
+                row_count=await self.flow_run_review_checkpoint_repo.measure_evidence_row_count(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                ),
+            ),
+            _EvidenceSectionRowCount(
+                section="webhook_deliveries",
+                row_count=await self.webhook_delivery_repo.measure_evidence_row_count(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                ),
+            ),
+            _EvidenceSectionRowCount(
+                section="provider_calls",
+                row_count=await self.provider_call_repo.measure_evidence_row_count(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=provider_call_limit
+                ),
+            ),
+        )
+        return attempt_evidence_size, section_rows
+
+    async def _refuse_export_beyond_measured_size(
+        self, *, run: FlowRun, detail: EvidenceExportDetail
+    ) -> None:
+        """Size every section an export loads and refuse what cannot fit."""
+        measurement_candidate_limit = EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1
+        run_measurements = await self.flow_run_repo.measure_evidence_sections(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        version_measurement = await self.flow_version_repo.measure_definition_evidence(
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=self.user.tenant_id,
+        )
+        attempt_evidence_size = await self.flow_run_repo.measure_step_attempt_evidence(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        review_measurement = (
+            await self.flow_run_review_checkpoint_repo.measure_evidence(
+                run_id=run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
+        edit_measurement = (
+            await self.flow_run_review_checkpoint_repo.measure_edit_evidence(
+                run_id=run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
+        correction_measurement = (
+            await self.transcript_corrections_repo.measure_revision_evidence(
+                run_id=run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
+        provider_call_measurement = await self.provider_call_repo.measure_evidence(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+        )
+        webhook_measurement = await self.webhook_delivery_repo.measure_evidence(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        section_usages = (
+            _EvidenceSectionUsage(
+                section="review_checkpoint_edits",
+                row_count=edit_measurement.row_count,
+                stored_json_bytes=edit_measurement.stored_json_bytes,
+                logical_json_bytes=edit_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="transcript_correction_revisions",
+                row_count=correction_measurement.row_count,
+                stored_json_bytes=correction_measurement.stored_json_bytes,
+                logical_json_bytes=correction_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="run",
+                row_count=run_measurements.run_row_count,
+                stored_json_bytes=run_measurements.run_stored_json_bytes,
+                logical_json_bytes=run_measurements.run_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="definition_snapshot",
+                row_count=version_measurement.row_count,
+                stored_json_bytes=version_measurement.stored_json_bytes,
+                logical_json_bytes=version_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="step_results",
+                row_count=run_measurements.step_result_row_count,
+                stored_json_bytes=run_measurements.step_result_stored_json_bytes,
+                logical_json_bytes=run_measurements.step_result_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="step_attempts",
+                row_count=attempt_evidence_size.attempt_count,
+                stored_json_bytes=attempt_evidence_size.stored_json_bytes,
+                logical_json_bytes=attempt_evidence_size.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="result_files",
+                row_count=run_measurements.result_file_row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=run_measurements.result_file_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="runtime_input_files",
+                row_count=run_measurements.runtime_input_file_row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=(
+                    run_measurements.runtime_input_file_logical_json_bytes
+                ),
+            ),
+            _EvidenceSectionUsage(
+                section="review_checkpoints",
+                row_count=review_measurement.row_count,
+                stored_json_bytes=review_measurement.stored_json_bytes,
+                logical_json_bytes=review_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="webhook_deliveries",
+                row_count=webhook_measurement.row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=0,
+            ),
+            _EvidenceSectionUsage(
+                section="provider_calls",
+                row_count=provider_call_measurement.row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=provider_call_measurement.logical_json_bytes,
+            ),
+        )
+        source_measurement = await self.transcript_source_service.measure_for_export(
+            run_id=run.id, candidate_limit=measurement_candidate_limit
+        )
+        section_usages += (
+            _EvidenceSectionUsage(
+                section="transcript_sources",
+                row_count=source_measurement.row_count,
+                stored_json_bytes=source_measurement.stored_json_bytes,
+                logical_json_bytes=source_measurement.logical_json_bytes,
+            ),
+        )
+        self._refuse_export_beyond_preflight(
+            attempt_evidence_size,
+            section_usages=section_usages,
+            detail=detail,
         )
 
     def _rag_evidence_policy(self) -> FlowRagEvidencePolicy:
@@ -1206,16 +1283,16 @@ class FlowRunEvidenceService:
 
     @staticmethod
     def _section_usage(
-        section_usages: Sequence[_EvidenceSectionUsage],
+        section_rows: Sequence[_EvidenceSectionRowCount],
         section: EvidenceSectionIdentifier,
-    ) -> _EvidenceSectionUsage:
-        return next(usage for usage in section_usages if usage.section == section)
+    ) -> _EvidenceSectionRowCount:
+        return next(usage for usage in section_rows if usage.section == section)
 
     @staticmethod
     def _record_view_omission(
         *,
         omissions: list[RunViewEvidenceOmission],
-        usage: _EvidenceSectionUsage,
+        usage: _EvidenceSectionRowCount,
         returned_count: int,
         row_limit: int,
         parent_omitted: bool = False,
