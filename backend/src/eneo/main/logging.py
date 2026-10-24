@@ -221,6 +221,15 @@ class SimpleLogger(logging.Logger):
         for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
+    def setLevel(self, level: int | str) -> None:
+        super().setLevel(level)
+        # Not registered with logging's manager, so its cache clearing never
+        # reaches this logger: an enabled-level answer cached before the change
+        # (CPython keeps it in the instance's ``_cache``) would outlive it.
+        cache = self.__dict__.get("_cache")
+        if isinstance(cache, dict):
+            cache.clear()
+
 
 def get_logger(module_name: str):
     # If we don't add a handler manually one will be created for us
