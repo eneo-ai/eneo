@@ -412,8 +412,9 @@ column that collapsed to its padding, which axe does not check (rule 6). It
 covers the public pages, the chat
 (start state, a docked conversation, the activity panel and sheet), the shell
 (catalog, collapsed rail, drawer, profile menu, ⌘K palette), spaces
-(overview, knowledge, websites, a collection, a create dialog) and admin, on
-desktop and at 390 × 844 with touch. One route is skipped with the reason in
+(overview, knowledge, websites, a collection, a create dialog; a space and the
+organisation space on a phone and an iPad either way) and admin, on desktop
+and at 390 × 844 with touch. One route is skipped with the reason in
 the spec: `/deactivated` (needs a suspended tenant). Add a route when you add
 a screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
 violation fails the run. Locally, run it against a dev server with a seeded

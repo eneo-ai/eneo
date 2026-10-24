@@ -604,6 +604,23 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
+        test("a space, and the organisation space", async ({ page }) => {
+          const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
+          const space = await createSpace(page, name);
+          await scan(page, `${space}/overview`, async () => {
+            await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+            // A phone lists what manages the space; tablets keep a tab for each.
+            await expect(
+              page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
+            ).toHaveCount(layout.phone ? 1 : 0);
+          });
+          await scan(page, "/spaces/organization/knowledge", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Organisation|Organization)$/ })
+            ).toBeVisible();
+          });
+        });
+
         if (layout.drawer) {
           test("the navigation drawer open", async ({ page }) => {
             await spacesList(page);

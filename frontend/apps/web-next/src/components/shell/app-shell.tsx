@@ -168,11 +168,11 @@ export function AppShellFrame({
           ref={mainRef}
           id="main-content"
           tabIndex={-1}
-          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14 lg:pb-0"
+          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14 max-md:has-[[data-phone-page-bar]]:scroll-pt-14 lg:pb-0"
         >
           {/* Under the top bar; a page with its own header shows its own
               under that header, and this one gives way. */}
-          <ConnectionBanner className="group-has-[[data-own-mobile-header]]/shell:hidden" />
+          <ConnectionBanner className="group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden" />
           {children}
         </main>
         <ConnectionAnnouncer />

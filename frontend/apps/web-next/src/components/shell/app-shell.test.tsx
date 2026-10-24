@@ -144,6 +144,8 @@ describe("AppShellFrame on a phone", () => {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const topBar = doc.querySelector("header");
     expect(topBar?.className).toContain("group-has-[[data-own-mobile-header]]/shell:hidden");
+    // A space's header replaces it on phones only (OWN_PHONE_HEADER).
+    expect(topBar?.className).toContain("max-md:group-has-[[data-own-phone-header]]/shell:hidden");
     expect(
       topBar?.closest('[class~="group/shell"]')?.querySelector("[data-own-mobile-header]")
     ).toBeTruthy();

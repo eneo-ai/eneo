@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
+import { createSpace, uniqueName } from "./helpers";
 
 // Below 1024 px a page with its own header (the chat's, a pushed screen's
 // PageBar) replaces the shell's top bar. The top bar gives way in CSS
@@ -11,7 +12,8 @@ import { expect, test } from "./csp";
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 test.use(PHONE);
 
-const TOP_BAR = "body header";
+// The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
+const TOP_BAR = "header:not(main *)";
 
 type Frame = { top: boolean; own: boolean; h1: boolean; at: number };
 
@@ -74,6 +76,72 @@ test("before hydration, a pushed screen or a chat shows only its own header", as
     await expect(page.locator(TOP_BAR)).toBeVisible();
     await expect(page.locator("[data-own-mobile-header]")).toHaveCount(0);
   }
+});
+
+test("a shared space is pushed on a phone; the personal and organisation spaces keep the menu", async ({
+  page
+}) => {
+  const name = uniqueName("E2E Pushed Space");
+  const space = await createSpace(page, name);
+  const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) (Ytor|Spaces)$/ });
+  const tabs = page.getByRole("navigation", { name: /^(Ytans innehåll|Space content)$/ });
+
+  // Before any script runs (decision 24): the space's bar, not the menu.
+  await page.route(isChunk, (route) => route.abort());
+  await page.mainFrame().goto(`${space}/overview`);
+  await expect(page.locator("[data-own-phone-header]")).toBeVisible({ timeout: 15_000 });
+  await expect(back).toBeVisible();
+  await expect(page.locator(TOP_BAR)).toBeHidden();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // Hydrated: the content tabs fit without scrolling, the rest is under Hantera ytan.
+  await page.goto(`${space}/overview`);
+  await expect(back).toBeVisible();
+  await expect(page.locator(TOP_BAR)).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await expect(tabs.getByRole("link")).toHaveCount(4);
+  const strip = await tabs.evaluate((nav) => {
+    const scroller = [...nav.querySelectorAll<HTMLElement>("*")].find(
+      (element) => getComputedStyle(element).overflowX === "auto"
+    );
+    return scroller ? scroller.scrollWidth - scroller.clientWidth : 0;
+  });
+  expect(strip).toBeLessThanOrEqual(1);
+  const manage = page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ });
+  await manage.getByRole("link", { name: /^(Medlemmar|Members)/ }).click();
+  await expect(page).toHaveURL(new RegExp(`${space}/members$`));
+  await expect(
+    page.getByRole("link", { name: new RegExp(`^(Tillbaka till|Back to) ${name}$`) })
+  ).toBeVisible();
+
+  for (const root of ["/spaces/personal/overview", "/spaces/organization/knowledge"]) {
+    await page.goto(root);
+    await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(TOP_BAR)).toBeVisible();
+    await expect(page.locator("[data-own-phone-header]")).toHaveCount(0);
+  }
+  await expect(tabs.getByRole("link")).toHaveCount(4);
+});
+
+test("a long space name in the back link never makes a 320 px page scroll sideways", async ({
+  page
+}) => {
+  const name = uniqueName("E2E Rymdstyrelseförvaltningens personalavdelning och arbetsmiljöenhet");
+  const space = await createSpace(page, name);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto(`${space}/members`);
+  const back = page.getByRole("link", { name: `Tillbaka till ${name}` });
+  await expect(back).toBeVisible();
+  const overflow = await page.evaluate(() => {
+    const main = document.getElementById("main-content")!;
+    return Math.max(
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      main.scrollWidth - main.clientWidth
+    );
+  });
+  expect(overflow).toBeLessThanOrEqual(1);
+  const box = (await back.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(320);
 });
 
 /** Script chunks of the app (not Next's inline streaming scripts). */

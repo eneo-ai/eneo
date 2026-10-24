@@ -57,7 +57,9 @@ export function SectionedSettings({
 
   return (
     <div data-space-full-bleed className="flex shrink-0 flex-col">
-      <header className="bg-ax-surface border-ax-border sticky top-0 z-30 border-b">
+      {/* Under a space's page bar on a phone (it sticks there too); main's
+          scroll padding for the bar adds to the anchors' scroll margin. */}
+      <header className="bg-ax-surface border-ax-border sticky top-0 z-30 border-b max-md:group-has-[[data-phone-page-bar]]/shell:top-14">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-1 px-6">
           {header}
           <TabList

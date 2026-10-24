@@ -110,3 +110,36 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
 export function spaceLandingHref(sections: SpaceSection[], routeId: SpaceRouteId): string {
   return sections[0]?.href ?? `/spaces/${routeId}/overview`;
 }
+
+/**
+ * A phone (decision 1: below 768 px, Tailwind `md`). A space there is a
+ * pushed screen with content tabs only (decision 24); tablets keep the header
+ * with every tab.
+ */
+export const SPACE_PHONE_QUERY = "(width < 48rem)";
+
+/** What a phone keeps as tabs: the space's content. */
+const CONTENT_SECTION_IDS: readonly SpaceSectionId[] = [
+  "overview",
+  "assistants",
+  "apps",
+  "knowledge"
+];
+/** What manages the space, in the order "Hantera ytan" lists it. */
+const MANAGE_SECTION_IDS: readonly SpaceSectionId[] = ["members", "settings", "skills", "services"];
+
+/**
+ * The sections as a phone shows them (decision 24): the content as tabs, the
+ * rest in "Hantera ytan" on Översikt. A space without Översikt (the
+ * organisation space) has nowhere to list them, so it keeps every tab (F4).
+ */
+export function phoneSections(sections: SpaceSection[]): {
+  tabs: SpaceSection[];
+  manage: SpaceSection[];
+} {
+  if (!sections.some((section) => section.id === "overview")) return { tabs: sections, manage: [] };
+  return {
+    tabs: sections.filter((section) => CONTENT_SECTION_IDS.includes(section.id)),
+    manage: MANAGE_SECTION_IDS.flatMap((id) => sections.filter((section) => section.id === id))
+  };
+}

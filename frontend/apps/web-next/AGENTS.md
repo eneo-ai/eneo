@@ -252,7 +252,10 @@ the default name on a backend name collision (9017).
   `CommandPalette`. A page header that replaces the phone top bar (the chat
   header, a pushed screen's `PageBar` with its back link) spreads
   `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
-  from the server render on; the chat header opens the drawer with
+  from the server render on. A space is pushed on phones only (decision 24:
+  tablets show it with breadcrumbs under the top bar): its bar is
+  `PageBar until="md"`, which spreads `OWN_PHONE_HEADER` instead. The chat
+  header opens the drawer with
   `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
   (`src/components/shell/routes.ts`). Keep state that changes after
   hydration out of contexts above the page: React replaces a page it has not
