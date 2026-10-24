@@ -268,6 +268,13 @@ async function openPalette(page: Page) {
   ).toBeVisible();
 }
 
+/** The touch layouts the page scans run at: phones and iPads, held both ways. */
+const TOUCH_LAYOUTS = [
+  { name: "phone (390 × 844)", viewport: { width: 390, height: 844 }, phone: true },
+  { name: "iPad portrait (820 × 1180)", viewport: { width: 820, height: 1180 }, phone: false },
+  { name: "iPad landscape (1180 × 820)", viewport: { width: 1180, height: 820 }, phone: false }
+] as const;
+
 for (const colorScheme of ["light", "dark"] as const) {
   test.describe(`WCAG 2.2 AA, ${colorScheme} mode`, () => {
     // Reduced motion: no fade-ins mid-scan, so contrast is measured at rest.
@@ -520,57 +527,71 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    // Phone layouts: the top bar or the chat's own header instead of the
-    // SideNav, and a touch pointer, so the 44 px touch targets apply.
-    test.describe("phone (390 × 844)", () => {
-      test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    // Touch layouts: a phone, and an iPad upright and sideways. All report a
+    // coarse pointer, so the 44 px touch targets apply; on the phone the top bar
+    // or the chat's own header replaces the SideNav.
+    for (const layout of TOUCH_LAYOUTS) {
+      test.describe(layout.name, () => {
+        test.use({ viewport: layout.viewport, hasTouch: true, isMobile: true });
 
-      test("personal chat", async ({ page }) => {
-        await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
-      });
+        test("a touch pointer", async ({ page }) => {
+          await spacesList(page);
+          expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+        });
 
-      test("chat: an answer, and its activity sheet", async ({ page }) => {
-        await addActivityToAnswers(page);
-        await answeredQuestion(page);
-        await expectNoAxeViolations(page);
+        test("personal chat", async ({ page }) => {
+          await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
+        });
 
-        await activityPill(page).click();
-        const sheet = page.getByRole("dialog", { name: ACTIVITY_PANEL });
-        await expect(sheet.getByRole("tabpanel", { name: /^(Steg|Steps)$/ })).toBeVisible();
-        await expectNoAxeViolations(page);
-      });
+        if (layout.phone) {
+          test("chat: an answer, and its activity sheet", async ({ page }) => {
+            await addActivityToAnswers(page);
+            await answeredQuestion(page);
+            await expectNoAxeViolations(page);
 
-      test("spaces list", async ({ page }) => {
-        await scan(page, "/spaces/list", async () => {
-          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+            await activityPill(page).click();
+            const sheet = page.getByRole("dialog", { name: ACTIVITY_PANEL });
+            await expect(sheet.getByRole("tabpanel", { name: /^(Steg|Steps)$/ })).toBeVisible();
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("spaces list", async ({ page }) => {
+          await scan(page, "/spaces/list", async () => {
+            await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+          });
+        });
+
+        if (layout.phone) {
+          test("the navigation drawer open", async ({ page }) => {
+            await spacesList(page);
+            await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+            const drawer = page.getByRole("dialog", { name: /^(Meny|Menu)$/ });
+            await expect(
+              drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })
+            ).toBeVisible();
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("the command palette open", async ({ page }) => {
+          await spacesList(page);
+          await openPalette(page);
+          await expectNoAxeViolations(page);
+        });
+
+        test("admin users", async ({ page }) => {
+          await scan(page, "/admin/users", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
+            ).toBeVisible();
+            await expect(
+              page.getByRole("main").getByText(/^\d+ (användare|users?)$/)
+            ).toBeVisible();
+          });
         });
       });
-
-      test("the navigation drawer open", async ({ page }) => {
-        await spacesList(page);
-        await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
-        const drawer = page.getByRole("dialog", { name: /^(Meny|Menu)$/ });
-        await expect(
-          drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })
-        ).toBeVisible();
-        await expectNoAxeViolations(page);
-      });
-
-      test("the command palette open", async ({ page }) => {
-        await spacesList(page);
-        await openPalette(page);
-        await expectNoAxeViolations(page);
-      });
-
-      test("admin users", async ({ page }) => {
-        await scan(page, "/admin/users", async () => {
-          await expect(
-            page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
-          ).toBeVisible();
-          await expect(page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
-        });
-      });
-    });
+    }
   });
 }
 
