@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
-import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
+import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -55,6 +55,7 @@ import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
+import { ConversationLayout } from "./conversation-layout";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -94,25 +95,6 @@ type PendingQuestionState = {
 
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
-
-/**
- * Height of an element, tracked with a ResizeObserver (0 where unsupported).
- * Returns a callback ref, so an element that mounts after the view (the
- * docked composer appears with the first question) is observed too.
- */
-function useElementHeight<T extends HTMLElement>() {
-  const [element, setElement] = useState<T | null>(null);
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setHeight(Math.ceil(entry.contentRect.height));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
-  return [setElement, height] as const;
-}
 
 /**
  * Astryx's message list is an aria-live log. ACCESSIBILITY.md → AI chat: the
@@ -822,15 +804,6 @@ function ConversationView({
     )
   };
 
-  const [observeDock, dockHeight] = useElementHeight<HTMLDivElement>();
-  const dockRef = useCallback(
-    (element: HTMLDivElement | null) => {
-      dockElement.current = element;
-      observeDock(element);
-    },
-    [observeDock]
-  );
-
   const fileInputElement =
     attachments.maxFiles !== 0 ? (
       <input
@@ -966,13 +939,10 @@ function ConversationView({
             : null
         }
       >
-        <ChatLayout
+        <ConversationLayout
           className="min-w-0 flex-1"
-          // WCAG 2.4.11: Tab and focus() scroll the focused element above the
-          // docked composer instead of behind it.
-          style={{ scrollPaddingBottom: dockHeight + 28 }}
           composer={
-            <div ref={dockRef} className="mx-auto w-full max-w-[680px]">
+            <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
               <Composer {...composerProps} textareaRef={dockTextareaRef} />
             </div>
           }
@@ -1030,7 +1000,7 @@ function ConversationView({
             )}
             {errorNotice}
           </ChatMessageList>
-        </ChatLayout>
+        </ConversationLayout>
       </SidePanel>
       {fileInputElement}
     </>

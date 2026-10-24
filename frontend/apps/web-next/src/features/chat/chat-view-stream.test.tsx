@@ -7,7 +7,6 @@ import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({
@@ -265,23 +264,20 @@ describe("ChatView sending", () => {
 });
 
 describe("ChatView docked composer", () => {
-  // WCAG 2.4.11: the conversation scrolls focused elements above the docked
-  // composer. A new conversation mounts the dock only after the first
-  // question, and its height must still be tracked.
-  it("keeps focus clear of the dock that appears with the first question", async () => {
+  // WCAG 2.4.11 and decision 16: the composer sits under the conversation,
+  // not over it, so nothing focused can hide behind it; the conversation is
+  // the scroller the answer is followed in.
+  it("docks the composer under the conversation's scroller, never over it", async () => {
     spies.mode = "answer";
     renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
-    const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
-    expect(scroller?.style.scrollPaddingBottom).toBe("28px");
-
+    // useChatStreamScroll marks the element it follows the answer in.
+    const scroller = document.querySelector("[data-astryx-chat-following]");
+    expect(scroller?.contains(log)).toBe(true);
     const textarea = screen.getByRole("textbox", { name: /^Fråga / });
-    const dock = observedElements().find((element) => element.contains(textarea));
-    expect(dock).toBeDefined();
-    act(() => reportResize(dock!, { height: 150 }));
-    expect(scroller?.style.scrollPaddingBottom).toBe("178px");
+    expect(scroller?.contains(textarea)).toBe(false);
   });
 });
 
