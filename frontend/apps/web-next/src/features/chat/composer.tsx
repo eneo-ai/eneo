@@ -119,7 +119,7 @@ function ComposerTextarea({
       // The Astryx ChatComposer around this textarea draws the 3:1 focus ring
       // (focus-within), so the field itself has none.
       // eslint-disable-next-line eneo/no-weak-focus-indicator -- ring drawn by ChatComposer
-      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-48 min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-base leading-normal focus:outline-none"
+      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-[min(12rem,30dvh)] min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-base leading-normal focus:outline-none"
     />
   );
 }

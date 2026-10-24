@@ -67,7 +67,13 @@ export function ConversationLayout({
           />
         </div>
       </div>
-      <div className="shrink-0 px-4 pt-1 pb-3">{composer}</div>
+      {/* At most two thirds of the height (a phone on its side, a keyboard
+          up, a long draft with attachments): the rest stays conversation,
+          and the dock scrolls what does not fit, its sovereignty note first.
+          pt-1.5 keeps the composer's focus ring (5 px out) inside the clip. */}
+      <div className="max-h-[65%] shrink-0 overflow-y-auto overscroll-y-contain px-4 pt-1.5 pb-3">
+        {composer}
+      </div>
     </div>
   );
 }

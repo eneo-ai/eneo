@@ -76,37 +76,62 @@ test("before hydration, a pushed screen or a chat shows only its own header", as
   }
 });
 
-test("a pushed screen keeps its server-rendered page and header while its code loads", async ({
+/** Script chunks of the app (not Next's inline streaming scripts). */
+const isChunk = (url: URL) =>
+  url.pathname.startsWith("/_next/static/chunks/") && url.pathname.endsWith(".js");
+/** A string only the users page's code holds (its tabs' label key). */
+const USERS_PAGE_CODE = "admin_users_tabs_label";
+/** A string of the shell's code: it must never be held with the page. */
+const SHELL_CODE = "group/shell";
+
+const isHydrated = (page: Page, selector: string) =>
+  page
+    .locator(selector)
+    .first()
+    .evaluate((element) => Object.keys(element).some((key) => key.startsWith("__reactFiber$")));
+
+test("the shell answers while a pushed screen's code loads, and the server page stays", async ({
   page
 }) => {
-  // Hold the code of the admin area's PageBar (the admin layout's client
-  // code): the shell hydrates first, the page waits for it.
-  let heldChunks = 0;
+  // Hold the users page's code only: the shell hydrates, the page cannot.
+  const held: string[] = [];
   let release!: () => void;
-  const held = new Promise<void>((resolve) => (release = resolve));
-  await page.route(
-    (url) => url.pathname.startsWith("/_next/static/chunks/") && url.pathname.endsWith(".js"),
-    async (route) => {
-      const response = await route.fetch();
-      const body = await response.text();
-      if (body.includes("shell_back_to")) {
-        heldChunks += 1;
-        await held;
-      }
-      await route.fulfill({ response, body });
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(isChunk, async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (body.includes(USERS_PAGE_CODE)) {
+      held.push(body.includes(SHELL_CODE) ? "page and shell" : "page");
+      await released;
     }
-  );
+    await route.fulfill({ response, body });
+  });
   await recordHeaders(page);
   // Not page.goto: the csp fixture's goto waits for the page to hydrate.
   await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
+  await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  expect(
+    held.every((code) => code === "page"),
+    "the shell's code is never held"
+  ).toBe(true);
+
+  // The shell is live: ⌘K opens its palette and Escape closes it.
+  const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
+  await expect(async () => {
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(palette).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+
+  // Meanwhile the page is still the server's, not swapped for its loading state.
+  expect(await isHydrated(page, "main h1")).toBe(false);
+  await expect(page.locator("[data-own-mobile-header]")).toBeVisible();
   await expect(page.locator(TOP_BAR)).toBeHidden();
-  await page.waitForTimeout(1500);
-  expect(heldChunks, "the PageBar's code was held").toBeGreaterThan(0);
+
   release();
-  await expect(
-    page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ })
-  ).toBeVisible();
-  await page.waitForTimeout(500);
+  await expect.poll(() => isHydrated(page, "main h1"), { timeout: 15_000 }).toBe(true);
 
   // From the first frame with the page in it: the page stays, under one header.
   const frames = await headerFrames(page);
@@ -114,6 +139,58 @@ test("a pushed screen keeps its server-rendered page and header while its code l
   expect(firstPage).toBeGreaterThanOrEqual(0);
   for (const frame of frames.slice(firstPage)) {
     expect(frame, `at ${frame.at} ms`).toMatchObject({ top: false, own: true, h1: true });
+  }
+});
+
+test("when a pushed screen's code fails to load, its server-rendered back link still leads out", async ({
+  page
+}) => {
+  await page.route(isChunk, async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (body.includes(USERS_PAGE_CODE)) return route.abort();
+    await route.fulfill({ response, body });
+  });
+  await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
+  // React leaves the page as the server rendered it: readable, with its bar
+  // (whose code is the shell's, so the link works either way).
+  await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+  const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ });
+  await expect(back).toBeVisible();
+  // It leads out without the page's code, to a screen with the menu.
+  await back.click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+  await expect(page.getByRole("dialog", { name: /^(Meny|Menu)$/ })).toBeVisible();
+});
+
+test("focus moving up a pushed screen stops below its PageBar", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.goto("/admin/users");
+  const barBottom = await page
+    .locator("[data-page-bar]")
+    .evaluate((bar) => bar.getBoundingClientRect().bottom);
+  const main = page.locator("#main-content");
+
+  // A control scrolled past, focused again (focus(), as on Shift+Tab).
+  await main.evaluate((element) => (element.scrollTop = element.scrollHeight));
+  const create = page.getByRole("button", { name: /^(Skapa användare|Create user)$/ });
+  await create.focus();
+  expect((await create.boundingBox())!.y).toBeGreaterThanOrEqual(barBottom - 1);
+
+  // Backwards through the page from its end: never under the bar.
+  await main.evaluate((element) => (element.scrollTop = element.scrollHeight));
+  await page.locator("main button, main a[href], main input").last().focus();
+  for (let step = 0; step < 20; step++) {
+    await page.keyboard.press("Shift+Tab");
+    const top = await page.evaluate(() => {
+      const focused = document.activeElement;
+      if (!focused || !focused.closest("#main-content") || focused.closest("[data-page-bar]")) {
+        return null;
+      }
+      return focused.getBoundingClientRect().top;
+    });
+    if (top !== null) expect(top, `step ${step}`).toBeGreaterThanOrEqual(barBottom - 1);
   }
 });
 

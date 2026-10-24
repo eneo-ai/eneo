@@ -160,12 +160,14 @@ export function AppShellFrame({
             position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:
             the panel contains what is absolutely positioned in it (visually
             hidden text), which otherwise escapes its scroll box and makes
-            the document taller, so the whole shell scrolls. */}
+            the document taller, so the whole shell scrolls. scroll-pt-14:
+            while a PageBar sticks to its top, focus and scrollIntoView stop
+            below the bar instead of under it (WCAG 2.4.11). */}
         <main
           ref={mainRef}
           id="main-content"
           tabIndex={-1}
-          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none lg:pb-0"
+          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14 lg:pb-0"
         >
           {children}
         </main>

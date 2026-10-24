@@ -32,6 +32,8 @@ export function PageBar({ parent, title, actions }: PageBarProps) {
     // The title is centred while it fits; the back link's name never gives way to it.
     <div
       {...OWN_MOBILE_HEADER}
+      // main#main-content keeps focused and scrolled-to content clear of it (app-shell.tsx).
+      data-page-bar=""
       className="bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5 lg:hidden"
     >
       <Button
