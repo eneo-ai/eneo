@@ -358,12 +358,16 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: runKeys.run(flowId, runId) });
   const [refreshing, setRefreshing] = useState(false);
-  // Reads everything on the page again, the audited content included: the person asked.
+  // Reads everything on the page again, the audited content and the transcripts
+  // included: the person asked.
   async function refreshNow() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await refresh();
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: runKeys.transcripts(flowId, runId) })
+      ]);
       announce(t("flow_run_more_refreshed"));
     } finally {
       setRefreshing(false);

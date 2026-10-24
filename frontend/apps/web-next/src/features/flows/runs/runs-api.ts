@@ -87,7 +87,19 @@ export const runKeys = {
   corrections: (flowId: string, runId: string) =>
     ["flows", flowId, "runs", runId, "transcript-corrections"] as const,
   revisions: (flowId: string, runId: string, stepId: string) =>
-    ["flows", flowId, "runs", runId, "transcript-revisions", stepId] as const
+    ["flows", flowId, "runs", runId, "transcript-revisions", stepId] as const,
+  /**
+   * A run's transcript reads, each of one attempt: under the literal
+   * "transcripts" (like "contract" and "list") rather than under `run`, so a
+   * save or a refusal that reads the run again does not read every page of a
+   * source that has not changed. Refresh reads them again.
+   */
+  transcripts: (flowId: string, runId: string) =>
+    ["flows", flowId, "runs", "transcripts", runId] as const,
+  transcriptSource: (flowId: string, runId: string, stepId: string, attemptNo: number) =>
+    ["flows", flowId, "runs", "transcripts", runId, "source", stepId, attemptNo] as const,
+  transcriptWords: (flowId: string, runId: string, stepId: string, attemptNo: number) =>
+    ["flows", flowId, "runs", "transcripts", runId, "words", stepId, attemptNo] as const
 };
 
 /** The published contract a run form is built from; a draft has none (404 or 400). */
@@ -500,7 +512,7 @@ export function transcriptQueryOptions(
   target: { stepId: string; attemptNo: number }
 ) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript", target.stepId, target.attemptNo],
+    queryKey: runKeys.transcriptSource(flowId, runId, target.stepId, target.attemptNo),
     queryFn: ({ signal }) => getTranscriptSource(flowId, runId, target, signal),
     // A finished attempt's source does not change.
     staleTime: Infinity
@@ -510,15 +522,23 @@ export function transcriptQueryOptions(
 /**
  * The word timings a transcription step stored, or null when it stored
  * none. An audited content read: asked for once someone plays the audio.
+ * The endpoint answers for the step's current attempt; the key names the
+ * attempt the transcript shows, so another attempt is read afresh (a "none"
+ * included). Words of another source are never placed (`wordsByLine`
+ * checks the hash).
  */
-export function transcriptWordsQueryOptions(flowId: string, runId: string, stepId: string) {
+export function transcriptWordsQueryOptions(
+  flowId: string,
+  runId: string,
+  target: { stepId: string; attemptNo: number }
+) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-words", stepId],
+    queryKey: runKeys.transcriptWords(flowId, runId, target.stepId, target.attemptNo),
     queryFn: async ({ signal }): Promise<TranscriptWords | null> => {
       try {
         return await unwrap(
           browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/", {
-            params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+            params: { path: { id: flowId, run_id: runId, step_id: target.stepId } },
             signal
           })
         );

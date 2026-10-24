@@ -1,3 +1,4 @@
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { reviewEditsQueryOptions } from "./review-extras-api";
@@ -5,10 +6,13 @@ import {
   activeReviewQueryOptions,
   runDetailQueryOptions,
   runEvidenceQueryOptions,
+  runKeys,
   runsListQueryOptions,
   runStepsQueryOptions,
   transcriptCorrectionsQueryOptions,
-  transcriptRevisionsQueryOptions
+  transcriptQueryOptions,
+  transcriptRevisionsQueryOptions,
+  transcriptWordsQueryOptions
 } from "./runs-api";
 
 const checkpoint = { flow_id: "flow-1", flow_run_id: "run-1", id: "checkpoint-1", revision: 1 };
@@ -57,5 +61,46 @@ describe("audited reads", () => {
 
   it("leave the content-free list on the app's default", () => {
     expect(runsListQueryOptions("flow-1").staleTime).toBeUndefined();
+  });
+});
+
+describe("transcript reads", () => {
+  const target = { stepId: "step-1", attemptNo: 2 };
+
+  function cached() {
+    const queryClient = new QueryClient();
+    const source = transcriptQueryOptions("flow-1", "run-1", target);
+    const words = transcriptWordsQueryOptions("flow-1", "run-1", target);
+    queryClient.setQueryData(source.queryKey, { status: "unavailable" });
+    queryClient.setQueryData(words.queryKey, null);
+    const matched = (queryKey: readonly unknown[]) =>
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey })
+        .map((query) => query.queryKey);
+    return { source: source.queryKey, words: words.queryKey, matched };
+  }
+
+  it("are not read again when the run's other reads are (a save of names, a stale refusal)", () => {
+    expect(cached().matched(runKeys.run("flow-1", "run-1"))).toEqual([]);
+  });
+
+  it("are read again by Refresh, which invalidates their root too", () => {
+    const { source, words, matched } = cached();
+    expect(matched(runKeys.transcripts("flow-1", "run-1"))).toEqual(
+      expect.arrayContaining([source, words])
+    );
+    expect(matched(runKeys.transcripts("flow-1", "run-2"))).toEqual([]);
+  });
+
+  it("name the attempt they read, the word timings too", () => {
+    const words = (attemptNo: number) =>
+      transcriptWordsQueryOptions("flow-1", "run-1", { stepId: "step-1", attemptNo }).queryKey;
+    expect(words(1)).not.toEqual(words(2));
+  });
+
+  it("keep a finished attempt's source and word timings for good", () => {
+    expect(transcriptQueryOptions("flow-1", "run-1", target).staleTime).toBe(Infinity);
+    expect(transcriptWordsQueryOptions("flow-1", "run-1", target).staleTime).toBe(Infinity);
   });
 });

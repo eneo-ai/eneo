@@ -554,6 +554,32 @@ describe("TranscriptLines with audio", () => {
     expect(within(lines).getByText("Hur").className).not.toContain("decoration-wavy");
   });
 
+  it("reads the word timings of another attempt, after one that had none, where the person is", async () => {
+    answerAudio();
+    const timed = state.routes[WORDS]!;
+    state.routes[WORDS] = () => ({ status: 404, body: { detail: "No word timings" } });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const { lines, rerender } = renderLines(audioTarget);
+    const audio = await startAudio(lines);
+    const wordReads = () =>
+      state.stub.calls.filter((call) => call.path.endsWith("/transcript-words/"));
+    await waitFor(() => expect(wordReads()).toHaveLength(1));
+    expect(lines.querySelector("[data-word]")).toBeNull();
+    Object.defineProperty(audio, "currentTime", { configurable: true, writable: true, value: 5.5 });
+    const focused = document.activeElement;
+    state.announce.mockClear();
+
+    // The step ran again: its new attempt has word timings.
+    state.routes[WORDS] = timed;
+    rerender(<Harness saves={[]} audio={{ ...audioTarget, attemptNo: 2 }} />);
+    await waitFor(() => expect(wordReads()).toHaveLength(2));
+    await waitFor(() => expect(lines.querySelector("[data-word]")).not.toBeNull());
+    expect(screen.getByLabelText(messages.flow_transcript_audio_label)).toBe(audio);
+    expect(audio.currentTime).toBe(5.5);
+    expect(document.activeElement).toBe(focused);
+    expect(state.announce).not.toHaveBeenCalled();
+  });
+
   it("plays a speaker's sample and stops after it", async () => {
     answerAudio();
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();

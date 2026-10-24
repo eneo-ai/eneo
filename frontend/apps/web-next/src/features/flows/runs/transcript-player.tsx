@@ -199,7 +199,7 @@ export function useTranscriptPlayback({
   const shortcutsId = `${baseId}-shortcuts`;
   const started = src !== null;
   const words = useQuery({
-    ...transcriptWordsQueryOptions(flowId, runId, target.stepId),
+    ...transcriptWordsQueryOptions(flowId, runId, target),
     enabled: started || eagerWords
   });
   const placed = useMemo(

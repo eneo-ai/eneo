@@ -924,6 +924,40 @@ describe("FlowRunPage", () => {
         speaker_edits: [],
         speaker_names: { SPEAKER_00: "Anna", SPEAKER_01: null }
       });
+      // The run's reads are read again, the attempt's transcript source is not:
+      // naming the speakers changes the corrections, never the source.
+      await waitFor(() => expect(calls(CORRECTIONS)).toHaveLength(2));
+      await waitFor(() => expect(calls(STEPS)).toHaveLength(2));
+      expect(calls(SOURCE)).toHaveLength(1);
+    });
+
+    it("reads the transcript source and the word timings again on Refresh", async () => {
+      const WORDS = "GET /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/";
+      answerAudioRun();
+      state.routes["POST /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"] =
+        () => ({
+          body: {
+            url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+            expires_at: "2026-10-21T10:00:00Z"
+          }
+        });
+      state.routes[WORDS] = () => ({ status: 404, body: { detail: "No word timings" } });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      renderRun(["flows_view"]);
+
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
+      await screen.findByLabelText(messages.flow_transcript_audio_label);
+      await waitFor(() => expect(calls(WORDS)).toHaveLength(1));
+      expect(calls(SOURCE)).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
+      );
+      expect(calls(SOURCE)).toHaveLength(2);
+      expect(calls(WORDS)).toHaveLength(2);
+      play.mockRestore();
     });
 
     it("reads the run's detail, steps and evidence again on Refresh or when the run moved, never on a refocus", async () => {
