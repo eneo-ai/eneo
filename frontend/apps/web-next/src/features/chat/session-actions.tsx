@@ -10,7 +10,7 @@ import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
-import { invalidateConversationLists } from "@/lib/api/conversations";
+import { dropFromRecentConversations, invalidateConversationLists } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
@@ -21,7 +21,16 @@ export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {
   return ["conversations", partner.type === "group-chat" ? "group-chat" : "assistant", partner.id];
 }
 
-/** Rename and delete for conversations of one partner. */
+/** Every partner's history list a conversation may be in (`historyQueryKey`). */
+const historyLists = {
+  predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+    queryKey[0] === "conversations" && (queryKey[1] === "assistant" || queryKey[1] === "group-chat")
+};
+
+/**
+ * Rename and delete for conversations: of one partner, or under "Alla" of
+ * any, so every history list and recent list hears of it.
+ */
 export function useSessionMutations(
   partner: Pick<ChatPartner, "type" | "id">,
   {
@@ -34,8 +43,11 @@ export function useSessionMutations(
 ) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const historyKey = historyQueryKey(partner);
-  const invalidate = () => invalidateConversationLists(queryClient, historyKey);
+  const invalidate = () =>
+    Promise.all([
+      invalidateConversationLists(queryClient, historyQueryKey(partner)),
+      queryClient.invalidateQueries(historyLists)
+    ]);
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -62,7 +74,8 @@ export function useSessionMutations(
     onSuccess: (_, id) => {
       // Drop the row at once (the refetch follows), so the history never shows
       // a deleted conversation and focus can move on from its row.
-      queryClient.setQueryData<InfiniteData<CursorPage<{ id: string }>>>(historyKey, (data) =>
+      dropFromRecentConversations(queryClient, id);
+      queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string }>>>(historyLists, (data) =>
         data
           ? {
               ...data,

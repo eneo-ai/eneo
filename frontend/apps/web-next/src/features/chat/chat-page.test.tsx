@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 
 type Chunk = Record<string, unknown>;
@@ -82,7 +82,10 @@ const api = vi.hoisted(() => ({
                 question: `Fråga i ${id}`,
                 answer: `Svar i ${id}`,
                 references: [],
-                files: [],
+                files:
+                  id === "s-file"
+                    ? [{ id: "f-1", name: "Policy.pdf", mimetype: "application/pdf", size: 2048 }]
+                    : [],
                 generated_files: [],
                 tools: { assistants: [] },
                 feedback: id === "s-rated" ? { value: -1, text: "Fel paragraf" } : null
@@ -333,23 +336,137 @@ describe("ChatPage", () => {
   });
 });
 
-describe("ChatPage history", () => {
-  const historyName = "Konversationer med Upphandlingsassistenten";
+describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => {
+  const historyButton = "Konversationer med Upphandlingsassistenten";
+  const historyName = "Konversationer";
+  const panelName = "Filer och vyer";
+  // Switching to Insikter writes ?tab=insights, which the next page would open on.
+  beforeEach(() => window.history.replaceState(null, "", "/"));
 
-  it("opens as a sheet below 1024px, an iPad held upright included", async () => {
+  /** Lays out the page's regions at `width` px, as a browser measures them. */
+  const layOut = (width: number) =>
+    act(() => {
+      for (const element of observedElements()) reportResize(element, { width, height: 800 });
+    });
+  const historyBeside = () => screen.queryByRole("complementary", { name: historyName });
+  const historySheet = () => screen.queryByRole("dialog", { name: historyName });
+  const openHistory = () => fireEvent.click(screen.getByRole("button", { name: historyButton }));
+  const openPanel = async () =>
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Visa sidopanelen med filer och vyer" })
+    );
+
+  it("sits beside the conversation when that keeps 480 px, an iPad held upright included", async () => {
     setViewport("tablet-portrait");
     renderPage(null);
-    fireEvent.click(screen.getByRole("button", { name: historyName }));
-    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
-    expect(screen.queryByRole("complementary", { name: historyName })).toBeNull();
+    layOut(820);
+    openHistory();
+    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+    expect(historySheet()).toBeNull();
   });
 
-  it("opens beside the conversation from 1024px", async () => {
-    setViewport("tablet-landscape");
+  it("is a sheet where the conversation would keep less (a 1024 px window beside the SideNav)", async () => {
     renderPage(null);
-    fireEvent.click(screen.getByRole("button", { name: historyName }));
+    layOut(752);
+    openHistory();
+    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
+    expect(historyBeside()).toBeNull();
+  });
+
+  it("gives way to a panel that opens where both cannot sit beside the conversation", async () => {
+    setViewport("tablet-landscape");
+    renderPage("s-file");
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(908);
+    openHistory();
     expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: historyName })).toBeNull();
+
+    await openPanel();
+    expect(await screen.findByRole("complementary", { name: panelName })).toBeTruthy();
+    expect(historyBeside()).toBeNull();
+    expect(historySheet()).toBeNull();
+  });
+
+  it("gives way without the panel showing as a sheet first", async () => {
+    setViewport("tablet-landscape");
+    renderPage("s-file");
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(908);
+    openHistory();
+    const history = await screen.findByRole("complementary", { name: historyName });
+    // In px, as the rule is: a larger default font size does not widen it.
+    expect(history.style.width).toBe("320px");
+    // As laid out: what holds the conversation keeps what the history leaves.
+    act(() => {
+      for (const element of observedElements()) {
+        if (!element.contains(history)) reportResize(element, { width: 588, height: 800 });
+      }
+    });
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+
+    await openPanel();
+    expect(await screen.findByRole("complementary", { name: panelName })).toBeTruthy();
+    expect(historyBeside()).toBeNull();
+    expect(showModal).not.toHaveBeenCalled();
+  });
+
+  it("leaves a panel open behind Insikter out of the history's room", async () => {
+    renderPage("s-file", { ...partner, insightEnabled: true });
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(1000);
+    await openPanel();
+    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    openHistory();
+    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+  });
+
+  it("lays nothing over Insikter for the conversation behind it", async () => {
+    renderPage("s-file", { ...partner, insightEnabled: true });
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(1000);
+    await openPanel();
+    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+    // The window narrows while Insikter is shown: the panel cannot sit beside.
+    layOut(800);
+    expect(showModal).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: panelName })).toBeNull();
+  });
+
+  it("gives way, rather than turn into a sheet, when the window narrows under both", async () => {
+    renderPage("s-file");
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(1168);
+    await openPanel();
+    openHistory();
+    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+
+    layOut(1100);
+    expect(historyBeside()).toBeNull();
+    expect(historySheet()).toBeNull();
+    expect(showModal).not.toHaveBeenCalled();
+    expect(screen.getByRole("complementary", { name: panelName })).toBeTruthy();
+  });
+
+  it("opens as a sheet beside a panel it cannot sit next to", async () => {
+    setViewport("tablet-landscape");
+    renderPage("s-file");
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(908);
+    await openPanel();
+    openHistory();
+    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
+  });
+
+  it("sits beside the conversation and the panel where all three fit", async () => {
+    renderPage("s-file");
+    await screen.findByRole("log", { name: "Konversation" });
+    layOut(1168);
+    await openPanel();
+    openHistory();
+    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: panelName })).toBeTruthy();
   });
 });
 

@@ -165,16 +165,19 @@ const partner: ChatPartner = {
 function Harness({
   onSessionCreated,
   onTitle,
-  chatPartner = partner
+  chatPartner = partner,
+  initialMessages
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
   chatPartner?: ChatPartner;
+  initialMessages?: EneoUIMessage[];
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
     <ChatView
       partner={chatPartner}
+      initialMessages={initialMessages}
       activity={activity}
       onActivityChange={setActivity}
       onSessionCreated={onSessionCreated}
@@ -340,6 +343,41 @@ describe("ChatView tool approval on a phone (decision 26)", () => {
     expect(
       within(screen.getByRole("region", { name: "Verktygsgodkännande" })).getByText("Godkänt")
     ).toBeTruthy();
+  });
+
+  it("keeps the dock for the decision: an earlier answer's sources do not cover it", async () => {
+    spies.mode = "approval";
+    setViewport("phone");
+    const earlier: EneoUIMessage[] = [
+      { id: "q0", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
+      {
+        id: "a0",
+        role: "assistant",
+        parts: [
+          {
+            type: "source-document",
+            sourceId: "abcd1234-0000",
+            mediaType: "text/plain",
+            title: "LOU 19 kap."
+          },
+          { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
+        ] as EneoUIMessage["parts"]
+      }
+    ];
+    renderInApp(<Harness initialMessages={earlier} />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+    await screen.findByRole("region", { name: /vill använda Sök ärende i diariet$/ });
+
+    const source = within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
+      name: "Källa 1: LOU 19 kap."
+    });
+    fireEvent.click(source);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Aktivitet för svaret" })).toBeNull()
+    );
+    // The focus goes back to what opened the sheet, not to the page.
+    await waitFor(() => expect(document.activeElement).toBe(source));
+    expect(screen.getByRole("region", { name: /vill använda Sök ärende i diariet$/ })).toBeTruthy();
   });
 
   it("gives the composer back when the stream breaks while a tool waits", async () => {

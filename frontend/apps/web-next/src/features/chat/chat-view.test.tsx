@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, renderToHtml, testAppContext } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
@@ -112,6 +112,14 @@ function Harness({
   );
 }
 
+/** Lays out the region around the conversation and its side panel, as a browser measures it. */
+function layOutConversation(width: number) {
+  const log = screen.getByRole("log");
+  const regions = observedElements().filter((element) => element.contains(log));
+  const region = regions.find((element) => regions.every((other) => element.contains(other)));
+  if (!region) throw new Error("The conversation's region is not measured");
+  act(() => reportResize(region, { width, height: 600 }));
+}
 describe("ChatView start state", () => {
   it("greets the user, fills the composer from a starter card and links their assistants", async () => {
     renderInApp(<Harness partner={personal} />);
@@ -484,6 +492,7 @@ describe("ChatView debug", () => {
       renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />, {
         appContext: testAppContext({ permissions: ["assistant_debug"] })
       });
+      layOutConversation(1008);
       fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Felsök" }));
 
@@ -511,5 +520,155 @@ describe("ChatView debug", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
     await screen.findByRole("menuitem", { name: "Kopiera som markdown" });
     expect(screen.queryByRole("menuitem", { name: "Felsök" })).toBeNull();
+  });
+});
+
+describe("ChatView activity on a phone (decision 28)", () => {
+  const sourced: EneoUIMessage[] = [
+    { id: "q1", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
+    {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        {
+          type: "source-document",
+          sourceId: "abcd1234-0000",
+          mediaType: "text/plain",
+          title: "LOU 19 kap."
+        },
+        { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
+      ] as EneoUIMessage["parts"]
+    }
+  ];
+  const PANEL = "Aktivitet för svaret";
+  /** The first source in the list under the answer (the citation in the text has the same name). */
+  const sourceRow = () =>
+    within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
+      name: "Källa 1: LOU 19 kap."
+    });
+  const openSource = () => fireEvent.click(sourceRow());
+
+  it("shows an answer's sources in a sheet that leaves the answer readable above it", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={assistant} messages={sourced} sessionId="session-1" />);
+    layOutConversation(390);
+    openSource();
+
+    const sheet = await screen.findByRole("dialog", { name: PANEL });
+    // Not modal: the conversation stays readable and scrollable above it…
+    expect(sheet.getAttribute("aria-modal")).toBeNull();
+    expect(screen.getByRole("log").closest("[inert]")).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+    // …and what it covers can take no focus (WCAG 2.4.11): the dock gives way.
+    expect(
+      screen.getByRole("textbox", { name: /^Fråga /, hidden: true }).closest("[hidden]")
+    ).not.toBeNull();
+    await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true));
+  });
+
+  it("closes on Escape and gives the focus back to the source it was opened from", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={assistant} messages={sourced} sessionId="session-1" />);
+    layOutConversation(390);
+    openSource();
+    const sheet = await screen.findByRole("dialog", { name: PANEL });
+    await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true));
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: PANEL })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(sourceRow()));
+    expect(screen.getByRole("textbox", { name: /^Fråga / }).closest("[hidden]")).toBeNull();
+  });
+
+  it("is the same sheet wherever it cannot sit beside the answer, an iPad held upright included", async () => {
+    setViewport("tablet-portrait");
+    renderInApp(<Harness partner={assistant} messages={sourced} sessionId="session-1" />);
+    layOutConversation(820);
+    openSource();
+    const sheet = await screen.findByRole("dialog", { name: PANEL });
+    expect(sheet.getAttribute("aria-modal")).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: /^Fråga /, hidden: true }).closest("[hidden]")
+    ).not.toBeNull();
+  });
+
+  it("leaves the focus in the conversation when the phone turns and the sheet moves beside it", async () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={assistant} messages={sourced} sessionId="session-1" />);
+    layOutConversation(390);
+    openSource();
+    const sheet = await screen.findByRole("dialog", { name: PANEL });
+    await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true));
+    const inAnswer = screen.getByRole("button", { name: "Kopiera svaret" });
+    act(() => inAnswer.focus());
+    expect(document.activeElement).toBe(inAnswer);
+
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    layOutConversation(844);
+    expect(await screen.findByRole("complementary", { name: PANEL })).toBeTruthy();
+    expect(document.activeElement).toBe(inAnswer);
+  });
+});
+
+describe("ChatView activity where the history gives way to it", () => {
+  /** The chat page's row: the conversation, and a 320 px history that yields to a panel. */
+  function Row({ messages }: { messages: EneoUIMessage[] }) {
+    const row = useRef<HTMLDivElement>(null);
+    const [historyOpen, setHistoryOpen] = useState(true);
+    const [activity, setActivity] = useState<ActivityState | null>(null);
+    return (
+      <div ref={row} data-testid="row" className="flex h-[600px]">
+        <ChatView
+          partner={assistant}
+          initialMessages={messages}
+          initialSessionId="session-1"
+          activity={activity}
+          onActivityChange={(next) => {
+            if (next) setHistoryOpen(false);
+            setActivity(next);
+          }}
+          layout={{ row, aside: historyOpen ? { width: 320, yields: true } : null }}
+        />
+        {historyOpen && <aside aria-label="Konversationer" style={{ width: 320 }} />}
+      </div>
+    );
+  }
+
+  it("opens beside the conversation without passing through the sheet", () => {
+    const sourced: EneoUIMessage[] = [
+      { id: "q1", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "source-document",
+            sourceId: "abcd1234-0000",
+            mediaType: "text/plain",
+            title: "LOU 19 kap."
+          },
+          { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
+        ] as EneoUIMessage["parts"]
+      }
+    ];
+    renderInApp(<Row messages={sourced} />);
+    act(() => reportResize(screen.getByTestId("row"), { width: 1000, height: 600 }));
+    const dock = screen.getByRole("textbox", { name: /^Fråga / });
+    const hidden: boolean[] = [];
+    const watch = new MutationObserver(() => hidden.push(Boolean(dock.closest("[hidden]"))));
+    watch.observe(document.body, { attributes: true, attributeFilter: ["hidden"], subtree: true });
+    const scrolled = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const opener = within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
+      name: "Källa 1: LOU 19 kap."
+    });
+
+    fireEvent.click(opener);
+
+    expect(screen.getByRole("complementary", { name: "Aktivitet för svaret" })).toBeTruthy();
+    watch.disconnect();
+    // The dock never gave way and the answer did not scroll for a sheet that never came.
+    expect(hidden.filter(Boolean)).toEqual([]);
+    expect(scrolled.mock.contexts).not.toContain(opener);
+    scrolled.mockRestore();
   });
 });

@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "./browser";
 import {
+  ALL_CONVERSATIONS_LIMIT,
+  dropFromRecentConversations,
   invalidateConversationLists,
   RECENT_CONVERSATIONS_LIMIT,
-  recentConversationsQueryOptions
+  recentConversationsQueryOptions,
+  type RecentConversation
 } from "./conversations";
 import { makeQueryClient } from "./query";
 
@@ -50,5 +53,20 @@ describe("invalidateConversationLists", () => {
     expect(invalidated(recent)).toBe(true);
     expect(invalidated(otherHistory)).toBe(false);
     expect(invalidated(detail)).toBe(false);
+  });
+});
+
+describe("dropFromRecentConversations", () => {
+  it("drops a deleted conversation from every recent list, the SideNav's and Alla", () => {
+    const queryClient = makeQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    const all = recentConversationsQueryOptions(browserApi, ALL_CONVERSATIONS_LIMIT).queryKey;
+    const rows = [{ id: "c1" }, { id: "c2" }] as RecentConversation[];
+    for (const key of [nav, all]) queryClient.setQueryData(key, rows);
+
+    dropFromRecentConversations(queryClient, "c1");
+
+    expect(queryClient.getQueryData(nav)).toEqual([{ id: "c2" }]);
+    expect(queryClient.getQueryData(all)).toEqual([{ id: "c2" }]);
   });
 });

@@ -13,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,7 +48,7 @@ import {
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
-import { SidePanel } from "./side-panel/side-panel";
+import { SidePanel, type SidePanelLayout } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { isExportableDocument } from "./side-panel/file-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
@@ -166,6 +167,10 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
+  /** Whether the side panel holds a file, view or the overview (the activity is the page's). */
+  onPanelOpenChange?: (open: boolean) => void;
+  /** The row the side panel shares with the page's history. */
+  layout?: SidePanelLayout;
 };
 
 /**
@@ -195,7 +200,9 @@ function ConversationView({
   modelSelector,
   partnerToken,
   activity,
-  onActivityChange
+  onActivityChange,
+  onPanelOpenChange,
+  layout
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -479,6 +486,12 @@ function ConversationView({
   useEffect(() => {
     if (panelOpen) onActivityChange(null);
   }, [panelOpen, onActivityChange]);
+  // Before paint: a history that gives way to the panel is gone in the same frame.
+  useLayoutEffect(() => {
+    if (!panelOpen) return;
+    onPanelOpenChange?.(true);
+    return () => onPanelOpenChange?.(false);
+  }, [panelOpen, onPanelOpenChange]);
 
   // The panel follows the answer being written: a document draft shows there
   // while the assistant writes it, and a file created in the live turn takes
@@ -797,6 +810,16 @@ function ConversationView({
 
   // Focus returns to the control that opened the panel (pill or citation).
   const activityTrigger = useRef<HTMLElement | null>(null);
+  // The answer whose activity took the focus, across presentations (F7).
+  const activityFocusedFor = useRef<string | null>(null);
+  const claimActivityFocus = useCallback((key: string) => {
+    if (activityFocusedFor.current === key) return false;
+    activityFocusedFor.current = key;
+    return true;
+  }, []);
+  useEffect(() => {
+    if (!activity) activityFocusedFor.current = null;
+  }, [activity]);
   const toggleActivity = (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
     const tab = request?.tab ?? "steps";
     // The pill toggles; a citation (or menu item with a tab) opens or switches.
@@ -813,6 +836,13 @@ function ConversationView({
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
+  // A call waiting for a decision takes the dock on a phone (decision 26): a
+  // sheet over the dock gives way to it, and the focus goes back to what
+  // opened the sheet.
+  const activityOpen = activity !== null;
+  useEffect(() => {
+    if (deciding && activityOpen) closeActivity();
+  }, [deciding, activityOpen, closeActivity]);
 
   const failure = error ? describeChatFailure(error, streamErrorCode, t) : null;
 
@@ -997,7 +1027,12 @@ function ConversationView({
           detail: t("chat_activity_steps", {
             count: deriveActivity(latestAnswer, { knowledge: partner.knowledge }).steps.length
           }),
-          open: () => onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null })
+          open: () => {
+            // Opened from the panel's switcher: closing gives the focus to the
+            // panel button (side-panel.tsx), not to an earlier pill.
+            activityTrigger.current = null;
+            onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null });
+          }
         }
       : null;
 
@@ -1011,6 +1046,7 @@ function ConversationView({
         exportOf={exportOf}
         saverOf={saverOf}
         latestActivity={latestActivity}
+        layout={layout}
         activity={
           activity && activityMessage && activityForPanel
             ? {
@@ -1025,6 +1061,7 @@ function ConversationView({
                     tab={activity.tab}
                     onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
                     focusSource={activity.source}
+                    claimFocus={claimActivityFocus}
                     debug={
                       debugAvailable && sessionId !== null
                         ? {
@@ -1040,72 +1077,76 @@ function ConversationView({
             : null
         }
       >
-        <ConversationLayout
-          className="min-w-0 flex-1"
-          composer={
-            <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
-              {decisionBar ? (
-                <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
-              ) : (
-                <Composer {...composerProps} textareaRef={dockTextareaRef} />
-              )}
-            </div>
-          }
-        >
-          <ChatMessageList
-            ref={quietLog}
-            aria-label={t("chat_conversation_label")}
-            gap={6}
-            isStreaming={busy}
-            className="focus-visible:outline-ring rounded-ax-container mx-auto w-full max-w-[712px] focus-visible:outline-2 focus-visible:-outline-offset-2"
+        {({ sheetOver }) => (
+          <ConversationLayout
+            className="min-w-0 flex-1"
+            sheetOver={sheetOver}
+            sheetOpener={activityTrigger}
+            composer={
+              <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
+                {decisionBar ? (
+                  <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
+                ) : (
+                  <Composer {...composerProps} textareaRef={dockTextareaRef} />
+                )}
+              </div>
+            }
           >
-            {messages.map((message, messageIndex) => {
-              const streaming = busy && messageIndex === messages.length - 1;
-              return (
-                <ConversationMessage
-                  key={message.id}
-                  sessionId={sessionId}
-                  message={message}
-                  assistant={assistantIdentity}
-                  isStreaming={streaming}
-                  showResponseLabel={partner.showResponseLabel ?? false}
-                  liveAnswering={liveAnswering}
-                  knowledge={partner.knowledge}
-                  durations={timings.durations(message.id)}
-                  activityExpanded={activity?.messageId === message.id}
-                  onActivityToggle={(trigger, request) =>
-                    toggleActivity(message.id, trigger, request)
-                  }
-                  canDebug={debugAvailable && sessionId !== null}
+            <ChatMessageList
+              ref={quietLog}
+              aria-label={t("chat_conversation_label")}
+              gap={6}
+              isStreaming={busy}
+              className="focus-visible:outline-ring rounded-ax-container mx-auto w-full max-w-[712px] focus-visible:outline-2 focus-visible:-outline-offset-2"
+            >
+              {messages.map((message, messageIndex) => {
+                const streaming = busy && messageIndex === messages.length - 1;
+                return (
+                  <ConversationMessage
+                    key={message.id}
+                    sessionId={sessionId}
+                    message={message}
+                    assistant={assistantIdentity}
+                    isStreaming={streaming}
+                    showResponseLabel={partner.showResponseLabel ?? false}
+                    liveAnswering={liveAnswering}
+                    knowledge={partner.knowledge}
+                    durations={timings.durations(message.id)}
+                    activityExpanded={activity?.messageId === message.id}
+                    onActivityToggle={(trigger, request) =>
+                      toggleActivity(message.id, trigger, request)
+                    }
+                    canDebug={debugAvailable && sessionId !== null}
+                    conversationFiles={allFiles}
+                    documents={documents.documents}
+                    draft={streaming ? liveDraft : null}
+                  />
+                );
+              })}
+              {pendingQuestion && (
+                <PendingQuestion
+                  text={pendingQuestion.text}
+                  uploads={pendingUploads}
                   conversationFiles={allFiles}
-                  documents={documents.documents}
-                  draft={streaming ? liveDraft : null}
                 />
-              );
-            })}
-            {pendingQuestion && (
-              <PendingQuestion
-                text={pendingQuestion.text}
-                uploads={pendingUploads}
-                conversationFiles={allFiles}
-              />
-            )}
-            {(status === "submitted" || pendingQuestion) && (
-              <PendingAnswer
-                assistant={assistantIdentity}
-                status={
-                  pendingQuestion
-                    ? t("uploading_attachments_progress", {
-                        done: pendingDone,
-                        total: pendingUploads.length
-                      })
-                    : undefined
-                }
-              />
-            )}
-            {errorNotice}
-          </ChatMessageList>
-        </ConversationLayout>
+              )}
+              {(status === "submitted" || pendingQuestion) && (
+                <PendingAnswer
+                  assistant={assistantIdentity}
+                  status={
+                    pendingQuestion
+                      ? t("uploading_attachments_progress", {
+                          done: pendingDone,
+                          total: pendingUploads.length
+                        })
+                      : undefined
+                  }
+                />
+              )}
+              {errorNotice}
+            </ChatMessageList>
+          </ConversationLayout>
+        )}
       </SidePanel>
       {fileInputElement}
     </ToolApprovalsContext>

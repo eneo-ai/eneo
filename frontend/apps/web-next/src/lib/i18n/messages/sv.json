@@ -6803,5 +6803,10 @@
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
+  "chat_history_title": "Konversationer",
+  "chat_history_scope": "Visa konversationer",
+  "chat_history_scope_assistant": "Den här assistenten",
+  "chat_history_scope_group_chat": "Den här gruppchatten",
+  "chat_history_scope_all": "Alla"
 }

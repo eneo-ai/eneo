@@ -2,7 +2,6 @@
 
 import { ExternalLink, FileText, Globe2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
 import { McpSnippetButton } from "./message-parts";
@@ -37,37 +36,17 @@ function excerptPreview(source: ActivitySource): string | null {
 
 /**
  * The Aktivitet panel's Källor tab: an answer's numbered sources with where
- * they come from. A citation that opened the panel focuses its source.
+ * they come from. Each source can take focus (`sourceAnchorId`): the panel
+ * moves it to the source a citation opened it on.
  */
 export function SourceList({
   messageId,
-  sources,
-  focusIndex
+  sources
 }: {
   messageId: string;
   sources: ActivitySource[];
-  focusIndex: number | null;
 }) {
   const t = useTranslations();
-  const itemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
-
-  // A citation opened the panel: move focus to that source (WCAG 2.4.3). In
-  // the bottom sheet this runs before the sheet's dialog opens, and nothing in
-  // a closed dialog takes focus; opening it then focuses the sheet's panel
-  // (browsers focus a dialog's first focusable element), so the sheet would
-  // skip a data-autofocus item. The sheet opens in its own effect, which runs
-  // after this one in the same task: focus the source right after that.
-  useEffect(() => {
-    if (focusIndex === null) return;
-    const item = itemRefs.current.get(focusIndex);
-    if (!item) return;
-    const focus = () => {
-      item.focus();
-      item.scrollIntoView({ block: "nearest" });
-    };
-    if (item.closest("dialog:not([open])")) queueMicrotask(focus);
-    else focus();
-  }, [focusIndex, messageId]);
 
   if (sources.length === 0) {
     return (
@@ -88,10 +67,6 @@ export function SourceList({
           <li
             key={source.key}
             id={sourceAnchorId(messageId, number)}
-            ref={(element) => {
-              if (element) itemRefs.current.set(index, element);
-              else itemRefs.current.delete(index);
-            }}
             tabIndex={-1}
             className="bg-ax-card border-ax-border focus-visible:outline-ring rounded-ax-container focus:bg-ax-selected flex gap-3 border p-3 focus-visible:outline-2 focus-visible:outline-offset-2"
           >

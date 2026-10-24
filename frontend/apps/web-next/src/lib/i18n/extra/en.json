@@ -1636,5 +1636,10 @@
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
+  "chat_history_title": "Conversations",
+  "chat_history_scope": "Show conversations",
+  "chat_history_scope_assistant": "This assistant",
+  "chat_history_scope_group_chat": "This group chat",
+  "chat_history_scope_all": "All"
 }

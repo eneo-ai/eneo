@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
@@ -67,7 +67,8 @@ const EMPTY_CONTENTS = { views: [], documents: [], uploads: [] };
 
 /**
  * The activity as the chat shows it: the pill in the conversation, the body
- * as the side panel's occupant. Below 1024px the panel is a bottom sheet.
+ * as the side panel's occupant: beside the conversation on a desktop (1008 px
+ * beside the SideNav), a bottom sheet on a phone (decision 14).
  */
 function Harness({
   initialSource = null,
@@ -81,6 +82,12 @@ function Harness({
   const [tab, setTab] = useState<ActivityTab>(initialSource !== null ? "sources" : "steps");
   const [panel] = useState(() => new SidePanelStore(() => Promise.reject(new Error("unused"))));
   const activity = deriveActivity(message, { knowledge });
+  // jsdom has no layout: the region is measured as a browser would.
+  useEffect(() => {
+    for (const element of observedElements()) {
+      reportResize(element, { width: variant === "sheet" ? 390 : 1008, height: 800 });
+    }
+  }, [variant]);
   return (
     <SidePanel
       panel={panel}
@@ -220,7 +227,8 @@ describe("ActivityPanel", () => {
     await waitFor(() => expect(document.activeElement).toBe(target));
   });
 
-  // Below 1024px (tablets, phones, 200–400% zoom) the panel is a modal sheet.
+  // Where the conversation would keep less than 480 px beside it (phones,
+  // iPads upright, 200–400% zoom) the panel is a modal sheet.
   it("focuses the cited source in the bottom sheet once it has opened", async () => {
     renderInApp(<Harness initialSource={1} variant="sheet" />);
     const sheet = await screen.findByRole("dialog", { name: "Aktivitet för svaret" });

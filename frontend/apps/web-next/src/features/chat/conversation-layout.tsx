@@ -6,7 +6,7 @@ import {
   useChatStreamScroll
 } from "@astryxdesign/core/Chat";
 import { useTranslator } from "@astryxdesign/core/i18n";
-import { useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,16 +20,28 @@ import { cn } from "@/lib/utils";
  * latest, "Nya meddelanden" when an answer grew out of view
  * (`useChatNewMessages` watches the content wrapper, as ChatLayout's context
  * is not exported). It mounts with the scroller: the hooks attach to it once.
+ *
+ * `sheetOver`: a non-modal sheet covers the lower 62 % (decision 28, an
+ * answer's activity where the side panel cannot sit beside it). The dock
+ * gives up its place (the draft stays), the conversation can scroll its end
+ * above the sheet and focus moved in it stops above the sheet (scroll
+ * padding); the scroll button under it is inert. Nothing focusable hides
+ * behind the sheet (WCAG 2.4.11). What it was opened from (`sheetOpener`)
+ * stays in view above it.
  */
 export function ConversationLayout({
   children,
   composer,
+  sheetOver = false,
+  sheetOpener,
   className
 }: {
   /** The message list. */
   children: ReactNode;
   /** The docked composer. */
   composer: ReactNode;
+  sheetOver?: boolean;
+  sheetOpener?: RefObject<HTMLElement | null>;
   className?: string;
 }) {
   const t = useTranslator();
@@ -41,6 +53,10 @@ export function ConversationLayout({
     isLocked,
     onResize: scrollIfLocked
   });
+  // With the end padding in place, before paint.
+  useLayoutEffect(() => {
+    if (sheetOver) sheetOpener?.current?.scrollIntoView({ block: "nearest" });
+  }, [sheetOver, sheetOpener]);
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -50,13 +66,16 @@ export function ConversationLayout({
         <div
           ref={scrollRef}
           // The list pads itself 16 px; the dock's 16 px lines the composer up with it.
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain pb-6"
+          className={cn(
+            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain",
+            sheetOver ? "scroll-pb-[62dvh] pb-[62dvh]" : "pb-6"
+          )}
         >
           <div ref={contentRef} className="flex flex-1 flex-col">
             {children}
           </div>
         </div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0">
+        <div inert={sheetOver} className="pointer-events-none absolute inset-x-0 bottom-0">
           <ChatLayoutScrollButton
             isVisible={isScrolledUp || hasNewMessages}
             label={hasNewMessages ? t("@astryx.chatLayout.newMessages") : undefined}
@@ -67,7 +86,7 @@ export function ConversationLayout({
           />
         </div>
       </div>
-      <ComposerDock>{composer}</ComposerDock>
+      <ComposerDock hidden={sheetOver}>{composer}</ComposerDock>
     </div>
   );
 }
@@ -80,9 +99,18 @@ export function ConversationLayout({
  * scrolls what does not fit, its sovereignty note first. pt-1.5 keeps the
  * composer's focus ring (5 px out) inside the clip.
  */
-export function ComposerDock({ children, className }: { children: ReactNode; className?: string }) {
+export function ComposerDock({
+  children,
+  hidden,
+  className
+}: {
+  children: ReactNode;
+  hidden?: boolean;
+  className?: string;
+}) {
   return (
     <div
+      hidden={hidden}
       className={cn(
         "max-h-[65%] shrink-0 overflow-y-auto overscroll-y-contain px-4 pt-1.5 pb-3",
         className

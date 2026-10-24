@@ -104,6 +104,11 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
   part. Check by tabbing through a long list with the sticky UI present.
+- A non-modal sheet over the page owns what it covers. The chat's activity
+  sheet (where the side panel cannot sit beside the answer) hides the dock
+  under it, pads the conversation's end and `scroll-padding` by its height so
+  the answer can be read and focused above it, and makes the rest it covers
+  `inert` (`ConversationLayout`'s `sheetOver`).
 - Toasts move themselves instead: while they would cover the focused element
   they rise just above it (`src/components/ui/toast-lift.ts`). A docked group
   that should stay clear as a whole while focus is anywhere in it (the chat

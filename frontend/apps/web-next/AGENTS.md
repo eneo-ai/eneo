@@ -266,6 +266,11 @@ the default name on a backend name collision (9017).
   Astryx Dialog, Popover and BottomSheet pad themselves. Don't add
   `env(safe-area-inset-*)` inside the page. The page never pulls to refresh
   (`overscroll-behavior`), and the drawer and dialogs have no backdrop blur.
+- **Panels by the room they have**: the chat's side panel and history decide
+  beside or sheet from the width of the row they share (`useElementWidth`,
+  decision 14: the conversation keeps 480 px), not from a media query; the
+  chat page owns that row and the history gives way to a panel that opens
+  where both do not fit. Widths in that rule are px, set inline.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
