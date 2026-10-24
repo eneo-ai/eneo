@@ -113,7 +113,10 @@ describe("globals.css", () => {
       "--text-supporting-size": "0.8125rem"
     });
     // Hand-built text follows it: Tailwind's text-sm and text-xs.
-    expect(coarse.get(":root")).toMatchObject({ "--text-sm": "0.9375rem", "--text-xs": "0.8125rem" });
+    expect(coarse.get(":root")).toMatchObject({
+      "--text-sm": "0.9375rem",
+      "--text-xs": "0.8125rem"
+    });
     for (const component of [
       "segmented-control-item",
       "checkbox-input",
