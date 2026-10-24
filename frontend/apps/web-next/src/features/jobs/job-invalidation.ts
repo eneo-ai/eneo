@@ -16,8 +16,10 @@ export const JOB_INVALIDATION_KEYS: readonly (readonly string[])[] = [
   ["websites"],
   // Single info-blob reads and previews.
   ["info-blobs"],
-  // App runs and their results.
+  // App runs and their results: an app's run list, and one run's result
+  // page, which stops polling while the job feed is connected.
   ["apps"],
+  ["app-runs"],
   // Integration sync history (Confluence and SharePoint pulls).
   ["integrations"],
   // Tenant storage figures shown to admins (every upload moves them).

@@ -1651,5 +1651,7 @@
   "space_role_editor_description": "Kan skapa, redigera och publicera assistenter, appar och kunskapskällor.",
   "space_role_viewer_description": "Kan se och använda publicerade assistenter och appar.",
   "space_remove_from_space": "Ta bort från ytan",
-  "space_role_current": "nuvarande roll"
+  "space_role_current": "nuvarande roll",
+  "app_result_actions": "Resultat, åtgärder",
+  "app_result_leave_hint": "Du kan lämna sidan, resultatet sparas i Resultat."
 }

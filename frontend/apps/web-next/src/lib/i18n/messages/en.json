@@ -6818,5 +6818,7 @@
   "space_role_editor_description": "Can create, edit and publish assistants, apps and knowledge sources.",
   "space_role_viewer_description": "Can see and use published assistants and apps.",
   "space_remove_from_space": "Remove from space",
-  "space_role_current": "current role"
+  "space_role_current": "current role",
+  "app_result_actions": "Result, actions",
+  "app_result_leave_hint": "You can leave this page; the result is saved under Results."
 }
