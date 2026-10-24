@@ -435,8 +435,13 @@ async def user_login_with_email_and_password(
 
         # Exception values and chained tracebacks may quote the submitted
         # password; redact it rather than drop the diagnostics.
+        redacted_traceback = redact_values(
+            "".join(traceback.format_exception(e)), password
+        )
         logger.error(
-            "Login failed: unexpected error",
+            # Plain-text logging only renders the message, not extra fields.
+            "Login failed: unexpected error\n%s",
+            redacted_traceback,
             extra={
                 "correlation_id": correlation_id,
                 "auth_method": "password",
@@ -444,9 +449,7 @@ async def user_login_with_email_and_password(
                 "source_ip": source_ip,
                 "error_type": type(e).__name__,
                 "error": redact_values(str(e), password),
-                "traceback": redact_values(
-                    "".join(traceback.format_exception(e)), password
-                ),
+                "traceback": redacted_traceback,
             },
         )
         raise HTTPException(

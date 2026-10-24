@@ -19,7 +19,7 @@ from eneo.main.exceptions import (
     ErrorCodes,
     QuotaExceededException,
 )
-from eneo.main.logging import OTELJSONFormatter
+from eneo.main.logging import OTELJSONFormatter, SimpleLogger
 from eneo.main.models import GeneralError
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
@@ -386,13 +386,21 @@ def test_unexpected_errors_keep_diagnostics_with_the_password_redacted(
     assert PASSWORD not in response.text
     logs = structured_logs(caplog)
     assert PASSWORD not in logs
-    failure = login_log(caplog, "Login failed: unexpected error")
+    failure = next(
+        record for record in caplog.records if record.levelno == logging.ERROR
+    )
     assert failure.error_type == "RuntimeError"  # type: ignore[attr-defined]
     assert failure.error == "Backend failed with credential [REDACTED]"  # type: ignore[attr-defined]
     trace = failure.traceback  # type: ignore[attr-defined]
     assert "ValueError: Inner exception: [REDACTED]" in trace
     assert "RuntimeError: Backend failed with credential [REDACTED]" in trace
     assert "user_router.py" in trace
+    plain_text = logging.Formatter(SimpleLogger.FORMAT_STRING).format(failure)
+    assert "Login failed: unexpected error" in plain_text
+    assert "ValueError: Inner exception: [REDACTED]" in plain_text
+    assert "RuntimeError: Backend failed with credential [REDACTED]" in plain_text
+    assert "user_router.py" in plain_text
+    assert PASSWORD not in plain_text
     login_endpoint.clear.assert_not_awaited()
 
 
