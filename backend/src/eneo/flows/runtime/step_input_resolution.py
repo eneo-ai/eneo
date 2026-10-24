@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
+from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -172,12 +173,11 @@ class StepInputResolutionDeps:
     max_audio_files: int
     max_inline_text_bytes: int
     logger: Any
+    # Ends the session's transaction when it has only read.
+    end_read_transaction: Callable[[], Awaitable[None]]
     input_limits: FlowInputLimits | None = None
     transcription_call_observer: "ProviderCallObserver | None" = None
     transcript_source_preparation: TranscriptSourcePreparation | None = None
-    # Ends the session's transaction when it has only read; without it the
-    # transaction is kept as it is.
-    end_read_transaction: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +201,21 @@ class ResolvedStepInputBinding:
     edges: tuple[FlowResolvedInputEdge, ...]
     diagnostic: StepDiagnostic
     structured: dict[str, Any] | None = None
+
+
+async def _open_audio_download(
+    deps: StepInputResolutionDeps, file_id: UUID
+) -> FileDownload:
+    # The download reads its bytes through its own snapshot. End the
+    # transaction that opened it if it has only read, so the step's session
+    # holds none while the audio is spooled and transcribed.
+    download = await deps.file_service.get_audio_download(file_id)
+    try:
+        await deps.end_read_transaction()
+    except BaseException:
+        await download.aclose()
+        raise
+    return download
 
 
 async def resolve_step_input(
@@ -356,20 +371,6 @@ async def resolve_step_input(
                 ),
             )
 
-            async def open_audio_download(file_id: UUID) -> FileDownload:
-                # The download reads its bytes through its own snapshot. End the
-                # transaction that opened it if it has only read, so the step's
-                # session holds none while the audio is spooled and transcribed.
-                download = await deps.file_service.get_audio_download(file_id)
-                if deps.end_read_transaction is None:
-                    return download
-                try:
-                    await deps.end_read_transaction()
-                except BaseException:
-                    await download.aclose()
-                    raise
-                return download
-
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,
                 commit=deps.commit,
@@ -379,7 +380,7 @@ async def resolve_step_input(
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,
                 actor=deps.actor,
-                open_audio_download=open_audio_download,
+                open_audio_download=partial(_open_audio_download, deps),
                 transcription_call_observer=deps.transcription_call_observer,
                 stage_transcript_source=deps.stage_transcript_source,
                 stage_run_transcript=deps.stage_run_transcript,
