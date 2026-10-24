@@ -132,8 +132,9 @@ class AuthService:
         self,
         user: UserInDB,
         *,
-        assistant_id: UUID,
+        assistant_id: UUID | None = None,
         mcp_server_id: UUID | None = None,
+        insight_target: tuple[Literal["assistant", "group_chat"], UUID] | None = None,
         table_tools: bool = False,
         expires_in: int = 15,
     ) -> str:
@@ -144,11 +145,17 @@ class AuthService:
         with the same claims as a normal access token, but is minted for
         ``INTERNAL_MCP_AUDIENCE``: only the loopback endpoints accept it (via
         ``UserService.authenticate_internal_mcp_token``), so it cannot be
-        replayed against the rest of the API. It additionally carries an
-        ``assistant_id`` claim so tools need no scope argument and cannot be
-        redirected to another assistant. Unknown claims ride through
-        ``JWTPayload`` (which ignores them on decode) and are read out
-        separately by the loopback endpoint.
+        replayed against the rest of the API. It additionally carries scope
+        claims so tools need no scope argument and cannot be redirected
+        elsewhere. Unknown claims ride through ``JWTPayload`` (which ignores
+        them on decode) and are read out separately by the loopback endpoint.
+
+        Scopes are distinct claims on purpose: ``assistant_id`` scopes the
+        knowledge and files tools to one assistant, while ``insight_target``
+        (``insight_target_type`` / ``insight_target_id``) scopes the insights
+        tools to one analysed assistant or group chat. An insights token must
+        not double as a knowledge-search token for its target, so at least one
+        scope is required and each server reads only its own claim.
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
@@ -156,7 +163,15 @@ class AuthService:
         completion also attached the file-analysis tools, so the files server
         can point spreadsheets at them instead of dumping their text.
         """
-        claims: dict[str, object] = {"assistant_id": str(assistant_id)}
+        if assistant_id is None and insight_target is None:
+            raise ValueError("A scoped MCP token needs at least one scope.")
+        claims: dict[str, object] = {}
+        if assistant_id is not None:
+            claims["assistant_id"] = str(assistant_id)
+        if insight_target is not None:
+            target_type, target_id = insight_target
+            claims["insight_target_type"] = target_type
+            claims["insight_target_id"] = str(target_id)
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
         if table_tools:

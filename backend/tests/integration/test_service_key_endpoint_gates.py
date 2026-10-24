@@ -388,6 +388,16 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ),
     (
         "POST",
+        "/api/v1/analysis/conversation-insights/chat/",
+        {"assistant_id": _STUB_ID, "question": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/analysis/conversation-insights/chat/{_STUB_ID}/",
+        {"question": "x"},
+    ),
+    (
+        "POST",
         f"/api/v1/conversations/{_STUB_ID}/documents/{_STUB_ID}/versions/",
         {"content": "# x\n"},
     ),
