@@ -22,7 +22,7 @@ import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/s
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { AddStepDialog } from "./editor/add-step-dialog";
-import { insertionKindsQueryOptions } from "./editor/editor-api";
+import { flowEditorKeys, insertionKindsQueryOptions } from "./editor/editor-api";
 import { FlowStepEditor } from "./editor/flow-step-editor";
 import type { StepKindOption } from "./editor/step-kinds";
 import {
@@ -200,6 +200,16 @@ export function FlowPage({ flowId }: { flowId: string }) {
       refused(error, t("flows_notice_not_unpublished"), steps);
     }
   });
+
+  // A new draft revision can carry rewritten prompts (a chat tool's edit, a
+  // move whose reads the core followed, a reload of a stale draft): the step
+  // assistants are read again then, and only then.
+  const assistantsRevision = useRef(flow.draft_revision);
+  useEffect(() => {
+    if (assistantsRevision.current === flow.draft_revision) return;
+    assistantsRevision.current = flow.draft_revision;
+    void queryClient.invalidateQueries({ queryKey: flowEditorKeys.assistants(flowId) });
+  }, [flow.draft_revision, flowId, queryClient]);
 
   /** After the chat's tools ran or it answered: reread the flow and say when it changed. */
   // The cards the chat's tools touched last, marked for a while.
@@ -549,6 +559,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   flowId={flow.id}
                   steps={steps}
                   canEdit={canEdit}
+                  mayEdit={mayEdit}
                   changes={chatChanges}
                   headingRef={stepsHeadingRef}
                   onOpen={openStep}

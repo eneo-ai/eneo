@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Schema } from "@/lib/api/models";
@@ -63,7 +64,7 @@ function evidence(traces: Schema<"FlowRunStepKnowledgeTrace">[]): RunEvidence {
 }
 
 function renderKnowledge() {
-  return renderInApp(<RunKnowledge flowId="flow-1" runId="run-1" steps={steps} />);
+  return renderInApp(<RunKnowledge flowId="flow-1" runId="run-1" steps={steps} runSettled />);
 }
 
 async function open() {
@@ -78,6 +79,7 @@ afterEach(() => {
   cleanup();
   state.stub.calls.length = 0;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("RunKnowledge", () => {
@@ -88,6 +90,23 @@ describe("RunKnowledge", () => {
 
     await open();
     expect(await screen.findByText(messages.flow_runs_knowledge_none)).toBeTruthy();
+    expect(state.stub.calls).toHaveLength(1);
+  });
+
+  it("does not read the evidence again when the person comes back to the tab", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    state.routes[EVIDENCE] = () => ({ body: evidence([]) });
+    renderKnowledge();
+    await open();
+    expect(await screen.findByText(messages.flow_runs_knowledge_none)).toBeTruthy();
+
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    await act(() => vi.advanceTimersByTimeAsync(100));
     expect(state.stub.calls).toHaveLength(1);
   });
 

@@ -20,7 +20,7 @@ import {
   type RunStepView
 } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
-import { NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
+import { isTerminal, NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
 import { StepAttempts } from "./run-step-attempts";
 import { StepPromptDetails } from "./run-step-details";
 import {
@@ -106,7 +106,8 @@ function StepCard({
   step,
   isNext,
   notRun,
-  canReadEvidence
+  canReadEvidence,
+  runSettled
 }: {
   flowId: string;
   runId: string;
@@ -115,6 +116,8 @@ function StepCard({
   /** The run ended without the step starting. */
   notRun: boolean;
   canReadEvidence: boolean;
+  /** The run has ended (`isTerminal`). */
+  runSettled: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -239,7 +242,13 @@ function StepCard({
       ) : null}
       {result ? <StepPromptDetails result={result} /> : null}
       {canReadEvidence && result?.started_at ? (
-        <StepAttempts flowId={flowId} runId={runId} order={step.order} title={title} />
+        <StepAttempts
+          flowId={flowId}
+          runId={runId}
+          order={step.order}
+          title={title}
+          runSettled={runSettled}
+        />
       ) : null}
     </article>
   );
@@ -277,6 +286,7 @@ export function RunSteps({
     return <p className="text-ax-text-secondary text-sm">{t("flow_runs_steps_none")}</p>;
   }
   const next = nextStepOrder(steps);
+  const runSettled = runStatus !== null && isTerminal(runStatus);
   return (
     <ol className="m-0 flex flex-col gap-3 p-0">
       {steps.map((step) => (
@@ -288,6 +298,7 @@ export function RunSteps({
             isNext={step.order === next}
             notRun={stepNeverRan(step, runStatus)}
             canReadEvidence={canReadEvidence}
+            runSettled={runSettled}
           />
         </li>
       ))}

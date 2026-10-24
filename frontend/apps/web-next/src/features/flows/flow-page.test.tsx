@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { focusManager } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
-import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
+import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { flowPermissions, makeFlow, makeStep } from "./flow-fixtures";
 import { flowKeys, type FlowPublic } from "./flows-api";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -30,12 +31,26 @@ const state = vi.hoisted(() => ({
   runs: null as unknown,
   unpublish: null as unknown,
   mode: null as unknown,
-  kinds: null as unknown
+  kinds: null as unknown,
+  /** The step assistants' prompts by assistant id; null leaves the reads unanswered. */
+  prompts: null as Record<string, string> | null
 }));
 
+const ASSISTANT = "/api/v1/flows/{id}/assistants/{assistant_id}/";
+
 const api = vi.hoisted(() => ({
-  GET: vi.fn(async (path: string) => {
+  GET: vi.fn(async (path: string, init?: { params?: { path?: { assistant_id?: string } } }) => {
     if (path === "/api/v1/flows/{id}/") return state.flow;
+    if (path === "/api/v1/flows/{id}/assistants/{assistant_id}/" && state.prompts) {
+      const id = init?.params?.path?.assistant_id ?? "";
+      return {
+        data: makeAssistant({
+          id,
+          prompt: { text: state.prompts[id] ?? "" } as ReturnType<typeof makeAssistant>["prompt"]
+        }),
+        response: new Response(null, { status: 200 })
+      };
+    }
     if (path === "/api/v1/flows/{id}/runs/") return state.runs;
     if (path === "/api/v1/flows/{id}/step-kinds/") return state.kinds;
     if (path === "/api/v1/assistants/{id}/") {
@@ -103,7 +118,11 @@ vi.mock("@/features/chat/chat-view", () => ({
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
-  return { useSpace: () => useSpaceFromQuery(() => space({})) };
+  return {
+    useSpace: () => useSpaceFromQuery(() => space({})),
+    // The step editor's own provider; the page's space serves it here.
+    SpaceProvider: ({ children }: { children: React.ReactNode }) => children
+  };
 });
 
 const steps = [
@@ -120,7 +139,13 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
+  state.prompts = null;
 });
+
+function assistantReads() {
+  return api.GET.mock.calls.filter(([path]) => path === ASSISTANT).length;
+}
 
 function renderPage(
   flow: FlowPublic = makeFlow({ steps }),
@@ -534,5 +559,84 @@ describe("FlowPage", () => {
       })
     );
     expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
+  });
+
+  describe("step prompts", () => {
+    const three = [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { user_description: "Skriv svar" }),
+      makeStep(3, { user_description: "Granska", input_source: "flow_input" })
+    ];
+
+    it("are not asked for by someone who may not edit the flow", async () => {
+      state.prompts = {};
+      renderPage(makeFlow({ steps, permissions: flowPermissions({ can_edit: false }) }));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(assistantReads()).toBe(0);
+    });
+
+    it("are read once per AI step for an editor, not again on a refocus", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      state.prompts = {};
+      renderPage();
+      await waitFor(() => expect(assistantReads()).toBe(2));
+
+      await act(() => vi.advanceTimersByTimeAsync(31_000));
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      focusManager.setFocused(undefined);
+      await act(() => vi.advanceTimersByTimeAsync(100));
+      expect(assistantReads()).toBe(2);
+    });
+
+    it("are read again after a move, which may rewrite what a prompt names", async () => {
+      state.prompts = { "assistant-3": "Jämför med {{step_2.output.text}}." };
+      state.editor = ok(
+        makeFlow({
+          draft_revision: 5,
+          steps: [{ ...three[1]!, step_order: 1 }, { ...three[0]!, step_order: 2 }, three[2]!]
+        })
+      );
+      renderPage(makeFlow({ steps: three }));
+      const granska = () => screen.getByRole("article", { name: "Steg 3 Granska" });
+      expect(await within(granska()).findByText("Steg 2: Skriv svar")).toBeTruthy();
+      expect(assistantReads()).toBe(3);
+
+      // The core follows the moved step: the prompt now names it by its new place.
+      state.prompts = { "assistant-3": "Jämför med {{step_1.output.text}}." };
+      fireEvent.click(screen.getByRole("button", { name: "Flytta upp Steg 2: Skriv svar" }));
+      expect(await within(granska()).findByText("Steg 1: Skriv svar")).toBeTruthy();
+      expect(within(granska()).queryByText("Steg 2: Sammanfatta")).toBeNull();
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(assistantReads()).toBe(6);
+    });
+
+    it("are read again after the chat's tools changed the flow", async () => {
+      const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+      state.chat = ok({ ...chat, editing: true });
+      state.prompts = {};
+      state.flow = ok(makeFlow({ draft_revision: 5, steps }));
+      renderPage();
+      await waitFor(() => expect(assistantReads()).toBe(2));
+
+      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+      await waitFor(() => expect(assistantReads()).toBe(4));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(assistantReads()).toBe(4);
+    });
+
+    it("are read again by the step editor when it opens, though the list read them", async () => {
+      state.prompts = {};
+      renderPage();
+      await waitFor(() => expect(assistantReads()).toBe(2));
+
+      fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+      await waitFor(() => expect(assistantReads()).toBe(3));
+      expect(
+        api.GET.mock.calls.filter(([path]) => path === ASSISTANT).at(-1)?.[1]?.params?.path
+      ).toEqual({ id: "flow-1", assistant_id: "assistant-1" });
+    });
   });
 });

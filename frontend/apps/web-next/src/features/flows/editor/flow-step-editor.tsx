@@ -156,7 +156,9 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
   const uploads = useEditorUploads(propFlow, latestStep?.assistant_id ?? "");
   const assistantQuery = useQuery({
     ...flowAssistantQueryOptions(latest.id, latestStep?.assistant_id ?? ""),
-    enabled: latestStep !== null
+    enabled: latestStep !== null,
+    // The form edits what is saved now, not what the step list read earlier.
+    refetchOnMount: "always"
   });
   const savedAssistant: FlowAssistant | null = assistantQuery.data ?? null;
   const assistantSaved = savedAssistant ? assistantConfigOf(savedAssistant) : null;

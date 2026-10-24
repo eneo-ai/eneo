@@ -48,6 +48,7 @@ import {
   canRedispatch,
   createPollClock,
   isAwaitingReview,
+  isTerminal,
   runDurationMs,
   runStatusView,
   shouldPoll
@@ -312,8 +313,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     enabled: signature !== null,
     placeholderData: keepPreviousData
   });
+  const settled = progress.data ? isTerminal(progress.data.status.status) : false;
   const steps = useQuery({
-    ...runStepsQueryOptions(flowId, runId, signature ?? ""),
+    ...runStepsQueryOptions(flowId, runId, signature ?? "", settled),
     enabled: signature !== null,
     placeholderData: keepPreviousData
   });
@@ -607,6 +609,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   flowId={flowId}
                   runId={runId}
                   steps={runStepViews(progress.data.graph, steps.data)}
+                  runSettled={settled}
                 />
               </Section>
             ) : null}

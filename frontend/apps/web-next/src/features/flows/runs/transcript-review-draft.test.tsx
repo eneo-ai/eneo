@@ -7,6 +7,7 @@ import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { ReviewPanel } from "./review-panel";
 import { makeCheckpoint } from "./run-fixtures";
+import { transcriptRevisionsQueryOptions } from "./runs-api";
 import type { TranscriptTarget } from "./transcript";
 
 const state = vi.hoisted(() => ({
@@ -244,5 +245,31 @@ describe("The review's transcript draft", () => {
     );
     fireEvent.click(within(panel).getByRole("button", { name: messages.flow_runs_review_approve }));
     await waitFor(() => expect(calls(APPROVE)).toHaveLength(1));
+  });
+
+  it("has the step's correction history read again once the draft is saved", async () => {
+    answer();
+    const { lines, queryClient } = await renderReview();
+    const history = transcriptRevisionsQueryOptions("flow-1", "run-1", "step-1").queryKey;
+    queryClient.setQueryData(history, { pages: [], pageParams: [] });
+    correctLine(lines, "Tackar.");
+
+    await waitFor(() => expect(calls(EDIT)).toHaveLength(1), { timeout: 3_000 });
+    await waitFor(() => expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true));
+  });
+
+  it("has the step's correction history read again when someone else saved first", async () => {
+    answer();
+    state.routes[EDIT] = () => ({
+      status: 400,
+      body: { message: "Stale", code: "flow_transcript_corrections_stale_revision" }
+    });
+    const { lines, queryClient } = await renderReview();
+    const history = transcriptRevisionsQueryOptions("flow-1", "run-1", "step-1").queryKey;
+    queryClient.setQueryData(history, { pages: [], pageParams: [] });
+    correctLine(lines, "Tackar.");
+
+    await waitFor(() => expect(calls(EDIT)).toHaveLength(1), { timeout: 3_000 });
+    await waitFor(() => expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true));
   });
 });

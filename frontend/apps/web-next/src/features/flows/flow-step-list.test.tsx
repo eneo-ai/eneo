@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -23,6 +24,8 @@ import { FlowStepList, type SpeakerStepOffer } from "./flow-step-list";
 afterEach(() => {
   cleanup();
   prompts.byAssistant = {};
+  api.GET.mockClear();
+  vi.useRealTimers();
 });
 
 const steps = [
@@ -36,7 +39,11 @@ const steps = [
   makeStep(3, { user_description: "Granska", input_bindings: { question: "{{step_1}}" } })
 ];
 
-function renderList(canEdit = true, speakerOffer: SpeakerStepOffer | null = null) {
+function renderList(
+  canEdit = true,
+  speakerOffer: SpeakerStepOffer | null = null,
+  mayEdit = canEdit
+) {
   const actions = {
     onOpen: vi.fn(),
     onMove: vi.fn(),
@@ -48,6 +55,7 @@ function renderList(canEdit = true, speakerOffer: SpeakerStepOffer | null = null
       flowId="flow-1"
       steps={steps}
       canEdit={canEdit}
+      mayEdit={mayEdit}
       headingRef={createRef()}
       speakerOffer={speakerOffer}
       {...actions}
@@ -144,5 +152,31 @@ describe("FlowStepList", () => {
     expect(screen.queryByRole("button", { name: /Flytta/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Fler åtgärder/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Lägg till steg" })).toBeNull();
+  });
+
+  it("reads each AI step's prompt once for an editor, not again on a refocus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderList();
+    // Steps 1 and 3 use a model; step 2 renders its input as it is.
+    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(2));
+
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(api.GET).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads no prompts for someone who may not edit the flow, and reads them for a published one", async () => {
+    renderList(false);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(api.GET).not.toHaveBeenCalled();
+    cleanup();
+
+    renderList(false, null, true);
+    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(2));
   });
 });

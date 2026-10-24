@@ -232,12 +232,15 @@ function StepCard({
   );
 }
 
-/** The prompts of the flow's AI steps, read through the step assistants as they arrive. */
-function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts {
+/**
+ * The prompts of the flow's AI steps, read through the step assistants as
+ * they arrive. Only an editor may read the assistants (`enabled`).
+ */
+function useStepPrompts(flowId: string, steps: readonly FlowStep[], enabled: boolean): StepPrompts {
   const assistants = useQueries({
     queries: steps
       .filter((step) => stepUsesModel(step))
-      .map((step) => flowAssistantQueryOptions(flowId, step.assistant_id))
+      .map((step) => ({ ...flowAssistantQueryOptions(flowId, step.assistant_id), enabled }))
   });
   return new Map(
     assistants.flatMap((query) =>
@@ -257,6 +260,7 @@ export function FlowStepList({
   flowId,
   steps,
   canEdit,
+  mayEdit,
   headingRef,
   speakerOffer = null,
   changes = null,
@@ -265,6 +269,8 @@ export function FlowStepList({
   flowId: string;
   steps: readonly FlowStep[];
   canEdit: boolean;
+  /** The caller may edit the flow, published or not: only then are the prompts read. */
+  mayEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
   speakerOffer?: SpeakerStepOffer | null;
   /** The steps the chat just added, changed or moved, by id, while the mark lasts. */
@@ -274,7 +280,7 @@ export function FlowStepList({
   const headingId = useId();
   const [removing, setRemoving] = useState<FlowStep | null>(null);
   const [removePending, setRemovePending] = useState(false);
-  const prompts = useStepPrompts(flowId, steps);
+  const prompts = useStepPrompts(flowId, steps, mayEdit);
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
 
   const addButton = (

@@ -171,15 +171,19 @@ function StepTranscript({
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
-  const correctionsKey = transcriptCorrectionsQueryOptions(flowId, runId).queryKey;
+  const correctionsKey = runKeys.corrections(flowId, runId);
   const save = useMutation({
     mutationFn: (body: EditRequest) =>
       editTranscriptCorrections(flowId, runId, target.stepId, body),
     onSuccess: (saved) => {
-      // The step's set as saved; the others stay as they are.
-      queryClient.setQueryData(correctionsKey, (current) =>
+      // The step's set as saved; the others stay as they are. The save is a
+      // new version in the step's history.
+      queryClient.setQueryData<TranscriptCorrections[]>(correctionsKey, (current) =>
         current ? [...current.filter((item) => item.step_id !== target.stepId), saved] : [saved]
       );
+      void queryClient.invalidateQueries({
+        queryKey: runKeys.revisions(flowId, runId, target.stepId)
+      });
     }
   });
 
@@ -249,6 +253,9 @@ function StepTranscript({
                 } catch (error) {
                   if (isStaleRefusal(error)) {
                     void queryClient.invalidateQueries({ queryKey: correctionsKey });
+                    void queryClient.invalidateQueries({
+                      queryKey: runKeys.revisions(flowId, runId, target.stepId)
+                    });
                   }
                   return refusalText(error, t);
                 }

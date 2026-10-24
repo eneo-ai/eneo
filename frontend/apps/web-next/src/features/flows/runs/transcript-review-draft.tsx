@@ -17,11 +17,7 @@ import {
 import { Banner } from "@astryxdesign/core/Banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { isStaleRefusal, refusalText } from "./run-messages";
-import {
-  editTranscriptCorrections,
-  transcriptCorrectionsQueryOptions,
-  type TranscriptSpeakerReview
-} from "./runs-api";
+import { editTranscriptCorrections, runKeys, type TranscriptSpeakerReview } from "./runs-api";
 import {
   shownSegmentsOf,
   type TranscriptCorrections,
@@ -162,7 +158,7 @@ export function ReviewDraftLines({
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
-  const correctionsKey = transcriptCorrectionsQueryOptions(flowId, runId).queryKey;
+  const correctionsKey = runKeys.corrections(flowId, runId);
   const segmentsHash = corrections?.segments_hash ?? sourceHash;
 
   const [draft] = useState(
@@ -183,15 +179,22 @@ export function ReviewDraftLines({
           target.stepId,
           editRequest(fence(revision, segmentsHash), set, segments, segmentsHash)
         );
-        // The step's set as saved; the others stay as they are.
-        queryClient.setQueryData(correctionsKey, (current) =>
+        // The step's set as saved; the others stay as they are. The save is a
+        // new version in the step's history.
+        queryClient.setQueryData<TranscriptCorrections[]>(correctionsKey, (current) =>
           current ? [...current.filter((item) => item.step_id !== target.stepId), saved] : [saved]
         );
+        void queryClient.invalidateQueries({
+          queryKey: runKeys.revisions(flowId, runId, target.stepId)
+        });
         return saved.revision;
       } catch (error) {
         // Someone saved first: read theirs, which the reviewer may take over.
         if (isStaleRefusal(error)) {
           void queryClient.invalidateQueries({ queryKey: correctionsKey });
+          void queryClient.invalidateQueries({
+            queryKey: runKeys.revisions(flowId, runId, target.stepId)
+          });
         }
         throw error;
       }

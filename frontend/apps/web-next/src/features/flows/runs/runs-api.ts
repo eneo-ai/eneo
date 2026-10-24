@@ -12,8 +12,7 @@ import type { TranscriptWords } from "./transcript-playback";
  * cancel, retry and redispatch, downloads and human review.
  *
  * Content-free reads (the list, `/status/`, the run-pinned graph) are what
- * polling uses. The run detail and its steps are audited content reads: they
- * are read when the screen opens and again only when the run moved on.
+ * polling uses. Content reads are audited (`AUDITED_READ`, `auditedRead`).
  */
 
 export type RunContract = Schema<"FlowRunContractPublic">;
@@ -41,6 +40,30 @@ export type RunErrorWithGuidance = Schema<"FlowRunErrorPublic">;
 export type TokenUsage = Schema<"FlowRunTokenUsagePublic">;
 export type TranscriptionUsage = Schema<"FlowRunTranscriptionUsagePublic">;
 
+/**
+ * An audited content read kept for as long as it is cached: read when it is
+ * opened, when its key changes, when it is invalidated (a save, Refresh),
+ * never on a window focus, a reconnect or a remount. Only for a read whose
+ * key names a version of what it reads: the run detail (keyed by the run's
+ * progress), the word timings of a finished transcription, and a settled
+ * run's steps and evidence (`auditedRead`).
+ */
+const AUDITED_READ = { staleTime: Infinity } as const;
+
+/**
+ * How long a run's steps and evidence are kept. While the run is live or
+ * awaits review: the app's default, since a review checkpoint's edit or
+ * approval changes them without moving the run's progress. Once the run is
+ * settled (`isTerminal`, which their keys name): for good, since nothing
+ * changes them any more. Transcript corrections and their history always keep
+ * the default: they are saved, and speakers named, on a settled run too,
+ * without moving it. So do the active review and its edits, which exist only
+ * while a review is open.
+ */
+export function auditedRead(settled: boolean): { staleTime?: number } {
+  return settled ? AUDITED_READ : {};
+}
+
 /** Every run query of a flow sits under `["flows", flowId, "runs"]`. */
 export const runKeys = {
   all: (flowId: string) => ["flows", flowId, "runs"] as const,
@@ -58,7 +81,13 @@ export const runKeys = {
     ["flows", flowId, "runs", runId, "steps", version] as const,
   review: (flowId: string, runId: string, version: string) =>
     ["flows", flowId, "runs", runId, "review", version] as const,
-  evidence: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "evidence"] as const
+  /** `settled`: whether the run had settled (`isTerminal`) when this was read. */
+  evidence: (flowId: string, runId: string, settled: boolean) =>
+    ["flows", flowId, "runs", runId, "evidence", settled ? "settled" : "live"] as const,
+  corrections: (flowId: string, runId: string) =>
+    ["flows", flowId, "runs", runId, "transcript-corrections"] as const,
+  revisions: (flowId: string, runId: string, stepId: string) =>
+    ["flows", flowId, "runs", runId, "transcript-revisions", stepId] as const
 };
 
 /** The published contract a run form is built from; a draft has none (404 or 400). */
@@ -143,7 +172,8 @@ export function runDetailQueryOptions(
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...AUDITED_READ
   });
 }
 
@@ -177,7 +207,12 @@ export function lastOwnRunQueryOptions(flowId: string) {
   });
 }
 
-export function runStepsQueryOptions(flowId: string, runId: string, version: string) {
+export function runStepsQueryOptions(
+  flowId: string,
+  runId: string,
+  version: string,
+  settled: boolean
+) {
   return queryOptions({
     queryKey: runKeys.steps(flowId, runId, version),
     queryFn: ({ signal }): Promise<RunStep[]> =>
@@ -186,7 +221,8 @@ export function runStepsQueryOptions(flowId: string, runId: string, version: str
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...auditedRead(settled)
   });
 }
 
@@ -209,16 +245,19 @@ export function getRunGraph(flowId: string, runId: string, signal?: AbortSignal)
   );
 }
 
-export function runEvidenceQueryOptions(flowId: string, runId: string) {
+export function runEvidenceQueryOptions(flowId: string, runId: string, settled: boolean) {
   return queryOptions({
-    queryKey: runKeys.evidence(flowId, runId),
+    queryKey: runKeys.evidence(flowId, runId, settled),
     queryFn: ({ signal }): Promise<RunEvidence> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/evidence/", {
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...auditedRead(settled),
+    // A bundle can be megabytes: not kept long once nothing shows it.
+    gcTime: 60_000
   });
 }
 
@@ -488,7 +527,7 @@ export function transcriptWordsQueryOptions(flowId: string, runId: string, stepI
         throw error;
       }
     },
-    staleTime: Infinity
+    ...AUDITED_READ
   });
 }
 
@@ -514,7 +553,7 @@ export async function inputFilePlayback(
 
 export function transcriptCorrectionsQueryOptions(flowId: string, runId: string) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-corrections"],
+    queryKey: runKeys.corrections(flowId, runId),
     queryFn: ({ signal }) =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/", {
@@ -546,10 +585,13 @@ export type TranscriptRegeneration = Schema<"FlowTranscriptRegenerationPublic">;
 /** Revisions per page of a step's correction history. */
 export const REVISIONS_PAGE_SIZE = 20;
 
-/** Every saved version of a step's transcript corrections, oldest first, a page at a time. */
+/**
+ * Every saved version of a step's transcript corrections, oldest first, a
+ * page at a time. A save adds one: it invalidates `runKeys.revisions`.
+ */
 export function transcriptRevisionsQueryOptions(flowId: string, runId: string, stepId: string) {
   return infiniteQueryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-revisions", stepId],
+    queryKey: runKeys.revisions(flowId, runId, stepId),
     queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET(

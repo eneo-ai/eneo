@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -141,6 +142,7 @@ afterEach(() => {
   cleanup();
   state.stub.calls.length = 0;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("RunTrace", () => {
@@ -186,6 +188,67 @@ describe("RunTrace", () => {
     expect(within(table).getByText(messages.flow_run_extras_call_outcome_unknown)).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.flow_run_extras_calls_more })).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps the trace as it is shown when the person comes back to the tab", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    state.routes[EVIDENCE] = () => ({ body: evidence() });
+    state.routes[CALLS] = () => ({
+      body: {
+        count: 1,
+        items: [call(2)],
+        has_more: false,
+        next_after_event_id: null,
+        total_count: 2
+      }
+    });
+    renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    const table = await screen.findByRole("table", {
+      name: messages.flow_run_extras_calls_heading
+    });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_calls_more }));
+    await vi.waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(3));
+
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(calls(EVIDENCE)).toHaveLength(1);
+    // The calls read page by page are still there: the trace was not built again.
+    expect(
+      within(
+        screen.getByRole("table", { name: messages.flow_run_extras_calls_heading })
+      ).getAllByRole("row")
+    ).toHaveLength(3);
+  });
+
+  it("writes out the diagnostic export only to copy or save it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    state.routes[EVIDENCE] = () => ({ body: evidence() });
+    const stringify = vi.spyOn(JSON, "stringify");
+    const debugWrites = () =>
+      stringify.mock.calls.filter(
+        ([value]) =>
+          (value as { schema_version?: string } | null)?.schema_version ===
+          "eneo.flow.debug-export.v3"
+      ).length;
+    renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
+    expect(debugWrites()).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_debug_copy }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual(evidence().debug_export);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_debug_download }));
+    expect(state.saveBlob.mock.calls[0]?.[1]).toBe("flow-debug-export-run-1.json");
+    expect(debugWrites()).toBe(2);
+    stringify.mockRestore();
   });
 
   it("downloads the redacted export when the core allows it", async () => {

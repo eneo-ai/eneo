@@ -8,7 +8,7 @@ import { makeRunGraph, makeRunStep } from "./run-fixtures";
 import { RunLiveProgress } from "./run-live-progress";
 import { runStepViews } from "./run-progress";
 import { RunSteps } from "./run-steps";
-import { runKeys, transcriptCorrectionsQueryOptions, type RunEvidence } from "./runs-api";
+import { runKeys, type RunEvidence } from "./runs-api";
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: {} }));
 
@@ -319,7 +319,7 @@ describe("RunSteps transcription and speakers", () => {
 
   it("shows whom a speaker-mapping step named, with the names given in the transcript since", async () => {
     const queryClient = testQueryClient();
-    queryClient.setQueryData(transcriptCorrectionsQueryOptions("flow-1", "run-1").queryKey, [
+    queryClient.setQueryData(runKeys.corrections("flow-1", "run-1"), [
       {
         flow_run_id: "run-1",
         step_id: "step-1",
@@ -381,7 +381,7 @@ describe("RunSteps transcription and speakers", () => {
 describe("RunSteps attempts", () => {
   it("lists a step's attempts in its card when opened, for a caller who may read the evidence", async () => {
     const queryClient = testQueryClient();
-    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1"), {
+    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1", false), {
       step_attempts: [
         {
           id: "a-1",
