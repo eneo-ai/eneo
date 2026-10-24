@@ -117,7 +117,7 @@ from eneo.main.exceptions import (
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
-    from eneo.files.file_service import FileService
+    from eneo.files.file_service import FileDownload, FileService
     from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
     from eneo.flows.runtime.transcription import (
@@ -172,6 +172,9 @@ class StepInputResolutionDeps:
     input_limits: FlowInputLimits | None = None
     transcription_call_observer: "ProviderCallObserver | None" = None
     transcript_source_preparation: TranscriptSourcePreparation | None = None
+    # Ends the session's transaction when it has only read; without it the
+    # transaction is kept as it is.
+    end_read_transaction: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -349,6 +352,21 @@ async def resolve_step_input(
                     else None
                 ),
             )
+
+            async def open_audio_download(file_id: UUID) -> FileDownload:
+                # The download reads its bytes through its own snapshot. End the
+                # transaction that opened it if it has only read, so the step's
+                # session holds none while the audio is spooled and transcribed.
+                download = await deps.file_service.get_audio_download(file_id)
+                if deps.end_read_transaction is None:
+                    return download
+                try:
+                    await deps.end_read_transaction()
+                except BaseException:
+                    await download.aclose()
+                    raise
+                return download
+
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,
                 commit=deps.commit,
@@ -358,7 +376,7 @@ async def resolve_step_input(
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,
                 actor=deps.actor,
-                open_audio_download=deps.file_service.get_audio_download,
+                open_audio_download=open_audio_download,
                 transcription_call_observer=deps.transcription_call_observer,
                 stage_transcript_source=deps.stage_transcript_source,
             )

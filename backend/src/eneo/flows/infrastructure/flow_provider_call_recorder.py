@@ -90,6 +90,7 @@ class FlowProviderCallRecorder:
         summarization_input: SummarizationCallInput | None = None,
         summarization: SummarizationProvenance | None = None,
         digest_call: DigestCallInput | None = None,
+        before_request: Callable[[], Awaitable[None]] | None = None,
     ):
         self.run_id = run_id
         self.step_id = step_id
@@ -103,9 +104,14 @@ class FlowProviderCallRecorder:
         self.summarization_input = summarization_input
         self.summarization = summarization
         self.digest_call = digest_call
+        # Awaited before each call is recorded, so the caller can release what
+        # it holds before the provider wait begins.
+        self.before_request = before_request
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
+        if self.before_request is not None:
+            await self.before_request()
         call_request = self._to_call_request(request)
 
         async def persist() -> ProviderCall:

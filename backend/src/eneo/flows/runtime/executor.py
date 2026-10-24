@@ -156,6 +156,7 @@ from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.infrastructure.session_writes import TransactionWrites
 from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
@@ -799,6 +800,22 @@ class FlowRunExecutor:
         self.max_audio_files = resolved_config.max_audio_files
         self.max_generic_files = resolved_config.max_generic_files
         self.input_limits = resolved_config.input_limits
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    @session.setter
+    def session(self, session: AsyncSession) -> None:
+        # Watched from the moment the executor runs on it, so
+        # _end_read_transaction can tell a transaction that has only read.
+        previous = getattr(self, "_transaction_writes", None)
+        if previous is not None:
+            if self._session is session:
+                return
+            previous.stop()
+        self._session = session
+        self._transaction_writes = TransactionWrites(session)
 
     async def execute(
         self,
@@ -1673,6 +1690,7 @@ class FlowRunExecutor:
                 summarization_input=summarization_input,
                 summarization=summarization,
                 digest_call=digest_call,
+                before_request=self._end_read_transaction,
             ),
             persist_summarization=partial(
                 self._persist_summarization,
@@ -1692,6 +1710,7 @@ class FlowRunExecutor:
                 completion_model_id=None,
                 mapped_call=None,
                 resolved_input_edge_indexes=(),
+                before_request=self._end_read_transaction,
             ),
         )
 
@@ -2761,6 +2780,7 @@ class FlowRunExecutor:
         return StepInputResolutionDeps(
             apply_output_cap=self._apply_output_cap,
             commit=self._commit,
+            end_read_transaction=self._end_read_transaction,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             resolve_tool_input=partial(self._resolve_tool_input, attempt_no=attempt_no),
@@ -3598,6 +3618,36 @@ class FlowRunExecutor:
 
     async def _commit(self) -> None:
         await self.session.commit()
+
+    async def _end_read_transaction(self) -> None:
+        """End the session's transaction before outside work, if it only read.
+
+        A provider call or an audio download can last minutes, and an idle
+        transaction keeps its connection checked out and its snapshot held for
+        all of that time. A transaction that has written (or locked a row) is
+        left open: what a step writes before its attempt is activated stays
+        uncommitted, so a failure before activation still rolls it back.
+
+        The next transaction is begun at once, so a writer that joins an
+        ambient transaction (and commits its own only when there is none)
+        still writes inside the step's. Beginning is lazy: it takes no
+        connection or snapshot until the next statement.
+
+        The rows the session holds are not expired: the step reads rows it
+        loaded before the call after it, and an expired attribute cannot be
+        loaded lazily under asyncio. Nothing was written, and under READ
+        COMMITTED a held row could already be older than a later statement
+        inside one transaction, so keeping them changes nothing.
+        """
+        if self._transaction_writes.only_read():
+            sync_session = self.session.sync_session
+            expire_on_commit = sync_session.expire_on_commit
+            sync_session.expire_on_commit = False
+            try:
+                await self._commit()
+            finally:
+                sync_session.expire_on_commit = expire_on_commit
+            await self.session.begin()
 
     async def _rollback(self) -> None:
         await self.session.rollback()
