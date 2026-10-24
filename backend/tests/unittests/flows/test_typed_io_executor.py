@@ -132,6 +132,9 @@ def _build_executor(
         )
     )
     flow_run_repo.list_step_results.return_value = []
+    # Finalization of a run without step results: completed, without an output.
+    flow_run_repo.list_step_result_annotations.return_value = []
+    flow_run_repo.read_last_completed_output_payload.return_value = None
 
     async def _activate_step_attempt(**kwargs):
         attempt_input = kwargs["attempt_input"]

@@ -1302,12 +1302,6 @@ class FlowRunExecutor:
                     exc=exc,
                 )
 
-            latest_run = await self.flow_run_repo.get(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-            )
-
             success_plan = build_step_success_plan(
                 claimed=claimed_result,
                 run_id=run_id,
@@ -1366,13 +1360,10 @@ class FlowRunExecutor:
                 await self._commit()
                 return {"status": FlowRunStatus.RUNNING.value}
 
-        results = await self.flow_run_repo.list_step_results(
-            run_id=run_id, tenant_id=tenant_id
-        )
         finalization = await finalize_run_from_current_results(
             run_id=run_id,
             tenant_id=tenant_id,
-            results=results,
+            flow_run_repo=self.flow_run_repo,
             terminalizer=self.flow_run_terminalizer,
             principal=self.principal,
         )

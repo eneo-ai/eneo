@@ -443,6 +443,9 @@ def _build_executor(
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
     flow_run_repo.list_step_results.return_value = []
+    # Finalization of a run without step results: completed, without an output.
+    flow_run_repo.list_step_result_annotations.return_value = []
+    flow_run_repo.read_last_completed_output_payload.return_value = None
     flow_run_repo.list_retained_input_file_ids.return_value = []
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()

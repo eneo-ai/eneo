@@ -927,8 +927,10 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
             FlowRunWebhookDeliveries.delivery_last_error,
         ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
     )
-    run_state = await _read_scalar(
-        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.output_payload_json).where(
+            FlowRuns.id == seeded.run.id
+        )
     )
     result_payload = await _read_scalar(
         sa.select(FlowStepResults.output_payload_json).where(
@@ -943,7 +945,9 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert delivery_state.delivery_attempts == 1
     assert delivery_state.delivered_at is not None
-    assert run_state == FlowRunStatus.COMPLETED.value
+    assert run_state.status == FlowRunStatus.COMPLETED.value
+    # The completed run returns its last completed step's output.
+    assert run_state.output_payload_json == {"text": "done"}
     assert result_payload == {"text": "done"}
     audit_log.assert_awaited_once()
     audit_args = audit_log.await_args

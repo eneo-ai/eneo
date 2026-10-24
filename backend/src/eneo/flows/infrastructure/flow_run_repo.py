@@ -2134,6 +2134,23 @@ class FlowRunRepository:
         ).all()
         return [FlowStepResultAnnotation.model_validate(row) for row in rows]
 
+    async def read_last_completed_output_payload(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowPersistedJsonObject | None:
+        """The output of the run's highest-order completed step: what a
+        completed run returns. One payload, never the other steps' content."""
+        return await self.session.scalar(
+            sa.select(FlowStepResults.output_payload_json)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status == FlowStepResultStatus.COMPLETED.value)
+            .order_by(FlowStepResults.step_order.desc())
+            .limit(1)
+        )
+
     async def list_step_results_by_orders(
         self,
         *,

@@ -577,14 +577,10 @@ class FlowRunWebhookDeliveryService:
                 "Webhook delivery claim was lost before success could be recorded."
             )
 
-        results = await self.flow_run_repo.list_step_results(
-            run_id=row.flow_run_id,
-            tenant_id=row.tenant_id,
-        )
         await finalize_run_from_current_results(
             run_id=row.flow_run_id,
             tenant_id=row.tenant_id,
-            results=results,
+            flow_run_repo=self.flow_run_repo,
             terminalizer=self.flow_run_terminalizer,
         )
         return True
