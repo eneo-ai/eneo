@@ -20,6 +20,7 @@ the step-018 integration test).
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -333,6 +334,38 @@ async def test_streaming_persists_adapter_cumulative_input_estimate():
     assert any(chunk.text == "Helper answer." for chunk in chunks)
     persisted = question_repo.add.await_args.args[0]
     assert persisted.num_tokens_question == 57
+
+
+@pytest.mark.asyncio
+async def test_closing_the_stream_closes_the_completion_on_the_same_task():
+    service, _ = _build_service(user=_make_user())
+    completion_closed_on: list[asyncio.Task[object] | None] = []
+
+    async def completion_stream():
+        try:
+            yield Completion(response_type=ResponseType.TEXT, text="Helper ")
+            yield Completion(response_type=ResponseType.TEXT, text="answer.")
+        finally:
+            completion_closed_on.append(asyncio.current_task())
+
+    helper_assistant = _mock_helper_assistant(assistant_id=uuid4())
+    stream = service._stream_and_persist(
+        response=CompletionModelResponse.model_construct(
+            completion=completion_stream(),
+            model=helper_assistant.completion_model,
+            extended_logging=None,
+            total_token_count=10,
+            usage=None,
+        ),
+        session=_build_session(session_id=uuid4()),
+        question="Help me",
+        datastore_chunks=[],
+        helper_assistant=helper_assistant,
+    )
+    assert (await anext(stream)).text == "Helper "
+    await stream.aclose()
+
+    assert completion_closed_on == [asyncio.current_task()]
 
 
 @pytest.mark.asyncio

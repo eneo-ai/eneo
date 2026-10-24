@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -403,17 +404,19 @@ class CompletionService:
         )
 
     async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
-        async for chunk in completion:
-            # Adapter events name their own type (tool calls and their argument
-            # deltas, approvals and their timeouts, reasoning, images, errors)
-            # and pass through whether or not they carry text. An untyped chunk
-            # is answer text, or the closing stop chunk that carries usage.
-            if chunk.response_type is None:
-                if chunk.text:
-                    chunk.response_type = ResponseType.TEXT
-                elif not chunk.stop:
-                    continue
-            yield chunk
+        async with aclosing(completion):
+            async for chunk in completion:
+                # Adapter events name their own type (tool calls and their
+                # argument deltas, approvals and their timeouts, reasoning,
+                # images, errors) and pass through whether or not they carry
+                # text. An untyped chunk is answer text, or the closing stop
+                # chunk that carries usage.
+                if chunk.response_type is None:
+                    if chunk.text:
+                        chunk.response_type = ResponseType.TEXT
+                    elif not chunk.stop:
+                        continue
+                yield chunk
 
     async def get_response(
         self,

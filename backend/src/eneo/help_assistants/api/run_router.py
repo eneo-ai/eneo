@@ -68,6 +68,7 @@ from eneo.main.logging import get_logger
 from eneo.main.models import ResourcePermission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -128,26 +129,27 @@ def _to_event_stream(
 
     async def event_stream():
         try:
-            async for chunk in answer:
-                if chunk.response_type == ResponseType.ERROR:
-                    # The completion adapter yields an ERROR chunk (rather than
-                    # raising) when the provider fails mid-stream. Forward it as
-                    # a terminal error event so the client stops and marks the
-                    # run failed, instead of silently ending with a partial
-                    # answer.
-                    yield HelperRunResponsePublic(
-                        run=run_public,
-                        answer="",
-                        references=[],
-                        error=chunk.error or "completion_failed",
-                    ).model_dump_json()
-                    return
-                if chunk.response_type == ResponseType.TEXT:
-                    yield HelperRunResponsePublic(
-                        run=run_public,
-                        answer=chunk.text or "",
-                        references=_chunk_references_or_default(chunk, references),
-                    ).model_dump_json()
+            async with closing(answer) as chunks:
+                async for chunk in chunks:
+                    if chunk.response_type == ResponseType.ERROR:
+                        # The completion adapter yields an ERROR chunk (rather
+                        # than raising) when the provider fails mid-stream.
+                        # Forward it as a terminal error event so the client
+                        # stops and marks the run failed, instead of silently
+                        # ending with a partial answer.
+                        yield HelperRunResponsePublic(
+                            run=run_public,
+                            answer="",
+                            references=[],
+                            error=chunk.error or "completion_failed",
+                        ).model_dump_json()
+                        return
+                    if chunk.response_type == ResponseType.TEXT:
+                        yield HelperRunResponsePublic(
+                            run=run_public,
+                            answer=chunk.text or "",
+                            references=_chunk_references_or_default(chunk, references),
+                        ).model_dump_json()
         except Exception:
             # Defense in depth: any unexpected mid-stream failure becomes a
             # terminal error event, not a raw traceback that drops the SSE
@@ -160,7 +162,7 @@ def _to_event_stream(
                 error="completion_failed",
             ).model_dump_json()
 
-    return EventSourceResponse(event_stream(), ping=15)
+    return ClosingEventSourceResponse(event_stream(), ping=15)
 
 
 def _chunk_references_or_default(

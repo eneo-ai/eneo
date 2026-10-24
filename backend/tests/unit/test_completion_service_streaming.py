@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -112,6 +113,49 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
     assert chunks[0].response_type == ResponseType.TEXT
     assert chunks[0].text == "hello"
     approval_manager.cancel_approval.assert_awaited_once_with("approval-123")
+
+
+@pytest.mark.asyncio
+async def test_closing_the_completion_runs_stream_cleanup_on_the_same_task():
+    """A client abort closes the typed stream; the wrapper behind it must clean
+    up right away, on the consumer's task, where its MCP connections live."""
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    cancelled_on: list[asyncio.Task[object] | None] = []
+    approval_manager = AsyncMock()
+    approval_manager.cancel_approval = AsyncMock(
+        side_effect=lambda _id: cancelled_on.append(asyncio.current_task())
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.completion_service.get_approval_manager",
+        return_value=approval_manager,
+    ):
+        response = await service.get_response(
+            model=completion_model,
+            text_input="hi",
+            session=SimpleNamespace(
+                id=uuid4(),
+                user_id=uuid4(),
+                assistant=SimpleNamespace(id=uuid4()),
+                questions=[],
+            ),
+            stream=True,
+            require_tool_approval=True,
+        )
+        assert (await anext(response.completion)).text == "hello"
+        await response.completion.aclose()
+
+    assert cancelled_on == [asyncio.current_task()]
 
 
 @pytest.mark.asyncio
