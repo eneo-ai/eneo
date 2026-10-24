@@ -162,6 +162,8 @@ test("when a pushed screen's code fails to load, its server-rendered back link s
   await expect(page).toHaveURL(/\/admin$/);
   await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
   await expect(page.getByRole("dialog", { name: /^(Meny|Menu)$/ })).toBeVisible();
+  // Chunks still on their way through the route would fail the next test.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("focus moving up a pushed screen stops below its PageBar", async ({ page }) => {
