@@ -1,7 +1,8 @@
 """The child process of the tool argument check: killed at its time limit and
 replaced, also when it sends half a message or stops reading, without holding
 the event loop; a child that dies is a typed host fault at once, and a checker
-serves the event loop it is called from."""
+serves the event loop it is called from, on up to its slot count of children,
+each within its memory budget."""
 
 from __future__ import annotations
 
@@ -17,8 +18,10 @@ from collections.abc import Awaitable
 from multiprocessing import Pipe
 from multiprocessing.connection import Connection
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.flows.domain.schema_engine import ContractViolation
 from eneo.flows.runtime import tool_argument_check
@@ -28,6 +31,7 @@ from eneo.flows.runtime.tool_argument_check import (
     ToolArgumentCheckFailed,
     ToolArgumentCheckResult,
 )
+from eneo.main import config
 
 # Python's re backtracks on this for seconds; each character more doubles it.
 _SLOW_SCHEMA: dict[str, object] = {"properties": {"code": {"pattern": "^(a+)+$"}}}
@@ -36,6 +40,16 @@ _REQUIRED: dict[str, object] = {"required": ["days"]}
 _MISSING_DAYS = ContractViolation(
     path=(), rule="required", detail="'days' is a required property"
 )
+_MiB = 1024 * 1024
+
+
+def _deep_rows(rows: int) -> list[object]:
+    """Rows of single-element lists nested 16 deep: decoding takes about 40
+    times the JSON's size (60,000 rows, 2 MiB of JSON, about 85 MiB)."""
+    deep: object = 0
+    for _ in range(16):
+        deep = [deep]
+    return [deep] * rows
 
 
 @pytest.fixture(autouse=True)
@@ -267,15 +281,22 @@ async def test_a_child_that_dies_during_a_check_is_a_host_fault_at_once(
     assert [record.name for record in caplog.records] == [tool_argument_check.__name__]
 
 
-async def test_a_check_queued_behind_another_ends_at_its_own_limit(children) -> None:
-    # Kills the mutant that starts the limit after the checker's lock: the
-    # queued check would wait for the first and then get its full limit. Also
-    # kills ending the running check's child when a queued check times out or
-    # is cancelled.
+@pytest.mark.parametrize("slots", [1, 2])
+async def test_a_check_queued_behind_another_ends_at_its_own_limit(
+    children, slots
+) -> None:
+    # Kills the mutant that starts the limit after the checker's admission:
+    # the queued check would wait for the others and then get its full limit.
+    # Also kills ending a running check's child when a queued check times out
+    # or is cancelled.
     limit = [2.0]
-    checker = ToolArgumentChecker(lambda: limit[0])
-    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
-    running = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    checker = ToolArgumentChecker(lambda: limit[0], lambda: slots)
+    warm = [checker.check({}, _REQUIRED) for _ in range(slots)]
+    assert await asyncio.gather(*warm) == [_MISSING_DAYS] * slots
+    running = [
+        asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+        for _ in range(slots)
+    ]
     await asyncio.sleep(0.1)
     limit[0] = 0.3
 
@@ -289,11 +310,13 @@ async def test_a_check_queued_behind_another_ends_at_its_own_limit(children) -> 
     cancelled.cancel()
     with pytest.raises(asyncio.CancelledError):
         await cancelled
-    assert not running.done()
-    assert children[-1].process.poll() is None
-    running.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await running
+    assert not any(task.done() for task in running)
+    assert len(children) == slots
+    assert all(child.process.poll() is None for child in children)
+    for task in running:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 async def test_a_cancelled_check_does_not_leave_its_answer_to_the_next(
@@ -376,7 +399,7 @@ if __name__ == '__main__':
         try:
             assert await checker.check({{'limit': 5}}, {{'properties': {{'limit': {{'type': 'integer'}}}}}}) is None
             print('checker source:', sys.modules['eneo.flows.runtime.tool_argument_check'].__file__)
-        finally: checker._end_child()
+        finally: checker.end_children()
     asyncio.run(check())
 """
     )
@@ -390,3 +413,451 @@ if __name__ == '__main__':
     assert result.returncode == 0, result.stderr
     assert marker.read_text() == "__main__\n"
     assert tool_argument_check.__file__ in result.stdout
+
+
+async def test_a_slow_check_leaves_the_second_slot_to_another(children) -> None:
+    # Kills the checker that runs one check at a time: the second check would
+    # wait for the slow one to reach its limit.
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2)
+    warm = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+    assert await asyncio.gather(*warm) == [_MISSING_DAYS] * 2
+    slow = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    await asyncio.sleep(0.1)
+
+    started = time.monotonic()
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+
+    assert time.monotonic() - started < 1.0
+    assert not slow.done()
+    assert len(children) == 2
+    assert all(child.process.poll() is None for child in children)
+    slow.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await slow
+
+
+async def test_a_timeout_kills_only_its_own_slots_child(children) -> None:
+    # Kills the mutant that ends every child when one check runs past its
+    # limit.
+    checker = ToolArgumentChecker(lambda: 0.5, lambda: 2)
+    warm = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+    assert await asyncio.gather(*warm) == [_MISSING_DAYS] * 2
+
+    assert await checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA) == (
+        ArgumentCheckUnfinished(timed_out=True)
+    )
+
+    assert len(children) == 2
+    assert sorted(child.process.poll() is None for child in children) == [False, True]
+
+
+async def test_sequential_checks_share_one_child_and_concurrent_ones_start_at_most_n(
+    children,
+) -> None:
+    # Kills the slots taken in turn (each sequential check would start or
+    # wake another child) and a slot count that does not bound the children.
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2)
+    for _ in range(3):
+        assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    assert len(children) == 1
+
+    four = [checker.check({}, _REQUIRED) for _ in range(4)]
+    assert await asyncio.gather(*four) == [_MISSING_DAYS] * 4
+
+    assert len(children) == 2
+    assert all(child.process.poll() is None for child in children)
+
+
+def test_a_second_event_loop_ends_every_child(children) -> None:
+    # Kills the mutant that ends only one slot's child when another event
+    # loop starts checking: the other child would serve no loop and stay.
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2)
+
+    async def two_at_once() -> list[object]:
+        return list(
+            await asyncio.gather(
+                checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)
+            )
+        )
+
+    first = asyncio.new_event_loop()
+    try:
+        assert first.run_until_complete(two_at_once()) == [_MISSING_DAYS] * 2
+    finally:
+        first.close()
+    assert len(children) == 2
+    second = asyncio.new_event_loop()
+    try:
+        assert second.run_until_complete(checker.check({}, _REQUIRED)) == (
+            _MISSING_DAYS
+        )
+    finally:
+        second.close()
+
+    assert all(child.process.poll() is not None for child in children[:2])
+    assert len(children) == 3
+    checker.end_children()
+
+
+@pytest.mark.parametrize(
+    ("value", "answer"),
+    [({"pad": "x" * 100}, _MISSING_DAYS), ({"days": 1, "pad": "x" * 100}, None)],
+    ids=["violation", "fits"],
+)
+async def test_a_check_above_the_recycle_size_ends_its_child_after_answering(
+    monkeypatch, children, value, answer
+) -> None:
+    # Kills the mutants that keep a child after a large check, that end it
+    # before it answered, and that end it after a check of exactly the size.
+    monkeypatch.setattr(tool_argument_check, "_RECYCLE_ABOVE_BYTES", 64)
+    checker = ToolArgumentChecker()
+
+    assert await checker.check(value, _REQUIRED) == answer
+
+    assert len(children) == 1
+    assert children[0].process.poll() is not None
+    at_the_size = {"pad": "x" * 53}
+    assert len(tool_argument_check._json_text(at_the_size)) == 64
+    assert await checker.check(at_the_size, _REQUIRED) == _MISSING_DAYS
+    assert await checker.check({"days": 1}, _REQUIRED) is None
+    assert len(children) == 2
+    assert children[1].process.poll() is None
+
+
+_RAISES = """
+import sys
+from multiprocessing.connection import Connection
+from eneo.flows.runtime.tool_argument_check import _CheckRaised, _Ready
+connection = Connection(int(sys.argv[1]))
+connection.send(_Ready())
+while True:
+    connection.recv()
+    connection.send(_CheckRaised("{exception}"))
+"""
+
+
+def _start_one_that_raises(monkeypatch, children, exception: str = "SystemError"):
+    real_start = tool_argument_check._start_child
+
+    def start(alarm_seconds: float) -> tool_argument_check._Child:
+        monkeypatch.setattr(tool_argument_check, "_start_child", real_start)
+        child = _fixture_child(_RAISES.replace("{exception}", exception))
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(tool_argument_check, "_start_child", start)
+
+
+async def test_a_check_that_raised_in_its_child_ends_that_child(
+    monkeypatch, children
+) -> None:
+    # Kills the mutant that keeps a child after it raised: a raise can be an
+    # allocation its memory budget refused (CPython then raises MemoryError or
+    # SystemError), which leaves the child holding what it reached.
+    _start_one_that_raises(monkeypatch, children)
+    checker = ToolArgumentChecker()
+
+    assert await checker.check({}, _REQUIRED) == ArgumentCheckUnfinished(
+        timed_out=False
+    )
+
+    assert children[0].process.poll() is not None
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    assert len(children) == 2
+
+
+@pytest.mark.parametrize(
+    ("exception", "budget", "applied", "names_the_budget"),
+    [
+        ("SystemError", 256 * _MiB, True, True),
+        ("MemoryError", 256 * _MiB, True, True),
+        ("TypeError", 256 * _MiB, True, False),
+        ("MemoryError", 256 * _MiB, False, False),
+        ("MemoryError", None, False, False),
+    ],
+)
+async def test_a_raise_that_can_be_the_memory_budget_names_its_setting(
+    caplog, monkeypatch, children, exception, budget, applied, names_the_budget
+) -> None:
+    # Kills a budget refusal that the log does not tell apart from any other
+    # raise, and a budget named where none was applied or the raise cannot be
+    # an allocation that failed.
+    monkeypatch.setattr(tool_argument_check, "_limit_memory", lambda *_: applied)
+    _start_one_that_raises(monkeypatch, children, exception)
+    checker = ToolArgumentChecker(memory_bytes=lambda: budget)
+
+    with caplog.at_level(logging.WARNING, logger=tool_argument_check.__name__):
+        assert await checker.check({}, _REQUIRED) == ArgumentCheckUnfinished(
+            timed_out=False
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages[0] == f"A schema check raised {exception} in its process."
+    if names_the_budget:
+        assert messages[1:] == [
+            "A schema check may have met its process's memory budget of "
+            "268435456 bytes (FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES)."
+        ]
+    else:
+        assert messages[1:] == []
+
+
+@pytest.mark.parametrize(
+    ("budget", "accepted"), [(128 * _MiB - 1, False), (128 * _MiB, True)]
+)
+def test_the_child_memory_budget_holds_the_largest_request(budget, accepted) -> None:
+    # Kills a budget below what the largest request at the default inline
+    # ceiling needs to arrive (80 MiB measured): every such check would end
+    # its child as a host fault.
+    values = {
+        **config.get_settings().model_dump(),
+        "flow_contract_check_child_memory_bytes": budget,
+    }
+    if accepted:
+        config.Settings.model_validate(values)
+    else:
+        with pytest.raises(
+            ValidationError, match="flow_contract_check_child_memory_bytes"
+        ):
+            config.Settings.model_validate(values)
+
+
+async def test_a_slot_whose_child_died_leaves_the_other_slot_serving(
+    children,
+) -> None:
+    # Kills the mutant that ends every child on one child's host fault, and a
+    # slot that stays unusable after its child died.
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2)
+    dying = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    while not children:
+        await asyncio.sleep(0.01)
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    assert len(children) == 2
+    pid = children[0].process.pid
+    assert pid is not None
+    os.kill(pid, signal.SIGKILL)
+    with pytest.raises(ToolArgumentCheckFailed):
+        await dying
+
+    two = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+    assert await asyncio.gather(*two) == [_MISSING_DAYS] * 2
+
+    assert len(children) == 3
+    assert children[1].process.poll() is None
+
+
+async def test_queued_checks_are_admitted_in_arrival_order(children) -> None:
+    # Kills an admission that is not first come, first served, including one
+    # that lets a check arriving as a slot is handed on take it from the check
+    # it was handed to.
+    checker = ToolArgumentChecker(lambda: 5.0)
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    running = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    await asyncio.sleep(0.1)
+    admitted: list[int] = []
+
+    async def queued(number: int) -> None:
+        assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+        admitted.append(number)
+
+    waiting: list[asyncio.Task[None]] = []
+    for number in range(4):
+        waiting.append(asyncio.create_task(queued(number)))
+        await asyncio.sleep(0.01)
+    running.cancel()
+    # The running check ends and hands its slot to check 0, which has not run
+    # yet when this one asks.
+    await asyncio.sleep(0)
+    await queued(4)
+    await asyncio.gather(*waiting)
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert admitted == [0, 1, 2, 3, 4]
+
+
+async def test_a_check_cancelled_as_its_slot_is_handed_to_it_passes_it_on(
+    children,
+) -> None:
+    # Kills an admission that loses the slot of a check cancelled after it
+    # was woken (the next check would wait out its limit) or that gives the
+    # slot out twice (two checks would take one child).
+    checker = ToolArgumentChecker(lambda: 5.0)
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    running = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    await asyncio.sleep(0.1)
+    woken = asyncio.create_task(checker.check({}, _REQUIRED))
+    behind = asyncio.create_task(checker.check({}, _REQUIRED))
+    await asyncio.sleep(0.05)
+    running.cancel()
+    # The running check ends and hands its slot to `woken`, which has not run.
+    await asyncio.sleep(0)
+    woken.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await woken
+    started = time.monotonic()
+    assert await behind == _MISSING_DAYS
+    assert time.monotonic() - started < 1.0
+    two = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+    assert await asyncio.gather(*two) == [_MISSING_DAYS] * 2
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+
+def test_importing_the_checker_does_not_import_settings() -> None:
+    # Kills a settings read when the module loads: the child imports this
+    # module and must not load the server's settings.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, eneo.flows.runtime.tool_argument_check; "
+            "assert 'eneo.main.config' not in sys.modules",
+        ],
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(tool_argument_check.__file__).resolve().parents[3]),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(("configured", "run_slots", "slots"), [(8, 3, 3), (2, 4, 2)])
+def test_contract_check_slots_are_bounded_by_the_run_slots(
+    monkeypatch, configured, run_slots, slots
+) -> None:
+    # Kills slots that follow only the setting: a run checks one value at a
+    # time, so a slot past the run slots is never used.
+    monkeypatch.setattr(
+        config,
+        "get_settings",
+        lambda: SimpleNamespace(
+            flow_contract_check_slots=configured, task_execution_max_jobs=run_slots
+        ),
+    )
+    assert tool_argument_check.contract_check_slots() == slots
+
+
+def _data_limit(pid: int) -> int | None:
+    """A process's soft RLIMIT_DATA in bytes, None when unlimited."""
+    for line in Path(f"/proc/{pid}/limits").read_text().splitlines():
+        if line.startswith("Max data size"):
+            soft = line.split()[3]
+            return None if soft == "unlimited" else int(soft)
+    raise AssertionError("no data limit line")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the budget is a Linux rlimit")
+async def test_only_contract_check_children_take_the_memory_budget(
+    monkeypatch, children
+) -> None:
+    # Kills a budget that is not applied, not read from the setting, or also
+    # given to the tool argument checker.
+    monkeypatch.setattr(
+        config,
+        "get_settings",
+        lambda: SimpleNamespace(
+            flow_contract_check_slots=2,
+            task_execution_max_jobs=4,
+            flow_contract_check_child_memory_bytes=300 * _MiB,
+        ),
+    )
+    # Earlier tests on this event loop can leave the module checkers warm
+    # children started before the setting was patched.
+    tool_argument_check._CONTRACT_CHECKER.end_children()
+    tool_argument_check._CHECKER.end_children()
+    try:
+        assert await tool_argument_check.check_contract_value({}, _REQUIRED) == (
+            _MISSING_DAYS
+        )
+        assert await tool_argument_check.check_tool_arguments({}, _REQUIRED) == (
+            _MISSING_DAYS
+        )
+        assert [_data_limit(child.process.pid) for child in children] == [
+            300 * _MiB,
+            None,
+        ]
+    finally:
+        tool_argument_check._CONTRACT_CHECKER.end_children()
+        tool_argument_check._CHECKER.end_children()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the budget is a Linux rlimit")
+async def test_a_check_past_its_memory_budget_is_unfinished_and_ends_its_child(
+    caplog, children
+) -> None:
+    # Kills a budget that is not enforced (decoding takes about 210 MiB and
+    # the value is valid), that leaves the child holding what it reached, or
+    # that leaves the slot without a child.
+    checker = ToolArgumentChecker(lambda: 30.0, memory_bytes=lambda: 160 * _MiB)
+
+    with caplog.at_level(logging.WARNING, logger=tool_argument_check.__name__):
+        assert await checker.check(
+            _deep_rows(150_000),  # 5 MiB of JSON
+            {"type": "array", "items": {"type": "array"}},
+        ) == ArgumentCheckUnfinished(timed_out=False)
+
+    assert "FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES" in caplog.records[-1].getMessage()
+    assert children[0].process.poll() is not None
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    assert len(children) == 2
+
+
+@pytest.mark.skipif(sys.platform == "linux", reason="Linux applies the budget")
+async def test_where_no_budget_can_be_set_checks_run_and_say_so_once(
+    caplog, children
+) -> None:
+    # Kills refusing every check on a development host without the rlimit,
+    # and a warning for each child.
+    tool_argument_check._memory_budget_not_applied.cache_clear()
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2, lambda: 1)
+
+    with caplog.at_level(logging.WARNING, logger=tool_argument_check.__name__):
+        two = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+        assert await asyncio.gather(*two) == [_MISSING_DAYS] * 2
+
+    assert len(children) == 2
+    assert len(caplog.records) == 1
+    assert "without their memory budget" in caplog.records[0].getMessage()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the budget is a Linux rlimit")
+async def test_a_violation_leaves_no_garbage_against_the_next_checks_budget(
+    children,
+) -> None:
+    # Kills the child that keeps a violation's garbage: the error holds
+    # reference cycles with the decoded value (about 85 MiB here), and a next
+    # check that allocates few containers, like a list of integers, never
+    # starts a collection, so it would meet the budget and not be checked.
+    checker = ToolArgumentChecker(lambda: 30.0, memory_bytes=lambda: 160 * _MiB)
+
+    violation = await checker.check(
+        _deep_rows(60_000),  # 2 MiB of JSON
+        {"type": "array", "items": {"type": "integer"}},
+    )
+    fits = await checker.check([0] * 5_000_000, {"type": "array"})  # 14 MiB
+
+    assert isinstance(violation, ContractViolation)
+    assert fits is None
+    assert len(children) == 1
+
+
+async def test_a_check_after_a_recycled_child_takes_a_warm_one(
+    monkeypatch, children
+) -> None:
+    # Kills the recycled slot that goes back on top of the warm ones: the
+    # next check would start a child while a warm one waits.
+    monkeypatch.setattr(tool_argument_check, "_RECYCLE_ABOVE_BYTES", 64)
+    checker = ToolArgumentChecker(lambda: 5.0, lambda: 2)
+    warm = [checker.check({}, _REQUIRED), checker.check({}, _REQUIRED)]
+    assert await asyncio.gather(*warm) == [_MISSING_DAYS] * 2
+
+    assert await checker.check({"pad": "x" * 100}, _REQUIRED) == _MISSING_DAYS
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+
+    assert len(children) == 2
+    assert sorted(child.process.poll() is None for child in children) == [False, True]

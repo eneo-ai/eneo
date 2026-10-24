@@ -466,6 +466,13 @@ value and a comment.
     |----------|---------|-------------|
     | `FLOW_AUTHORING_CHAT_IDLE_MINUTES` | `45` | Minutes without a question or an edit mode change after which turning on a flow chat's edit mode starts a new conversation. Earlier conversations are kept but no longer answered. Must be greater than zero |
 
+    **Flows contract checks:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_CONTRACT_CHECK_SLOTS` | `2` | Contract checks each backend or worker process runs at once, each in its own process; at most `TASK_EXECUTION_MAX_JOBS`, since a run checks one value at a time. Each busy one can take up to `FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES`, so raise it only with memory to spare |
+    | `FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES` | `536870912` (512 MiB) | Memory one contract check's process may take on Linux; at least `134217728` (128 MiB), which the largest request at the default `FLOW_MAX_INLINE_TEXT_BYTES` needs to arrive. The default holds a value at that ceiling in its costliest decoded shape: deeply nested lists, about 440 MiB measured while checked, with `anyOf`, `uniqueItems` or a recursive `$ref` alike. An `anyOf` or `oneOf` keeps only the first error of each failing branch, so a valid 3 MiB array of 400,000 integers under a two-branch `oneOf` passes. A check past it ends with `typed_io_contract_not_checked`, valid value or not, and the log names this setting. Raise it together with `FLOW_MAX_INLINE_TEXT_BYTES` |
+
     **Flows HTTP destinations:**
 
     | Variable | Default | Description |

@@ -680,13 +680,13 @@ async def test_publish_refuses_a_fixed_argument_its_property_refuses(
         finally:
             beating.cancel()
             await asyncio.gather(beating, return_exceptions=True)
-            checker._end_child()
+            checker.end_children()
         return
     try:
         with pytest.raises(BadRequestException) as refusal:
             await service.publish_flow(flow_id=flow.id)
     finally:
-        checker._end_child()
+        checker.end_children()
 
     assert refusal.value.code == "typed_io_tool_invalid_config"
     assert refusal.value.context == {
@@ -720,4 +720,4 @@ async def test_publish_leaves_a_checker_host_fault_to_the_run(
     service, _, version_repo = _publisher(user, flow, facts)
     await service.publish_flow(flow_id=flow.id)
     version_repo.create.assert_awaited_once()
-    assert checker._child is None
+    assert checker._slots and all(slot.child is None for slot in checker._slots)
