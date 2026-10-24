@@ -12,6 +12,19 @@ export function sourceAnchorId(messageId: string, number: number): string {
   return `${messageId}-source-${number}`;
 }
 
+/** Where a source comes from, one line: "Utdrag 2 · Upphandling · s. 4–6". */
+export function sourceMeta(source: ActivitySource, t: ReturnType<typeof useTranslations>): string {
+  return [
+    source.mcpSnippet?.excerptNumber
+      ? t("chat_source_excerpt", { number: source.mcpSnippet.excerptNumber })
+      : null,
+    source.origin,
+    source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function excerptPreview(source: ActivitySource): string | null {
   const content = source.mcpSnippet?.excerptNumber
     ? source.mcpSnippet.content?.replace(/\s+/g, " ").trim()
@@ -67,16 +80,7 @@ export function SourceList({
       {sources.map((source, index) => {
         const number = index + 1;
         const Icon = source.url ? Globe2 : FileText;
-        const excerpt = source.mcpSnippet?.excerptNumber
-          ? t("chat_source_excerpt", { number: source.mcpSnippet.excerptNumber })
-          : null;
-        const meta = [
-          excerpt,
-          source.origin,
-          source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
-        ]
-          .filter(Boolean)
-          .join(" · ");
+        const meta = sourceMeta(source, t);
         const preview = excerptPreview(source);
         const titleClass =
           "focus-visible:outline-ring rounded-ax-inner min-h-6 text-left text-[13px] leading-snug font-medium break-words focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11";

@@ -5795,6 +5795,7 @@
   "chat_header_in_space": "{assistant} i {space}",
   "chat_header_switch": "Byt assistent",
   "chat_send_offline": "Du är offline. Skicka frågan när du är uppkopplad igen.",
+  "chat_show_all_sources": "Visa alla {count} källor",
   "chat_switch_assistant_named": "Byt assistent: {name}",
   "chat_activity_tool_calls": "{count, plural, one {# verktygsanrop} other {# verktygsanrop}}",
   "chat_activity_tool_group": "{label} · {count, plural, one {# anrop} other {# anrop}}",

@@ -599,6 +599,7 @@
   "chat_header_in_space": "{assistant} in {space}",
   "chat_header_switch": "Switch assistant",
   "chat_send_offline": "You're offline. Send the question when you're back online.",
+  "chat_show_all_sources": "Show all {count} sources",
   "chat_switch_assistant_named": "Switch assistant: {name}",
   "chat_activity_tool_calls": "{count, plural, one {# tool call} other {# tool calls}}",
   "chat_activity_tool_group": "{label} · {count, plural, one {# call} other {# calls}}",
