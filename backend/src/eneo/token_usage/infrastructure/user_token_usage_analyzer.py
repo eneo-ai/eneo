@@ -7,7 +7,6 @@ from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.model_providers_table import ModelProviders
-from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.token_usage.domain.token_usage_models import (
@@ -18,6 +17,7 @@ from eneo.token_usage.domain.user_token_usage_models import (
     UserTokenUsage,
     UserTokenUsageSummary,
 )
+from eneo.token_usage.infrastructure.question_usage import question_usage_rows
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -58,22 +58,23 @@ class UserTokenUsageAnalyzer:
         Returns:
             A SQLAlchemy select query for questions token usage
         """
+        usage = question_usage_rows(tenant_id, start_date, end_date)
         query = (
             select(
                 Users.id.label("user_id"),
                 Users.username.label("username"),
                 Users.email.label("email"),
-                func.sum(Questions.num_tokens_question).label("input_tokens"),
-                func.sum(Questions.num_tokens_answer).label("output_tokens"),
-                func.count(Questions.id).label("request_count"),
+                func.sum(usage.c.num_tokens_question).label("input_tokens"),
+                func.sum(usage.c.num_tokens_answer).label("output_tokens"),
+                func.count(usage.c.id).label("request_count"),
             )
             .join(Sessions, Users.id == Sessions.user_id)
             .join(
-                Questions,
-                (Questions.session_id == Sessions.id)
-                & (Questions.tenant_id == tenant_id)
-                & (Questions.created_at >= start_date)
-                & (Questions.created_at <= end_date),
+                usage,
+                (usage.c.session_id == Sessions.id)
+                & (usage.c.tenant_id == tenant_id)
+                & (usage.c.created_at >= start_date)
+                & (usage.c.created_at <= end_date),
             )
             .where(Users.tenant_id == tenant_id)
             # Helper-assistant runs (e.g. Prompt Guide) live in the regular
@@ -410,30 +411,31 @@ class UserTokenUsageAnalyzer:
         """
 
         # Get token usage from questions (chat messages) for this user - join through sessions
+        usage = question_usage_rows(tenant_id, start_date, end_date)
         questions_query = (
             select(
-                Questions.completion_model_id.label("model_id"),
+                usage.c.completion_model_id.label("model_id"),
                 CompletionModels.name.label("model_name"),
                 CompletionModels.nickname.label("model_nickname"),
                 CompletionModels.org.label("model_org"),
                 ModelProviders.name.label("model_provider"),
-                func.sum(Questions.num_tokens_question).label("input_tokens"),
-                func.sum(Questions.num_tokens_answer).label("output_tokens"),
-                func.count(Questions.id).label("request_count"),
+                func.sum(usage.c.num_tokens_question).label("input_tokens"),
+                func.sum(usage.c.num_tokens_answer).label("output_tokens"),
+                func.count(usage.c.id).label("request_count"),
             )
-            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Sessions, usage.c.session_id == Sessions.id)
             .join(
                 CompletionModels,
-                Questions.completion_model_id == CompletionModels.id,
+                usage.c.completion_model_id == CompletionModels.id,
             )
             .outerjoin(
                 ModelProviders,
                 CompletionModels.provider_id == ModelProviders.id,
             )
-            .where(Questions.tenant_id == tenant_id)
+            .where(usage.c.tenant_id == tenant_id)
             .where(Sessions.user_id == user_id)
-            .where(Questions.created_at >= start_date)
-            .where(Questions.created_at <= end_date)
+            .where(usage.c.created_at >= start_date)
+            .where(usage.c.created_at <= end_date)
             # Exclude helper-assistant runs from per-user model breakdown too.
             .where(
                 ~exists(
@@ -443,7 +445,7 @@ class UserTokenUsageAnalyzer:
                 )
             )
             .group_by(
-                Questions.completion_model_id,
+                usage.c.completion_model_id,
                 CompletionModels.name,
                 CompletionModels.nickname,
                 CompletionModels.org,

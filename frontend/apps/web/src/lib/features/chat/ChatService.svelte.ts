@@ -28,6 +28,7 @@ import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
 import { documentDraft, type DocumentDraft } from "./documentDraft";
 import { conversationDocuments } from "./documentVersions";
 import { readPartialArguments, readPartialStringArguments } from "./partialToolArguments";
+import { awaitingToolCalls } from "./consultationApproval";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -966,6 +967,27 @@ export class ChatService {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
+              if (event.eneo_event_type === "consultation" && "consultations" in event && ref) {
+                const stored = new SvelteMap(
+                  (ref.consultations ?? []).map((item) => [item.id, item])
+                );
+                for (const consultation of event.consultations) {
+                  const previous = stored.get(consultation.id);
+                  stored.set(consultation.id, consultation);
+                  const awaiting = awaitingToolCalls(consultation);
+                  if (awaiting.length > 0 && consultation.approval_id) {
+                    this.pendingToolApproval = {
+                      approvalId: consultation.approval_id,
+                      tools: awaiting
+                    };
+                  } else if (previous?.approval_id === this.pendingToolApproval?.approvalId) {
+                    this.pendingToolApproval = null;
+                  }
+                }
+                ref.consultations = [...stored.values()].sort((a, b) => a.ordinal - b.ordinal);
+                return;
+              }
+
               if (event.eneo_event_type === "token_usage" && "usage" in event) {
                 // Reflect token usage on the live message so reload-from-history
                 // matches the in-memory state, then expose the running context
@@ -1151,8 +1173,15 @@ export class ChatService {
           // refresh. Falling through to reloadHistory() (below) syncs the sidebar with
           // the now-persisted state instead of leaving the new session invisible until
           // a manual reload.
-        } else if (ref && error instanceof EneoError && !ref.answer) {
-          // If streaming started but no content arrived yet, remove the empty message
+        } else if (
+          ref &&
+          error instanceof EneoError &&
+          !ref.answer &&
+          (ref.consultations?.length ?? 0) === 0
+        ) {
+          // If streaming started but no content arrived yet, remove the empty
+          // message. Specialist steps count as content: an orchestrated turn
+          // that fails before its synthesis keeps them, with the notice below.
           this.currentConversation.messages.pop();
           this.#clearDiagnosticsPending(ref.id);
           console.error(error);
@@ -1171,8 +1200,15 @@ export class ChatService {
             }
           }
 
-          this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
-            message;
+          // An orchestrated turn that stopped on a limit or an access change
+          // has already shown its synthesis and specialist steps; the notice
+          // joins that answer instead of replacing it.
+          const failed =
+            this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+          failed.answer =
+            (failed.consultations?.length ?? 0) > 0 && failed.answer
+              ? `${failed.answer}\n\n${message}`
+              : message;
           console.error(error);
         }
       } finally {

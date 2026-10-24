@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
@@ -110,8 +111,6 @@ class InfoBlobChunkRepo:
         # Reference: https://github.com/pgvector/pgvector/issues/662
         # TODO: Solve this issue in a more elegant way.
 
-        await self.session.execute(sa.text("SET LOCAL enable_seqscan = off;"))
-
         stmt = (
             sa.select(
                 InfoBlobChunks,
@@ -134,19 +133,23 @@ class InfoBlobChunkRepo:
             info_blob_ids=info_blob_ids or [],
         )
 
-        chunks_in_db = await self.session.execute(stmt)
+        async with (
+            nullcontext() if self.session.in_transaction() else self.session.begin()
+        ):
+            await self.session.execute(sa.text("SET LOCAL enable_seqscan = off;"))
+            chunks_in_db = await self.session.execute(stmt)
 
-        chunks_with_score = [
-            InfoBlobChunkInDBWithScore(
-                **chunk[0].to_dict(exclude="embedding"),
-                score=1 - chunk[1],
-                info_blob_title=chunk[2],
-                info_blob_source_metadata=chunk[3] or [],
-            )
-            for chunk in chunks_in_db
-        ]
+            chunks_with_score = [
+                InfoBlobChunkInDBWithScore(
+                    **chunk[0].to_dict(exclude="embedding"),
+                    score=1 - chunk[1],
+                    info_blob_title=chunk[2],
+                    info_blob_source_metadata=chunk[3] or [],
+                )
+                for chunk in chunks_in_db
+            ]
 
-        return chunks_with_score
+            return chunks_with_score
 
     async def sample_evenly(
         self,

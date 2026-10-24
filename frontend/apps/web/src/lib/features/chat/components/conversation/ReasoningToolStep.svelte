@@ -7,10 +7,9 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Check, X, LoaderCircle, ChevronRight, RotateCcw } from "@lucide/svelte";
+  import { Check, X, LoaderCircle, ChevronRight, RotateCcw, Hourglass } from "@lucide/svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
-
-  type Status = "preparing" | "running" | "complete" | "failed" | "denied";
+  import type { ToolStepStatus as Status } from "../../toolStepStatus";
 
   let {
     toolName,
@@ -62,6 +61,11 @@
             badge: "bg-accent-dimmer text-accent-default",
             label: m.chat_tool_status_preparing()
           },
+          awaiting: {
+            ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
+            badge: "bg-accent-dimmer text-accent-default",
+            label: m.group_consultation_approval()
+          },
           running: {
             ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
             badge: "bg-accent-dimmer text-accent-default",
@@ -99,6 +103,8 @@
     <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border {ui.ring}">
       {#if isPreviousAttempt}
         <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+      {:else if status === "awaiting"}
+        <Hourglass class="h-3.5 w-3.5" />
       {:else if status === "running" || status === "preparing"}
         <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
       {:else if status === "complete"}

@@ -13,7 +13,11 @@ from pydantic import (
     model_validator,
 )
 
-from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.ai_models.completion_models.completion_model import (
+    AssistantConsultation,
+    CompletionModel,
+    TokenUsage,
+)
 from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
@@ -178,6 +182,89 @@ class ToolCallInfo(BaseModel):
     app_view: Optional[dict[str, Any]] = None
 
 
+class ConsultationToolCall(ToolCallInfo):
+    """A stored step has a server identity independent of provider approval IDs."""
+
+    step_id: UUID
+
+
+class ConsultationInfo(BaseModel):
+    """Version-one consultation history, owned by its parent question."""
+
+    schema_version: Literal[1] = 1
+    id: UUID
+    ordinal: int
+    assistant_id: UUID
+    assistant_name: str
+    question: str
+    status: Literal[
+        "running",
+        "awaiting_approval",
+        "complete",
+        "denied",
+        "timeout",
+        "cancelled",
+        "incomplete",
+        "failed",
+    ]
+    answer: str
+    tool_calls: list[ConsultationToolCall] = Field(
+        default_factory=list[ConsultationToolCall]
+    )
+    references: list[McpToolReferencePublic] = Field(
+        default_factory=list[McpToolReferencePublic]
+    )
+    usage: TokenUsage | None = None
+    approval_id: str | None = None
+    awaiting_tool_call_ids: list[str] = Field(default_factory=list[str])
+    completion_model_id: UUID | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+    @classmethod
+    def from_execution(cls, consultation: AssistantConsultation) -> "ConsultationInfo":
+        return cls(
+            id=consultation.id,
+            ordinal=consultation.ordinal,
+            assistant_id=consultation.assistant_id,
+            assistant_name=consultation.assistant_name,
+            question=consultation.question,
+            status=consultation.status,
+            answer=consultation.answer,
+            tool_calls=[
+                ConsultationToolCall(
+                    **ToolCallInfo.model_validate(
+                        step, from_attributes=True
+                    ).model_dump(),
+                    step_id=step_id,
+                )
+                for step_id, step in zip(
+                    consultation.step_ids, consultation.tool_calls, strict=True
+                )
+            ],
+            references=[
+                McpToolReferencePublic.model_validate(ref, from_attributes=True)
+                for ref in consultation.references
+            ],
+            usage=consultation.usage,
+            approval_id=consultation.approval_id,
+            awaiting_tool_call_ids=list(consultation.awaiting_tool_call_ids),
+            completion_model_id=consultation.completion_model_id,
+            input_tokens=consultation.input_tokens,
+            output_tokens=consultation.output_tokens,
+        )
+
+    def public(self) -> "ConsultationInfo":
+        return self.model_copy(
+            update={
+                "tool_calls": [
+                    step.model_copy(update={"result": None, "structured_content": None})
+                    for step in self.tool_calls
+                ]
+            }
+        )
+
+
 class QuestionAdd(QuestionBase):
     num_tokens_question: int
     num_tokens_answer: int
@@ -191,6 +278,7 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    consultations: list[ConsultationInfo] | None = None
     skill_provenance: Optional[list[SkillExecutionReference]] = None
     skill_activation: Optional[SkillActivationEvidenceV1] = None
     # Model reasoning/thinking text captured during streaming. Persisted so the
@@ -244,6 +332,9 @@ class Message(QuestionBase, InDB):
     generated_files: list[FilePublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
+    consultations: list[ConsultationInfo] = Field(
+        default_factory=list[ConsultationInfo]
+    )
     skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
     feedback: Optional[MessageFeedback] = Field(

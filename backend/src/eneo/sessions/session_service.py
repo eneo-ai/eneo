@@ -22,7 +22,12 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
+from eneo.questions.question import (
+    ConsultationInfo,
+    MessageFeedback,
+    QuestionAdd,
+    ToolCallInfo,
+)
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session import (
     SessionAdd,
@@ -86,12 +91,14 @@ async def persist_partial_question_answer(
     question_id: UUID,
     answer: str,
     num_tokens_answer: int,
+    num_tokens_question: int | None = None,
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
     skill_activation: SkillActivationEvidenceV1 | None = None,
     generated_files: Sequence[File] | None = None,
     tool_calls: list[ToolCallInfo] | None = None,
+    consultations: list[ConsultationInfo] | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
@@ -112,12 +119,14 @@ async def persist_partial_question_answer(
                 tenant_id=tenant_id,
                 answer=answer,
                 num_tokens_answer=num_tokens_answer,
+                num_tokens_question=num_tokens_question,
                 completion_model_id=completion_model_id,
                 reasoning=reasoning,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
                 generated_files=list(generated_files) if generated_files else None,
                 tool_calls=tool_calls or None,
+                consultations=consultations,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
@@ -289,6 +298,10 @@ class SessionService:
             for tc in question.tool_calls or []:
                 if tc.tool_call_id and tc.tool_call_id == tool_call_id:
                     return tc
+            for consultation in question.consultations or []:
+                for step in consultation.tool_calls:
+                    if str(step.step_id) == tool_call_id:
+                        return step
         return None
 
     async def get_sessions_by_assistant(
@@ -482,6 +495,16 @@ class SessionService:
                 self._question_repository(db_session), question_add, files
             )
 
+    async def record_consultations(
+        self, question_id: UUID, consultations: Sequence[ConsultationInfo]
+    ) -> None:
+        async with self._write_transaction():
+            await self.question_repo.update_consultations(
+                question_id=question_id,
+                tenant_id=self.user.tenant_id,
+                consultations=consultations,
+            )
+
     async def complete_question_with_answer(
         self,
         *,
@@ -497,6 +520,7 @@ class SessionService:
         generated_files: Sequence[File] | None = None,
         logging_details: LoggingDetails | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
+        consultations: list[ConsultationInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
@@ -516,6 +540,7 @@ class SessionService:
                 skill_context_tokens=skill_context_tokens,
                 completion_model_id=completion_model_id,
                 tool_calls=tool_calls,
+                consultations=consultations,
                 reasoning=reasoning,
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,

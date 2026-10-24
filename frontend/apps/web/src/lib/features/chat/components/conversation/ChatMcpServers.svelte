@@ -50,6 +50,8 @@
     internalServers?: InternalMcpServer[];
     /** Whether the partner's model can call tools at all; false renders every row unavailable. */
     modelSupportsTools?: boolean;
+    /** Specialist tools use the same approval preference without exposing their catalogue. */
+    delegatedTools?: boolean;
     /** Server ids the user has switched off for this conversation (mutated in place). */
     disabledServerIds: SvelteSet<string>;
     /** Called after the user changes the external server selection. */
@@ -63,6 +65,7 @@
     capabilityServers = [],
     internalServers = [],
     modelSupportsTools = true,
+    delegatedTools = false,
     disabledServerIds,
     onSelectionChange,
     autoAcceptTools = $bindable()
@@ -260,7 +263,7 @@
       </div>
     {/if}
 
-    {#if modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)}
+    {#if (modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)) || delegatedTools}
       <Separator />
 
       <div class="p-1">
@@ -274,6 +277,9 @@
             >
             <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
               {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+              {#if delegatedTools}
+                {m.assistant_delegated_tools()}
+              {/if}
             </span>
           </span>
           <Switch

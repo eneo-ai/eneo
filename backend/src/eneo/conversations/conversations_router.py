@@ -89,6 +89,7 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionPublic,
     SessionUpdate,
+    SSEConsultation,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -344,6 +345,7 @@ async def _authorize_partner_access(
             SSETokenUsage,
             SSEFirstChunk,
             SSEError,
+            SSEConsultation,
         ],
     ),
 )
@@ -391,15 +393,6 @@ async def chat(
             detail={
                 "code": "invalid_request",
                 "message": "Tool approval requires streaming mode. Set stream=true or remove require_tool_approval.",
-            },
-        )
-
-    if request.require_tool_approval and request.group_chat_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "not_supported",
-                "message": "Tool approval is not supported for group chats.",
             },
         )
 

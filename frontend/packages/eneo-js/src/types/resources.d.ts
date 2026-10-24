@@ -266,6 +266,7 @@ export namespace SSE {
       result_status?: string;
     }>;
   };
+  export type Consultation = Omit<components["schemas"]["SSEConsultation"], "$defs">;
   export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
   export type Event =
@@ -277,6 +278,7 @@ export namespace SSE {
     | ToolApprovalRequired
     | ToolApprovalTimeout
     | TokenUsage
+    | Consultation
     | Error;
 }
 

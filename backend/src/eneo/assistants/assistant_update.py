@@ -35,6 +35,8 @@ class AssistantUpdate:
     enabled_capabilities: list[CapabilityPurpose] | None = None
     mcp_server_ids: list[UUID] | None = None
     mcp_tools: list[tuple[UUID, bool]] | None = None
+    # specialist id -> description for the orchestrator (None: its own)
+    specialists: dict[UUID, str | None] | None = None
 
     def scalar_values(self) -> dict[str, object]:
         values: dict[str, object] = {

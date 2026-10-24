@@ -142,6 +142,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -249,6 +250,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     assistant_id = uuid4()
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -335,6 +337,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -436,6 +439,7 @@ async def test_ask_applies_governed_file_policy_to_personal_assistant(
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -521,6 +525,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     server_b = SimpleNamespace(id=uuid4(), name="Confluence", purpose=None)
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -798,6 +803,7 @@ async def test_get_assistant_with_effective_config_enforces_read_auth():
     from eneo.main.exceptions import UnauthorizedException
 
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.is_default = False
     assistant.completion_model = TEST_MODEL_CHATGPT
 
@@ -822,6 +828,7 @@ async def test_get_assistant_with_effective_config_allows_personal_default_for_b
     # A PERSONAL_CHAT-only user (no ASSISTANTS permission) can read their own
     # personal default assistant via the carve-out.
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = uuid4()
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
@@ -895,6 +902,7 @@ def _runtime_service(
     effective_config: SimpleNamespace | None = None,
 ):
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = uuid4()
     assistant.name = "Assistant"
     assistant.description = None
@@ -1365,6 +1373,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
     )
     session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
     assistant = MagicMock()
+    assistant.specialists = []
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None

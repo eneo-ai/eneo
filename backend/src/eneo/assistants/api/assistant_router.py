@@ -754,6 +754,13 @@ async def update_assistant(
     if "rerank_model_id" in request_dict:
         rerank_model_id = assistant.rerank_model_id
 
+    specialists = None
+    if assistant.specialists is not None:
+        specialists = [
+            (specialist.id, specialist.user_description)
+            for specialist in assistant.specialists
+        ]
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -768,6 +775,7 @@ async def update_assistant(
         mcp_server_ids=mcp_server_ids,
         enabled_capabilities=assistant.enabled_capabilities,
         mcp_tools=mcp_tool_settings,
+        specialists=specialists,
         description=description,
         insight_enabled=assistant.insight_enabled,
         inline_file_text=assistant.inline_file_text,

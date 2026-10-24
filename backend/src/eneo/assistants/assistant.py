@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
@@ -55,6 +56,20 @@ UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to acces
 _KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
 
 
+@dataclass(frozen=True)
+class AssistantSpecialist:
+    """An assistant this one may consult, with what to consult it for."""
+
+    id: UUID
+    name: str
+    default_description: str | None
+    user_description: str | None
+
+    @property
+    def description(self) -> str:
+        return self.user_description or self.default_description or ""
+
+
 class Assistant(Entity):
     def __init__(
         self,
@@ -89,6 +104,7 @@ class Assistant(Entity):
         attachment_inline_text: Mapping[UUID, bool] | None = None,
         document_template: DocumentTemplateChoice | None = None,
         rerank_model_id: Optional[UUID] = None,
+        specialists: list[AssistantSpecialist] | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -115,6 +131,7 @@ class Assistant(Entity):
         self.published = published
         self.is_default = is_default
         self.tool_assistants = tool_assistants or []
+        self.specialists = specialists or []
         self.description = description
         self.insight_enabled = insight_enabled
         self.inline_file_text = inline_file_text
@@ -394,6 +411,18 @@ class Assistant(Entity):
             "Knowledge sources:\n" + "\n".join(lines)
         )
 
+    @property
+    def specialist_ids(self) -> set[UUID]:
+        return {specialist.id for specialist in self.specialists}
+
+    @property
+    def orchestrates(self) -> bool:
+        """Consults specialists when asked: it has some and its model can call tools."""
+        return bool(self.specialists) and (
+            self.completion_model is not None
+            and self.completion_model.supports_tool_calling
+        )
+
     def update(
         self,
         name: str | None = None,
@@ -416,9 +445,15 @@ class Assistant(Entity):
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        specialists: list[AssistantSpecialist] | None = None,
     ):
         if name is not None:
             self.name = name
+
+        if specialists is not None:
+            if any(specialist.id == self.id for specialist in specialists):
+                raise BadRequestException("An assistant cannot be its own specialist.")
+            self.specialists = specialists
 
         if prompt is not None:
             self.prompt = prompt

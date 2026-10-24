@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from contextlib import aclosing
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
@@ -16,8 +17,10 @@ from eneo.info_blobs.info_blob import (
     InfoBlobAskAssistantPublic,
     InfoBlobMetadata,
 )
+from eneo.main.exceptions import OpenAIException
 from eneo.main.logging import get_logger
 from eneo.questions.question import (
+    ConsultationInfo,
     McpToolReferencePublic,
     UseTools,
 )
@@ -25,6 +28,7 @@ from eneo.sessions.session import (
     AskChatResponse,
     AskResponse,
     SessionInDB,
+    SSEConsultation,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -193,7 +197,15 @@ def to_ask_conversation_response(
 
 
 def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
-    if chunk.response_type == ResponseType.TEXT:
+    if chunk.response_type == ResponseType.CONSULTATION:
+        data = SSEConsultation(
+            session_id=session_id,
+            consultations=[
+                ConsultationInfo.from_execution(item).public()
+                for item in chunk.consultations or []
+            ],
+        )
+    elif chunk.response_type == ResponseType.TEXT:
         data = SSEText(
             session_id=session_id,
             answer=chunk.text or "",
@@ -444,13 +456,45 @@ async def to_conversation_response(
             )
 
             assert not isinstance(response.answer, str)
-            async for chunk in response.answer:
-                yield to_sse_response(chunk=chunk, session_id=response.session.id)
+            async with aclosing(response.answer):
+                async for chunk in response.answer:
+                    yield to_sse_response(chunk=chunk, session_id=response.session.id)
 
         return EventSourceResponse(event_stream(), ping=15)
 
-    assert isinstance(response.answer, str)
-    return to_ask_conversation_response(
+    consultations: dict["UUID", ConsultationInfo] = {}
+    references: dict["UUID", InfoBlobAskAssistantPublic] = {}
+    if not isinstance(response.answer, str):
+        answer_parts: list[str] = []
+        async with aclosing(response.answer):
+            async for chunk in response.answer:
+                if chunk.response_type == ResponseType.ERROR:
+                    raise OpenAIException(
+                        chunk.error or "The assistant execution failed.",
+                        code=chunk.error_reason or "assistant_execution_failed",
+                    )
+                if chunk.response_type == ResponseType.TEXT:
+                    answer_parts.append(chunk.text or "")
+                    for blob in chunk.reference_chunks or []:
+                        public = InfoBlobAskAssistantPublic(
+                            **blob.model_dump(),
+                            metadata=InfoBlobMetadata(**blob.model_dump()),
+                        )
+                        references[public.id] = public
+                if chunk.generated_file is not None:
+                    response.generated_files.append(chunk.generated_file)
+                for reference in chunk.mcp_tool_references or []:
+                    if all(
+                        ref.id != reference.id for ref in response.mcp_tool_references
+                    ):
+                        response.mcp_tool_references.append(reference)
+                for consultation in chunk.consultations or []:
+                    consultations[consultation.id] = ConsultationInfo.from_execution(
+                        consultation
+                    ).public()
+        response.answer = "".join(answer_parts)
+
+    public_response = to_ask_conversation_response(
         question=response.question,
         files=response.files,
         session=response.session,
@@ -465,3 +509,7 @@ async def to_conversation_response(
         mcp_tool_references=response.mcp_tool_references,
         generated_files=response.generated_files,
     )
+    public_response.consultations = list(consultations.values())
+    if references:
+        public_response.references = list(references.values())
+    return public_response

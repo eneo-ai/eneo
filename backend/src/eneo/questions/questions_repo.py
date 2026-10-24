@@ -26,7 +26,7 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
-from eneo.questions.question import Question, QuestionAdd
+from eneo.questions.question import ConsultationInfo, Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
@@ -67,6 +67,22 @@ class QuestionRepository:
         )
         self.session = session
         self.file_content_loader = file_content_loader
+
+    async def update_consultations(
+        self,
+        *,
+        question_id: UUID,
+        tenant_id: UUID,
+        consultations: Sequence[ConsultationInfo],
+    ) -> None:
+        """Record specialist progress without replacing the parent answer."""
+        await self.session.execute(
+            sa.update(Questions)
+            .where(Questions.id == question_id, Questions.tenant_id == tenant_id)
+            .values(
+                consultations=[item.model_dump(mode="json") for item in consultations]
+            )
+        )
 
     async def _hydrate_questions(
         self,
@@ -298,6 +314,7 @@ class QuestionRepository:
         skill_context_tokens: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
+        consultations: list[ConsultationInfo] | None = None,
         reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
@@ -342,6 +359,10 @@ class QuestionRepository:
             # JSON mode: the column is JSONB and the records carry UUIDs.
             update_values["tool_calls"] = [
                 tc.model_dump(mode="json") for tc in tool_calls
+            ]
+        if consultations is not None:
+            update_values["consultations"] = [
+                item.model_dump(mode="json") for item in consultations
             ]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
@@ -448,6 +469,10 @@ class QuestionRepository:
             question_values["tool_calls"] = question.model_dump(
                 mode="json", include={"tool_calls"}
             )["tool_calls"]
+        if question.consultations is not None:
+            question_values["consultations"] = question.model_dump(
+                mode="json", include={"consultations"}
+            )["consultations"]
         question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")
             if question.skill_activation is not None

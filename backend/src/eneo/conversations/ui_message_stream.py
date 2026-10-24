@@ -24,13 +24,13 @@ backend/tests/fixtures/ui_message_stream/ are asserted by both test suites.
 
 import json
 import time
-from typing import TYPE_CHECKING, Any, AsyncIterable, Optional
+from contextlib import aclosing
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import uuid4
 
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from eneo.ai_models.completion_models.completion_model import (
-    Completion,
     CompletionModelPublic,
     ResponseType,
 )
@@ -39,6 +39,7 @@ from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.files.file_models import ContentDisposition, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic, InfoBlobMetadata
 from eneo.main.logging import get_logger
+from eneo.questions.question import ConsultationInfo
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import ToolCallMetadata
@@ -280,7 +281,7 @@ def _mcp_tool_references_chunk(references: list[Any]) -> dict[str, Any] | None:
 
 async def _ui_message_chunks(
     response: "AssistantResponse", base_url: str
-) -> AsyncIterable[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     yield {"type": "start", "messageId": str(response.question_id or uuid4())}
 
     model = _model_public(response.completion_model)
@@ -343,148 +344,163 @@ async def _ui_message_chunks(
     pending_approvals: dict[str, list[str]] = {}
 
     assert not isinstance(response.answer, str)
-    completion_stream: AsyncIterable[Completion] = response.answer
-    async for completion in completion_stream:
-        response_type = completion.response_type
+    async with aclosing(response.answer):
+        async for completion in response.answer:
+            response_type = completion.response_type
 
-        if response_type == ResponseType.REASONING:
-            if text_id is not None:
-                yield {"type": "text-end", "id": text_id}
-                text_id = None
-            delta = _part_delta(
-                completion.reasoning_content,
-                starts_later_part=not reasoning_open and reasoning_index > 0,
-            )
-            if delta:
-                if not reasoning_open:
-                    reasoning_id = f"reasoning-{reasoning_index}"
-                    reasoning_index += 1
-                    reasoning_open = True
-                    yield {"type": "reasoning-start", "id": reasoning_id}
-                yield {"type": "reasoning-delta", "id": reasoning_id, "delta": delta}
+            if response_type == ResponseType.REASONING:
+                if text_id is not None:
+                    yield {"type": "text-end", "id": text_id}
+                    text_id = None
+                delta = _part_delta(
+                    completion.reasoning_content,
+                    starts_later_part=not reasoning_open and reasoning_index > 0,
+                )
+                if delta:
+                    if not reasoning_open:
+                        reasoning_id = f"reasoning-{reasoning_index}"
+                        reasoning_index += 1
+                        reasoning_open = True
+                        yield {"type": "reasoning-start", "id": reasoning_id}
+                    yield {
+                        "type": "reasoning-delta",
+                        "id": reasoning_id,
+                        "delta": delta,
+                    }
 
-        elif response_type == ResponseType.TEXT:
-            # Reasoning always precedes the answer; close it before text opens.
-            if reasoning_open and reasoning_id is not None:
-                yield {"type": "reasoning-end", "id": reasoning_id}
-                reasoning_open = False
-            delta = _part_delta(
-                completion.text,
-                starts_later_part=text_id is None and text_index > 0,
-            )
-            if delta:
-                if text_id is None:
-                    text_id = f"text-{text_index}"
-                    text_index += 1
-                    yield {"type": "text-start", "id": text_id}
-                yield {"type": "text-delta", "id": text_id, "delta": delta}
-            for blob in completion.reference_chunks or []:
-                chunk_dict = _source_document_chunk(blob)
-                if chunk_dict["sourceId"] not in seen_source_ids:
-                    seen_source_ids.add(chunk_dict["sourceId"])
+            elif response_type == ResponseType.TEXT:
+                # Reasoning always precedes the answer; close it before text opens.
+                if reasoning_open and reasoning_id is not None:
+                    yield {"type": "reasoning-end", "id": reasoning_id}
+                    reasoning_open = False
+                delta = _part_delta(
+                    completion.text,
+                    starts_later_part=text_id is None and text_index > 0,
+                )
+                if delta:
+                    if text_id is None:
+                        text_id = f"text-{text_index}"
+                        text_index += 1
+                        yield {"type": "text-start", "id": text_id}
+                    yield {"type": "text-delta", "id": text_id, "delta": delta}
+                for blob in completion.reference_chunks or []:
+                    chunk_dict = _source_document_chunk(blob)
+                    if chunk_dict["sourceId"] not in seen_source_ids:
+                        seen_source_ids.add(chunk_dict["sourceId"])
+                        yield chunk_dict
+
+            elif response_type == ResponseType.FILES:
+                assert completion.generated_file is not None
+                yield _generated_file_chunk(
+                    completion.generated_file,
+                    base_url,
+                    tool_call_id=(
+                        completion.image.tool_call_id if completion.image else None
+                    ),
+                )
+
+            elif response_type == ResponseType.CONSULTATION:
+                for consultation in completion.consultations or []:
+                    yield {
+                        "type": "data-consultation",
+                        "id": str(consultation.id),
+                        "data": ConsultationInfo.from_execution(consultation)
+                        .public()
+                        .model_dump(mode="json"),
+                    }
+            elif response_type == ResponseType.TOOL_CALL:
+                tools = list(completion.tool_calls_metadata or [])
+                # A decided approval resolves its pending part before the calls
+                # it covers move on (run, or fail as denied).
+                for chunk_dict in _approval_decision_chunks(pending_approvals, tools):
+                    yield chunk_dict
+                reference_chunk = _mcp_tool_references_chunk(
+                    list(completion.mcp_tool_references or [])
+                )
+                if reference_chunk is not None:
+                    yield reference_chunk
+                for chunk_dict in _tool_chunks(tools, tool_fallback_ids):
+                    # Tool snapshots repeat; emit each (id, phase) transition once.
+                    call_id = chunk_dict["toolCallId"]
+                    key = f"{call_id}:{chunk_dict['type']}"
+                    if key in emitted_tool_chunks:
+                        continue
+                    if (
+                        chunk_dict["type"] == "tool-input-start"
+                        and f"{call_id}:tool-input-available" in emitted_tool_chunks
+                    ):
+                        # Restarting would send a known input back to streaming.
+                        continue
+                    emitted_tool_chunks.add(key)
+                    if chunk_dict["type"] == "tool-input-start":
+                        streaming_inputs.add(call_id)
+                    elif chunk_dict["type"] == "tool-input-available":
+                        streaming_inputs.discard(call_id)
                     yield chunk_dict
 
-        elif response_type == ResponseType.FILES:
-            assert completion.generated_file is not None
-            yield _generated_file_chunk(
-                completion.generated_file,
-                base_url,
-                tool_call_id=(
-                    completion.image.tool_call_id if completion.image else None
-                ),
-            )
-
-        elif response_type == ResponseType.TOOL_CALL:
-            tools = list(completion.tool_calls_metadata or [])
-            # A decided approval resolves its pending part before the calls
-            # it covers move on (run, or fail as denied).
-            for chunk_dict in _approval_decision_chunks(pending_approvals, tools):
-                yield chunk_dict
-            reference_chunk = _mcp_tool_references_chunk(
-                list(completion.mcp_tool_references or [])
-            )
-            if reference_chunk is not None:
-                yield reference_chunk
-            for chunk_dict in _tool_chunks(tools, tool_fallback_ids):
-                # Tool snapshots repeat; emit each (id, phase) transition once.
-                call_id = chunk_dict["toolCallId"]
-                key = f"{call_id}:{chunk_dict['type']}"
-                if key in emitted_tool_chunks:
-                    continue
-                if (
-                    chunk_dict["type"] == "tool-input-start"
-                    and f"{call_id}:tool-input-available" in emitted_tool_chunks
+            elif response_type == ResponseType.TOOL_CALL_DELTA:
+                # The argument text of an announced call as the model writes it.
+                # Only a started call whose input is not yet known takes deltas:
+                # the SDK rejects a delta for a call it has not seen start, and
+                # the complete arguments of `tool-input-available` supersede them.
+                if completion.tool_call_id in streaming_inputs and (
+                    completion.arguments_delta
                 ):
-                    # Restarting would send a known input back to streaming.
-                    continue
-                emitted_tool_chunks.add(key)
-                if chunk_dict["type"] == "tool-input-start":
-                    streaming_inputs.add(call_id)
-                elif chunk_dict["type"] == "tool-input-available":
-                    streaming_inputs.discard(call_id)
-                yield chunk_dict
+                    yield {
+                        "type": "tool-input-delta",
+                        "toolCallId": completion.tool_call_id,
+                        "inputTextDelta": completion.arguments_delta,
+                    }
 
-        elif response_type == ResponseType.TOOL_CALL_DELTA:
-            # The argument text of an announced call as the model writes it.
-            # Only a started call whose input is not yet known takes deltas:
-            # the SDK rejects a delta for a call it has not seen start, and
-            # the complete arguments of `tool-input-available` supersede them.
-            if completion.tool_call_id in streaming_inputs and (
-                completion.arguments_delta
-            ):
+            elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                assert completion.approval_id is not None
+                tools = list(completion.tool_calls_metadata or [])
+                pending_approvals[completion.approval_id] = [
+                    tool.tool_call_id for tool in tools if tool.tool_call_id
+                ]
+                yield _tool_approval_chunk(
+                    approval_id=completion.approval_id, tools=tools, status="pending"
+                )
+
+            elif response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
+                assert completion.approval_id is not None
+                pending_approvals.pop(completion.approval_id, None)
+                yield _tool_approval_chunk(
+                    approval_id=completion.approval_id,
+                    tools=list(completion.tool_calls_metadata or []),
+                    status="timeout_denied",
+                )
+
+            elif response_type == ResponseType.TOKEN_USAGE:
+                prompt = completion.usage.prompt_tokens or 0 if completion.usage else 0
+                generated = (
+                    completion.usage.completion_tokens or 0 if completion.usage else 0
+                )
                 yield {
-                    "type": "tool-input-delta",
-                    "toolCallId": completion.tool_call_id,
-                    "inputTextDelta": completion.arguments_delta,
+                    "type": "data-token-usage",
+                    "data": {
+                        "prompt_tokens": prompt,
+                        "completion_tokens": generated,
+                        "turn_tokens": prompt + generated,
+                    },
+                    "transient": True,
                 }
 
-        elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
-            assert completion.approval_id is not None
-            tools = list(completion.tool_calls_metadata or [])
-            pending_approvals[completion.approval_id] = [
-                tool.tool_call_id for tool in tools if tool.tool_call_id
-            ]
-            yield _tool_approval_chunk(
-                approval_id=completion.approval_id, tools=tools, status="pending"
-            )
+            elif response_type == ResponseType.ERROR:
+                yield {
+                    "type": "data-error",
+                    "data": {"code": completion.error_code},
+                    "transient": True,
+                }
+                yield {"type": "error", "errorText": completion.error or ""}
 
-        elif response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
-            assert completion.approval_id is not None
-            pending_approvals.pop(completion.approval_id, None)
-            yield _tool_approval_chunk(
-                approval_id=completion.approval_id,
-                tools=list(completion.tool_calls_metadata or []),
-                status="timeout_denied",
-            )
-
-        elif response_type == ResponseType.TOKEN_USAGE:
-            prompt = completion.usage.prompt_tokens or 0 if completion.usage else 0
-            generated = (
-                completion.usage.completion_tokens or 0 if completion.usage else 0
-            )
-            yield {
-                "type": "data-token-usage",
-                "data": {
-                    "prompt_tokens": prompt,
-                    "completion_tokens": generated,
-                    "turn_tokens": prompt + generated,
-                },
-                "transient": True,
-            }
-
-        elif response_type == ResponseType.ERROR:
-            yield {
-                "type": "data-error",
-                "data": {"code": completion.error_code},
-                "transient": True,
-            }
-            yield {"type": "error", "errorText": completion.error or ""}
-
-        else:
-            logger.warning(
-                "Unsupported response type in v3 stream",
-                extra={"response_type": response_type.value if response_type else None},
-            )
+            else:
+                logger.warning(
+                    "Unsupported response type in v3 stream",
+                    extra={
+                        "response_type": response_type.value if response_type else None
+                    },
+                )
 
     if reasoning_open and reasoning_id is not None:
         yield {"type": "reasoning-end", "id": reasoning_id}
@@ -499,8 +515,9 @@ def to_ui_message_stream_response(
     """version=3 streaming response: AI SDK UI Message Stream over SSE."""
 
     async def event_stream():
-        async for chunk in _ui_message_chunks(response, base_url):
-            yield _event(chunk)
+        async with aclosing(_ui_message_chunks(response, base_url)) as chunks:
+            async for chunk in chunks:
+                yield _event(chunk)
         yield ServerSentEvent("[DONE]")
 
     return EventSourceResponse(

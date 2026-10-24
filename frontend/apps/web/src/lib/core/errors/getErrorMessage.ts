@@ -132,7 +132,13 @@ const ANSWER_FAILURE_MESSAGES: Record<string, () => string> = {
 export function getAnswerFailureMessage(error: unknown): string | undefined {
   if (!(error instanceof EneoError)) return undefined;
   const reason = error.response?.code;
-  return typeof reason === "string" ? ANSWER_FAILURE_MESSAGES[reason]?.() : undefined;
+  if (typeof reason !== "string") return undefined;
+  // An orchestrated group chat names the exhausted limit after the prefix
+  // (`execution_limit_duration`, `execution_limit_model_requests`, ...); the
+  // user needs the same instruction whichever limit it was.
+  if (reason.startsWith("execution_limit_")) return m.chat_answer_failed_execution_limit();
+  if (reason === "assistant_access_changed") return m.chat_answer_failed_access_changed();
+  return ANSWER_FAILURE_MESSAGES[reason]?.();
 }
 
 /**

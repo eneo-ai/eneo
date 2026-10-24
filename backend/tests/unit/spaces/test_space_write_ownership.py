@@ -23,6 +23,7 @@ from eneo.database.tables.assistant_table import (
     Assistants,
     AssistantsFiles,
     AssistantsGroups,
+    AssistantSpecialists,
     AssistantsWebsites,
 )
 from eneo.database.tables.capabilities_table import (
@@ -87,6 +88,7 @@ def persisted():
         AssistantIntegrationKnowledge,
         AssistantMCPServers,
         AssistantMCPServerTools,
+        AssistantSpecialists,
         AssistantCapabilities,
         AssistantDocumentTemplates,
         GroupChatsTable,
