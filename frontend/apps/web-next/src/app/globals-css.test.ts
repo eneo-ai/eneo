@@ -168,6 +168,11 @@ describe("globals.css", () => {
       "padding-bottom": "env(safe-area-inset-bottom, 0px)",
       "padding-inline-start": "env(safe-area-inset-left, 0px)"
     });
+    // A PageBar's title is hidden until the page scrolls it in.
+    expect(components.get(".page-bar-title")).toMatchObject({
+      opacity: "0",
+      "animation-timeline": "scroll(nearest block)"
+    });
   });
 
   it("marks what is selected, current or highlighted with Highlight in forced colours", () => {

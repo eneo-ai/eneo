@@ -9,10 +9,9 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
-import { isAdminRoute, isChatRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
+import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
 import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 
@@ -26,18 +25,26 @@ const ShellCommandPalette = dynamic(() => import("./command-palette"), { ssr: fa
 const MOBILE_QUERY = "(width < 64rem)";
 
 /**
- * The app frame: skip link (first tab stop), the SideNav (from 1024 px) or the
- * top bar + drawer (phones and iPads held upright), and the page panel `main#main-content` that pages
- * scroll inside. Also hosts the ⌘K palette and the "Skapa yta" dialog.
+ * The app frame: skip link (first tab stop), the SideNav (from 1024 px) or
+ * the top bar + drawer (phones and iPads held upright), and the page panel
+ * `main#main-content` that pages scroll inside. Also hosts the ⌘K palette
+ * and the "Skapa yta" dialog.
  *
  * Not Astryx AppShell: it fixes its own main landmark id and skip link, and
  * web-next's contract is `main#main-content` (ACCESSIBILITY.md rule 1,
  * tests/a11y.spec.ts). Its parts (SideNav, MobileNav, MobileNavToggle and the
  * AppShell mobile context they share) are used as they are.
  *
- * Contract with the chat: its header replaces the phone top bar while it is
- * mounted (`useOwnMobileHeader()`) and opens the drawer by dispatching
- * `OPEN_NAV_EVENT` on the window.
+ * Contract with the chat and pushed screens: their header (the chat's, a
+ * `PageBar`) carries `OWN_MOBILE_HEADER` and the top bar gives way to it in
+ * CSS; the chat's opens the drawer by dispatching `OPEN_NAV_EVENT` on the
+ * window.
+ *
+ * Nothing above the page may change after hydration on phones: a context
+ * update above a page React has not hydrated yet (its code is still loading)
+ * replaces the server-rendered page with its loading state. So the
+ * mobile-nav context, whose `isMobile` the server cannot know, wraps the
+ * navigation only, and the top bar's visibility is CSS, not state.
  */
 export function AppShellFrame({
   children,
@@ -50,7 +57,6 @@ export function AppShellFrame({
   const t = useTranslations();
   const pathname = usePathname();
   const isMobile = useMediaQuery(MOBILE_QUERY);
-  const isHydrated = useHydrated();
   const navId = useId();
   const drawerId = useId();
   const variant: NavVariant = isAdminRoute(pathname) ? "admin" : "main";
@@ -59,7 +65,6 @@ export function AppShellFrame({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [createSpaceOpen, setCreateSpaceOpen] = useState(false);
-  const [ownMobileHeaders, setOwnMobileHeaders] = useState(0);
 
   // Navigating (from any link, not only nav items) or leaving the phone
   // layout closes the drawer. A palette result can stay on the same path
@@ -109,20 +114,10 @@ export function AppShellFrame({
 
   const openCreateSpace = useCallback(() => setCreateSpaceOpen(true), []);
   const closeNav = useCallback(() => setNavOpen(false), []);
-  const registerMobileHeader = useCallback(() => {
-    setOwnMobileHeaders((count) => count + 1);
-    return () => setOwnMobileHeaders((count) => count - 1);
-  }, []);
   const shell = useMemo<ShellContextValue>(
-    () => ({ openPalette, openCreateSpace, registerMobileHeader }),
-    [openPalette, openCreateSpace, registerMobileHeader]
+    () => ({ openPalette, openCreateSpace }),
+    [openPalette, openCreateSpace]
   );
-
-  // The phone top bar gives way to a page's own header (the chat's) only
-  // while that header is mounted, so a chat route that is loading or failed
-  // keeps the menu. Before hydration no header has registered yet: there the
-  // route decides, so chat routes don't flash the bar on first paint.
-  const showTopBar = isHydrated ? ownMobileHeaders === 0 : !isChatRoute(pathname);
 
   // Astryx's mobile-nav context: MobileNavToggle opens the drawer, SideNavItems
   // in it close it, and SideNav's collapse control stays away on phones.
@@ -142,50 +137,53 @@ export function AppShellFrame({
 
   return (
     <ShellContext value={shell}>
-      <AppShellMobileContext value={mobileNav}>
-        {/* The page runs under the notch and the home indicator
-            (viewport-fit=cover): the frame keeps the top and the sides clear,
-            main#main-content the bottom. On phones the surface fills the
-            frame, so the strip under the status bar continues the top bar;
-            from lg the page panel floats on the body colour. */}
-        <div className="bg-ax-surface lg:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] lg:flex-row lg:gap-2 lg:pt-[max(0.5rem,env(safe-area-inset-top,0px))] lg:pr-[max(0.5rem,env(safe-area-inset-right,0px))] lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] lg:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
-          <a
-            href="#main-content"
-            className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            {t("skip_to_content")}
-          </a>
-          {showTopBar && <MobileTopBar />}
+      {/* The page runs under the notch and the home indicator
+          (viewport-fit=cover): the frame keeps the top and the sides clear,
+          main#main-content the bottom. On phones the surface fills the
+          frame, so the strip under the status bar continues the top bar;
+          from lg the page panel floats on the body colour. group/shell: the
+          top bar hides while the page has its own header. */}
+      <div className="group/shell bg-ax-surface lg:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] lg:flex-row lg:gap-2 lg:pt-[max(0.5rem,env(safe-area-inset-top,0px))] lg:pr-[max(0.5rem,env(safe-area-inset-right,0px))] lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] lg:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
+        <a
+          href="#main-content"
+          className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          {t("skip_to_content")}
+        </a>
+        <AppShellMobileContext value={mobileNav}>
+          <MobileTopBar />
           <div className="hidden min-h-0 shrink-0 lg:flex lg:flex-col">
             <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
-          {/* tabIndex -1: the skip link moves focus here, not just the scroll
-              position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:
-              the panel contains what is absolutely positioned in it (visually
-              hidden text), which otherwise escapes its scroll box and makes
-              the document taller, so the whole shell scrolls. */}
-          <main
-            ref={mainRef}
-            id="main-content"
-            tabIndex={-1}
-            className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none lg:pb-0"
-          >
-            {children}
-          </main>
-          {isMobile && (
+        </AppShellMobileContext>
+        {/* tabIndex -1: the skip link moves focus here, not just the scroll
+            position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:
+            the panel contains what is absolutely positioned in it (visually
+            hidden text), which otherwise escapes its scroll box and makes
+            the document taller, so the whole shell scrolls. */}
+        <main
+          ref={mainRef}
+          id="main-content"
+          tabIndex={-1}
+          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none lg:pb-0"
+        >
+          {children}
+        </main>
+        {isMobile && (
+          <AppShellMobileContext value={mobileNav}>
             <MobileNavDrawer variant={variant} isOpen={drawerOpen} onOpenChange={setNavOpen} />
-          )}
-          {paletteMounted && (
-            <ShellCommandPalette
-              isOpen={paletteOpen}
-              onOpenChange={setPaletteOpen}
-              onCreateSpace={openCreateSpace}
-              onNavigate={closeNav}
-            />
-          )}
-          <CreateSpaceDialog open={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />
-        </div>
-      </AppShellMobileContext>
+          </AppShellMobileContext>
+        )}
+        {paletteMounted && (
+          <ShellCommandPalette
+            isOpen={paletteOpen}
+            onOpenChange={setPaletteOpen}
+            onCreateSpace={openCreateSpace}
+            onNavigate={closeNav}
+          />
+        )}
+        <CreateSpaceDialog open={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />
+      </div>
     </ShellContext>
   );
 }

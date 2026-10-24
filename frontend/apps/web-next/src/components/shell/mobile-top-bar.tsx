@@ -12,15 +12,16 @@ import { NEW_CONVERSATION_HREF } from "./routes";
 import { useShell } from "./shell-context";
 
 /**
- * Phones and iPads held upright, outside the chat: menu, Eneo, search (the
- * ⌘K palette), the notification bells and "Ny konversation", 56 px high with
- * 44 px targets.
+ * Phones and iPads held upright: menu, Eneo, search (the ⌘K palette), the
+ * notification bells and "Ny konversation", 56 px high with 44 px targets.
+ * It gives way to a page's own header (`OWN_MOBILE_HEADER`: the chat's, a
+ * PageBar) in CSS, in the frame's `group/shell`.
  */
 export function MobileTopBar() {
   const t = useTranslations();
   const { openPalette } = useShell();
   return (
-    <header className="bg-ax-surface border-ax-border flex h-14 shrink-0 items-center gap-1 border-b px-1.5 lg:hidden">
+    <header className="bg-ax-surface border-ax-border flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden lg:hidden">
       {/* Astryx's toggle only renders once the phone layout is known (after
           hydration); the slot keeps the logo from shifting when it appears. */}
       <span className="flex size-11 shrink-0 items-center justify-center">

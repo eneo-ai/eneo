@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
-import { useOwnMobileHeader } from "@/components/shell/shell-context";
+import { OWN_MOBILE_HEADER } from "@/components/shell/shell-context";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -298,9 +298,6 @@ export function ChatHeader({
   menuItems,
   minimal = false
 }: ChatHeaderProps) {
-  // The chat header carries the phone menu button, so the shell hides its own
-  // top bar while this header is mounted.
-  useOwnMobileHeader();
   const t = useTranslations();
   const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
@@ -378,8 +375,12 @@ export function ChatHeader({
         </div>
       </div>
 
-      {/* Below 1024px: the shell hides its own top bar on chat routes. */}
-      <div className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 lg:hidden">
+      {/* Below 1024px. It carries the menu button, so the shell's top bar
+          gives way to it (OWN_MOBILE_HEADER). */}
+      <div
+        {...OWN_MOBILE_HEADER}
+        className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 lg:hidden"
+      >
         <AppMenuButton />
         <PartnerSwitcher
           partner={partner}

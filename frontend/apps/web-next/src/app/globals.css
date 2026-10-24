@@ -805,4 +805,23 @@
       --text-xs: 0.8125rem;
     }
   }
+  /* A pushed screen's PageBar (components/shell/page-bar.tsx) fades its
+     title in as the page's own h1 scrolls under the bar; the scroller is
+     main#main-content. Without scroll timelines the title stays hidden: the
+     back link is what the bar is for. */
+  .page-bar-title {
+    opacity: 0;
+  }
+  @supports (animation-timeline: scroll()) {
+    .page-bar-title {
+      animation: page-bar-title linear both;
+      animation-timeline: scroll(nearest block);
+      animation-range: 1.5rem 3.5rem;
+    }
+  }
+  @keyframes page-bar-title {
+    to {
+      opacity: 1;
+    }
+  }
 }

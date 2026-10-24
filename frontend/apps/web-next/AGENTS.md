@@ -249,11 +249,14 @@ the default name on a backend name collision (9017).
   the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
   `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
   markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
-  `CommandPalette`. A page header that carries its own phone menu button (the
-  chat header) calls
-  `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
-  opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
-  (`src/components/shell/routes.ts`).
+  `CommandPalette`. A page header that replaces the phone top bar (the chat
+  header, a pushed screen's `PageBar` with its back link) spreads
+  `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
+  from the server render on; the chat header opens the drawer with
+  `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
+  (`src/components/shell/routes.ts`). Keep state that changes after
+  hydration out of contexts above the page: React replaces a page it has not
+  hydrated yet with its loading state when such a context changes.
 - **Phones and tablets**: the root layout's `viewport` runs the page edge to
   edge (`viewportFit: "cover"`), lets the Android keyboard resize the layout
   (`interactiveWidget: "resizes-content"`) and colours the status bar with the

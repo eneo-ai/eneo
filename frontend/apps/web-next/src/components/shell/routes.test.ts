@@ -3,31 +3,9 @@ import {
   conversationHref,
   currentNavTarget,
   isAdminRoute,
-  isChatRoute,
   navTarget,
   spaceRouteIdFromPath
 } from "./routes";
-
-describe("isChatRoute", () => {
-  it("matches the chat routes that render their own mobile header", () => {
-    expect(isChatRoute("/spaces/personal/chat")).toBe(true);
-    expect(isChatRoute("/spaces/7f0c/chat")).toBe(true);
-    expect(isChatRoute("/dashboard/assistant-1")).toBe(true);
-    expect(isChatRoute("/dashboard/assistant-1/session-9")).toBe(true);
-  });
-
-  it("leaves every other page to the shell's top bar", () => {
-    expect(isChatRoute("/dashboard")).toBe(false);
-    expect(isChatRoute("/dashboard/app/app-1")).toBe(false);
-    expect(isChatRoute("/dashboard/app/app-1/results/run-1")).toBe(false);
-    expect(isChatRoute("/spaces/list")).toBe(false);
-    expect(isChatRoute("/spaces/7f0c/overview")).toBe(false);
-    expect(isChatRoute("/spaces/7f0c/knowledge")).toBe(false);
-    expect(isChatRoute("/admin/models")).toBe(false);
-    expect(isChatRoute("/account")).toBe(false);
-    expect(isChatRoute("/")).toBe(false);
-  });
-});
 
 describe("isAdminRoute", () => {
   it("is true for /admin and below only", () => {

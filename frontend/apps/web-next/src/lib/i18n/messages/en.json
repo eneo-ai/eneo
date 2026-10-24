@@ -5556,6 +5556,7 @@
   "admin_users_deleted": "{email} was deleted",
   "shell_nav_label": "Main menu",
   "shell_menu_label": "Menu",
+  "shell_back_to": "Back to {name}",
   "shell_open_menu": "Open menu",
   "shell_home_link": "Eneo, go to the start page",
   "shell_collapse_nav": "Collapse the side menu",

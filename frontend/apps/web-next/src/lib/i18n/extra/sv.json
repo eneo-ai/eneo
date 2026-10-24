@@ -359,6 +359,7 @@
   "completion_models": "Chatt",
   "shell_nav_label": "Huvudmeny",
   "shell_menu_label": "Meny",
+  "shell_back_to": "Tillbaka till {name}",
   "shell_open_menu": "Öppna menyn",
   "shell_home_link": "Eneo, till startsidan",
   "shell_collapse_nav": "Fäll ihop sidomenyn",
