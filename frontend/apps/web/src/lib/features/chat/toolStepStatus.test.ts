@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { previousToolAttemptIndexes, toolStepStatus } from "./toolStepStatus";
+import { failedResultText, previousToolAttemptIndexes, toolStepStatus } from "./toolStepStatus";
 
 it.each(["pending", "approved", "deferred"])(
   "does not claim success for interrupted %s calls",
@@ -95,4 +95,16 @@ it("tracks multiple tools independently within the reply", () => {
     ])
   ).toEqual(new Set([0]));
   expect(previousToolAttemptIndexes([]).size).toBe(0);
+});
+
+it("shows a failed call's error as its message, not as the JSON the model reads", () => {
+  expect(failedResultText('{"error": "SHORT_HISTORY: too short.\\nThe file is readable."}')).toBe(
+    "SHORT_HISTORY: too short.\nThe file is readable."
+  );
+  expect(failedResultText('{"rows": []}')).toBe('{"rows": []}');
+  // An error with more to say than its message is shown whole.
+  expect(failedResultText('{"error": "failed", "request_id": "r1"}')).toBe(
+    '{"error": "failed", "request_id": "r1"}'
+  );
+  expect(failedResultText("plain text")).toBe("plain text");
 });

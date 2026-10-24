@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ban, CircleCheck, CircleX, Clock, Copy, LoaderCircle, Square, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { useMemo } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ import type { StepStatus, ToolCall, ToolPart } from "./activity";
 import { callTimingKey, type TurnDurations } from "./activity-timings";
 import { formatSeconds } from "./format";
 import {
+  failedResultText,
   fileIdFromUrl,
   toolPresentation,
   toolTarget,
@@ -118,13 +120,23 @@ function CallArguments({ part, files }: { part: ToolPart; files: AttachedFile[] 
   );
 }
 
+/** A denied call's outcome, worded as the approval card words it. */
+const DENIAL_KEY: Record<string, string> = {
+  denied: "chat_tool_denied",
+  timeout_denied: "chat_tool_approval_timed_out"
+};
+
 /** The result, loaded when the row is open, in a scroll box with a copy button. */
 function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
   const t = useTranslations();
   const locale = useLocale();
   const { copy } = useClipboard({ announce: t("copied_to_clipboard") });
-  const finished = part.state === "output-available" || part.state === "output-error";
-  const canLoad = Boolean(sessionId && part.toolCallId && finished);
+  const failed = part.state === "output-error";
+  const errorText = failed ? part.errorText : undefined;
+  // A denied call ran nothing: its stored result is only the denial the model read.
+  const denial = errorText ? DENIAL_KEY[errorText] : undefined;
+  const finished = part.state === "output-available" || failed;
+  const canLoad = Boolean(sessionId && part.toolCallId && finished && !denial);
   const result = useQuery({
     queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
     enabled: canLoad,
@@ -138,12 +150,16 @@ function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | n
       return response.result ?? null;
     }
   });
-  const errorText = part.state === "output-error" ? part.errorText : undefined;
+  // Parsed once per loaded result, not on every render of the open row.
+  const stored = useMemo(() => {
+    const data = typeof result.data === "string" && result.data.trim() ? result.data : null;
+    return data && failed ? failedResultText(data) : data;
+  }, [result.data, failed]);
   if (!canLoad) {
-    return errorText ? <p className="text-ax-error text-[12.5px]">{errorText}</p> : null;
+    const message = denial ? t(denial) : errorText;
+    return message ? <p className="text-ax-error text-[12.5px]">{message}</p> : null;
   }
-  const text =
-    typeof result.data === "string" && result.data.trim() ? result.data : (errorText ?? null);
+  const text = stored ?? errorText ?? null;
   const body = result.isPending
     ? t("loading_ellipsis")
     : result.isError

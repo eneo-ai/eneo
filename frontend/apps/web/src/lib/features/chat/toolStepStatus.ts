@@ -51,3 +51,20 @@ export function previousToolAttemptIndexes(
   }
   return previousAttempts;
 }
+
+/**
+ * A failed call's stored result is the `{"error": …}` the model read; a reader is shown the
+ * message itself. Any other text is shown as it is.
+ */
+export function failedResultText(result: string): string {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const fields = parsed as Record<string, unknown>;
+      if (typeof fields.error === "string" && Object.keys(fields).length === 1) return fields.error;
+    }
+  } catch {
+    // Not JSON: shown as it is.
+  }
+  return result;
+}

@@ -145,6 +145,15 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     return None
 
 
+def _eneo_notice(text: str) -> dict[str, Any]:
+    """A note Eneo adds to a tool's result, on a line of its own.
+
+    The adapter joins a result's text blocks as they are (a server may split
+    one payload across blocks), so Eneo's own text brings its newline.
+    """
+    return {"type": "text", "text": f"\n{text}"}
+
+
 class MCPProxySession:
     """
     Session-scoped proxy for aggregating multiple MCP servers.
@@ -755,7 +764,7 @@ class MCPProxySession:
             ". Narrow the request (e.g. fewer URLs or a more specific query) "
             "to fit the limit.]"
         )
-        kept.append({"type": "text", "text": notice})
+        kept.append(_eneo_notice(notice))
         return {**result, "content": kept + image_blocks}
 
     @staticmethod
@@ -789,13 +798,9 @@ class MCPProxySession:
             if mime_type not in allowed:
                 if allowed:
                     notices.append(
-                        {
-                            "type": "text",
-                            "text": (
-                                f"[A file of unsupported type {mime_type!r} was "
-                                "dropped.]"
-                            ),
-                        }
+                        _eneo_notice(
+                            f"[A file of unsupported type {mime_type!r} was dropped.]"
+                        )
                     )
                 remaining.append(stripped)
                 continue
@@ -803,25 +808,18 @@ class MCPProxySession:
             decoded_size = len(encoded) * 3 // 4
             if decoded_size > max_bytes:
                 notices.append(
-                    {
-                        "type": "text",
-                        "text": (
-                            f"[A file of ~{decoded_size / (1024 * 1024):.1f} MB "
-                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and "
-                            "was dropped.]"
-                        ),
-                    }
+                    _eneo_notice(
+                        f"[A file of ~{decoded_size / (1024 * 1024):.1f} MB "
+                        f"exceeded the {max_bytes // (1024 * 1024)} MB limit and "
+                        "was dropped.]"
+                    )
                 )
                 continue
             if len(admitted) >= max_count:
                 notices.append(
-                    {
-                        "type": "text",
-                        "text": (
-                            f"[A file beyond the {max_count} per result limit was "
-                            "dropped.]"
-                        ),
-                    }
+                    _eneo_notice(
+                        f"[A file beyond the {max_count} per result limit was dropped.]"
+                    )
                 )
                 continue
             admitted.append(
@@ -860,27 +858,21 @@ class MCPProxySession:
             mime_type = str(raw_mime).split(";", 1)[0].strip().lower()
             if mime_type not in MCP_IMAGE_MIME_TYPES:
                 notices.append(
-                    {
-                        "type": "text",
-                        "text": (
-                            f"[An image content block of unsupported type "
-                            f"{mime_type!r} was dropped.]"
-                        ),
-                    }
+                    _eneo_notice(
+                        f"[An image content block of unsupported type "
+                        f"{mime_type!r} was dropped.]"
+                    )
                 )
                 continue
             encoded = block.get("data") or ""
             decoded_size = len(encoded) * 3 // 4
             if decoded_size > max_bytes:
                 notices.append(
-                    {
-                        "type": "text",
-                        "text": (
-                            f"[An image content block of ~{decoded_size / (1024 * 1024):.1f} MB "
-                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and was "
-                            "dropped.]"
-                        ),
-                    }
+                    _eneo_notice(
+                        f"[An image content block of ~{decoded_size / (1024 * 1024):.1f} MB "
+                        f"exceeded the {max_bytes // (1024 * 1024)} MB limit and was "
+                        "dropped.]"
+                    )
                 )
                 continue
             if len(admitted) >= max_count:
@@ -893,13 +885,10 @@ class MCPProxySession:
             )
         if over_count:
             notices.append(
-                {
-                    "type": "text",
-                    "text": (
-                        f"[{over_count} image content block(s) beyond the "
-                        f"{max_count} per result limit were dropped.]"
-                    ),
-                }
+                _eneo_notice(
+                    f"[{over_count} image content block(s) beyond the "
+                    f"{max_count} per result limit were dropped.]"
+                )
             )
         return admitted, notices
 
@@ -1377,7 +1366,7 @@ class MCPProxySession:
             if is_error:
                 blocks: list[Any] = list(result.get("content") or [])
                 if auth_denied:
-                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
+                    blocks.append(_eneo_notice(AUTH_DENIED_NOTICE))
                 # Invalid arguments need a corrected call, not a different file
                 # reader. Keep recovery guidance after truncation in either case.
                 hint = (
@@ -1387,7 +1376,7 @@ class MCPProxySession:
                     else self._reference_fallback_hint(tool_name, arguments)
                 )
                 if hint:
-                    blocks.append({"type": "text", "text": hint})
+                    blocks.append(_eneo_notice(hint))
                 if auth_denied or hint:
                     result = {**result, "content": blocks}
             return result

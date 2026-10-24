@@ -5,10 +5,14 @@ import {
   type McpUiResourcePermissions,
   type McpUiToolResultNotification
 } from "@modelcontextprotocol/ext-apps/app-bridge";
+import { EneoApiError } from "@/lib/api/errors";
 import type { McpAppDisplayMode } from "./mcp-apps";
 
 const MAX_INLINE_HEIGHT = 2000;
 const MAX_MESSAGE_LENGTH = 4000;
+// A stopped answer is stored once its stream has ended, so for a moment its
+// result is not there (404): it is asked for again, waiting longer each time.
+const RESULT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
 
 /** What a tool call brought back, as the host hands it to its view. */
 export type ToolCallOutcome = {
@@ -238,9 +242,24 @@ export class McpAppBridge {
   }
 
   async #deliverResult() {
-    try {
-      const outcome = await this.#options.getToolResult();
+    let outcome: ToolCallOutcome | null | undefined;
+    for (const delay of [0, ...RESULT_RETRY_DELAYS_MS]) {
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       if (this.#destroyed) return;
+      try {
+        outcome = await this.#options.getToolResult();
+        break;
+      } catch (error) {
+        // Only a result that is not stored yet is asked for again.
+        if (!(error instanceof EneoApiError && error.status === 404)) break;
+      }
+    }
+    if (this.#destroyed) return;
+    if (outcome === undefined) {
+      this.#resultSent = false;
+      return;
+    }
+    try {
       await this.#sdk.sendToolResult({
         content: outcome?.result == null ? [] : [{ type: "text", text: outcome.result }],
         ...(outcome?.structuredContent

@@ -27,14 +27,15 @@ type ToolLike = {
 /**
  * The `eneo` provider metadata of a tool part (server_name, title, purpose,
  * approved), wherever the AI SDK put it: saved sessions use
- * `providerMetadata`, live streams `callProviderMetadata` /
- * `resultProviderMetadata`.
+ * `providerMetadata`; live streams the output chunk's `resultProviderMetadata`
+ * once the call has finished, which is newer than the input chunk's
+ * `callProviderMetadata` (still "pending" or "approved").
  */
 export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
   for (const provider of [
     part.providerMetadata,
-    part.callProviderMetadata,
-    part.resultProviderMetadata
+    part.resultProviderMetadata,
+    part.callProviderMetadata
   ]) {
     const eneo =
       provider && typeof provider === "object" && "eneo" in provider
@@ -223,4 +224,21 @@ export function toolTarget(
     return query;
   }
   return readableArguments(args);
+}
+
+/**
+ * A failed call's stored result is the `{"error": …}` the model read; a reader is shown the
+ * message itself. Any other text is shown as it is.
+ */
+export function failedResultText(result: string): string {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const fields = parsed as Record<string, unknown>;
+      if (typeof fields.error === "string" && Object.keys(fields).length === 1) return fields.error;
+    }
+  } catch {
+    // Not JSON: shown as it is.
+  }
+  return result;
 }

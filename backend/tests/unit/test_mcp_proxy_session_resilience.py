@@ -995,7 +995,10 @@ async def test_unauthorized_tool_result_keeps_original_and_allows_corrected_call
 
     assert first["is_error"] is True
     assert first["content"][0]["text"] == '{"error":"Unauthorized"}'
-    assert "credentials" in first["content"][1]["text"]
+    # The note starts on a line of its own: the adapter joins blocks as they are.
+    assert "".join(block["text"] for block in first["content"]) == (
+        '{"error":"Unauthorized"}\n' + proxy_module.AUTH_DENIED_NOTICE
+    )
     assert first["meta"] == {"request_id": "upstream-123"}
     assert corrected["content"][0]["text"] == "works"
     assert client.call_tool.await_count == 2
@@ -1197,6 +1200,9 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert any("files__read_file" in text for text in texts)
         assert any('"Read attached file"' in text for text in texts)
+        assert "".join(texts).startswith(
+            "could not fetch URL\nThe attached file itself is still readable"
+        )
 
     @pytest.mark.parametrize(
         "error",
@@ -1403,6 +1409,10 @@ class TestTruncateToolResult:
         assert head["text"].startswith("x")
         assert len(head["text"]) < max_chars
         assert "truncated" in notice["text"]
+        # Joined as the adapter joins blocks, the notice starts on its own line.
+        assert "".join(b["text"] for b in truncated["content"]).endswith(
+            "x\n" + notice["text"].lstrip("\n")
+        )
 
     def test_leading_blocks_kept_whole_and_tail_dropped(self):
         from eneo.main.config import get_settings
