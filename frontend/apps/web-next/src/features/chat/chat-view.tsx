@@ -22,6 +22,7 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
 import { displayPartnerName } from "@/lib/chat/partner-name";
@@ -196,6 +197,7 @@ function ConversationView({
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
+  const online = useOnline();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
   const toolChoices = useToolChoices(partner);
@@ -701,7 +703,11 @@ function ConversationView({
 
   // Attachments still uploading do not block: the question waits for them in
   // the conversation. An empty draft is the composer's to explain.
-  const sendBlocked = usage.willExceedContext ? t("context_usage_will_exceed_estimate") : null;
+  const sendBlocked = !online
+    ? t("chat_send_offline")
+    : usage.willExceedContext
+      ? t("context_usage_will_exceed_estimate")
+      : null;
   const quote = panel.quote;
   const composerQuote = quote
     ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }

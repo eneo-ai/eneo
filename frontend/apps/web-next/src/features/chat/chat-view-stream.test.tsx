@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager } from "@tanstack/react-query";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
@@ -278,6 +279,28 @@ describe("ChatView docked composer", () => {
     expect(scroller?.contains(log)).toBe(true);
     const textarea = screen.getByRole("textbox", { name: /^Fråga / });
     expect(scroller?.contains(textarea)).toBe(false);
+  });
+});
+
+describe("ChatView offline", () => {
+  afterEach(() => onlineManager.setOnline(true));
+
+  it("keeps the question and says at the field why it cannot be sent", () => {
+    spies.mode = "answer";
+    renderInApp(<Harness />);
+    act(() => void window.dispatchEvent(new Event("offline")));
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    const sentBefore = spies.sent.length;
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expect(spies.sent).toHaveLength(sentBefore);
+    expect(textarea.value).toBe("Vilken gräns gäller?");
+    const description = (textarea.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(description).toContain("Du är offline. Skicka frågan när du är uppkopplad igen.");
   });
 });
 

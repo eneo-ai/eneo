@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChevronLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ConnectionBanner } from "./connection-banner";
 import { OWN_MOBILE_HEADER } from "./shell-context";
 
 export type PageBarProps = {
@@ -29,29 +30,33 @@ export type PageBarProps = {
 export function PageBar({ parent, title, actions }: PageBarProps) {
   const t = useTranslations();
   return (
-    // The title is centred while it fits; the back link's name never gives way to it.
-    <div
-      {...OWN_MOBILE_HEADER}
-      // main#main-content keeps focused and scrolled-to content clear of it (app-shell.tsx).
-      data-page-bar=""
-      className="bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5 lg:hidden"
-    >
-      <Button
-        href={parent.href}
-        variant="ghost"
-        size="lg"
-        icon={<Icon icon={ChevronLeft} />}
-        label={parent.label}
-        aria-label={t("shell_back_to", { name: parent.label })}
-        className="text-ax-text-accent justify-self-start"
-      />
-      <span
-        aria-hidden="true"
-        className="page-bar-title truncate text-center text-sm font-semibold"
+    <>
+      {/* The title is centred while it fits; the back link's name never gives way to it. */}
+      <div
+        {...OWN_MOBILE_HEADER}
+        // main#main-content keeps focused and scrolled-to content clear of it (app-shell.tsx).
+        data-page-bar=""
+        className="bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5 lg:hidden"
       >
-        {title}
-      </span>
-      <div className="flex items-center justify-self-end">{actions}</div>
-    </div>
+        <Button
+          href={parent.href}
+          variant="ghost"
+          size="lg"
+          icon={<Icon icon={ChevronLeft} />}
+          label={parent.label}
+          aria-label={t("shell_back_to", { name: parent.label })}
+          className="text-ax-text-accent justify-self-start"
+        />
+        <span
+          aria-hidden="true"
+          className="page-bar-title truncate text-center text-sm font-semibold"
+        >
+          {title}
+        </span>
+        <div className="flex items-center justify-self-end">{actions}</div>
+      </div>
+      {/* Under the bar, not in it: the bar is hidden from 1024px, the banner is not. */}
+      <ConnectionBanner />
+    </>
   );
 }

@@ -15,6 +15,7 @@ import { ClassificationToken } from "@/components/composites/classification-toke
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
+import { ConnectionBanner } from "@/components/shell/connection-banner";
 import { OWN_MOBILE_HEADER } from "@/components/shell/shell-context";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -498,6 +499,8 @@ export function ChatHeader({
           className="size-11"
         />
       </div>
+      {/* Offline: under the header at every width (the shell's gives way). */}
+      <ConnectionBanner />
     </>
   );
 }

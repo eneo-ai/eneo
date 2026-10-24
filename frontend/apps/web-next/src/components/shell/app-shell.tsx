@@ -10,6 +10,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
+import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
@@ -169,8 +170,12 @@ export function AppShellFrame({
           tabIndex={-1}
           className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14 lg:pb-0"
         >
+          {/* Under the top bar; a page with its own header shows its own
+              under that header, and this one gives way. */}
+          <ConnectionBanner className="group-has-[[data-own-mobile-header]]/shell:hidden" />
           {children}
         </main>
+        <ConnectionAnnouncer />
         {isMobile && (
           <AppShellMobileContext value={mobileNav}>
             <MobileNavDrawer variant={variant} isOpen={drawerOpen} onOpenChange={setNavOpen} />

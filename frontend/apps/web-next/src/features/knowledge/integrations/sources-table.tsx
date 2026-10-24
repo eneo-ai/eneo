@@ -41,7 +41,7 @@ import {
   type SourceSummary
 } from "./sources";
 import type { ProgressById } from "./sync-progress";
-import { useAnnounceChange } from "./use-announce-change";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { useSourceListAnnouncements } from "./use-sync-announcements";
 import { VendorIcon } from "./vendor";
 

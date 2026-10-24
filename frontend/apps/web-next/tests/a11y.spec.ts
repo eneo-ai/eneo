@@ -558,6 +558,34 @@ for (const colorScheme of ["light", "dark"] as const) {
         });
 
         if (layout.phone) {
+          test("offline: the banner, and a question kept with the reason", async ({
+            page,
+            context
+          }) => {
+            await page.goto("/spaces/personal/chat");
+            await chatStartReady(page);
+            await context.setOffline(true);
+            // One banner, under the chat's own header (the shell's gives way).
+            const banners = page.getByRole("main").getByText(/^(Du är offline|You're offline)$/);
+            const banner = banners.filter({ visible: true });
+            await expect(banner).toHaveCount(1);
+            const header = page.locator("[data-own-mobile-header]");
+            expect((await banner.boundingBox())!.y).toBeGreaterThan(
+              (await header.boundingBox())!.y + (await header.boundingBox())!.height - 1
+            );
+
+            await chatComposer(page).fill("Vilken gräns gäller?");
+            await chatComposer(page).press("ControlOrMeta+Enter");
+            await expect(chatComposer(page)).toHaveValue("Vilken gräns gäller?");
+            await expect(chatComposer(page)).toHaveAccessibleDescription(
+              /^(Du är offline\. Skicka frågan|You're offline\. Send the question)/
+            );
+            await expectNoAxeViolations(page);
+
+            await context.setOffline(false);
+            await expect(banner).toBeHidden();
+          });
+
           test("chat: an answer, and its activity sheet", async ({ page }) => {
             await addActivityToAnswers(page);
             await answeredQuestion(page);
