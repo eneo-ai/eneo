@@ -199,8 +199,10 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Related controls are grouped: `<fieldset>` + `<legend>` or `role="group"`
   with `aria-labelledby` (radio groups, checkbox lists).
 - Instructions and formats come before the field (`description`,
-  `aria-describedby`). Required fields say so in text, not only with `*` or
-  colour.
+  `aria-describedby`). Required is the default and unmarked; an optional field
+  says "Valfritt" in its label: Astryx `isOptional` inside
+  `<FormLayout defaultOptionality="required">`, which also gives every other
+  field `aria-required`. Nothing is marked only with `*` or colour.
 - Personal data fields have `autoComplete` tokens (`email`, `name`,
   `username`, `current-password`, `new-password`, `one-time-code`; 1.3.5).
 - Errors (3.3.1, 3.3.3): on submit, show the error as text at the field (Astryx

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation } from "@tanstack/react-query";
@@ -108,7 +109,7 @@ export function ChangePasswordForm({
 
   return (
     <form
-      className="flex max-w-sm flex-col gap-3"
+      className="max-w-sm"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -122,69 +123,72 @@ export function ChangePasswordForm({
         change.mutate();
       }}
     >
-      {/* Read by password managers only, to match the change to the saved
+      {/* Every field is required, the default and unmarked (decision 40). */}
+      <FormLayout defaultOptionality="required" className="gap-3">
+        {/* Read by password managers only, to match the change to the saved
           login (the login form's `username` is the email): out of the tab
           order and hidden from assistive technology, but not display:none,
           which some managers skip. */}
-      <input
-        className="sr-only"
-        tabIndex={-1}
-        aria-hidden="true"
-        name="username"
-        autoComplete="username"
-        value={email}
-        readOnly
-      />
-      <TextInput
-        ref={currentRef}
-        type="password"
-        label={t("current_password")}
-        value={current}
-        onChange={(value) => {
-          setCurrent(value);
-          setServerErrors((refused) => ({ ...refused, current: undefined }));
-        }}
-        autoComplete="current-password"
-        description={currentPasswordHint}
-        isRequired
-        status={currentError ? { type: "error", message: currentError } : undefined}
-      />
-      <PasswordPolicyChecklist
-        id={checklistId}
-        password={next}
-        confirmation={confirm}
-        policy={policy}
-      />
-      <ConfirmedSecretInput
-        label={t("new_password")}
-        confirmLabel={t("confirm_password")}
-        describedBy={checklistId}
-        value={next}
-        confirmation={confirm}
-        onValueChange={(value) => {
-          setNext(value);
-          setServerErrors((refused) => ({ ...refused, next: undefined }));
-        }}
-        onConfirmationChange={setConfirm}
-        // Password managers offer a generated password and fill both.
-        autoComplete="new-password"
-        isRequired
-        valueError={shown("next")}
-        mismatchMessage={errors.confirm ?? t("change_password_mismatch")}
-        showErrors={submitted}
-        valueRef={nextRef}
-        confirmationRef={confirmRef}
-      />
-      <Text type="supporting">{t("password_change_sign_out_notice")}</Text>
-      <Button
-        type="submit"
-        variant="primary"
-        label={t("save")}
-        className="self-start"
-        // Keeps focus while saving; a second press is ignored above.
-        isLoading={change.isPending}
-        isInterruptible
-      />
+        <input
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          name="username"
+          autoComplete="username"
+          value={email}
+          readOnly
+        />
+        <TextInput
+          ref={currentRef}
+          type="password"
+          label={t("current_password")}
+          value={current}
+          onChange={(value) => {
+            setCurrent(value);
+            setServerErrors((refused) => ({ ...refused, current: undefined }));
+          }}
+          autoComplete="current-password"
+          description={currentPasswordHint}
+          isRequired
+          status={currentError ? { type: "error", message: currentError } : undefined}
+        />
+        <PasswordPolicyChecklist
+          id={checklistId}
+          password={next}
+          confirmation={confirm}
+          policy={policy}
+        />
+        <ConfirmedSecretInput
+          label={t("new_password")}
+          confirmLabel={t("confirm_password")}
+          describedBy={checklistId}
+          value={next}
+          confirmation={confirm}
+          onValueChange={(value) => {
+            setNext(value);
+            setServerErrors((refused) => ({ ...refused, next: undefined }));
+          }}
+          onConfirmationChange={setConfirm}
+          // Password managers offer a generated password and fill both.
+          autoComplete="new-password"
+          isRequired
+          valueError={shown("next")}
+          mismatchMessage={errors.confirm ?? t("change_password_mismatch")}
+          showErrors={submitted}
+          valueRef={nextRef}
+          confirmationRef={confirmRef}
+        />
+        <Text type="supporting">{t("password_change_sign_out_notice")}</Text>
+        <Button
+          type="submit"
+          variant="primary"
+          label={t("save")}
+          className="self-start"
+          // Keeps focus while saving; a second press is ignored above.
+          isLoading={change.isPending}
+          isInterruptible
+        />
+      </FormLayout>
     </form>
   );
 }

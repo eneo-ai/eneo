@@ -395,7 +395,9 @@ describe("RenameSessionDialog", () => {
       />
     );
     const dialog = screen.getByRole("dialog", { name: "Byt namn" });
-    const input = within(dialog).getByRole("textbox", { name: /^Namn/ });
+    // Required is the default and unmarked (decision 40).
+    const input = within(dialog).getByRole("textbox", { name: "Namn" });
+    expect(input.getAttribute("aria-required")).toBe("true");
     const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
     fireEvent.change(input, { target: { value: "  " } });
     // Never disabled: a disabled button says nothing about what is missing.

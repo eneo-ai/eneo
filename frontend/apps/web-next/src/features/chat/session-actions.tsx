@@ -2,7 +2,9 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -140,6 +142,7 @@ export function RenameSessionDialog({
       onOpenChange={(open) => !open && close()}
       purpose="form"
       width={440}
+      className={DIALOG_TOP_ON_TOUCH}
     >
       <Layout
         header={
@@ -151,15 +154,18 @@ export function RenameSessionDialog({
         }
         content={
           <LayoutContent>
-            <TextInput
-              ref={inputRef}
-              label={t("chat_history_name_label")}
-              value={value}
-              onChange={(next) => session && setDraft({ session, name: next })}
-              onEnter={save}
-              isRequired
-              status={problem ? { type: "error", message: problem } : undefined}
-            />
+            {/* Required is the default and unmarked (decision 40). */}
+            <FormLayout defaultOptionality="required">
+              <TextInput
+                ref={inputRef}
+                label={t("chat_history_name_label")}
+                value={value}
+                onChange={(next) => session && setDraft({ session, name: next })}
+                onEnter={save}
+                isRequired
+                status={problem ? { type: "error", message: problem } : undefined}
+              />
+            </FormLayout>
           </LayoutContent>
         }
         footer={

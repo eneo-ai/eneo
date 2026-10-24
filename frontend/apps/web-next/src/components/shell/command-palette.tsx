@@ -25,6 +25,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
+import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
@@ -315,7 +316,7 @@ export default function ShellCommandPalette({
       // the software keyboard never covers the field and the field stays put
       // while the results change; on phones it may grow to the full height.
       maxHeight={phone ? PHONE_MAX_HEIGHT : "min(480px, calc(100dvh - 2rem))"}
-      className="pointer-coarse:mt-[max(1rem,env(safe-area-inset-top,0px))]"
+      className={DIALOG_TOP_ON_TOUCH}
       input={
         <CommandPaletteInput
           label={t("shell_palette_input_label")}
