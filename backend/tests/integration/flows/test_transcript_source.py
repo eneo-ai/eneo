@@ -22,33 +22,13 @@ from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
 from eneo.flows.runtime import transcription
-from tests.integration.flows.test_transcript_corrections import (
-    SEGMENTS,
-    _create_scenario,
-)
+from tests.integration.flows import transcript_source_support
+from tests.integration.flows.statement_capture_support import capture_queries
+from tests.integration.flows.test_transcript_corrections import SEGMENTS
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
-
-
-@pytest.fixture
-async def source_scenario(
-    completion_model_factory, space_factory, assistant_factory, admin_user
-):
-    from eneo.database.database import sessionmanager
-    from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
-
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        scenario = await _create_scenario(
-            session=session,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            admin_user=admin_user,
-            store_source=False,
-        )
-        yield session, scenario, admin_user
+source_scenario = transcript_source_support.source_scenario
 
 
 def _reference(scenario, source, attempt_no=1):
@@ -115,9 +95,6 @@ async def test_step_listing_batches_reference_only_attempt_reads(
     from eneo.database.tables.flow_tables import FlowStepResults
     from eneo.database.tables.spaces_table import SpacesUsers
     from eneo.spaces.api.space_models import SpaceRoleValue
-    from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-        _capture_queries,
-    )
 
     session, scenario, user = source_scenario
     await session.execute(
@@ -157,7 +134,7 @@ async def test_step_listing_batches_reference_only_attempt_reads(
         token = container.auth_service().create_access_token_for_user(user)
     bind = session.sync_session.bind
     assert bind is not None
-    with _capture_queries(bind) as queries:
+    with capture_queries(bind) as queries:
         response = await client.get(
             f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}/steps/",
             headers={"Authorization": f"Bearer {token}"},
@@ -184,9 +161,6 @@ async def test_batched_references_validate_canonical_current_attempt(
     source_scenario, envelope, state
 ):
     from eneo.database.tables.flow_tables import FlowStepResults
-    from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-        _capture_queries,
-    )
 
     session, scenario, user = source_scenario
     source = transcription.capture_transcript_source(
@@ -244,7 +218,7 @@ async def test_batched_references_validate_canonical_current_attempt(
     )
     bind = session.sync_session.bind
     assert bind is not None
-    with _capture_queries(bind) as queries:
+    with capture_queries(bind) as queries:
         call = _service(session, user).get_references_for_step_results(
             flow_id=scenario.flow_id, run_id=scenario.flow_run_id, step_results=[result]
         )
@@ -1319,3 +1293,444 @@ async def test_inline_transcript_sections_persist_identity_after_reload(
         assert provenance.summarization.sources == (transcript.reference,)
         assert provenance.summarization.rounds == 0
         assert len(provenance.summarization.records) == 1
+
+
+async def _authorized_run(session, scenario, user):
+    runs = FlowRunRepository(session=session)
+    return await FlowRunAccessPolicy(
+        user=user, flow_repo=FlowRepository(session=session), flow_run_repo=runs
+    ).load_run_status(
+        run_id=scenario.flow_run_id, flow_id=scenario.flow_id, access_kind="content"
+    )
+
+
+async def _page(session, scenario, user, start, attempt_no=1):
+    return await _service(session, user).get_page_for_attempt(
+        run=await _authorized_run(session, scenario, user),
+        step_id=scenario.transcription_step_id,
+        attempt_no=attempt_no,
+        start=start,
+        limit=200,
+    )
+
+
+async def _store(session, scenario, user, segments, speaker_review=None):
+    source = transcription.capture_transcript_source(
+        segments=segments,
+        speaker_review=speaker_review,
+        words=[],
+        words_omitted_reason=None,
+    )
+    reference = _reference(scenario, source)
+    await _attempt(session, scenario, reference)
+    await FlowTranscriptSourceRepository(session=session).insert(
+        tenant_id=user.tenant_id,
+        flow_id=scenario.flow_id,
+        reference=reference,
+        source=source,
+    )
+    return source
+
+
+def _lines(count):
+    return [{**SEGMENTS[index % 2], "text": f"{index}: rad"} for index in range(count)]
+
+
+@pytest.mark.parametrize("total", [1, 400, 401])
+async def test_page_reads_return_absolute_slices_of_the_whole_source(
+    source_scenario, total
+):
+    session, scenario, user = source_scenario
+    review = {"files": [{"file_index": 0, "overlaps": [{"id": "x:overlap_0000"}]}]}
+    source = await _store(session, scenario, user, _lines(total), review)
+    assert source.segments is not None
+
+    for start in (0, 1, 199, 200, 399, 400, 401, 2**31 - 1, 2**31, 10**18):
+        state = await _page(session, scenario, user, start)
+        assert state.status == "present"
+        assert state.component_omissions.detail is None
+        assert state.component_omissions.words is None
+        page = state.page
+        assert page.start == start
+        assert page.total == total
+        assert page.segments == source.segments[start : start + 200]
+        assert page.source_hash == source.source_hash
+        assert page.bounds == source.bounds
+        assert page.speaker_review == (review if start == 0 else None)
+
+
+async def test_page_reads_match_python_slices_of_the_stored_source(source_scenario):
+    import random
+
+    session, scenario, user = source_scenario
+    rng = random.Random(4)
+    segments = [
+        {
+            "file_index": rng.randint(0, 2),
+            "start": index * 1.5,
+            "end": index * 1.5 + rng.random(),
+            "speaker": rng.choice(["SPEAKER_00", "SPEAKER_01", None]),
+            "text": "å" * rng.randint(0, 40),
+            **({"overlap_ids": [f"x:overlap_{index}"]} if rng.random() < 0.1 else {}),
+            **({"speaker_attribution": None} if rng.random() < 0.1 else {}),
+        }
+        for index in range(1_000)
+    ]
+    await _store(session, scenario, user, segments, {"files": []})
+    whole = await _read(session, scenario, user)
+    assert whole.status == "present"
+    stored = whole.source.segments
+    assert stored is not None
+
+    starts = [0, 1, 199, 200, 800, 999, 1_000, 1_001, 5_000]
+    starts += [rng.randint(0, 1_100) for _ in range(20)]
+    for start in starts:
+        state = await _page(session, scenario, user, start)
+        assert state.status == "present"
+        assert state.page.segments == stored[start : start + 200], start
+        assert state.page.total == len(stored)
+        assert state.page.speaker_review == (
+            whole.source.speaker_review if start == 0 else None
+        )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        "pre_row",
+        "omitted",
+        "missing_attempt",
+        "missing_row",
+        "hash",
+        "bounds",
+        "foreign",
+        "null",
+        "malformed",
+        "omitted_nonempty",
+        "present_without_segments",
+        "not_a_list",
+        "json_null_omitted",
+        "json_null_present",
+        "non_object_past_page",
+    ],
+)
+async def test_page_reads_refuse_and_degrade_like_whole_source_reads(
+    source_scenario, state
+):
+    from pydantic import ValidationError
+
+    from eneo.database.tables.flow_tables import FlowStepTranscriptSources
+    from eneo.flows.domain.transcript_source import TranscriptSourceBounds
+    from eneo.main.exceptions import NotFoundException
+
+    def refusal(exc):
+        """A refusal's type and what it says, whichever model raised it."""
+        if isinstance(exc, ValidationError):
+            return type(exc), [(e["type"], e["loc"], e["msg"]) for e in exc.errors()]
+        return type(exc), str(exc)
+
+    session, scenario, user = source_scenario
+    source = transcription.capture_transcript_source(
+        segments=[] if state == "omitted" else SEGMENTS,
+        speaker_review=None,
+        words=[],
+        words_omitted_reason=None,
+    )
+    reference = _reference(scenario, source)
+    stored_segments = {
+        "omitted_nonempty": SEGMENTS,
+        "present_without_segments": [],
+        "not_a_list": SEGMENTS[0],
+        "json_null_omitted": sa.JSON.NULL,
+        "json_null_present": sa.JSON.NULL,
+        "non_object_past_page": [*_lines(230), "not a line", *_lines(20)],
+    }
+    if state in stored_segments:
+        # Rows the ORM cannot write. Each read refuses them as the whole read
+        # does; only JSON null marked omitted reads as an omitted source.
+        bounds = TranscriptSourceBounds.model_validate(
+            {
+                **source.bounds.model_dump(),
+                "segments_omitted_reason": (
+                    TranscriptSourceOmissionReason.TOO_LARGE
+                    if state in ("omitted_nonempty", "json_null_omitted")
+                    else None
+                ),
+            }
+        )
+        reference = reference.model_copy(update={"bounds": bounds})
+        await session.execute(
+            sa.insert(FlowStepTranscriptSources).values(
+                tenant_id=user.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                attempt_no=1,
+                source_hash=source.source_hash,
+                segments_json=stored_segments[state],
+                detail_json=None,
+                **bounds.model_dump(mode="json"),
+            )
+        )
+    elif state not in ("pre_row", "missing_attempt", "missing_row"):
+        await FlowTranscriptSourceRepository(session=session).insert(
+            tenant_id=user.tenant_id,
+            flow_id=scenario.flow_id,
+            reference=reference,
+            source=source,
+        )
+    if state != "missing_attempt":
+        await _attempt(session, scenario, None if state == "pre_row" else reference)
+    marker = reference.model_dump(mode="json")
+    if state == "hash":
+        marker["source_hash"] = "b" * 64
+    elif state == "bounds":
+        marker["bounds"]["segments_count"] += 1
+    elif state == "foreign":
+        marker["attempt_no"] = 2
+    elif state == "null":
+        marker = None
+    elif state == "malformed":
+        marker = {"version": 1, "run_id": "not-a-run"}
+    if state in ("hash", "bounds", "foreign", "null", "malformed"):
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+            .values(
+                input_payload_json={
+                    "schema_version": "flow-step-attempt-input.v1",
+                    "resolved_input": {"transcription": {"source": marker}},
+                }
+            )
+        )
+
+    outcomes = []
+    for read in (_read(session, scenario, user), _page(session, scenario, user, 0)):
+        try:
+            outcomes.append(await read)
+        except Exception as exc:
+            outcomes.append(exc)
+    whole, page = outcomes
+    if state == "pre_row":
+        assert whole.status == page.status == "unavailable_pre_row"
+    elif state in ("omitted", "json_null_omitted"):
+        assert whole.status == page.status == "omitted"
+        assert (
+            page.reason
+            == whole.reason
+            == (
+                TranscriptSourceOmissionReason.NO_SEGMENTS
+                if state == "omitted"
+                else TranscriptSourceOmissionReason.TOO_LARGE
+            )
+        )
+        assert page.bounds == whole.bounds == reference.bounds
+    else:
+        expected = {
+            "missing_attempt": NotFoundException,
+            "missing_row": MissingTranscriptSourceError,
+            "hash": ValueError,
+            "bounds": ValueError,
+            "foreign": ValueError,
+        }.get(state, ValidationError)
+        assert type(whole) is expected, whole
+        assert refusal(page) == refusal(whole), (page, whole)
+
+
+async def test_detail_route_reads_one_page_after_one_status_authorization(
+    source_scenario, client, db_container, patch_auth_service_jwt
+):
+    import re
+
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+    from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    session, scenario, user = source_scenario
+    await _store(session, scenario, user, _lines(450), {"files": []})
+    await session.execute(
+        sa.update(FlowStepAttempts)
+        .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+        .values(output_payload_json={"text": "Protected transcript " * 500})
+    )
+    await session.execute(
+        sa.update(FlowRuns)
+        .where(FlowRuns.id == scenario.flow_run_id)
+        .values(output_payload_json={"text": "Protected transcript " * 500})
+    )
+    await session.execute(
+        sa.update(FlowStepResults)
+        .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+        .values(input_payload_json={})
+    )
+    flow = await FlowRepository(session=session).get(scenario.flow_id, user.tenant_id)
+    session.add(
+        SpacesUsers(space_id=flow.space_id, user_id=user.id, role=SpaceRoleValue.EDITOR)
+    )
+    await session.commit()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(user)
+    path = (
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+        f"/steps/{scenario.transcription_step_id}/attempts/1/transcript-source/"
+    )
+    bind = session.sync_session.bind
+    assert bind is not None
+    pages = []
+    start = 0
+    while start is not None:
+        with capture_queries(bind) as queries:
+            response = await client.get(
+                path,
+                headers={"Authorization": f"Bearer {token}"},
+                params={"start_segment_index": start},
+            )
+        assert response.status_code == 200, response.text
+        runs = [q.sql for q in queries if re.search(r"\bFROM flow_runs\b", q.sql)]
+        assert len(runs) == 1, runs
+        assert "input_payload_json" not in runs[0]
+        assert "output_payload_json" not in runs[0]
+        reads = [
+            q.sql
+            for q in queries
+            if "flow_step_attempts" in q.sql or "flow_step_transcript_sources" in q.sql
+        ]
+        assert len(reads) == 1, reads
+        assert "output_payload_json" not in reads[0]
+        assert "jsonb_path_query_array" in reads[0]
+        assert ("detail_json" in reads[0]) == (start == 0)
+        pages.append(response.json())
+        start = response.json()["next_segment_index"]
+
+    assert [page["start_segment_index"] for page in pages] == [0, 200, 400]
+    assert [len(page["segments"]) for page in pages] == [200, 200, 50]
+    assert [segment["segment_index"] for segment in pages[2]["segments"]] == list(
+        range(400, 450)
+    )
+    async with db_container() as container:
+        audits = (
+            await container.session().execute(
+                sa.select(AuditLogTable.description, AuditLogTable.log_metadata)
+                .where(
+                    AuditLogTable.action == ActionType.FLOW_EVIDENCE_VIEWED.value,
+                    AuditLogTable.entity_id == scenario.flow_run_id,
+                )
+                .order_by(AuditLogTable.timestamp)
+            )
+        ).all()
+    assert len(audits) == len(pages)
+    for audit in audits:
+        assert audit.description == (
+            f"Viewed transcript source for flow run {scenario.flow_run_id}"
+        )
+        assert audit.log_metadata["target"] == {
+            "id": str(scenario.flow_run_id),
+            "name": None,
+        }
+        assert audit.log_metadata["extra"] == {
+            "evidence_detail": "transcript_source",
+            "step_id": str(scenario.transcription_step_id),
+            "attempt_no": 1,
+            "flow_id": str(scenario.flow_id),
+            "run_id": str(scenario.flow_run_id),
+        }
+
+
+@pytest.mark.parametrize("route", ["transcript-source", "transcript-words"])
+@pytest.mark.parametrize("caller", ["not_the_owner", "missing_run"])
+async def test_transcript_routes_refuse_before_reading_content(
+    source_scenario, client, db_container, patch_auth_service_jwt, route, caller
+):
+    import re
+
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
+    from eneo.roles.permissions import Permission
+    from eneo.spaces.api.space_models import SpaceRoleValue
+    from tests.integration.flows.test_flow_evidence_api_contracts import (
+        _create_user_with_flow_permissions_and_token,
+    )
+
+    session, scenario, user = source_scenario
+    await _store(session, scenario, user, _lines(3))
+    await FlowTranscriptWordsRepository(session=session).upsert(
+        tenant_id=user.tenant_id,
+        flow_id=scenario.flow_id,
+        run_id=scenario.flow_run_id,
+        step_id=scenario.transcription_step_id,
+        segments_hash=segments_content_hash(_lines(3)),
+        alignment="forced",
+        words_json=[{"segment_index": 0, "words": []}],
+    )
+    await session.commit()
+    if caller == "not_the_owner":
+        caller_user, token = await _create_user_with_flow_permissions_and_token(
+            db_container=db_container,
+            tenant_id=user.tenant_id,
+            role_name_prefix="Transcript reader",
+            permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+        )
+        flow = await FlowRepository(session=session).get(
+            scenario.flow_id, user.tenant_id
+        )
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=caller_user.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        await session.commit()
+        run_id = scenario.flow_run_id
+    else:
+        flow = await FlowRepository(session=session).get(
+            scenario.flow_id, user.tenant_id
+        )
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id, user_id=user.id, role=SpaceRoleValue.EDITOR
+            )
+        )
+        await session.commit()
+        async with db_container() as container:
+            token = container.auth_service().create_access_token_for_user(user)
+        run_id = uuid4()
+    suffix = (
+        "attempts/1/transcript-source/"
+        if route == "transcript-source"
+        else "transcript-words/"
+    )
+    bind = session.sync_session.bind
+    assert bind is not None
+    with capture_queries(bind) as queries:
+        response = await client.get(
+            f"/api/v1/flows/{scenario.flow_id}/runs/{run_id}"
+            f"/steps/{scenario.transcription_step_id}/{suffix}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == (403 if caller == "not_the_owner" else 404)
+    assert not [
+        q.sql
+        for q in queries
+        if re.search(
+            r"flow_step_attempts|flow_step_transcript_sources|"
+            r"flow_step_transcript_words|flow_step_results",
+            q.sql,
+        )
+    ]
+    async with db_container() as container:
+        assert not (
+            await container.session().scalars(
+                sa.select(AuditLogTable.id).where(
+                    AuditLogTable.action == ActionType.FLOW_EVIDENCE_VIEWED.value
+                )
+            )
+        ).all()

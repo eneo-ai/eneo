@@ -123,10 +123,6 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
             "flows/application/flow_transcript_corrections_service.py",
             "FlowTranscriptCorrectionsService.list_for_run",
         ),
-        (
-            "flows/application/flow_transcript_words_service.py",
-            "FlowTranscriptWordsService.get_for_step",
-        ),
     }
     | {
         (
@@ -136,7 +132,6 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         for name in (
             "_load_attempt",
             "get_for_attempt",
-            "get_reference_for_attempt",
             "get_references_for_step_results",
         )
     }

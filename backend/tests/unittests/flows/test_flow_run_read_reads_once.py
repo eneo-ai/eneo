@@ -211,7 +211,6 @@ def test_one_policy_serves_the_gate_and_every_run_service_of_a_request(
     assert container.flow_run_access_policy() is policy
     assert container.flow_run_service().access_policy is policy
     assert container.flow_run_evidence_service().access_policy is policy
-    assert container.flow_transcript_words_service().access_policy is policy
     assert policy.user is member
 
 

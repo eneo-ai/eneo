@@ -1702,7 +1702,6 @@ class Container(containers.DeclarativeContainer):
         FlowTranscriptWordsService,
         user=user,
         transcript_words_repo=flow_transcript_words_repo,
-        access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
         transcript_source_service=flow_transcript_source_service,
     )

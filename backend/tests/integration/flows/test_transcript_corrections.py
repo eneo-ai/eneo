@@ -31,9 +31,7 @@ from eneo.flows.principal import FlowPrincipal
 from tests.flow_snapshot_fixtures import (
     assistant_snapshot as fixture_assistant_snapshot,
 )
-from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-    _capture_queries,
-)
+from tests.integration.flows.statement_capture_support import capture_queries
 from tests.integration.flows.test_flow_run_review_checkpoint_repository import (
     _create_service_principal_id,
 )
@@ -611,7 +609,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
         bind = session.sync_session.bind
         assert bind is not None
         if baseline:
-            with _capture_queries(bind) as queries:
+            with capture_queries(bind) as queries:
                 value, obstructing = await repo.get_revision_for_step(
                     run_id=scenario.flow_run_id,
                     step_id=scenario.transcription_step_id,
@@ -623,7 +621,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
             assert obstructing == (2, 533)
             assert len(queries) == 1
             assert "octet_length" in queries[0].sql
-            with _capture_queries(bind) as queries:
+            with capture_queries(bind) as queries:
                 value, obstructing = await repo.get_revision_for_step(
                     run_id=scenario.flow_run_id,
                     step_id=scenario.transcription_step_id,
@@ -647,7 +645,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
             (2, 200, 32, [3], False, None),
             (3, 200, 32, [], False, None),
         ):
-            with _capture_queries(bind) as queries:
+            with capture_queries(bind) as queries:
                 rows, has_more, obstructing = await repo.list_revisions(
                     run_id=scenario.flow_run_id,
                     step_id=scenario.transcription_step_id,
@@ -1487,7 +1485,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
     }
     bind = session.sync_session.bind
     assert bind is not None
-    with _capture_queries(bind) as queries:
+    with capture_queries(bind) as queries:
         response = await client.post(path, headers=headers, json=body)
     if audit_failure:
         assert response.status_code == 503, response.text

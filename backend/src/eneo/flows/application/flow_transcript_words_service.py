@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_transcript_source_service import (
     FlowTranscriptSourceService,
 )
+from eneo.flows.domain.flow import FlowRunStatusSnapshot
 from eneo.flows.domain.transcript_words import FlowStepTranscriptWords
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_transcript_words_repo import (
@@ -30,30 +30,19 @@ class FlowTranscriptWordsService:
         *,
         user: UserInDB,
         transcript_words_repo: FlowTranscriptWordsRepository,
-        access_policy: FlowRunAccessPolicy,
         flow_run_repo: FlowRunRepository,
         transcript_source_service: FlowTranscriptSourceService,
     ):
         self.user = user
         self.transcript_words_repo = transcript_words_repo
-        self.access_policy = access_policy
         self.flow_run_repo = flow_run_repo
         self.transcript_source_service = transcript_source_service
 
     async def get_for_step(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-        step_id: UUID,
-        history: bool = False,
+        self, *, run: FlowRunStatusSnapshot, step_id: UUID
     ) -> FlowTranscriptWordsView:
-        run = await self.access_policy.load_run(
-            run_id=run_id,
-            flow_id=flow_id,
-            access_kind="content",
-            history=history,
-        )
+        """The step's words; the caller has already authorized ``run`` for
+        content, and it is not authorized again."""
         words = await self.transcript_words_repo.get_for_step(
             run_id=run.id,
             step_id=step_id,
@@ -67,12 +56,8 @@ class FlowTranscriptWordsService:
             tenant_id=self.user.tenant_id,
         )
         reference = (
-            await self.transcript_source_service.get_reference_for_attempt(
-                flow_id=flow_id,
-                run_id=run.id,
-                step_id=step_id,
-                attempt_no=step_result.current_attempt_no,
-                history=history,
+            await self.transcript_source_service.get_reference_for_run_attempt(
+                run=run, step_id=step_id, attempt_no=step_result.current_attempt_no
             )
             if step_result is not None and step_result.current_attempt_no is not None
             else None

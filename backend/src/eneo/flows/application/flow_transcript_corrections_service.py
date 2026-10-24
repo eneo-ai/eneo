@@ -94,12 +94,10 @@ class FlowTranscriptCorrectionsService:
             if step_result.step_id not in corrected_steps:
                 continue
             source = (
-                await self.transcript_source_service.get_reference_for_attempt(
-                    flow_id=flow_id,
-                    run_id=run.id,
+                await self.transcript_source_service.get_reference_for_run_attempt(
+                    run=run,
                     step_id=step_result.step_id,
                     attempt_no=step_result.current_attempt_no,
-                    history=history,
                 )
                 if step_result.current_attempt_no is not None
                 else None

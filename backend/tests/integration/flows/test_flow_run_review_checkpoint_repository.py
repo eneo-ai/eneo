@@ -78,9 +78,7 @@ from eneo.flows.runtime.flow_runtime_health import (
 )
 from eneo.main.exceptions import ConflictException
 from tests.flow_snapshot_fixtures import assistant_snapshot
-from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-    _capture_queries,
-)
+from tests.integration.flows.statement_capture_support import capture_queries
 
 
 @pytest.mark.parametrize("folded", [False, True])
@@ -3413,7 +3411,7 @@ async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
         assert bind is not None
         if baseline:
             for revision, budget in ((1, 0), (3, 32)):
-                with _capture_queries(bind) as queries:
+                with capture_queries(bind) as queries:
                     (
                         value,
                         obstructing,
@@ -3435,7 +3433,7 @@ async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
                 (1, opened.checkpoint.original_payload_json),
                 (3, {"text": "é" * 256}),
             ):
-                with _capture_queries(bind) as queries:
+                with capture_queries(bind) as queries:
                     (
                         value,
                         obstructing,
@@ -3464,7 +3462,7 @@ async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
             (3, 200, 32, [4], False, None),
             (4, 200, 32, [], False, None),
         ):
-            with _capture_queries(bind) as queries:
+            with capture_queries(bind) as queries:
                 rows, has_more, obstructing = await repo.list_review_checkpoint_edits(
                     checkpoint_id=opened.checkpoint.id,
                     tenant_id=scenario.tenant_id,

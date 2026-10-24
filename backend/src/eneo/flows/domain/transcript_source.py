@@ -50,6 +50,13 @@ class TranscriptSourceBounds(BaseModel):
     words_omitted_reason: TranscriptSourceOmissionReason | None = None
 
 
+def _require_segments_match_omission(
+    *, has_segments: bool, bounds: TranscriptSourceBounds
+) -> None:
+    if has_segments != (bounds.segments_omitted_reason is None):
+        raise ValueError("Usable transcript segments must match their omission state.")
+
+
 class TranscriptSource(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -60,10 +67,33 @@ class TranscriptSource(BaseModel):
 
     @model_validator(mode="after")
     def _segments_match_omission(self) -> TranscriptSource:
-        if bool(self.segments) != (self.bounds.segments_omitted_reason is None):
-            raise ValueError(
-                "Usable transcript segments must match their omission state."
-            )
+        _require_segments_match_omission(
+            has_segments=bool(self.segments), bounds=self.bounds
+        )
+        return self
+
+
+class TranscriptSourceSlice(BaseModel):
+    """One page of a stored source: ``segments`` are its lines from absolute
+    index ``start`` on, ``total`` counts every line, and ``speaker_review`` is
+    read only for the page at ``start`` 0 (None on every other page)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    start: int = Field(ge=0)
+    total: int = Field(ge=0)
+    segments: list[dict[str, Any]] | None
+    speaker_review: dict[str, Any] | None
+    source_hash: str | None = Field(min_length=64, max_length=64)
+    bounds: TranscriptSourceBounds
+
+    @model_validator(mode="after")
+    def _segments_match_omission(self) -> TranscriptSourceSlice:
+        # The whole source decides, not the page: a page past the end is
+        # empty, and lines marked omitted are refused on every page.
+        _require_segments_match_omission(
+            has_segments=self.total > 0, bounds=self.bounds
+        )
         return self
 
 
@@ -103,6 +133,14 @@ class PresentTranscriptSource(BaseModel):
     component_omissions: TranscriptComponentOmissions
 
 
+class PresentTranscriptSourceSlice(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: Literal["present"] = "present"
+    page: TranscriptSourceSlice
+    component_omissions: TranscriptComponentOmissions
+
+
 class OmittedTranscriptSource(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -119,6 +157,13 @@ class UnavailablePreRowTranscriptSource(BaseModel):
 
 TranscriptSourceState = Annotated[
     PresentTranscriptSource
+    | OmittedTranscriptSource
+    | UnavailablePreRowTranscriptSource,
+    Field(discriminator="status"),
+]
+
+TranscriptSourcePageState = Annotated[
+    PresentTranscriptSourceSlice
     | OmittedTranscriptSource
     | UnavailablePreRowTranscriptSource,
     Field(discriminator="status"),
