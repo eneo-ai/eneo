@@ -1303,3 +1303,203 @@ async def test_stream_preparation_sends_the_measured_package_and_useful_cap():
     )
     assert sent["max_tokens"] == evidence.preferred.output_cap_tokens
     assert "useful_output_reserve_tokens" not in sent
+
+
+def _force_context_accounting(service):
+    """Build every context as preflight did before it skipped the count."""
+    build_context = service.context_builder.build_context
+
+    def counted(*args, **kwargs):
+        return build_context(*args, **{**kwargs, "account_tokens": True})
+
+    service.context_builder.build_context = counted
+
+
+def _preflight_digest(preflight):
+    return [
+        (
+            _wire_payload(package.messages, package.tools, package.response_format),
+            package.input_reserve,
+            package.useful_output_reserve_tokens,
+            package.output_cap_tokens,
+            package.fits,
+            package.context.model_dump(exclude={"token_count"}),
+        )
+        for package in (preflight.preferred, preflight.fallback)
+        if package is not None
+    ] + [preflight.refusal, preflight.retrieval_included]
+
+
+def _preflight_cases():
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.files.file_models import File, FileType
+
+    now = datetime.now(timezone.utc)
+    attachment = File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="guide.txt",
+        checksum="test",
+        size=20,
+        file_type=FileType.TEXT,
+        text="Attachment marker.",
+        owner_type=PrincipalType.USER,
+        tenant_id=uuid4(),
+    )
+    tools_proxy = SimpleNamespace(
+        get_tools_for_llm=lambda: [
+            {
+                "type": "function",
+                "function": {
+                    "name": "server__lookup",
+                    "description": "Find source",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+    )
+    return {
+        "plain": {},
+        "attachments": {"prompt_files": [attachment]},
+        "tools": {"mcp_proxy": tools_proxy},
+        "fallback": {
+            "model_kwargs": ModelKwargs(response_format={"type": "json_object"}),
+            "capability_fallback_prompt": "Be concise.\nReturn JSON.",
+        },
+        "long_prompt": {"prompt": "Follow the house style. " * 2000},
+        "empty_retrieval": {"info_blob_chunks": []},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", list(_preflight_cases()))
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_preflight_without_history_or_knowledge_skips_context_counting(case):
+    module = "eneo.completion_models.infrastructure.context_builder"
+    request = {
+        "text_input": "Summarize the source.",
+        "prompt": "Be concise.",
+        "version": 2,
+        "useful_output_reserve_tokens": 32,
+    } | _preflight_cases()[case]
+    service, _, model = _preflight_service()
+    counted_service, _, _ = _preflight_service()
+    _force_context_accounting(counted_service)
+    counted = await counted_service.preflight_request(model=model, **request)
+
+    with (
+        patch(f"{module}.count_message_tokens") as message_counter,
+        patch(f"{module}.count_tool_tokens") as tool_counter,
+        patch(f"{module}._image_files_tokens") as image_counter,
+    ):
+        skipped = await service.preflight_request(model=model, **request)
+
+    message_counter.assert_not_called()
+    tool_counter.assert_not_called()
+    image_counter.assert_not_called()
+    assert _preflight_digest(skipped) == _preflight_digest(counted)
+    for package in (skipped.preferred, skipped.fallback):
+        if package is not None:
+            assert package.context.token_count == package.input_reserve.tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budgeted", ["session", "knowledge"])
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_preflight_with_history_or_knowledge_still_counts_the_context(
+    budgeted,
+):
+    from eneo.completion_models.infrastructure import context_builder
+    from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+    now = datetime.now(timezone.utc)
+    request = {
+        "text_input": "Summarize the source.",
+        "prompt": "Be concise.",
+        "version": 2,
+        "useful_output_reserve_tokens": 32,
+    }
+    if budgeted == "session":
+        request["session"] = SimpleNamespace(questions=[])
+    else:
+        request["info_blob_chunks"] = [
+            InfoBlobChunkInDBWithScore(
+                id=uuid4(),
+                created_at=now,
+                updated_at=now,
+                text="Retrieved marker.",
+                chunk_no=0,
+                info_blob_id=uuid4(),
+                tenant_id=uuid4(),
+                info_blob_title="Retrieved source",
+                score=0.9,
+            )
+        ]
+    service, adapter, model = _preflight_service()
+
+    with patch(
+        "eneo.completion_models.infrastructure.context_builder.count_message_tokens",
+        wraps=context_builder.count_message_tokens,
+    ) as message_counter:
+        result = await service.preflight_request(model=model, **request)
+
+    message_counter.assert_called()
+    expected = service.context_builder.build_context(
+        input_str=request["text_input"],
+        max_tokens=model.max_input_tokens,
+        model_name=adapter.litellm_model,
+        prompt=request["prompt"],
+        session=request.get("session"),
+        info_blob_chunks=request.get("info_blob_chunks"),
+        version=2,
+        vision=model.vision,
+    )
+    assert result.preferred.context == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_skipped_counting_keeps_over_limit_preflight_and_dispatch_decisions():
+    from eneo.completion_models.infrastructure.context_builder import (
+        ContextWindowExceededError,
+    )
+
+    request = {
+        "text_input": "An oversized source. " * 400,
+        "prompt": "Be concise.",
+        "useful_output_reserve_tokens": 32,
+    }
+    outcomes = []
+    for force_counting in (True, False):
+        service, _, model = _preflight_service()
+        model.max_input_tokens = 500
+        if force_counting:
+            _force_context_accounting(service)
+        preflight = await service.preflight_request(model=model, **request)
+        with (
+            patch(
+                "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+                AsyncMock(),
+            ) as transport,
+            pytest.raises(ContextWindowExceededError) as error,
+        ):
+            await service.get_response(
+                model=model,
+                **request,
+                prepared_request=preflight.preferred,
+                reject_context_over_limit=True,
+            )
+        transport.assert_not_awaited()
+        outcomes.append(
+            (
+                _preflight_digest(preflight),
+                error.value.estimated_tokens,
+                error.value.max_tokens,
+            )
+        )
+
+    assert outcomes[0] == outcomes[1]
+    assert outcomes[0][0][-2] == "current_request_input_does_not_fit"
+    assert outcomes[0][1] == preflight.preferred.input_reserve.tokens
