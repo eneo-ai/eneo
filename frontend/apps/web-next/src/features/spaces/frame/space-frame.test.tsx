@@ -90,7 +90,8 @@ describe("SpaceFrame", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
     expect(screen.getByText("Stöd för kommunens upphandlare.")).toBeTruthy();
-    expect(screen.getByText("Klass 2 · Intern").textContent).toBe(
+    // ClassificationToken: read with its prefix.
+    expect(screen.getByText("Klass 2 · Intern").parentElement!.textContent).toBe(
       "Säkerhetsklass: Klass 2 · Intern"
     );
 

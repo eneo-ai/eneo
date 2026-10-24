@@ -8,9 +8,10 @@ import {
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { ChevronDown, History, Menu, ShieldCheck, SquarePen } from "lucide-react";
+import { ChevronDown, History, Menu, SquarePen } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ClassificationToken } from "@/components/composites/classification-token";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
@@ -72,13 +73,52 @@ function PartnerTile({
   );
 }
 
+/** The space a partner belongs to, worth naming: not the personal space ("Personlig assistent"). */
+function partnerSpace(partner: ChatPartner): string | null {
+  return partner.personalSpace ? null : (partner.spaceName ?? null);
+}
+
+/** "…kommit?" stays as it is; "Upphandlingsanalys" becomes a sentence. */
+const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+/**
+ * The phone switcher's accessible name (decision 2): what its two lines show,
+ * with the space they leave out for room, then what it does. "Upphandlings-
+ * analys mot LOU. Upphandlingsassistenten i Upphandling, säkerhetsklass
+ * Intern. Byt assistent"
+ */
+function phoneSwitcherName(
+  t: ReturnType<typeof useTranslations>,
+  partner: ChatPartner,
+  title: string | null
+): string {
+  const name = displayPartnerName(partner, t);
+  const space = partnerSpace(partner);
+  const who = [
+    space ? t("chat_header_in_space", { assistant: name, space }) : name,
+    partner.securityClassification
+      ? t("chat_header_classified", { classification: partner.securityClassification })
+      : null
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return [title, who]
+    .filter((part): part is string => !!part)
+    .map(asSentence)
+    .concat(t("chat_header_switch"))
+    .join(" ");
+}
+
 function SwitcherFace({
   partner,
+  title = null,
   subtitle,
   variant,
   interactive
 }: {
   partner: ChatPartner;
+  /** The conversation's title, first on the phone face (decision 2); null before one starts. */
+  title?: string | null;
   subtitle: string | null;
   variant: SwitcherVariant;
   interactive: boolean;
@@ -89,15 +129,50 @@ function SwitcherFace({
     <ChevronDown aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
   );
   if (variant === "mobile") {
-    return (
-      <span className="flex min-w-0 flex-col items-center leading-tight">
-        <span className="flex max-w-full min-w-0 items-center gap-1 text-[15px] font-semibold">
-          <span className="truncate">{name}</span>
-          {chevron}
+    // Two start-aligned lines: the title (or, before a conversation, the
+    // assistant), then who answers and the space's security class. The
+    // chevron sits beside the assistant, which is what the menu switches.
+    const space = partnerSpace(partner);
+    const classification = (
+      <ClassificationToken
+        variant="inline"
+        name={partner.securityClassification}
+        // A class name is short: the space or assistant gives way first.
+        className="max-w-[45%] shrink-0"
+      />
+    );
+    const line = "flex max-w-full min-w-0 items-center";
+    const second = cn(line, "text-ax-text-secondary gap-1.5 text-[0.8125rem] leading-snug");
+    if (title === null) {
+      return (
+        <span className="flex min-w-0 flex-col items-start text-start">
+          <span className={cn(line, "gap-1 text-[1.0625rem] leading-snug font-semibold")}>
+            <span className="truncate">{name}</span>
+            {chevron}
+          </span>
+          {(space || partner.securityClassification) && (
+            <span className={second}>
+              {space && <span className="truncate">{space}</span>}
+              {classification}
+            </span>
+          )}
         </span>
-        {subtitle && (
-          <span className="text-ax-text-secondary max-w-full truncate text-xs">{subtitle}</span>
-        )}
+      );
+    }
+    return (
+      <span className="flex min-w-0 flex-col items-start text-start">
+        <span className="max-w-full truncate text-[1.0625rem] leading-snug font-semibold">
+          {title}
+        </span>
+        <span className={second}>
+          <span className="flex min-w-0 items-center gap-0.5">
+            <span className="truncate">{name}</span>
+            {/* Left out for room at 390px; the switcher's name and its menu say it. */}
+            {space && <span className="sr-only">, {space}</span>}
+            {chevron}
+          </span>
+          {classification}
+        </span>
       </span>
     );
   }
@@ -132,8 +207,10 @@ const SWITCHER_CLASS: Record<SwitcherVariant, string> = {
     "text-ax-text flex h-[42px] max-w-[min(22rem,40vw)] min-w-0 items-center justify-start rounded-ax-element ps-1.5 pe-2 text-start text-sm pointer-coarse:h-11",
   token:
     "text-ax-text border-ax-border-control flex h-8 max-w-[16rem] min-w-0 items-center justify-start rounded-full border ps-1 pe-2 text-[13px] font-semibold pointer-coarse:h-11",
+  // Start-aligned (one control before it, two after); on an iPad held
+  // upright no wider than its lines need.
   mobile:
-    "text-ax-text flex h-auto min-h-11 min-w-0 flex-1 flex-col items-center justify-center rounded-ax-container px-2"
+    "text-ax-text flex h-auto min-h-11 min-w-0 flex-1 items-center justify-start rounded-ax-container py-1 ps-2 pe-1 text-start sm:max-w-[28rem]"
 };
 
 /** Menu value of a switcher item. */
@@ -151,11 +228,14 @@ function itemValue(item: Pick<ChatPartnerSwitcherItem, "type" | "id">): string {
 export function PartnerSwitcher({
   partner,
   items,
+  title = null,
   subtitle,
   variant
 }: {
   partner: ChatPartner;
   items?: ChatPartnerSwitcherItem[];
+  /** The conversation's title: the phone face shows it first (decision 2). */
+  title?: string | null;
   subtitle: string | null;
   variant: SwitcherVariant;
 }) {
@@ -166,7 +246,13 @@ export function PartnerSwitcher({
   if (!interactive) {
     return (
       <div className={cn(SWITCHER_CLASS[variant], variant === "token" && "border-transparent")}>
-        <SwitcherFace partner={partner} subtitle={subtitle} variant={variant} interactive={false} />
+        <SwitcherFace
+          partner={partner}
+          title={title}
+          subtitle={subtitle}
+          variant={variant}
+          interactive={false}
+        />
       </div>
     );
   }
@@ -175,16 +261,25 @@ export function PartnerSwitcher({
   return (
     <DropdownMenu
       button={{
-        label: t("chat_switch_assistant_named", { name: displayPartnerName(partner, t) }),
+        label:
+          variant === "mobile"
+            ? phoneSwitcherName(t, partner, title)
+            : t("chat_switch_assistant_named", { name: displayPartnerName(partner, t) }),
         variant: "ghost",
         className: SWITCHER_CLASS[variant],
         children: (
-          <SwitcherFace partner={partner} subtitle={subtitle} variant={variant} interactive />
+          <SwitcherFace
+            partner={partner}
+            title={title}
+            subtitle={subtitle}
+            variant={variant}
+            interactive
+          />
         )
       }}
-      // The face draws its own chevron (beside the name on phones).
+      // The face draws its own chevron (beside the assistant's name on phones).
       hasChevron={false}
-      alignment={variant === "mobile" ? "center" : "start"}
+      alignment="start"
       menuWidth={288}
     >
       <DropdownMenuRadioGroup
@@ -283,8 +378,10 @@ function HistoryButton({
  * Chat header. From 1024px (56px): assistant selector, divider,
  * conversation title (h1), the space's security classification, the
  * Chatt/Insikter switch, new conversation, history and a menu for session
- * actions. Phones and iPads held upright: the app menu (opens the shell's drawer), the selector
- * centred with "space · model", new conversation and the same menu.
+ * actions. Below 1024px (decision 2): the app menu (opens the shell's
+ * drawer), the switcher with the conversation's title first and the
+ * assistant and security class under it, new conversation and the same
+ * menu.
  */
 export function ChatHeader({
   partner,
@@ -342,13 +439,7 @@ export function ChatHeader({
         ) : (
           <span className="flex-1" />
         )}
-        {partner.securityClassification && (
-          <span className="bg-ax-muted text-ax-text-secondary flex h-[26px] shrink-0 items-center gap-1.5 rounded-full ps-2 pe-2.5 text-xs font-semibold">
-            <ShieldCheck aria-hidden="true" className="size-3.5" />
-            <span className="sr-only">{t("chat_security_classification")}: </span>
-            {partner.securityClassification}
-          </span>
-        )}
+        <ClassificationToken name={partner.securityClassification} />
         {view && (
           <SegmentedControl
             label={t("chat_view_label")}
@@ -382,13 +473,16 @@ export function ChatHeader({
         className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 lg:hidden"
       >
         <AppMenuButton />
+        {/* The page's heading, met before the switcher that shows it. */}
+        {title !== null && <h1 className="sr-only">{title}</h1>}
         <PartnerSwitcher
           partner={partner}
           items={switcherItems}
+          title={title}
           subtitle={subtitle}
           variant="mobile"
         />
-        {title !== null && <h1 className="sr-only">{title}</h1>}
+        <span aria-hidden="true" className="hidden flex-1 sm:block" />
         <IconButton
           label={t("new_conversation")}
           icon={<SquarePen className="size-5" />}
