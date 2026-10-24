@@ -94,7 +94,9 @@ from eneo.flows.flow_run_error import (
 )
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    SPEAKER_LABELS_KEY,
     FlowRunInputEnvelopePatch,
+    speaker_labels_choice,
 )
 from eneo.flows.flow_run_provenance import (
     FlowImportedAttemptProvenance,
@@ -956,6 +958,39 @@ class FlowRunRepository:
                 flow_id=flow_id,
             )
         return FlowRunStatusSnapshot.model_validate(row)
+
+    async def get_status_with_speaker_labels(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> tuple[FlowRunStatusSnapshot, bool | None]:
+        """The status projection and the run's speaker-label setting, without
+        loading the rest of its input payload: the graph poll reads only this."""
+        speaker_labels = FlowRuns.input_payload_json[SPEAKER_LABELS_KEY].label(
+            "speaker_labels"
+        )
+        stmt = (
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS, speaker_labels)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        row = (await self.session.execute(stmt)).mappings().one_or_none()
+        if row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        status = {key: value for key, value in row.items() if key != "speaker_labels"}
+        return (
+            FlowRunStatusSnapshot.model_validate(status),
+            speaker_labels_choice(row["speaker_labels"]),
+        )
 
     async def get_idempotent_run(
         self,

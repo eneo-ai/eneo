@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    NoReturn,
+    Protocol,
+    TypeGuard,
+    TypeVar,
+    get_args,
+)
 from uuid import UUID
 
 from eneo.authentication.access_denial_code import AccessDenialCode
@@ -52,6 +61,7 @@ _EVIDENCE_ACCESS_KINDS: tuple[FlowRunAccessKind, ...] = (
     "evidence_export_redacted",
     "evidence_export_raw",
 )
+_Loaded = TypeVar("_Loaded")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,34 +130,68 @@ class FlowRunAccessPolicy:
         access_kind: FlowRunAccessKind = "status",
         history: bool = False,
     ) -> FlowRun:
-        try:
-            run = await self.flow_run_repo.get(
-                run_id=run_id,
-                tenant_id=self.user.tenant_id,
-                flow_id=flow_id,
-            )
-        except FlowRunNotFoundError as exc:
-            raise NotFoundException("Flow run not found.") from exc
-        await self.ensure_can_access_run(run, access_kind=access_kind, history=history)
-        return run
+        return await self._load_accessible_run(
+            lambda: self.flow_run_repo.get(
+                run_id=run_id, tenant_id=self.user.tenant_id, flow_id=flow_id
+            ),
+            run_of=lambda run: run,
+            access_kind=access_kind,
+            history=history,
+        )
 
     async def load_run_status(
         self,
         *,
         run_id: UUID,
         flow_id: UUID | None = None,
+        access_kind: FlowRunAccessKind = "status",
         history: bool = False,
     ) -> FlowRunStatusSnapshot:
+        return await self._load_accessible_run(
+            lambda: self.flow_run_repo.get_status(
+                run_id=run_id, tenant_id=self.user.tenant_id, flow_id=flow_id
+            ),
+            run_of=lambda run: run,
+            access_kind=access_kind,
+            history=history,
+        )
+
+    async def load_run_status_with_speaker_labels(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+        access_kind: FlowRunAccessKind,
+        history: bool = False,
+    ) -> tuple[FlowRunStatusSnapshot, bool | None]:
+        """The run's status and speaker-label setting, for a caller who may
+        read the run as ``access_kind``; the rest of its content stays unread."""
+        return await self._load_accessible_run(
+            lambda: self.flow_run_repo.get_status_with_speaker_labels(
+                run_id=run_id, tenant_id=self.user.tenant_id, flow_id=flow_id
+            ),
+            run_of=lambda loaded: loaded[0],
+            access_kind=access_kind,
+            history=history,
+        )
+
+    async def _load_accessible_run(
+        self,
+        load: Callable[[], Awaitable[_Loaded]],
+        *,
+        run_of: Callable[[_Loaded], FlowRunStatusSnapshot],
+        access_kind: FlowRunAccessKind,
+        history: bool,
+    ) -> _Loaded:
+        """What ``load`` read of one run, once the caller may access the run."""
         try:
-            run = await self.flow_run_repo.get_status(
-                run_id=run_id,
-                tenant_id=self.user.tenant_id,
-                flow_id=flow_id,
-            )
+            loaded = await load()
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
-        await self.ensure_can_access_run(run, access_kind="status", history=history)
-        return run
+        await self.ensure_can_access_run(
+            run_of(loaded), access_kind=access_kind, history=history
+        )
+        return loaded
 
     async def load_flow_context(
         self, *, flow_id: UUID, history: bool = False

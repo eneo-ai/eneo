@@ -110,11 +110,15 @@ def read_semantic_flow_input_payload(
     }
 
 
+def speaker_labels_choice(value: object) -> bool | None:
+    """The run's recorded speaker-label setting: only a boolean is one."""
+    return value if isinstance(value, bool) else None
+
+
 def read_speaker_labels_choice(
     input_payload_json: FlowPersistedJsonObject | None,
 ) -> bool | None:
-    choice = (input_payload_json or {}).get(SPEAKER_LABELS_KEY)
-    return choice if isinstance(choice, bool) else None
+    return speaker_labels_choice((input_payload_json or {}).get(SPEAKER_LABELS_KEY))
 
 
 def read_live_transcript_ids(

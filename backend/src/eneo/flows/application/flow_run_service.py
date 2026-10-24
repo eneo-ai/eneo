@@ -79,7 +79,6 @@ from eneo.flows.flow_run_input_envelope import (
     read_live_transcript_ids,
     read_semantic_flow_input_payload,
     read_single_recording_steps,
-    read_speaker_labels_choice,
     with_admitted_audio_seconds,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
@@ -1020,7 +1019,12 @@ class FlowRunService:
         run_id: UUID,
         history: bool = False,
     ) -> FlowRunVersionedView:
-        run = await self.get_run(
+        # The status projection and the one payload key the graph shows: a
+        # poll never loads the run's input payload, a transcript included.
+        (
+            run,
+            speaker_labels,
+        ) = await self.access_policy.load_run_status_with_speaker_labels(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
@@ -1041,7 +1045,7 @@ class FlowRunService:
         return FlowRunVersionedView(
             published_definition=published_definition,
             step_results=tuple(step_results),
-            speaker_labels=read_speaker_labels_choice(run.input_payload_json),
+            speaker_labels=speaker_labels,
         )
 
     async def get_run_with_result_files_and_usage(
