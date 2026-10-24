@@ -879,3 +879,17 @@
     }
   }
 }
+
+/*
+ * 14b. A phone's docked action bar (DockedActions): the toasts rest above it
+ *     instead of on its button (sonner sets its offsets inline, hence
+ *     !important).
+ */
+@layer components {
+  @media (width < 48rem) {
+    body:has([data-docked-actions]) [data-sonner-toaster] {
+      --offset-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px) + 8px) !important;
+      --mobile-offset-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px) + 8px) !important;
+    }
+  }
+}

@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
@@ -19,19 +20,23 @@ import { SourcesList, type SourceGroup } from "./sources-table";
 import { groupIntegrationSources } from "./sources";
 import { useSyncProgress } from "./use-sync-progress";
 
-/** Import from a connected integration, or where to connect one first. */
-function ImportAction() {
-  const t = useTranslations();
+/** Whether this user can import, connect an integration first, or only read why not. */
+function useIntegrationSetup() {
   const { space } = useSpace();
   const { can } = useAppContext();
   const { integrations } = useImportableIntegrations();
-  const [showImport, setShowImport] = useState(false);
-  const action = integrationSetupAction({
+  return integrationSetupAction({
     importableCount: integrations.length,
     personal: space.personal,
     organization: space.organization,
     isAdmin: can("admin")
   });
+}
+
+/** Import from a connected integration, or where to connect one first. */
+function ImportAction({ action }: { action: ReturnType<typeof integrationSetupAction> }) {
+  const t = useTranslations();
+  const [showImport, setShowImport] = useState(false);
 
   if (action.kind === "import") {
     return (
@@ -89,10 +94,17 @@ export function IntegrationsTab({
             ];
       })
     : [{ key: "all", heading: null, sources }];
-  const action = canCreate ? (
-    <ImportAction />
-  ) : (
+  const setup = useIntegrationSetup();
+  // A button or link is the tab's primary action (docked on a phone); a
+  // message saying why there is none stays in the page.
+  const action = !canCreate ? (
     <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
+  ) : setup.kind === "message" ? (
+    <ImportAction action={setup} />
+  ) : (
+    <DockedActions label={t("space_knowledge_actions")}>
+      <ImportAction action={setup} />
+    </DockedActions>
   );
 
   return (
@@ -111,7 +123,8 @@ export function IntegrationsTab({
         />
       ) : (
         <>
-          <div className="flex flex-wrap justify-end gap-2">{action}</div>
+          {/* contents on a phone: the docked action leaves the flow, adding no gap. */}
+          <div className="flex flex-wrap justify-end gap-2 max-md:contents">{action}</div>
           <SourcesList
             groups={groups}
             progress={progress}

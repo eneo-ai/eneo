@@ -1643,5 +1643,6 @@
   "chat_history_scope_group_chat": "This group chat",
   "chat_history_scope_all": "All",
   "space_manage": "Manage space",
-  "space_updated_on": "updated <date></date>"
+  "space_updated_on": "updated <date></date>",
+  "space_knowledge_actions": "Knowledge, actions"
 }

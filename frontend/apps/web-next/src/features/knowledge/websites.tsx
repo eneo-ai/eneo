@@ -18,6 +18,7 @@ import {
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
 import { Table, type TableName } from "@/components/astryx/table";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -510,6 +511,10 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
   const createDialog = showCreate ? (
     <WebsiteDialog open={showCreate} onOpenChange={setShowCreate} />
   ) : null;
+  // The tab's primary action: docked at the bottom on a phone.
+  const docked = canCreate ? (
+    <DockedActions label={t("space_knowledge_actions")}>{connectButton}</DockedActions>
+  ) : null;
 
   // Nothing to filter yet: the empty state carries the one create button.
   if (websites.length === 0) {
@@ -522,11 +527,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
           description={t("space_websites_empty_description")}
           headingLevel={3}
           actions={
-            canCreate ? (
-              connectButton
-            ) : (
-              <NoCreatePermissionInfo resourceType={t("resource_websites")} />
-            )
+            canCreate ? docked : <NoCreatePermissionInfo resourceType={t("resource_websites")} />
           }
         />
         {createDialog}
@@ -600,7 +601,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
   const action = (
     <>
       {canCreate && stoppableIds.length > 0 ? stopButton(stoppableIds, "stop_all_crawls") : null}
-      {canCreate ? connectButton : null}
+      {docked}
       {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {createDialog}
       <ConfirmDialogControlled

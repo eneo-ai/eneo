@@ -1129,6 +1129,59 @@ describe("Kunskap on a phone", () => {
     expect(screen.getByRole("button", { name: /^Stoppa alla aktiva/ })).toBeTruthy();
   });
 
+  it("docks the create action at the bottom, once, and leaves the empty state without it", () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(within(dock).getByRole("button", { name: "Skapa samling" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Skapa samling" })).toHaveLength(1);
+    cleanup();
+
+    setViewport("phone");
+    show(makeSpace({ collections: [] }));
+    expect(screen.getByRole("heading", { name: "Inga samlingar ännu" })).toBeTruthy();
+    const docked = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(screen.getAllByRole("button", { name: "Skapa samling" })).toEqual([
+      within(docked).getByRole("button", { name: "Skapa samling" })
+    ]);
+  });
+
+  it("keeps an open create dialog and what was typed when a turn moves the action", async () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    fireEvent.click(within(dock).getByRole("button", { name: "Skapa samling" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: "Bygglov" } });
+
+    act(() => setViewport("tablet-portrait"));
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect((within(dialog).getByLabelText(/Namn/) as HTMLInputElement).value).toBe("Bygglov");
+  });
+
+  it("docks only the primary action: stopping crawls stays with the list", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        websites: [
+          makeWebsite({
+            latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "in progress" }
+          })
+        ]
+      }),
+      "websites"
+    );
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(within(dock).getByRole("button", { name: "Anslut webbplats" })).toBeTruthy();
+    expect(within(dock).queryByRole("button", { name: /^Stoppa alla aktiva/ })).toBeNull();
+  });
+
+  it("docks nothing for someone who may not add knowledge", () => {
+    setViewport("phone");
+    show(makeSpace({ resourcePermissions: ["read"], collections: [makeCollection()] }));
+    expect(screen.queryByRole("group", { name: "Kunskap, åtgärder" })).toBeNull();
+  });
+
   it("keeps focus on the same collection when a turn swaps rows for the table", () => {
     setViewport("phone");
     show(makeSpace({ collections: [makeCollection()] }));

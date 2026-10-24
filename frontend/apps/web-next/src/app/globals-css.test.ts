@@ -275,6 +275,26 @@ describe("globals.css", () => {
     expect(controls?.[1]).toMatchObject({ position: "relative", "z-index": "1" });
   });
 
+  it("keeps a phone's toasts above its docked action bar", () => {
+    let offsets: Record<string, string> = {};
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.includes("[data-docked-actions]") || !rule.selector.includes("toaster")) {
+        return;
+      }
+      rule.walkDecls((decl) => {
+        offsets = {
+          ...offsets,
+          [decl.prop]: `${decl.value}${decl.important ? " !important" : ""}`
+        };
+      });
+    });
+    // sonner sets these inline: only !important moves them.
+    expect(offsets).toMatchObject({
+      "--offset-bottom": expect.stringMatching(/^calc\(4\.5rem .* !important$/),
+      "--mobile-offset-bottom": expect.stringMatching(/^calc\(4\.5rem .* !important$/)
+    });
+  });
+
   it("keeps what an Astryx table scrolls inside its scroll box", () => {
     let position: string | undefined;
     postcss.parse(css).walkRules(".astryx-table-scroll-wrapper", (rule: Rule) => {

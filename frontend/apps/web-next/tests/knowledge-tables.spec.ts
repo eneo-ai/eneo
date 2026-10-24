@@ -145,6 +145,23 @@ test.describe("knowledge on a phone", () => {
       await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     ).toBeLessThanOrEqual(0);
 
+    // The primary action is docked at the bottom, in the thumb zone; the page
+    // keeps room for it.
+    const dock = page.getByRole("group", { name: /kunskap, åtgärder|knowledge, actions/i });
+    const connect = dock.getByRole("button", { name: /anslut webbplats|connect website/i });
+    await expect(connect).toBeVisible();
+    const docked = await dock.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const main = document.getElementById("main-content")!;
+      return {
+        bottom: Math.round(innerHeight - box.bottom),
+        reserved: parseFloat(getComputedStyle(main).paddingBottom) >= box.height,
+        button: el.querySelector("button")!.getBoundingClientRect().height
+      };
+    });
+    expect(docked).toEqual({ bottom: 0, reserved: true, button: expect.any(Number) });
+    expect(docked.button).toBeGreaterThanOrEqual(44);
+
     await sources.getByRole("radio", { name: /samlingar|collections/i }).click();
     await expect(page).toHaveURL(/[?&]tab=collections/);
   });
@@ -195,5 +212,9 @@ test.describe("knowledge tables on an iPad held upright", () => {
   test("the widest knowledge table fits without scrolling sideways", async ({ page }) => {
     const { region } = await websitesTable(page);
     expect(await region.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+    // A tablet keeps the action in its place in the page: nothing docks.
+    const actions = page.getByRole("group", { name: /kunskap, åtgärder|knowledge, actions/i });
+    await expect(actions).toBeVisible();
+    expect(await actions.evaluate((el) => getComputedStyle(el).position)).toBe("static");
   });
 });

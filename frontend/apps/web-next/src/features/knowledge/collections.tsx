@@ -49,6 +49,7 @@ import {
 } from "./knowledge-sort";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { RowsOrTable } from "./knowledge-list";
 import { collectionRow } from "./knowledge-rows";
@@ -369,23 +370,29 @@ export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: 
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
 
+  // The tab's primary action: docked at the bottom on a phone.
   const action = canCreate ? (
-    <CreateCollectionButton />
+    <DockedActions label={t("space_knowledge_actions")}>
+      <CreateCollectionButton />
+    </DockedActions>
   ) : (
     <NoCreatePermissionInfo resourceType={t("resource_collections")} />
   );
 
-  // Nothing to filter yet: the empty state carries the one create button.
+  // Nothing to filter yet: the empty state carries the one create button
+  // (on a phone, the dock does).
   if (collections.length === 0) {
     return (
-      <EmptyState
-        icon={<FolderClosed />}
-        hue={AREA_HUES.knowledge}
-        title={t("space_collections_empty_title")}
-        description={t("space_collections_empty_description")}
-        headingLevel={3}
-        actions={action}
-      />
+      <>
+        <EmptyState
+          icon={<FolderClosed />}
+          hue={AREA_HUES.knowledge}
+          title={t("space_collections_empty_title")}
+          description={t("space_collections_empty_description")}
+          headingLevel={3}
+          actions={action}
+        />
+      </>
     );
   }
 
