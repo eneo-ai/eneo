@@ -357,7 +357,11 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 - Decision 9: a table keeps every column on a phone and scrolls sideways with
   what names a row held in view: `pinnedColumn="name"` (the wrapper pins it
   and any selection or row-status column before it, and keeps focus clear of
-  it). On touch, sortable headers are 44 px targets with their arrows shown,
+  it). A space's Kunskap tab is the exception: on a phone its sources list
+  rows (`RowsOrTable` in `features/knowledge/knowledge-list.tsx`, rows from
+  `knowledge-rows.ts`, which the overview shares) under a segmented control;
+  selecting websites for bulk actions stays on tablets and desktop. A
+  collection's files stay a table. On touch, sortable headers are 44 px targets with their arrows shown,
   and long header labels wrap (`globals.css` section 9b). A pinned column takes
   its container's colour from `--table-sticky-background`: `SpaceTableFrame`
   sets it (and runs edge to edge on a phone); a table on the page sets

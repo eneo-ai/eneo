@@ -1642,5 +1642,6 @@
   "chat_history_scope_assistant": "Den här assistenten",
   "chat_history_scope_group_chat": "Den här gruppchatten",
   "chat_history_scope_all": "Alla",
-  "space_manage": "Hantera ytan"
+  "space_manage": "Hantera ytan",
+  "space_updated_on": "uppdaterad <date></date>"
 }

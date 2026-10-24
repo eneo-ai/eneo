@@ -3,13 +3,14 @@ import { expect, test } from "./csp";
 import { createSpace, openCreateCollectionDialog, uniqueName } from "./helpers";
 
 /*
- * Decision 9: a knowledge table keeps all its columns on a touch screen. On a
- * phone it scrolls sideways in its own region with the name held in view; an
- * iPad held upright shows it whole. Sort headers are 44 px targets with their
- * arrows shown (there is no hover to reveal them).
+ * Decision 9: a knowledge table keeps all its columns on a touch screen and
+ * scrolls sideways in its own region with the name held in view; an iPad held
+ * upright shows it whole. Sort headers are 44 px targets with their arrows
+ * shown (there is no hover to reveal them). On a phone a space's Kunskap tab
+ * lists rows instead; a collection's files stay a table.
  */
 
-/** A space with one website; returns its websites table and scroll region. */
+/** A space with one website, on its Kunskap tab's websites. */
 async function spaceWithWebsite(page: Page) {
   const space = await createSpace(page, uniqueName("E2E Tabeller"));
   await page.goto(`${space}/knowledge?tab=websites`);
@@ -21,19 +22,25 @@ async function spaceWithWebsite(page: Page) {
   await dialog.getByLabel(/^(webbadress|web address)/i).fill("https://example.org/e2e");
   await dialog.getByRole("button", { name: /skapa webbplats|create website/i }).click();
   await expect(dialog).toBeHidden();
+  await expect(page.getByRole("main").getByRole("link", { name: /example\.org/ })).toBeVisible();
+}
+
+/** The websites table and its scroll region (from 768 px). */
+async function websitesTable(page: Page) {
+  await spaceWithWebsite(page);
   const table = page.getByRole("table", { name: /webbplatser|websites/i });
-  await expect(table.getByRole("link", { name: /example\.org/ })).toBeVisible();
   return { table, region: page.getByRole("group", { name: /webbplatser|websites/i }) };
 }
 
-test.describe("knowledge tables on a phone", () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+test.describe("knowledge tables on a touch screen narrower than they are", () => {
+  // The narrowest table width (768 px): the websites table scrolls there.
+  test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true, isMobile: true });
 
   test("scroll sideways with the name in view, behind 44 px sort headers", async ({
     page,
     browserName
   }) => {
-    const { table, region } = await spaceWithWebsite(page);
+    const { table, region } = await websitesTable(page);
     await expect
       .poll(() => region.evaluate((el) => el.scrollWidth - el.clientWidth))
       .toBeGreaterThan(0);
@@ -77,7 +84,6 @@ test.describe("knowledge tables on a phone", () => {
       const box = scroller.getBoundingClientRect();
       return {
         scrolled: scroller.scrollLeft > 0,
-        edges: [Math.round(box.left), Math.round(innerWidth - box.right)],
         offset: Math.round(header.getBoundingClientRect().left - box.left),
         header: getComputedStyle(header).backgroundColor,
         headerRow: behind(header.parentElement!),
@@ -86,8 +92,6 @@ test.describe("knowledge tables on a phone", () => {
       };
     });
     expect(pinned.scrolled).toBe(true);
-    // Edge to edge on a phone, over the page's gutters.
-    expect(pinned.edges).toEqual([0, 0]);
     // The selection checkbox's column is held in view before the name.
     expect(pinned.offset).toBeGreaterThanOrEqual(36);
     expect(pinned.header).toBe(pinned.headerRow);
@@ -119,6 +123,31 @@ test.describe("knowledge tables on a phone", () => {
       await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     ).toBeLessThanOrEqual(0);
   });
+});
+
+test.describe("knowledge on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("the Kunskap tab lists rows, its source chosen with a segmented control", async ({
+    page
+  }) => {
+    await spaceWithWebsite(page);
+    const sources = page.getByRole("radiogroup", { name: /kunskapskällor|knowledge sources/i });
+    await expect(sources).toBeVisible();
+    await expect(sources.getByRole("radio", { name: /webbplatser|websites/i })).toBeChecked();
+    await expect(page.getByRole("table")).toHaveCount(0);
+    const websites = page.getByRole("list", { name: /webbplatser|websites/i });
+    await expect(websites.getByRole("link", { name: /example\.org/ })).toBeVisible();
+    await expect(
+      websites.getByRole("button", { name: /fler åtgärder för|more actions for/i })
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    ).toBeLessThanOrEqual(0);
+
+    await sources.getByRole("radio", { name: /samlingar|collections/i }).click();
+    await expect(page).toHaveURL(/[?&]tab=collections/);
+  });
 
   test("a table that fits keeps its pinned cells on their own columns", async ({ page }) => {
     const space = await createSpace(page, uniqueName("E2E Filer"));
@@ -142,7 +171,9 @@ test.describe("knowledge tables on a phone", () => {
     const layout = await table.evaluate((el) => {
       const scroller = el.closest(".astryx-table-scroll-wrapper")!;
       const cells = [...el.querySelectorAll("thead th")].map((th) => th.getBoundingClientRect());
+      const box = scroller.getBoundingClientRect();
       return {
+        edges: [Math.round(box.left), Math.round(innerWidth - box.right)],
         overflow: scroller.scrollWidth - scroller.clientWidth,
         starts: cells.map((box) => Math.round(box.left)),
         ends: [
@@ -151,6 +182,8 @@ test.describe("knowledge tables on a phone", () => {
         ].slice(0, -1)
       };
     });
+    // Edge to edge on a phone, over the page's gutters.
+    expect(layout.edges).toEqual([0, 0]);
     expect(layout.overflow).toBeLessThanOrEqual(0);
     expect(layout.starts).toEqual(layout.ends);
   });
@@ -160,7 +193,7 @@ test.describe("knowledge tables on an iPad held upright", () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true });
 
   test("the widest knowledge table fits without scrolling sideways", async ({ page }) => {
-    const { region } = await spaceWithWebsite(page);
+    const { region } = await websitesTable(page);
     expect(await region.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
   });
 });

@@ -17,7 +17,8 @@ import {
   type TableSelectionState,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
+import { Table, type TableName } from "@/components/astryx/table";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
@@ -38,6 +39,8 @@ import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { RowsOrTable } from "./knowledge-list";
+import { websiteRow } from "./knowledge-rows";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type CrawlRun, type Website } from "./knowledge";
 import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
@@ -219,7 +222,7 @@ export function WebsiteActions({ website }: { website: Website }) {
 /**
  * One embedding model's websites. Sorting is shared across the groups; the
  * checkboxes (for bulk sync) select into one set, the header one selects this
- * group's rows. `labelledBy` names the table: the model heading when grouped
+ * group's rows. `name` names the table: the model heading when grouped
  * (which tells the groups' "select all" checkboxes apart), else the tab.
  */
 function WebsitesTable({
@@ -228,14 +231,14 @@ function WebsitesTable({
   selectable,
   selectedKeys,
   setSelectedKeys,
-  labelledBy
+  name
 }: {
   websites: Website[];
   sortConfig: UseTableSortableConfig<WebsiteSortKey>;
   selectable: boolean;
   selectedKeys: Set<string>;
   setSelectedKeys: Dispatch<SetStateAction<Set<string>>>;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -324,7 +327,7 @@ function WebsitesTable({
           data={websites}
           columns={columns}
           idKey="id"
-          aria-labelledby={labelledBy}
+          {...name}
           pinnedColumn="name"
           plugins={
             selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
@@ -343,8 +346,9 @@ function WebsitesTable({
   );
 }
 
-/** The websites tab; `labelledBy` is the tab, which names an ungrouped table. */
-export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; labelledBy: string }) {
+/** The websites tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
+export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
+  const phone = useMediaMatch(PHONE_QUERY);
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
@@ -657,7 +661,9 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   return (
     <div className="flex flex-col gap-6">
       {toolbar}
-      {selectionToolbar}
+      {/* Bulk actions are a tablet and desktop task: a selection made there
+          waits, hidden, while a phone shows rows without checkboxes. */}
+      {phone ? null : selectionToolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
           ? sortedData.filter((website) => website.embedding_model.id === model.id)
@@ -671,14 +677,22 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <WebsitesTable
-              websites={rows}
-              sortConfig={sortConfig}
-              selectable={canCreate}
-              selectedKeys={selected}
-              setSelectedKeys={setSelected}
-              labelledBy={headingId ?? labelledBy}
-            />
+            <RowsOrTable
+              items={rows.map((website) => ({
+                row: websiteRow(website, routeId),
+                actions: <WebsiteActions website={website} />
+              }))}
+              name={headingId ? { "aria-labelledby": headingId } : name}
+            >
+              <WebsitesTable
+                websites={rows}
+                sortConfig={sortConfig}
+                selectable={canCreate}
+                selectedKeys={selected}
+                setSelectedKeys={setSelected}
+                name={headingId ? { "aria-labelledby": headingId } : name}
+              />
+            </RowsOrTable>
           </div>
         );
       })}

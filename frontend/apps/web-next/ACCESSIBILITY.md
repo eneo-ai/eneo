@@ -104,11 +104,11 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
   part. Check by tabbing through a long list with the sticky UI present. A
-  table's pinned column is sticky UI too: the controls in the table get
-  `scroll-margin-inline-start` as wide as the pinned columns, so Shift+Tab
-  back to a scrolled-out control lands beside them. A margin, not scroll
-  padding on the region: padding would also scroll the table when a pinned
-  control, already in view, takes focus.
+  table's pinned column is sticky UI too: the Table wrapper moves a control
+  that takes focus under it out beside it. CSS cannot: the browser counts a
+  control under the pinned column as visible, so `scroll-margin` never
+  applies, and `scroll-padding` also moved the table when a pinned control
+  took focus.
 - A non-modal sheet over the page owns what it covers. The chat's activity
   sheet (where the side panel cannot sit beside the answer) hides the dock
   under it, pads the conversation's end and `scroll-padding` by its height so

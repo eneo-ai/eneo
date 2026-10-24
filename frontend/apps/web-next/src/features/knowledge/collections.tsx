@@ -11,7 +11,7 @@ import {
   type TableColumn,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
+import { Table, type TableName } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
@@ -50,6 +50,8 @@ import {
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { RowsOrTable } from "./knowledge-list";
+import { collectionRow } from "./knowledge-rows";
 import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 
 function useInvalidateSpace() {
@@ -261,17 +263,17 @@ export function CollectionActions({ collection }: { collection: Collection }) {
 }
 
 /**
- * One embedding model's collections, named by `labelledBy`: the model heading
+ * One embedding model's collections, named by `name`: the model heading
  * when grouped, else the tab.
  */
 function CollectionsTable({
   collections,
   sortConfig,
-  labelledBy
+  name
 }: {
   collections: Collection[];
   sortConfig: UseTableSortableConfig<CollectionSortKey>;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -336,7 +338,7 @@ function CollectionsTable({
         data={collections}
         columns={columns}
         idKey="id"
-        aria-labelledby={labelledBy}
+        {...name}
         pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
       />
@@ -344,16 +346,10 @@ function CollectionsTable({
   );
 }
 
-/** The collections tab; `labelledBy` is the tab, which names an ungrouped table. */
-export function CollectionsTab({
-  canCreate,
-  labelledBy
-}: {
-  canCreate: boolean;
-  labelledBy: string;
-}) {
+/** The collections tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
+export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const groupId = useId();
   const [filter, setFilter] = useState("");
 
@@ -435,11 +431,19 @@ export function CollectionsTab({
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <CollectionsTable
-              collections={rows}
-              sortConfig={sortConfig}
-              labelledBy={headingId ?? labelledBy}
-            />
+            <RowsOrTable
+              items={rows.map((collection) => ({
+                row: collectionRow(collection, routeId),
+                actions: <CollectionActions collection={collection} />
+              }))}
+              name={headingId ? { "aria-labelledby": headingId } : name}
+            >
+              <CollectionsTable
+                collections={rows}
+                sortConfig={sortConfig}
+                name={headingId ? { "aria-labelledby": headingId } : name}
+              />
+            </RowsOrTable>
           </div>
         );
       })}

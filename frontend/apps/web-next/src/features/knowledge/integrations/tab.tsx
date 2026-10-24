@@ -5,6 +5,7 @@ import { useCollator } from "@astryxdesign/core/i18n";
 import { Plug } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import type { TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
@@ -50,15 +51,15 @@ function ImportAction() {
   return <p className="text-ax-text-secondary text-sm">{t(action.messageKey)}</p>;
 }
 
-/** The integrations tab; `labelledBy` is the tab, which names an ungrouped table. */
+/** The integrations tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
 export function IntegrationsTab({
   canCreate,
   integrationRequestFormUrl,
-  labelledBy
+  name
 }: {
   canCreate: boolean;
   integrationRequestFormUrl?: string;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const collator = useCollator();
@@ -116,7 +117,7 @@ export function IntegrationsTab({
             progress={progress}
             queued={queued}
             progressLoaded={progressLoaded}
-            labelledBy={labelledBy}
+            name={name}
           />
         </>
       )}

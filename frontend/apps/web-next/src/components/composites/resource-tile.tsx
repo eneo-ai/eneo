@@ -4,7 +4,8 @@ import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { ChevronRight } from "lucide-react";
-import { createContext, use, useEffect, useRef } from "react";
+import { createContext, use, useRef } from "react";
+import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 
@@ -33,8 +34,7 @@ export function useResourceLayout(): ResourceLayout {
  *
  * Crossing 768 px (a phone turned) replaces every item, and an open menu or
  * dialog with it: the focus they had goes to the same resource's link in
- * the new layout (WCAG 2.4.3), not to the page. Tracked with focusin, which
- * removing an element never fires.
+ * the new layout (useFocusAcrossLayouts).
  */
 export function ResourceCollection({
   children,
@@ -47,24 +47,7 @@ export function ResourceCollection({
 }) {
   const phone = useMediaMatch(PHONE_QUERY);
   const box = useRef<HTMLDivElement>(null);
-  // The link of the resource that has the focus, null while it is elsewhere.
-  const focused = useRef<string | null>(null);
-  useEffect(() => {
-    const onFocusIn = (event: FocusEvent) => {
-      const target = event.target as Element;
-      focused.current = box.current?.contains(target)
-        ? (target.closest("li")?.querySelector("a[href]")?.getAttribute("href") ?? "")
-        : null;
-    };
-    document.addEventListener("focusin", onFocusIn);
-    return () => document.removeEventListener("focusin", onFocusIn);
-  }, []);
-  useEffect(() => {
-    const href = focused.current;
-    if (href === null || document.activeElement !== document.body) return;
-    const links = [...(box.current?.querySelectorAll<HTMLElement>("a[href]") ?? [])];
-    (links.find((link) => link.getAttribute("href") === href) ?? links[0])?.focus();
-  }, [phone]);
+  useFocusAcrossLayouts(box, phone);
 
   return (
     <div ref={box} className="contents">

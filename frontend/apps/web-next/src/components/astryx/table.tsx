@@ -8,8 +8,8 @@ import {
 } from "@astryxdesign/core/Table";
 import { useMemo, type Ref, type RefCallback } from "react";
 
-/** A table's accessible name: its own label, or the id of what names it. */
-type TableName =
+/** A table's (or list's) accessible name: its own label, or the id of what names it. */
+export type TableName =
   | { "aria-label": string; "aria-labelledby"?: never }
   | { "aria-labelledby": string; "aria-label"?: never };
 
@@ -32,12 +32,8 @@ export type TableProps<T extends Record<string, unknown>> = AstryxTableProps<T> 
  * every Table import here.
  *
  * `pinnedColumn` holds a column in view (Astryx's sticky columns). It covers
- * what scrolls under it, so the controls in the table keep a scroll margin as
- * wide as the pinned columns: focus moved back to one scrolled out of view
- * comes to rest beside them, not hidden behind them (WCAG 2.4.11). A margin
- * only places what has to scroll into view, so focus on a pinned control,
- * always in view, leaves the scroll where it is (scroll padding on the
- * region would not).
+ * what scrolls under it, so a control there that takes focus is moved out
+ * from under it (WCAG 2.4.11): see `keepFocusClear`.
  */
 export function Table<T extends Record<string, unknown>>({
   pinnedColumn,
@@ -62,13 +58,13 @@ export function Table<T extends Record<string, unknown>>({
     if (!pinnedColumn) return { ...userPlugins, scrollRegionName };
     // After the sticky plugin, whose ref on the region this one wraps. The
     // attribute is for globals.css section 9.
-    const keepFocusClear: TablePlugin<T> = {
+    const pinnedRegion: TablePlugin<T> = {
       transformScrollWrapper: (render) => ({
         ...render,
-        htmlProps: { ...render.htmlProps, ref: measurePinned(render.htmlProps.ref), ...PINNED }
+        htmlProps: { ...render.htmlProps, ref: keepFocusClear(render.htmlProps.ref), ...PINNED }
       })
     };
-    return { ...userPlugins, sticky, keepFocusClear, scrollRegionName };
+    return { ...userPlugins, sticky, pinnedRegion, scrollRegionName };
   }, [label, labelledBy, pinnedColumn, sticky, userPlugins]);
 
   return <AstryxTable<T> {...props} plugins={plugins} />;
@@ -77,11 +73,16 @@ export function Table<T extends Record<string, unknown>>({
 const PINNED = { "data-pinned": "" };
 
 /**
- * The scroll region's ref: passes the region on to `inner` and keeps
- * `--table-pinned-width` at the pinned columns' width (the header cells
- * Astryx offsets): the scroll margin of the table's controls.
+ * The scroll region's ref: passes the region on to `inner`, and moves what
+ * takes focus in a scrolling column out from under the pinned columns (the
+ * header cells Astryx offsets mark how far they reach). A pinned control is
+ * always in view and moves nothing. This runs before the browser scrolls
+ * focus into view, which then has nothing left to do. CSS cannot do it: the
+ * browser counts a control under the pinned columns as visible, so a scroll
+ * margin never applies, and scroll padding also moved the table whenever a
+ * pinned control took focus.
  */
-function measurePinned(inner: Ref<HTMLDivElement> | undefined): RefCallback<HTMLDivElement> {
+function keepFocusClear(inner: Ref<HTMLDivElement> | undefined): RefCallback<HTMLDivElement> {
   const pass = (node: HTMLDivElement | null) => {
     if (typeof inner === "function") inner(node);
     else if (inner) inner.current = node;
@@ -89,19 +90,21 @@ function measurePinned(inner: Ref<HTMLDivElement> | undefined): RefCallback<HTML
   return (region) => {
     pass(region);
     if (!region) return;
-    const measure = () => {
-      const start = region.getBoundingClientRect().left;
-      let end = start;
-      for (const cell of region.querySelectorAll<HTMLElement>("thead th")) {
-        if (cell.style.insetInlineStart) end = Math.max(end, cell.getBoundingClientRect().right);
+    const onFocusIn = (event: FocusEvent) => {
+      const cell = (event.target as Element).closest<HTMLElement>("td, th");
+      if (!cell || cell.style.insetInlineStart) return;
+      let pinnedEnd = region.getBoundingClientRect().left;
+      for (const header of region.querySelectorAll<HTMLElement>("thead th")) {
+        if (header.style.insetInlineStart) {
+          pinnedEnd = Math.max(pinnedEnd, header.getBoundingClientRect().right);
+        }
       }
-      region.style.setProperty("--table-pinned-width", `${end - start}px`);
+      const covered = pinnedEnd - (event.target as Element).getBoundingClientRect().left;
+      if (covered > 0) region.scrollLeft -= covered;
     };
-    const observer = new ResizeObserver(measure);
-    observer.observe(region);
-    measure();
+    region.addEventListener("focusin", onFocusIn);
     return () => {
-      observer.disconnect();
+      region.removeEventListener("focusin", onFocusIn);
       pass(null);
     };
   };

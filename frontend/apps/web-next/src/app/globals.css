@@ -430,15 +430,6 @@
     overflow-x: auto;
     overflow-y: hidden;
   }
-  /*
-   * A control scrolled under the pinned columns comes to rest beside them
-   * when it takes focus (WCAG 2.4.11). The Table wrapper measures the pinned
-   * width; a margin only places what has to scroll, so a pinned control's
-   * focus moves nothing.
-   */
-  .astryx-table-scroll-wrapper[data-pinned] :is(td, th) * {
-    scroll-margin-inline-start: var(--table-pinned-width, 0px);
-  }
 }
 
 /*
