@@ -3,10 +3,18 @@
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
+  import {
+    fromSavedBindings,
+    personalSkillHasNewerRevision,
+    personalSkillsSaveErrorMessage,
+    withLatestPersonalSkillRevision
+  } from "$lib/features/skills/personalChatSkills";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { Info } from "@lucide/svelte";
@@ -16,11 +24,29 @@
 
   let { data } = $props();
 
+  const spaces = getSpacesManager();
+
   let statusError = $state<string | null>(null);
   let statusSaving = $state(false);
   let formDirty = $state(false);
   let restoreAnnouncement = $state("");
   let availabilityChecked = $derived(data.skill.is_active);
+
+  // Saving an edit never moves the personal chat to it; the person does.
+  const personalChatBinding = $derived(
+    data.personalChatSkills?.bindings.find((binding) => binding.skill_id === data.skill.id)
+  );
+  const personalChatOnOlderVersion = $derived(
+    personalChatBinding && personalSkillHasNewerRevision(personalChatBinding)
+      ? personalChatBinding
+      : null
+  );
+  // Without the permission the move is refused; the chat keeps its version.
+  const canMovePersonalChat = $derived(
+    data.personalChatSkills?.personal_layer?.reason !== "permission_missing"
+  );
+  let personalChatSaving = $state(false);
+  let personalChatError = $state<string | null>(null);
 
   const spaceRouteId = $derived(
     data.currentSpace.personal
@@ -30,6 +56,33 @@
         : data.currentSpace.id
   );
   const canEdit = $derived(data.currentSpace.skill_permissions.includes(EDIT_SKILL_PERMISSION));
+
+  async function usePersonalChatLatestVersion() {
+    const assistant = data.currentSpace.default_assistant;
+    // The revision the person reviewed here; the other Skills come from the server.
+    const binding = personalChatOnOlderVersion;
+    if (!spaces || !assistant || !binding) return;
+    personalChatSaving = true;
+    personalChatError = null;
+    try {
+      await spaces.updateDefaultAssistantSkills(
+        { id: assistant.id },
+        fromSavedBindings(
+          () =>
+            data.eneo.skills.getAssistantConfiguration({
+              spaceId: data.currentSpace.id,
+              assistantId: assistant.id
+            }),
+          (bindings) => withLatestPersonalSkillRevision(bindings, binding)
+        )
+      );
+      await invalidate("space:skills");
+    } catch (error) {
+      personalChatError = personalSkillsSaveErrorMessage(error);
+    } finally {
+      personalChatSaving = false;
+    }
+  }
 
   async function createRevision(value: SkillRevisionFormValue) {
     await data.eneo.skills.createRevision({
@@ -129,6 +182,33 @@
   </Page.Header>
   <Page.Main>
     <div class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
+      {#if personalChatOnOlderVersion}
+        <!-- Status, not alert: it appears after a save as news, not as a failure. -->
+        <Alert.Root role="status">
+          <Info aria-hidden="true" />
+          <Alert.Title>
+            {m.personal_chat_skills_version_notice({
+              version: String(personalChatOnOlderVersion.revision_number)
+            })}
+          </Alert.Title>
+          {#if canMovePersonalChat}
+            <Alert.Description>
+              <Button
+                variant="outline"
+                size="sm"
+                class="mt-1"
+                disabled={personalChatSaving}
+                onclick={usePersonalChatLatestVersion}
+              >
+                {m.personal_chat_skills_use_latest()}
+              </Button>
+              {#if personalChatError}
+                <p class="text-destructive mt-1 text-sm" role="alert">{personalChatError}</p>
+              {/if}
+            </Alert.Description>
+          {/if}
+        </Alert.Root>
+      {/if}
       <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <aside
           class="border-border order-first border-b pb-6 lg:order-last lg:sticky lg:top-6 lg:border-b-0 lg:border-l lg:pb-0 lg:pl-6"
