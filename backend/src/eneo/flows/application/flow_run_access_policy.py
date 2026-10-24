@@ -76,6 +76,11 @@ class FlowRunActorManagerProtocol(Protocol):
 
 
 class FlowRunAccessPolicy:
+    """Who may do what with a flow's runs, asked by the flow gate and the run
+    services of one request. Its memo is valid only while no route changes
+    membership, publication, sensitivity or the evidence-export setting before
+    asking again."""
+
     def __init__(
         self,
         *,
@@ -144,8 +149,8 @@ class FlowRunAccessPolicy:
         await self.ensure_can_access_run(run, access_kind="status", history=history)
         return run
 
-    async def _load_flow_context(
-        self, *, flow_id: UUID, history: bool
+    async def load_flow_context(
+        self, *, flow_id: UUID, history: bool = False
     ) -> FlowHistoryAccessContext:
         """The flow's authorization row; a retired flow only in history mode."""
         key = (flow_id, history)
@@ -166,7 +171,7 @@ class FlowRunAccessPolicy:
             return None, 0
         # Resolved before the cache so a live read of a retired flow is refused
         # even after a history read cached its space.
-        context = await self._load_flow_context(flow_id=flow_id, history=history)
+        context = await self.load_flow_context(flow_id=flow_id, history=history)
         cached_access = self._space_access_by_flow_id.get(flow_id)
         if cached_access is not None:
             return cached_access
@@ -393,7 +398,7 @@ class FlowRunAccessPolicy:
         # reader, so they are read directly rather than through the space
         # service, whose membership check a tenant admin is not subject to.
         # A tenant admin bypasses authorization, never the data's classification.
-        context = await self._load_flow_context(flow_id=run.flow_id, history=history)
+        context = await self.load_flow_context(flow_id=run.flow_id, history=history)
         # A raw export has already cleared the flow's export switch and the
         # classification gates in `ensure_can_access_run`, so reaching here
         # means the reader is entitled to the underlying content.
@@ -434,7 +439,7 @@ class FlowRunAccessPolicy:
         # The flow's current setting decides for all of its runs, old ones and a
         # retired flow's included. The access context resolves it fail-closed:
         # metadata that cannot be parsed does not allow export.
-        context = await self._load_flow_context(flow_id=flow_id, history=history)
+        context = await self.load_flow_context(flow_id=flow_id, history=history)
         if context.evidence_export_allowed is not True:
             self.deny_evidence_export_disabled(auth_layer="flow_evidence_policy")
 

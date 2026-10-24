@@ -111,6 +111,8 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         )
     }
     | {
+        # The flow gate asks the run access policy the routes' services ask.
+        ("flows/api/flow_access_context.py", "enforce_flow_scope"),
         (
             "flows/application/flow_run_review_checkpoint_service.py",
             "FlowRunReviewCheckpointService.get_active_review_checkpoint",

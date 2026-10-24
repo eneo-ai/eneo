@@ -111,11 +111,10 @@ async def enforce_flow_scope(
         scope_filter,
         scope_mismatch_message="API key scope does not permit flow access.",
     )
-    flow = await container.flow_repo().get_history_access_context(
-        flow_id=flow_id,
-        tenant_id=container.user().tenant_id,
-        include_retired=history,
-    )
+    # The request's run access policy: the run services read the flow and the
+    # caller's facts from the memo this fills.
+    policy = container.flow_run_access_policy()
+    flow = await policy.load_flow_context(flow_id=flow_id, history=history)
     # A service key on a route that does not allow one is refused in here,
     # before any space is loaded; every caller that passes is loaded below.
     _ensure_flow_reachable(
@@ -127,7 +126,11 @@ async def enforce_flow_scope(
         require_published_for_service_key=require_published_for_service_key,
         scope_mismatch_message="API key space scope does not match requested flow.",
     )
-    actor = await _space_actor(container, flow.space_id)
+    actor, _classification_level = await policy.load_space_access(
+        flow_id=flow_id, history=history
+    )
+    # The container wires the policy's space service and actor manager.
+    assert actor is not None
     _ensure_flow_readable(actor, flow)
     return FlowReadAccess(flow=flow, actor=actor)
 

@@ -1061,6 +1061,40 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_scope_mismatch_is_refused_before_the_callers_facts_are_read(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow = _flow(uuid4())
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    _enable_space_access(container)
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(scope_type="space", space_id=uuid4()),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await flow_access_context_module.enforce_flow_scope(
+            SimpleNamespace(state=SimpleNamespace()),
+            container,
+            flow_id=flow.id,
+            allow_service_key_principals=True,
+            history=True,
+        )
+
+    _assert_scope_mismatch(
+        exc_info,
+        message="API key space scope does not match requested flow.",
+    )
+    container.flow_repo.return_value.get_history_access_context.assert_awaited_once()
+    container.space_service.return_value.get_space_access_facts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     """User-owned space-scoped API keys should still load actor context for flow visibility."""
     container = MagicMock()

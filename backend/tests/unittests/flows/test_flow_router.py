@@ -42,6 +42,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
+from tests.unittests.flows.run_access_wiring import wire_run_access_policy
 
 
 def _flow_step(step_id, step_order: int) -> FlowStep:
@@ -309,6 +310,7 @@ def _wire_flow_gate(container) -> None:
     container.flow_repo.return_value.get_history_access_context = AsyncMock(
         side_effect=history_row
     )
+    wire_run_access_policy(container)
 
 
 def _enable_space_access(

@@ -1062,7 +1062,7 @@ async def test_space_and_flow_context_lookups_are_cached_per_flow(user) -> None:
             2,
         )
         assert (
-            await policy._load_flow_context(flow_id=context.flow_id, history=False)
+            await policy.load_flow_context(flow_id=context.flow_id, history=False)
             == context
         )
 

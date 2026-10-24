@@ -1621,7 +1621,10 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         tool_facts_reader=unattended_tool_facts_reader,
     )
-    flow_run_access_policy = providers.Factory(
+    # One per Container, so the flow gate and every run service of a request
+    # share its memo. A Container is built per request and given its user by
+    # `override_user`: never resolve this before authentication.
+    flow_run_access_policy = providers.Singleton(
         FlowRunAccessPolicy,
         user=user,
         flow_repo=flow_repo,
