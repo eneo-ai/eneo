@@ -4,11 +4,39 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const cwd = fileURLToPath(new URL("..", import.meta.url));
-// A mitigation with an expiry, not a blanket waiver for braces.
-assert.ok(
-  new Date() < new Date("2026-11-05T00:00:00Z"),
-  "Review the braces security patch and remove/renew its documented exception before 2026-11-05.",
-);
+// Accepted advisories, each pinned to its exact advisory and version range
+// and with an expiry: a reviewed reason, not a blanket waiver.
+const ACCEPTED = [
+  {
+    name: "braces",
+    url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+    vulnerable_versions: "<=3.0.3",
+    expires: "2026-11-05",
+    reason: "mitigated by the tested downstream patch",
+  },
+  {
+    name: "@sveltejs/kit",
+    url: "https://github.com/advisories/GHSA-pfhg-q3qv-9q6r",
+    vulnerable_versions: "<3.0.0",
+    expires: "2026-12-15",
+    reason:
+      "open redirect needs use:enhance on a route that accepts paths starting with //; web has no catch-all routes and its enhanced forms are on fixed paths. Fixed only in SvelteKit 3",
+  },
+  {
+    name: "@sveltejs/kit",
+    url: "https://github.com/advisories/GHSA-27mw-82g8-phjj",
+    vulnerable_versions: "<3.0.0",
+    expires: "2026-12-15",
+    reason:
+      "affects prerendered pages only; web prerenders none. Fixed only in SvelteKit 3",
+  },
+];
+for (const entry of ACCEPTED) {
+  assert.ok(
+    new Date() < new Date(`${entry.expires}T00:00:00Z`),
+    `Review ${entry.name} ${entry.url} and remove/renew its documented exception before ${entry.expires}.`,
+  );
+}
 const regression = spawnSync(
   process.execPath,
   ["--test", "scripts/security-patches.test.mjs"],
@@ -34,13 +62,15 @@ if (process.argv[2])
 let blocking = 0;
 for (const [name, advisories] of Object.entries(report)) {
   for (const advisory of advisories) {
-    if (
-      name === "braces" &&
-      advisory.url === "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm" &&
-      advisory.vulnerable_versions === "<=3.0.3"
-    ) {
+    const accepted = ACCEPTED.find(
+      (entry) =>
+        entry.name === name &&
+        entry.url === advisory.url &&
+        entry.vulnerable_versions === advisory.vulnerable_versions,
+    );
+    if (accepted) {
       console.log(
-        "braces: GHSA-vfj7-8cjw-p6xm mitigated by the tested downstream patch; review expires 2026-11-05.",
+        `${name}: ${advisory.url} accepted, ${accepted.reason}; review expires ${accepted.expires}.`,
       );
       continue;
     }
