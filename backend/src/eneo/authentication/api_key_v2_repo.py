@@ -567,8 +567,12 @@ class ApiKeysV2Repository:
     ) -> Optional[ApiKeyV2InDB]:
         cutoff = last_used_at - timedelta(seconds=min_interval_seconds)
 
-        query = (
-            sa.update(self.table)
+        # The bump is best effort and the request's transaction can stay open
+        # while a response streams, so a key another transaction holds keeps
+        # its time instead of making this request wait. The lock is the one the
+        # update takes anyway, so rows that only reference the key never wait.
+        due_key = (
+            sa.select(self.table.id)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
             .where(
@@ -577,6 +581,13 @@ class ApiKeysV2Repository:
                     self.table.last_used_at < cutoff,
                 )
             )
+            .with_for_update(key_share=True, skip_locked=True)
+            .correlate(None)
+            .scalar_subquery()
+        )
+        query = (
+            sa.update(self.table)
+            .where(self.table.id == due_key)
             .values(last_used_at=last_used_at)
             .returning(self.table)
         )

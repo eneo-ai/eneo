@@ -114,7 +114,7 @@ async def test_inactive_user_setup_uses_non_ambient_authentication_transaction(
         with_transaction=False,
     )
     resolved = await dependency(
-        request=SimpleNamespace(method="POST"),
+        request=SimpleNamespace(method="POST", state=SimpleNamespace()),
         token="token",
         api_key="",
         container=container,
@@ -175,7 +175,7 @@ async def test_upload_admission_refreshes_before_authentication_and_loads_in_tra
         with_upload_admission=True,
     )
     resolved = await dependency(
-        request=SimpleNamespace(method="POST"),
+        request=SimpleNamespace(method="POST", state=SimpleNamespace()),
         token="token",
         api_key="",
         container=container,

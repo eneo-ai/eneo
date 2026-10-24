@@ -1,29 +1,17 @@
-from typing import Annotated, cast
+from fastapi import Request
 
-from fastapi import Depends
-
-from eneo.database.database import AsyncSession
 from eneo.flows.application.feature_gate import require_flows_enabled
 from eneo.main.container.container import Container
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import add_request_gate
+from eneo.users.user import UserInDB
 
 
-async def require_flow_feature(
-    # Mount it after every API key guard of the router: its authentication
-    # authorizes the key against the guards stashed on the request so far,
-    # and without them it falls back to the stricter basic method check.
-    # Its own session, whose authentication commits before the route's runs:
-    # authenticating can write (a legacy key hash is upgraded on first use),
-    # and a write held open here would block the route authenticating the
-    # same key in its own session.
-    container: Annotated[
-        Container,
-        Depends(
-            get_container(with_user=True, with_module_user=True, with_transaction=False)
-        ),
-    ],
-) -> None:
-    async with cast(AsyncSession, container.session()).begin():
-        await require_flows_enabled(
-            container.feature_flag_service(), container.user().tenant_id
-        )
+async def _flows_enabled(container: Container, user: UserInDB) -> None:
+    await require_flows_enabled(container.feature_flag_service(), user.tenant_id)
+
+
+async def require_flow_feature(request: Request) -> None:
+    # The route's own authentication runs the gate once the user is known, in
+    # its transaction, so a tenant without flows is refused after the
+    # credentials and the API key guards and before the request body.
+    add_request_gate(request, _flows_enabled)
