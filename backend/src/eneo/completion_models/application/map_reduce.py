@@ -34,8 +34,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Literal, TypeVar
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -49,6 +47,9 @@ _SKIPPED = _Skipped()
 
 NOT_RELEVANT = "NOT_RELEVANT"
 _DATE_LINE = re.compile(r"^\s*Date:\s*(\S.*?)\s*$", re.IGNORECASE)
+_WHITESPACE = re.compile(r"\s")
+# Where a segment may end, best first; a hard cut when none is near the end.
+_SEPARATORS = ("\n\n", "\n", " ")
 
 Coverage = Literal["complete", "partial", "cancelled"]
 # Reasons that on their own make the answer less than the material.
@@ -189,11 +190,6 @@ def plan_segments(
     True when all texts together fit one reduce call; the caller then
     answers in a single call instead of mapping.
     """
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=budgets.segment_tokens,
-        chunk_overlap=budgets.segment_tokens // 20,
-        length_function=count,
-    )
     planned: list[PlannedItem] = []
     total_tokens = 0
     for item in items:
@@ -202,7 +198,15 @@ def plan_segments(
         if tokens <= budgets.segment_tokens:
             segments: tuple[str, ...] = (item.text,)
         else:
-            segments = tuple(splitter.split_text(item.text)) or (item.text,)
+            segments = tuple(
+                _split_by_tokens(
+                    item.text,
+                    tokens,
+                    budgets.segment_tokens,
+                    budgets.segment_tokens // 20,
+                    count,
+                )
+            ) or (item.text,)
         planned.append(PlannedItem(item=item, segments=segments, tokens=tokens))
     total_segments = sum(len(p.segments) for p in planned)
     return DigestPlan(
@@ -716,13 +720,11 @@ class _Run:
         out: list[_Note] = []
         system = batch_reduce_prompt(self.instruction, self.budgets.batch_words)
         for note in notes:
-            if self.count(note.text) <= budget:
+            tokens = self.count(note.text)
+            if tokens <= budget:
                 out.append(note)
                 continue
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=budget, chunk_overlap=0, length_function=self.count
-            )
-            pieces = splitter.split_text(note.text)
+            pieces = _split_by_tokens(note.text, tokens, budget, 0, self.count)
             texts = await asyncio.gather(
                 *(
                     self.call(system, piece, self.budgets.batch_max_tokens)
@@ -927,6 +929,51 @@ async def _stages(run: _Run, plan: DigestPlan) -> DigestResult:
 
 def _format_note(item: DigestItem, date: str | None, body: str) -> str:
     return f"{_item_header(item)}\nDate: {date or 'unknown'}\n{body}"
+
+
+def _split_by_tokens(
+    text: str, total: int, limit: int, overlap: int, count: Callable[[str], int]
+) -> list[str]:
+    """``text`` in stripped pieces of at most ``limit`` tokens, in order.
+
+    ``total`` is the caller's count of the whole text. Its characters per
+    token size each window, which ends at the best separator in its last
+    fifth; one count checks the stripped piece, the text returned, because
+    stripping can change how the rest tokenizes, and a piece over ``limit``
+    shrinks by the overshoot until it fits or is one character. Each piece
+    re-measures the density, so a few counts per piece replace one per
+    separator, and the next piece starts ``overlap`` tokens back, at a word
+    start.
+    """
+    size = len(text)
+    chars_per_token = size / max(total, 1)
+    pieces: list[str] = []
+    start = 0
+    while start < size:
+        end = min(size, start + max(1, int(limit * chars_per_token * 0.97)))
+        while True:
+            if end < size:
+                floor = start + (end - start) * 4 // 5
+                for separator in _SEPARATORS:
+                    cut = text.rfind(separator, floor, end)
+                    if cut > start:
+                        end = cut + len(separator)
+                        break
+            piece = text[start:end].strip()
+            used = count(piece)
+            if used <= limit or end - start <= 1:
+                break
+            end = start + max(1, int((end - start) * limit / used * 0.97))
+        if piece:
+            pieces.append(piece)
+        if end >= size:
+            break
+        chars_per_token = (end - start) / max(used, 1)
+        back = end - int(overlap * chars_per_token)
+        if start < back and (space := _WHITESPACE.search(text, back, end)):
+            back = space.end()
+        start = back if start < back < end else end
+    return pieces
 
 
 def _truncate_to_tokens(text: str, budget: int, count: Callable[[str], int]) -> str:

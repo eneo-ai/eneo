@@ -4,7 +4,8 @@ coverage account that says what the answer leaves out."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import random
+from collections.abc import Callable, Sequence
 
 import pytest
 
@@ -14,12 +15,14 @@ from eneo.completion_models.application.map_reduce import (
     DigestDeadlineExceeded,
     DigestItem,
     Usage,
+    _split_by_tokens,
     batch_by_tokens,
     fitting_prefix,
     parse_map_output,
     plan_segments,
     run_digest,
 )
+from eneo.tokens.token_utils import count_tokens
 
 
 def _count(text: str) -> int:
@@ -141,6 +144,116 @@ class TestPlanSegments:
         assert fitting_prefix(texts, _count, 100) == 2
         assert fitting_prefix(texts, _count, 1000) == 3
         assert fitting_prefix(texts, _count, 10) == 1  # never nothing
+
+
+def _chars(text: str) -> int:
+    """A token per three characters: works on text with no whitespace."""
+    return -(-len(text) // 3)
+
+
+def _assert_tiles(text: str, segments: Sequence[str]) -> None:
+    """The segments run through ``text`` in order with no gap but whitespace."""
+    covered = 0
+    previous = -1
+    for segment in segments:
+        start = text.find(segment, previous + 1)
+        assert start != -1
+        assert text[covered:start].strip() == ""
+        covered = max(covered, start + len(segment))
+        previous = start
+    assert text[covered:].strip() == ""
+
+
+_TEXTS = {
+    "newline-free": (_words(600), _count),
+    "paragraphs": ("\n\n".join(_words(37, f"p{j}_") for j in range(20)), _count),
+    "no-whitespace": ("".join(str(i) for i in range(1_000)), _chars),
+    "swedish and cjk": (" ".join(f"ärende{i}å會議記錄ö" for i in range(400)), _count),
+    "cjk unspaced": ("".join(chr(0x4E00 + i) for i in range(1_000)), _chars),
+}
+
+
+class TestSegmentSplitting:
+    @pytest.mark.parametrize("name", _TEXTS)
+    def test_every_segment_fits_and_the_segments_tile_the_text(self, name):
+        text, count = _TEXTS[name]
+        plan = plan_segments([DigestItem("D1", "T", text)], _budgets(), count)
+
+        segments = plan.items[0].segments
+        assert len(segments) > 1
+        assert all(count(s) <= 50 for s in segments)
+        _assert_tiles(text, segments)
+
+    def test_overlap_repeats_words_but_never_the_last_one(self):
+        text = _words(600)
+        segments = plan_segments([DigestItem("D1", "T", text)], _budgets(), _count)
+        joined = " ".join(segments.items[0].segments).split()
+
+        assert set(joined) == set(text.split())
+        assert joined.count("w599") == 1
+
+    def test_the_same_text_splits_the_same_way(self):
+        items = [DigestItem("D1", "T", _TEXTS["paragraphs"][0])]
+
+        assert plan_segments(items, _budgets(), _count) == plan_segments(
+            items, _budgets(), _count
+        )
+
+    @pytest.mark.parametrize("count", [lambda text: 1, len])
+    def test_splitting_ends_whatever_the_counter_says(self, count):
+        text = _words(500)
+
+        segments = _split_by_tokens(text, count(text), 50, 2, count)
+
+        assert segments
+        _assert_tiles(text, segments)
+        assert all(count(s) <= 50 for s in segments) or count(text) == 1
+
+    def test_a_long_text_is_measured_a_few_times_per_segment(self):
+        calls = 0
+
+        def counting(text: str) -> int:
+            nonlocal calls
+            calls += 1
+            return _count(text)
+
+        items = [DigestItem("D1", "T", _words(20_000))]
+        plan = plan_segments(items, _budgets(segment_tokens=1_000), counting)
+
+        # The text and its header once each, then at most three per segment.
+        assert plan.total_segments >= 20
+        assert calls <= 2 + 3 * plan.total_segments
+
+    @pytest.mark.parametrize(
+        ("seed", "words", "limit"), [(120, (25, 80), 50), (51, (600, 1200), 1024)]
+    )
+    @pytest.mark.parametrize("lead", [" ", ""])
+    def test_a_real_tokenizer_counts_the_segment_it_returns(
+        self, seed, words, limit, lead
+    ):
+        # " council" is one o200k token and "council" three, so a piece that
+        # fits with its leading space can overflow once the space is stripped.
+        def count(text: str) -> int:
+            return count_tokens(text, "gpt-4o")
+
+        rng = random.Random(seed)
+        vocabulary = (
+            "the understanding meeting council municipality sammanträde"
+            " beslut protokoll Sundsvall budget, a. of"
+        ).split()
+        text = lead + " ".join(
+            rng.choice(vocabulary) for _ in range(rng.randint(*words))
+        )
+        plan = plan_segments(
+            [DigestItem("D1", "T", text)],
+            _budgets(segment_tokens=limit, reduce_input_tokens=10 * limit),
+            count,
+        )
+
+        segments = plan.items[0].segments
+        assert len(segments) > 1
+        assert [count(s) for s in segments if count(s) > limit] == []
+        _assert_tiles(text, segments)
 
 
 class TestParseMapOutput:
@@ -437,6 +550,27 @@ async def test_oversized_item_note_is_split_and_reduced_before_batching():
     assert counts["Merge"] >= 1 + 3  # the item reduce plus one call per piece
     assert result.coverage == "complete"
     assert result.excluded == []
+
+
+async def test_an_oversized_note_is_cut_into_fitting_pieces_without_overlap():
+    class _LongItemNote(_ScriptedModel):
+        async def __call__(self, system, user, max_tokens):
+            if system.startswith("Merge notes taken from consecutive"):
+                self.calls.append((system, user, max_tokens))
+                return "Date: unknown\n[D1] " + _words(300, "n"), self.usage
+            return await super().__call__(system, user, max_tokens)
+
+    model = _LongItemNote()
+    budgets = _budgets(segment_tokens=50, reduce_input_tokens=100)
+    plan = plan_segments([DigestItem("D1", "Long", _words(150, "a"))], budgets, _count)
+
+    await run_digest(plan, model, instruction="sum", budgets=budgets, count=_count)
+
+    pieces = [u for s, u, _ in model.calls if s.startswith("Merge notes from several")]
+    assert len(pieces) >= 4
+    assert all(_count(piece) <= 100 for piece in pieces)
+    words = " ".join(pieces).split()
+    assert all(words.count(f"n{i}") == 1 for i in range(300))
 
 
 async def test_usage_is_summed_over_every_call():
