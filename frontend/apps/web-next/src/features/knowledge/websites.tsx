@@ -258,7 +258,7 @@ function WebsitesTable({
     {
       key: "name",
       header: t("website"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 152 }),
       sortable: true,
       renderCell: (website) => (
         <KnowledgeNameCell
@@ -272,7 +272,7 @@ function WebsitesTable({
     {
       key: "link",
       header: t("link"),
-      width: proportional(1),
+      width: pixel(112),
       renderCell: (website) => (
         <AstryxLink href={website.url} isExternalLink color="secondary">
           {t("go_to_website")}
@@ -282,7 +282,7 @@ function WebsitesTable({
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(136),
       sortable: true,
       renderCell: (website) => (
         <WebsiteStatusCell
@@ -297,21 +297,21 @@ function WebsitesTable({
     {
       key: "synced",
       header: t("website_last_indexed"),
-      width: proportional(1),
+      width: pixel(112),
       sortable: true,
       renderCell: (website) => <WebsiteSyncedCell website={website} />
     },
     {
       key: "interval",
       header: t("auto_updates"),
-      width: proportional(1),
+      width: pixel(144),
       sortable: true,
       renderCell: (website) => <WebsiteIntervalLabel website={website} />
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (website) => <WebsiteActions website={website} />
     }
@@ -325,6 +325,7 @@ function WebsitesTable({
           columns={columns}
           idKey="id"
           aria-labelledby={labelledBy}
+          pinnedColumn="name"
           plugins={
             selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
           }

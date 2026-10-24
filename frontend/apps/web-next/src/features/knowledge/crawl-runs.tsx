@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import {
+  pixel,
   proportional,
   useTableSortable,
   useTableSortableState,
@@ -136,21 +137,21 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "started",
       header: t("fix_crawl_started_column"),
-      width: proportional(1),
+      width: pixel(216),
       sortable: true,
       renderCell: (run) => <CrawlStartedCell run={run} onSelect={() => select(run, null)} />
     },
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(136),
       sortable: true,
       renderCell: (run) => <CrawlRunStatusLabel run={run} />
     },
     {
       key: "results",
       header: t("results"),
-      width: proportional(2),
+      width: proportional(1, { minWidth: 200 }),
       sortable: true,
       renderCell: (run) => (
         <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
@@ -159,7 +160,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "duration",
       header: t("duration"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (run) => <CrawlDurationCell crawl={run} />
     }
@@ -189,6 +190,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
             columns={columns}
             idKey="id"
             aria-label={t("crawls")}
+            pinnedColumn="started"
             plugins={{ sort: sortPlugin }}
           />
         </SpaceTableFrame>

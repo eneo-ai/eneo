@@ -348,6 +348,20 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   (`data` + `columns`) with a width on every column: `pixel(n)` for fixed
   columns, `proportional(n)` for text (it keeps a 120 px minimum). Its plugins
   do sorting, filtering, pagination and selection.
+- Size short columns (counts, dates, states, sizes) with `pixel(n)` to fit
+  their content and header, and leave the name `proportional(1, { minWidth })`.
+  The table's min width is the sum of the pixel columns plus, for each
+  proportional one, its min width times the total share over its own share:
+  three `proportional(1)` beside a `proportional(3)` make 840 px of a table
+  whose content needs half. Knowledge tables fit an iPad held upright (770 px).
+- Decision 9: a table keeps every column on a phone and scrolls sideways with
+  what names a row held in view: `pinnedColumn="name"` (the wrapper pins it
+  and any selection or row-status column before it, and keeps focus clear of
+  it). On touch, sortable headers are 44 px targets with their arrows shown,
+  and long header labels wrap (`globals.css` section 9b). A pinned column takes
+  its container's colour from `--table-sticky-background`: `SpaceTableFrame`
+  sets it (and runs edge to edge on a phone); a table on the page sets
+  `[--table-sticky-background:var(--color-ax-surface)]`.
 - Every table is named: `aria-labelledby` its visible heading, or a translated
   `aria-label` (the wrapper's type requires one). The wrapper gives the
   table's horizontal scroll region the same name; Astryx would call it just
@@ -359,9 +373,10 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   and one column without a width, which takes what is left, work as they are.
 - A column with a button or menu is at least `w-14 min-w-14`: on touch,
   Astryx controls are 44 px, plus the cell's 12 px start padding.
-- Give a table with many columns a min width (`min-w-*` on `Table`). Below it
-  the table scrolls sideways in its own focusable region instead of squeezing
-  the columns.
+- Give a children-mode table with many columns a min width (`min-w-*` on
+  `Table`; data-driven tables get it from their columns). Below it the table
+  scrolls sideways in its own focusable region instead of squeezing the
+  columns.
 - The page scans in `tests/a11y.spec.ts` fail on a column that collapsed.
 - Legacy shadcn tables (`@/components/ui/table`) get the same keyboard-scrollable,
   named container from Astryx's `useScrollableArea`; name them the same way.

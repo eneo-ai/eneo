@@ -103,7 +103,12 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   docked chat composer, toolbars, toasts, cookie-style banners. Give the scroll
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
-  part. Check by tabbing through a long list with the sticky UI present.
+  part. Check by tabbing through a long list with the sticky UI present. A
+  table's pinned column is sticky UI too: the controls in the table get
+  `scroll-margin-inline-start` as wide as the pinned columns, so Shift+Tab
+  back to a scrolled-out control lands beside them. A margin, not scroll
+  padding on the region: padding would also scroll the table when a pinned
+  control, already in view, takes focus.
 - A non-modal sheet over the page owns what it covers. The chat's activity
   sheet (where the side panel cannot sit beside the answer) hides the dock
   under it, pads the conversation's end and `scroll-padding` by its height so

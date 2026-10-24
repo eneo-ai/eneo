@@ -420,6 +420,49 @@
   .astryx-table-scroll-wrapper {
     position: relative;
   }
+  /*
+   * A table with a pinned column (web-next Table `pinnedColumn`) stays its
+   * own scroll container when it fits. Astryx clips one that fits, and its
+   * pinned cells then stuck to the page instead: off their column where a
+   * phone's table runs over the page's gutters.
+   */
+  .astryx-table-scroll-wrapper[data-pinned] {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  /*
+   * A control scrolled under the pinned columns comes to rest beside them
+   * when it takes focus (WCAG 2.4.11). The Table wrapper measures the pinned
+   * width; a margin only places what has to scroll, so a pinned control's
+   * focus moves nothing.
+   */
+  .astryx-table-scroll-wrapper[data-pinned] :is(td, th) * {
+    scroll-margin-inline-start: var(--table-pinned-width, 0px);
+  }
+}
+
+/*
+ * 9b. Sortable column headers (Astryx useTableSortable). The header's ellipsis
+ *    cannot reach a label inside the flex sort button, so a label wider than
+ *    its column was cut off mid-word: it wraps instead. On a coarse pointer
+ *    the button is at least 44 px high (decision 9; the cell keeps its block
+ *    padding, which its focus ring needs), and the arrows of an unsorted
+ *    column, which Astryx shows only on hover, are always shown: a touch
+ *    screen has no hover to reveal them.
+ */
+@layer components {
+  .astryx-table-header-cell button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  @media (pointer: coarse) {
+    .astryx-table-header-cell button {
+      min-block-size: 44px;
+    }
+    .astryx-table-header-cell button > span:has(> .astryx-icon) {
+      opacity: 1;
+    }
+  }
 }
 
 /*

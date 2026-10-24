@@ -83,7 +83,7 @@ export function FolderOverview({
     {
       key: "folder",
       header: t("integration_source_folder"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 176 }),
       renderCell: (row) => (
         <span
           className="flex min-w-0 flex-col"
@@ -110,7 +110,7 @@ export function FolderOverview({
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(144),
       renderCell: (row) => <SourceStateLabel state={itemState(row.item, progress, queued)} />
     },
     {
@@ -127,7 +127,7 @@ export function FolderOverview({
     {
       key: "updated",
       header: t("integration_source_last_up_to_date"),
-      width: proportional(1),
+      width: pixel(128),
       renderCell: (row) => <LastUpToDate item={row.item} />
     },
     ...(items.some((item) => item.integration_type === "sharepoint")
@@ -135,7 +135,7 @@ export function FolderOverview({
           {
             key: "watch",
             header: t("integration_source_stat_watch"),
-            width: proportional(1),
+            width: pixel(168),
             renderCell: (row: FolderRow) => <WatchCell item={row.item} />
           }
         ]
@@ -143,7 +143,7 @@ export function FolderOverview({
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(112),
+      width: pixel(120),
       align: "end",
       renderCell: (row) => {
         const url = safeExternalUrl(row.item.url);
@@ -180,6 +180,9 @@ export function FolderOverview({
       columns={columns}
       idKey="id"
       aria-label={t("integration_source_folders_table_label", { name: sourceName })}
+      pinnedColumn="folder"
+      // Not in a frame: the pinned column takes the page's colour.
+      className="[--table-sticky-background:var(--color-ax-surface)]"
     />
   );
 }

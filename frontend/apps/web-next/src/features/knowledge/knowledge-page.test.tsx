@@ -924,3 +924,42 @@ describe("KnowledgePage", () => {
     ).toBeTruthy();
   });
 });
+
+/*
+ * Decision 9: a knowledge table keeps all its columns on a phone and scrolls
+ * sideways in its own region, with its name held in view. Its short columns
+ * are as wide as what they hold, so an iPad held upright shows it whole.
+ */
+describe("knowledge tables on phones and tablets", () => {
+  // What an iPad held upright (820 px) leaves a space's table: the page's
+  // 24 px insets and the frame's border.
+  const IPAD_PORTRAIT_WIDTH = 770;
+  // Headers of the columns held in view (Astryx offsets them from the start).
+  const pinned = (table: HTMLElement) =>
+    within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart)
+      .map((cell) => cell.textContent);
+  const minWidth = (table: HTMLElement) => Number.parseFloat(table.style.minWidth);
+
+  it("holds a collection's name in view and fits an iPad", () => {
+    show(makeSpace({ collections: [makeCollection()] }));
+    const table = screen.getByRole("table", { name: "Samlingar" });
+    expect(pinned(table)).toEqual(["Namn"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+  });
+
+  it("holds a website's checkbox and name in view and fits an iPad", () => {
+    show(makeSpace({ websites: [makeWebsite()] }), "websites");
+    const table = screen.getByRole("table", { name: "Webbplatser" });
+    expect(pinned(table)).toEqual([expect.stringContaining("Markera alla rader"), "Webbplats"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+  });
+
+  it("holds a source's name in view and fits an iPad", async () => {
+    show(makeSpace({ integrations: [makeIntegration()] }), "integrations");
+    const table = await screen.findByRole("table", { name: "Integrationer" });
+    expect(pinned(table)).toEqual(["Källa"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+  });
+});

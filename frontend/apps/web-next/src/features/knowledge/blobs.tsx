@@ -317,21 +317,21 @@ export function BlobTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(4),
+      width: proportional(1),
       sortable: true,
       renderCell: (blob) => <BlobNameCell blob={blob} />
     },
     {
       key: "size",
       header: t("size"),
-      width: proportional(1),
+      width: pixel(96),
       sortable: true,
       renderCell: (blob) => formatBytes(blob.metadata.size, locale)
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (blob) => (canEdit ? <BlobActions blob={blob} /> : null)
     }
@@ -358,6 +358,7 @@ export function BlobTable({
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
+            pinnedColumn="name"
             plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
           />
         </SpaceTableFrame>

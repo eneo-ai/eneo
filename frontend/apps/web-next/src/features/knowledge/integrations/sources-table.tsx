@@ -211,7 +211,7 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
     {
       key: "name",
       header: t("integration_source_column_source"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (row) => <SourceNameCell source={row.source} />
     },
@@ -228,21 +228,21 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
     {
       key: "status",
       header: t("status"),
-      width: proportional(2),
+      width: pixel(200),
       sortable: true,
       renderCell: (row) => <SourceStatusCell row={row} />
     },
     {
       key: "updated",
       header: t("integration_source_column_updated"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (row) => <SourceUpdated summary={row.summary} />
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (row) => {
         const [single] = row.source.items;
@@ -268,6 +268,7 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
         columns={columns}
         idKey="id"
         aria-labelledby={labelledBy}
+        pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
         emptyState={
           <EmptyState title={t("no_results_found")} headingLevel={3} isCompact framed={false} />

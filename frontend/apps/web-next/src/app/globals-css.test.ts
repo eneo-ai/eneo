@@ -284,4 +284,30 @@ describe("globals.css", () => {
     });
     expect(position).toBe("relative");
   });
+
+  it("wraps a sortable header's label, and on touch makes it a 44 px target with its arrows shown", () => {
+    const header = ".astryx-table-header-cell";
+    // "<media> <selector>" → declarations
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(header)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector}`.trim(), declarations);
+    });
+    // Astryx's ellipsis cannot reach a label inside the flex sort button: a
+    // long one was cut off mid-word.
+    expect(rules.get(`${header} button`)).toMatchObject({ "white-space": "normal" });
+    expect(rules.get(`(pointer: coarse) ${header} button`)).toMatchObject({
+      "min-block-size": "44px"
+    });
+    // The unsorted arrows Astryx shows only on hover.
+    expect(
+      rules.get(`(pointer: coarse) ${header} button > span:has(> .astryx-icon)`)
+    ).toMatchObject({ opacity: "1" });
+  });
 });

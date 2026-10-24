@@ -281,7 +281,7 @@ function CollectionsTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (collection) => (
         <KnowledgeNameCell
@@ -295,7 +295,7 @@ function CollectionsTable({
     {
       key: "files",
       header: t("content"),
-      width: proportional(1),
+      width: pixel(112),
       sortable: true,
       renderCell: (collection) =>
         t("space_files_count", { count: collection.metadata.num_info_blobs })
@@ -303,7 +303,7 @@ function CollectionsTable({
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(128),
       renderCell: (collection) =>
         collection.metadata.num_info_blobs > 0 ? (
           <StatusLabel status="success" label={t("space_status_indexed")} />
@@ -314,7 +314,7 @@ function CollectionsTable({
     {
       key: "updated",
       header: t("space_updated_column"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (collection) => {
         const updatedAt = collection.updated_at ?? collection.created_at;
@@ -324,7 +324,7 @@ function CollectionsTable({
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (collection) => <CollectionActions collection={collection} />
     }
@@ -337,6 +337,7 @@ function CollectionsTable({
         columns={columns}
         idKey="id"
         aria-labelledby={labelledBy}
+        pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
       />
     </SpaceTableFrame>
