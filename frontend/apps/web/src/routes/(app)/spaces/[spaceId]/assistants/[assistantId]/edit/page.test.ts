@@ -5,6 +5,8 @@ import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/sk
 import { load } from "./+page";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
+const USE_SKILLS_USER = { roles: [{ permissions: ["skills"] }] };
+const OWN_SKILLS_ONLY_USER = { roles: [{ permissions: ["personal_chat", "personal_skills"] }] };
 
 describe("Assistant edit loader", () => {
   test("loads Skill bindings for a reader of a non-default Assistant", async () => {
@@ -33,6 +35,7 @@ describe("Assistant edit loader", () => {
       depends: vi.fn(),
       params: { assistantId: "assistant-1" },
       parent: vi.fn().mockResolvedValue({
+        user: USE_SKILLS_USER,
         currentSpace: {
           id: "space-1",
           organization: false,
@@ -82,6 +85,7 @@ describe("Assistant edit loader", () => {
       depends: vi.fn(),
       params: { assistantId: "default-assistant" },
       parent: vi.fn().mockResolvedValue({
+        user: USE_SKILLS_USER,
         currentSpace: {
           id: "personal-space",
           personal: true,
@@ -141,6 +145,7 @@ describe("Assistant edit loader", () => {
       depends: vi.fn(),
       params: { assistantId: "default-assistant" },
       parent: vi.fn().mockResolvedValue({
+        user: USE_SKILLS_USER,
         currentSpace: {
           id: "shared-space",
           personal: false,
@@ -182,5 +187,42 @@ describe("Assistant edit loader", () => {
       spaceId: "shared-space",
       assistantId: "default-assistant"
     });
+  });
+
+  test("hides Skills on other personal Assistants without Use Skills", async () => {
+    const list = vi.fn();
+    const getAssistantConfiguration = vi.fn();
+    const event = {
+      depends: vi.fn(),
+      params: { assistantId: "assistant-1" },
+      parent: vi.fn().mockResolvedValue({
+        user: OWN_SKILLS_ONLY_USER,
+        currentSpace: {
+          id: "personal-space",
+          personal: true,
+          default_assistant: { id: "default-assistant" },
+          skill_permissions: [READ_SKILL_PERMISSION]
+        },
+        eneo: {
+          documentTemplates: { listAvailable: vi.fn().mockResolvedValue({ items: [] }) },
+          models: { list: vi.fn().mockResolvedValue({ rerankModels: [] }) },
+          assistants: {
+            get: vi.fn().mockResolvedValue({ id: "assistant-1" }),
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+          },
+          helpAssistants: {
+            runs: { availability: vi.fn().mockResolvedValue(null) }
+          },
+          skills: { list, getAssistantConfiguration }
+        }
+      })
+    };
+
+    const result = await load(event as never);
+
+    expect(result.supportsDirectSkills).toBe(true);
+    expect(result.canUseSkills).toBe(false);
+    expect(list).not.toHaveBeenCalled();
+    expect(getAssistantConfiguration).not.toHaveBeenCalled();
   });
 });
