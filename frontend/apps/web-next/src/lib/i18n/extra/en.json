@@ -1644,5 +1644,12 @@
   "chat_history_scope_all": "All",
   "space_manage": "Manage space",
   "space_updated_on": "updated <date></date>",
-  "space_knowledge_actions": "Knowledge, actions"
+  "space_knowledge_actions": "Knowledge, actions",
+  "space_members_actions": "Members, actions",
+  "space_group_user_count": "{count, plural, one {# user} other {# users}}",
+  "space_role_admin_description": "Has full control of the space and can manage its members.",
+  "space_role_editor_description": "Can create, edit and publish assistants, apps and knowledge sources.",
+  "space_role_viewer_description": "Can see and use published assistants and apps.",
+  "space_remove_from_space": "Remove from space",
+  "space_role_current": "current role"
 }

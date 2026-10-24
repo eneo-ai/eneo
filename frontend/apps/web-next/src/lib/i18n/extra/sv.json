@@ -1644,5 +1644,12 @@
   "chat_history_scope_all": "Alla",
   "space_manage": "Hantera ytan",
   "space_updated_on": "uppdaterad <date></date>",
-  "space_knowledge_actions": "Kunskap, åtgärder"
+  "space_knowledge_actions": "Kunskap, åtgärder",
+  "space_members_actions": "Medlemmar, åtgärder",
+  "space_group_user_count": "{count, plural, one {# användare} other {# användare}}",
+  "space_role_admin_description": "Har full kontroll över ytan och kan hantera medlemmar.",
+  "space_role_editor_description": "Kan skapa, redigera och publicera assistenter, appar och kunskapskällor.",
+  "space_role_viewer_description": "Kan se och använda publicerade assistenter och appar.",
+  "space_remove_from_space": "Ta bort från ytan",
+  "space_role_current": "nuvarande roll"
 }

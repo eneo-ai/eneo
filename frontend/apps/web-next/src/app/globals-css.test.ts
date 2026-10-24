@@ -290,8 +290,12 @@ describe("globals.css", () => {
     });
     // sonner sets these inline: only !important moves them.
     expect(offsets).toMatchObject({
-      "--offset-bottom": expect.stringMatching(/^calc\(4\.5rem .* !important$/),
-      "--mobile-offset-bottom": expect.stringMatching(/^calc\(4\.5rem .* !important$/)
+      "--offset-bottom": expect.stringMatching(
+        /^calc\(\s*var\(--docked-actions-height[\s\S]* !important$/
+      ),
+      "--mobile-offset-bottom": expect.stringMatching(
+        /^calc\(\s*var\(--docked-actions-height[\s\S]* !important$/
+      )
     });
   });
 

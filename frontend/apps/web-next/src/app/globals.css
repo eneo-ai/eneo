@@ -888,8 +888,12 @@
 @layer components {
   @media (width < 48rem) {
     body:has([data-docked-actions]) [data-sonner-toaster] {
-      --offset-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px) + 8px) !important;
-      --mobile-offset-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px) + 8px) !important;
+      --offset-bottom: calc(
+        var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px
+      ) !important;
+      --mobile-offset-bottom: calc(
+        var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px
+      ) !important;
     }
   }
 }
