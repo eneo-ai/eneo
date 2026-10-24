@@ -208,6 +208,47 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
   });
 });
 
+describe("ChatView tool approval (decision 26)", () => {
+  const waiting: EneoUIMessage[] = [
+    {
+      id: "q-tool",
+      role: "user",
+      parts: [{ type: "text", text: "Hur långt har ärende BN 2026-0412 kommit?" }]
+    },
+    {
+      id: "a-tool",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-tool-approval",
+          id: "ap-1",
+          data: {
+            approval_id: "ap-1",
+            status: "pending",
+            tools: [
+              {
+                server_name: "diarium",
+                tool_name: "sok_arende",
+                title: "Sök ärende i diariet",
+                tool_call_id: "call-1",
+                arguments: { arendenummer: "BN 2026-0412" }
+              }
+            ]
+          }
+        } as EneoUIMessage["parts"][number]
+      ]
+    }
+  ];
+
+  it("keeps the composer from 640px, where the card in the conversation decides", () => {
+    setViewport("tablet-portrait");
+    renderInApp(<Harness partner={assistant} messages={waiting} sessionId="s-1" />);
+    expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy();
+    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).getByRole("button", { name: "Godkänn Sök ärende i diariet" })).toBeTruthy();
+  });
+});
+
 describe("ChatView conversation", () => {
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);

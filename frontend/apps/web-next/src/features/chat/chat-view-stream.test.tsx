@@ -8,12 +8,13 @@ import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold",
+  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break",
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
@@ -42,6 +43,37 @@ vi.mock("@/lib/chat/transport", () => ({
       }
       // The SDK hands the backend's error text over as an Error message.
       if (spies.mode === "json") throw new Error('{"message":"Not authenticated"}');
+      if (spies.mode === "approval" || spies.mode === "approval-break") {
+        // A tool asks first; the stream waits for the decision, or breaks.
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "start", messageId: "answer-1" });
+            controller.enqueue({
+              type: "data-tool-approval",
+              id: "ap-1",
+              data: {
+                approval_id: "ap-1",
+                status: "pending",
+                tools: [
+                  {
+                    server_name: "diarium",
+                    tool_name: "sok_arende",
+                    title: "Sök ärende i diariet",
+                    tool_call_id: "call-1",
+                    arguments: { arendenummer: "BN 2026-0412" }
+                  }
+                ]
+              }
+            });
+            if (spies.mode === "approval-break") {
+              setTimeout(() => controller.error(new Error("Anslutningen bröts")), 0);
+            }
+            abortSignal?.addEventListener("abort", () =>
+              controller.error(new DOMException("Aborted", "AbortError"))
+            );
+          }
+        });
+      }
       if (spies.mode === "hold") {
         // Starts answering, then waits until the user stops it.
         return new ReadableStream({
@@ -279,6 +311,45 @@ describe("ChatView docked composer", () => {
     expect(scroller?.contains(log)).toBe(true);
     const textarea = screen.getByRole("textbox", { name: /^Fråga / });
     expect(scroller?.contains(textarea)).toBe(false);
+  });
+});
+
+describe("ChatView tool approval on a phone (decision 26)", () => {
+  it("puts the decision in the composer's place while the tool waits, then gives it back", async () => {
+    spies.mode = "approval";
+    setViewport("phone");
+    renderInApp(<Harness />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+
+    const bar = await screen.findByRole("region", {
+      name: /vill använda Sök ärende i diariet$/
+    });
+    expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
+    expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
+    // Asked once: the card in the conversation shows the call, the bar decides.
+    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));
+    const sheet = await screen.findByRole("dialog", { name: "Sök ärende i diariet" });
+    expect(within(sheet).getByText("diarium/sok_arende")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Stäng" })).toBeTruthy();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Godkänn Sök ärende i diariet" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy());
+    expect(
+      within(screen.getByRole("region", { name: "Verktygsgodkännande" })).getByText("Godkänt")
+    ).toBeTruthy();
+  });
+
+  it("gives the composer back when the stream breaks while a tool waits", async () => {
+    spies.mode = "approval-break";
+    setViewport("phone");
+    renderInApp(<Harness />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+    expect(await screen.findByRole("button", { name: "Försök igen" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /vill använda/ })).toBeNull();
+    expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy();
   });
 });
 

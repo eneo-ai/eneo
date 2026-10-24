@@ -58,6 +58,12 @@ import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ComposerDock, ConversationLayout } from "./conversation-layout";
+import {
+  pendingTools,
+  ToolApprovalsContext,
+  ToolDecisionBar,
+  useToolApprovalState
+} from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -95,9 +101,14 @@ type PendingQuestionState = {
   request: SendRequest;
 };
 
+/**
+ * Below Tailwind's `sm`, a phone: its start state docks the composer
+ * (decision 5), and a waiting tool's decision takes the composer's place
+ * (decision 26).
+ */
+const PHONE = "(width < 40rem)";
+
 /** Which answer's activity is shown, on which tab, and which source to focus. */
-/** Below Tailwind's `sm`: a phone's start state docks its composer (decision 5). */
-const PHONE_START = "(width < 40rem)";
 
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
@@ -202,6 +213,7 @@ function ConversationView({
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
   const online = useOnline();
+  const approvals = useToolApprovalState();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
   const toolChoices = useToolChoices(partner);
@@ -267,13 +279,10 @@ function ConversationView({
   const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Phones dock the start composer where it stays (decision 5): CSS picks
   // from the first paint, and once the width is known the other place goes.
-  const phoneStart = useMediaMatch(PHONE_START);
+  const phone = useMediaMatch(PHONE);
   /** The start composer's field the user has: docked on phones, centred from 640px. */
   const startTextarea = () =>
-    ((phoneStart ?? window.matchMedia(PHONE_START).matches)
-      ? startDockTextareaRef
-      : startTextareaRef
-    ).current;
+    ((phone ?? window.matchMedia(PHONE).matches) ? startDockTextareaRef : startTextareaRef).current;
   const startField = useEffectEvent(startTextarea);
   const refocusComposer = useRef(false);
   // Crossing 640px (a phone turned, a window resized) swaps the start
@@ -286,7 +295,7 @@ function ConversationView({
   };
   useEffect(() => {
     if (startHadFocus.current && document.activeElement === document.body) startField()?.focus();
-  }, [phoneStart]);
+  }, [phone]);
   const rescue = useFocusRescue();
   useEffect(() => {
     if (focusComposerIfLost) rescue(startField());
@@ -550,6 +559,41 @@ function ConversationView({
   }, []);
 
   const started = messages.length > 0 || pendingQuestion !== null;
+
+  // A tool waiting for a decision in the latest answer: on a phone the
+  // decision takes the composer's place (decision 26); wider, the card in
+  // the conversation is the place.
+  const lastMessage = messages.at(-1);
+  const waitingApproval =
+    lastMessage?.role === "assistant"
+      ? lastMessage.parts.findLast(
+          (part) => part.type === "data-tool-approval" && part.data.status === "pending"
+        )
+      : undefined;
+  const decisionBar =
+    phone === true &&
+    // A pending call only waits while its stream is open: a broken stream
+    // gives the composer back (and its retry).
+    busy &&
+    waitingApproval?.type === "data-tool-approval" &&
+    pendingTools(waitingApproval.data, approvals.decisions).length > 0
+      ? waitingApproval.data
+      : null;
+  // The decision is made: the composer is back where the bar was, and the
+  // focus goes with it if it had none left.
+  const barApprovalId = decisionBar?.approval_id ?? null;
+  const approvalsHere = useMemo(
+    () => ({ ...approvals, barApprovalId }),
+    [approvals, barApprovalId]
+  );
+  const deciding = decisionBar !== null;
+  const wasDeciding = useRef(false);
+  useEffect(() => {
+    if (wasDeciding.current && !deciding && document.activeElement === document.body) {
+      dockTextareaRef.current?.focus();
+    }
+    wasDeciding.current = deciding;
+  }, [deciding]);
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
   useEffect(() => {
     reportStarted(started);
@@ -900,7 +944,7 @@ function ConversationView({
               startTextarea()?.focus();
             }}
             composer={
-              phoneStart !== true && (
+              phone !== true && (
                 // From 640px: centred under the greeting until the conversation starts.
                 <div
                   data-start-composer=""
@@ -919,7 +963,7 @@ function ConversationView({
             }
           />
         </div>
-        {phoneStart !== false && (
+        {phone !== false && (
           // Phones: docked from the first frame where it stays once the
           // conversation starts, so nothing moves when the question is sent.
           <ComposerDock className="sm:hidden">
@@ -958,7 +1002,7 @@ function ConversationView({
       : null;
 
   return (
-    <>
+    <ToolApprovalsContext value={approvalsHere}>
       <SidePanel
         panel={panel}
         messages={messages}
@@ -1000,7 +1044,11 @@ function ConversationView({
           className="min-w-0 flex-1"
           composer={
             <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
-              <Composer {...composerProps} textareaRef={dockTextareaRef} />
+              {decisionBar ? (
+                <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
+              ) : (
+                <Composer {...composerProps} textareaRef={dockTextareaRef} />
+              )}
             </div>
           }
         >
@@ -1060,6 +1108,6 @@ function ConversationView({
         </ConversationLayout>
       </SidePanel>
       {fileInputElement}
-    </>
+    </ToolApprovalsContext>
   );
 }
