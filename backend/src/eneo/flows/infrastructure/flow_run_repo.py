@@ -1224,24 +1224,31 @@ class FlowRunRepository:
     async def renew_execution_heartbeats(
         self, *, owners: Sequence[FlowRunExecutionOwner]
     ) -> set[FlowRunExecutionOwner]:
+        """Renew the leases of the owners whose run rows no other transaction
+        holds. A held row is skipped, not waited for: an owner left out may
+        still hold its lease (``has_execution_ownership`` tells)."""
         if not owners:
             return set()
+        lease = (
+            sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
+                [(owner.run_id, owner.tenant_id, owner.revision) for owner in owners]
+            ),
+            FlowRuns.status == FlowRunStatus.RUNNING.value,
+            FlowRuns.execution_heartbeat_at
+            > sa.func.clock_timestamp()
+            - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS),
+        )
+        # NO KEY UPDATE is the lock the update takes: a child row's foreign key
+        # check (KEY SHARE) does not make a run row look held.
+        free = (
+            sa.select(FlowRuns.id)
+            .where(*lease)
+            .with_for_update(key_share=True, skip_locked=True)
+            .correlate(None)
+        )
         rows = await self.session.execute(
             sa.update(FlowRuns)
-            .where(
-                sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
-                    [
-                        (owner.run_id, owner.tenant_id, owner.revision)
-                        for owner in owners
-                    ]
-                )
-            )
-            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
-            .where(
-                FlowRuns.execution_heartbeat_at
-                > sa.func.clock_timestamp()
-                - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS)
-            )
+            .where(FlowRuns.id.in_(free), *lease)
             .values(
                 execution_heartbeat_at=sa.func.clock_timestamp(),
                 updated_at=FlowRuns.updated_at,

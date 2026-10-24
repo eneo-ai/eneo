@@ -2617,6 +2617,7 @@ async def test_heartbeat_loss_cancels_an_already_running_provider_child(monkeypa
     manager = heartbeat.FlowExecutionHeartbeats(max_active=1)
     repo = AsyncMock()
     repo.renew_execution_heartbeats.return_value = set()
+    repo.has_execution_ownership.return_value = False
 
     @asynccontextmanager
     async def session_scope():

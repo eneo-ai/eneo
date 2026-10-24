@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
@@ -299,6 +300,9 @@ async def _execute_flow_run_async_traced(
             run_trace_id=run.trace_id,
             task_id=task_id,
         ):
+            # Read before the claim stamps the lease, so its commit counts
+            # against the lease the heartbeats then keep.
+            leased_at = time.monotonic()
             can_run = await flow_run_repo.mark_running_if_claimable(
                 run_id=run_id,
                 tenant_id=tenant_id,
@@ -319,7 +323,8 @@ async def _execute_flow_run_async_traced(
                 return result
 
             async with execution_heartbeats().track(
-                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision),
+                leased_at=leased_at,
             ):
                 try:
                     run_actor = await _resolve_flow_run_actor(

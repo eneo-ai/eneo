@@ -65,6 +65,9 @@ async def test_heartbeat_renewal_is_fenced_and_does_not_touch_run_history() -> N
     assert "flow_runs.status =" in sql
     assert "flow_runs.execution_heartbeat_at > clock_timestamp() -" in sql
     assert "revision=" not in sql
+    # A row another transaction holds is skipped, not waited for; child-row
+    # foreign key checks (KEY SHARE) do not make a row look held.
+    assert "FOR NO KEY UPDATE SKIP LOCKED" in sql
 
 
 @pytest.mark.asyncio

@@ -19,8 +19,17 @@ FLOW_DISPATCH_RETRY_BACKOFF_SECONDS = (30, 120, 300, 900)
 FLOW_TASK_HARD_TIMEOUT_MARGIN_SECONDS = 60
 FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS = 30
 FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS = 180
-FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES = 3
 FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS = 10
+# A run not renewed for this long is stopped, as its lease could expire before
+# the next renewal lands and the stale reconciler may then end the run. Each
+# heartbeat cycle sleeps the interval and waits for its renewal at most the
+# transaction timeout before it checks this limit, so a run younger than it at
+# one check is younger than the expiry at the next.
+FLOW_EXECUTION_HEARTBEAT_RENEWAL_DEADLINE_SECONDS = (
+    FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS
+    - FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS
+    - FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS
+)
 # A run whose worker shuts down mid-execution is failed with one fenced write.
 # ARQ cancels the run's task when its job_completion_wait (60 s) is over, and
 # the deployment's stop_grace_period (70 s) kills the worker 10 s later; half
@@ -66,6 +75,10 @@ def require_flow_run_wait_before_deadline(
 
 
 assert len(FLOW_DISPATCH_RETRY_BACKOFF_SECONDS) == FLOW_DISPATCH_MAX_ATTEMPTS - 1
+assert (
+    FLOW_EXECUTION_HEARTBEAT_RENEWAL_DEADLINE_SECONDS
+    >= FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS
+)
 
 
 class FlowDispatchEpochValues(TypedDict):

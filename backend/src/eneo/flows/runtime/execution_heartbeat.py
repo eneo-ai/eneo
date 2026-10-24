@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, Coroutine
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -13,7 +14,7 @@ from eneo.flows.domain.flow_run_exceptions import (
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS,
-    FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES,
+    FLOW_EXECUTION_HEARTBEAT_RENEWAL_DEADLINE_SECONDS,
     FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS,
     FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS,
 )
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 class _Invocation:
     owner: FlowRunExecutionOwner
     task: asyncio.Task[object]
+    # A ``time.monotonic()`` reading no later than the database stamped the
+    # lease last: taken before the claim, then before each renewal that
+    # committed. The local timer runs ahead of the lease, never behind it.
+    renewed_at: float
     lost: bool = False
     cancellation_requested: bool = False
 
@@ -40,6 +45,19 @@ class _Invocation:
             self.lost = True
             if asyncio.current_task() is not self.task:
                 self.cancellation_requested = self.task.cancel()
+
+    def past_renewal_deadline(self) -> bool:
+        return (
+            time.monotonic() - self.renewed_at
+            >= FLOW_EXECUTION_HEARTBEAT_RENEWAL_DEADLINE_SECONDS
+        )
+
+    def lease_facts(self) -> dict[str, object]:
+        return {
+            "run_id": str(self.owner.run_id),
+            "tenant_id": str(self.owner.tenant_id),
+            "seconds_since_renewal": round(time.monotonic() - self.renewed_at, 1),
+        }
 
 
 _current_invocation: ContextVar[_Invocation | None] = ContextVar(
@@ -73,7 +91,7 @@ class FlowExecutionHeartbeats:
         self._max_active = max_active
         self._active: dict[FlowRunExecutionOwner, _Invocation] = {}
         self._loop: asyncio.Task[None] | None = None
-        self._failures = 0
+        self._renewal: asyncio.Task[None] | None = None
         self._worker: asyncio.Task[object] | None = None
         # Every flow run job task, from its first statement until the task
         # itself has ended: a job a shutdown cancels may still be claiming its
@@ -171,19 +189,37 @@ class FlowExecutionHeartbeats:
         for invocation in tuple(self._active.values()):
             invocation.stop()
         loop, self._loop = self._loop, None
-        if loop is not None:
-            loop.cancel()
-            with suppress(asyncio.CancelledError):
-                await loop
+        renewal, self._renewal = self._renewal, None
+        heartbeat_tasks = [task for task in (loop, renewal) if task is not None]
+        for task in heartbeat_tasks:
+            task.cancel()
+        await asyncio.gather(*heartbeat_tasks, return_exceptions=True)
 
     @asynccontextmanager
-    async def track(self, owner: FlowRunExecutionOwner) -> AsyncGenerator[None]:
+    async def track(
+        self, owner: FlowRunExecutionOwner, *, leased_at: float | None = None
+    ) -> AsyncGenerator[None]:
+        """Own the run while the block runs, renewing its lease.
+
+        ``leased_at`` is a ``time.monotonic()`` reading taken before the claim
+        that stamped the run's lease (default: now): the claim's commit counts
+        against the lease. A run whose lease could expire before its first
+        renewal lands is not started; it is lost."""
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("Flow execution requires an asyncio task.")
         if owner in self._active or len(self._active) >= self._max_active:
             raise RuntimeError("Flow execution ownership capacity exceeded.")
-        invocation = _Invocation(owner, task)
+        invocation = _Invocation(
+            owner, task, time.monotonic() if leased_at is None else leased_at
+        )
+        if invocation.past_renewal_deadline():
+            logger.error(
+                "Flow execution not started: its claim committed too late to "
+                "renew the run's lease before it expires",
+                extra=invocation.lease_facts(),
+            )
+            raise FlowExecutionOwnershipLost()
         self._active[owner] = invocation
         if task not in self._claimed_runs:
             task.add_done_callback(self._forget_claimed_run)
@@ -207,37 +243,78 @@ class FlowExecutionHeartbeats:
             del self._active[owner]
 
     async def renew(self) -> None:
-        invocations = tuple(self._active.values())
-        if not invocations:
-            self._failures = 0
-            return
+        """One heartbeat cycle: renew the leases, then stop each run whose
+        lease could expire before the next cycle renews it.
+
+        The renewal is a task of its own that the cycle waits for at most the
+        transaction timeout, which bounds its statements but not the rollback
+        and close after them: the limit is checked on time all the same. A
+        renewal still finishing when the next cycle comes is not joined by a
+        second one."""
+        if self._renewal is None or self._renewal.done():
+            invocations = tuple(
+                invocation
+                for invocation in self._active.values()
+                if not invocation.lost
+            )
+            if invocations:
+                self._renewal = asyncio.create_task(
+                    self._renew(invocations), name="flow-execution-heartbeat-renewal"
+                )
+        if self._renewal is not None and not self._renewal.done():
+            await asyncio.wait(
+                (self._renewal,),
+                timeout=FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS,
+            )
+        for invocation in tuple(self._active.values()):
+            if not invocation.lost and invocation.past_renewal_deadline():
+                logger.error(
+                    "Flow execution heartbeat stopped a run it could not renew "
+                    "before its lease expires",
+                    extra=invocation.lease_facts(),
+                )
+                invocation.stop()
+
+    async def _renew(self, invocations: tuple[_Invocation, ...]) -> None:
+        started = time.monotonic()
         try:
             async with asyncio.timeout(
                 FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS
             ):
                 async with sessionmanager.session() as session, session.begin():
-                    renewed = await FlowRunRepository(
-                        session=session
-                    ).renew_execution_heartbeats(
+                    repo = FlowRunRepository(session=session)
+                    renewed = await repo.renew_execution_heartbeats(
                         owners=[invocation.owner for invocation in invocations]
                     )
+                    # Left out is not lost: a row another transaction holds is
+                    # skipped, and only the committed row says whether the
+                    # lease still stands.
+                    held = {
+                        invocation.owner
+                        for invocation in invocations
+                        if invocation.owner not in renewed
+                        and await repo.has_execution_ownership(owner=invocation.owner)
+                    }
         except Exception:
-            self._failures += 1
+            # Nothing is known, not even after a commit that failed: each
+            # lease is as old as its last renewal.
             logger.exception(
                 "Flow execution heartbeat renewal failed",
-                extra={"consecutive_failures": self._failures},
+                extra={"runs": len(invocations)},
             )
-            if self._failures >= FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES:
-                for invocation in invocations:
-                    if self._active.get(invocation.owner) is invocation:
-                        invocation.stop()
             return
-        self._failures = 0
         for invocation in invocations:
-            if (
-                invocation.owner not in renewed
-                and self._active.get(invocation.owner) is invocation
-            ):
+            if self._active.get(invocation.owner) is not invocation:
+                continue
+            if invocation.owner in renewed:
+                invocation.renewed_at = started
+            elif invocation.owner in held:
+                logger.warning(
+                    "Flow execution heartbeat skipped a run another transaction holds",
+                    extra=invocation.lease_facts(),
+                )
+            else:
+                # Its revision, status or lease changed: the run is not its own.
                 invocation.stop()
 
     async def _run(self) -> None:

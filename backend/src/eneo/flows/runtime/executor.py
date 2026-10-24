@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
@@ -837,6 +838,9 @@ class FlowRunExecutor:
         dispatch_task_id: str | None,
         retry_count: int,
     ) -> dict[str, object]:
+        # Read before the claim stamps the lease, so its commit counts
+        # against the lease the heartbeats then keep.
+        leased_at = time.monotonic()
         can_run = await self.flow_run_repo.mark_running_if_claimable(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -851,7 +855,8 @@ class FlowRunExecutor:
 
         try:
             async with execution_heartbeats().track(
-                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision),
+                leased_at=leased_at,
             ):
                 return await self.execute_claimed(
                     run_id=run_id,

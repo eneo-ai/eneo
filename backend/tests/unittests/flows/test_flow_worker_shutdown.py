@@ -43,7 +43,10 @@ def worker(monkeypatch):
     monkeypatch.setattr(
         heartbeat,
         "FlowRunRepository",
-        lambda **_: SimpleNamespace(renew_execution_heartbeats=renewal),
+        lambda **_: SimpleNamespace(
+            renew_execution_heartbeats=renewal,
+            has_execution_ownership=AsyncMock(return_value=False),
+        ),
     )
     monkeypatch.setattr(flow_runtime_tasks, "execution_heartbeats", lambda: manager)
 
