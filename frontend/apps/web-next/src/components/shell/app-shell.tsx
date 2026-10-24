@@ -8,7 +8,7 @@ import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
@@ -19,12 +19,15 @@ import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 // Loaded the first time the palette opens: nothing of it ships with page loads.
 const ShellCommandPalette = dynamic(() => import("./command-palette"), { ssr: false });
 
-/** Below Tailwind's `md` breakpoint the SideNav becomes a drawer. */
-const MOBILE_QUERY = "(width < 48rem)";
+/**
+ * Below Tailwind's `lg` breakpoint (phones and an iPad held upright) the
+ * SideNav becomes a drawer. The markup mirrors it with `lg:` variants.
+ */
+const MOBILE_QUERY = "(width < 64rem)";
 
 /**
- * The app frame: skip link (first tab stop), the SideNav (desktop) or the top
- * bar + drawer (phones), and the page panel `main#main-content` that pages
+ * The app frame: skip link (first tab stop), the SideNav (from 1024 px) or the
+ * top bar + drawer (phones and iPads held upright), and the page panel `main#main-content` that pages
  * scroll inside. Also hosts the ⌘K palette and the "Skapa yta" dialog.
  *
  * Not Astryx AppShell: it fixes its own main landmark id and skip link, and
@@ -67,6 +70,18 @@ export function AppShellFrame({
     setNavOpen(false);
   }
   const drawerOpen = isMobile && navOpen;
+
+  // Widening past the phone layout (an iPad turned sideways) unmounts the
+  // drawer or hides the top bar, and with them the focused element: the page
+  // takes the focus instead of the document body.
+  const mainRef = useRef<HTMLElement>(null);
+  const wasMobile = useRef(isMobile);
+  useEffect(() => {
+    if (wasMobile.current && !isMobile && document.activeElement === document.body) {
+      mainRef.current?.focus({ preventScroll: true });
+    }
+    wasMobile.current = isMobile;
+  }, [isMobile]);
 
   useEffect(() => {
     if (!isMobile) return;
@@ -132,8 +147,8 @@ export function AppShellFrame({
             (viewport-fit=cover): the frame keeps the top and the sides clear,
             main#main-content the bottom. On phones the surface fills the
             frame, so the strip under the status bar continues the top bar;
-            from md the page panel floats on the body colour. */}
-        <div className="bg-ax-surface md:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] md:flex-row md:gap-2 md:pt-[max(0.5rem,env(safe-area-inset-top,0px))] md:pr-[max(0.5rem,env(safe-area-inset-right,0px))] md:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
+            from lg the page panel floats on the body colour. */}
+        <div className="bg-ax-surface lg:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] lg:flex-row lg:gap-2 lg:pt-[max(0.5rem,env(safe-area-inset-top,0px))] lg:pr-[max(0.5rem,env(safe-area-inset-right,0px))] lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] lg:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
           <a
             href="#main-content"
             className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -141,7 +156,7 @@ export function AppShellFrame({
             {t("skip_to_content")}
           </a>
           {showTopBar && <MobileTopBar />}
-          <div className="hidden min-h-0 shrink-0 md:flex md:flex-col">
+          <div className="hidden min-h-0 shrink-0 lg:flex lg:flex-col">
             <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
           {/* tabIndex -1: the skip link moves focus here, not just the scroll
@@ -150,9 +165,10 @@ export function AppShellFrame({
               hidden text), which otherwise escapes its scroll box and makes
               the document taller, so the whole shell scrolls. */}
           <main
+            ref={mainRef}
             id="main-content"
             tabIndex={-1}
-            className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none md:pb-0"
+            className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none lg:pb-0"
           >
             {children}
           </main>

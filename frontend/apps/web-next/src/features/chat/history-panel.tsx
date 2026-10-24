@@ -320,8 +320,8 @@ function HistoryPanel({
 }
 
 /**
- * History as a side panel (≥768px, focus moves to its heading, Escape closes)
- * or an Astryx bottom sheet on phones (modal: it traps focus and returns it).
+ * History as a side panel (≥1024px, focus moves to its heading, Escape closes)
+ * or an Astryx bottom sheet below (modal: it traps focus and returns it).
  * The caller returns focus to the history button when the panel closes.
  */
 export function HistoryAside({

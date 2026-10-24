@@ -202,6 +202,13 @@ describe("AppShellFrame on a phone", () => {
     expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
   });
 
+  it("opens search from the top bar", async () => {
+    renderShell();
+    const topBar = screen.getByRole("banner");
+    fireEvent.click(within(topBar).getByRole("button", { name: "Sök" }));
+    expect(await screen.findByRole("dialog", { name: "Sök i Eneo" })).toBeTruthy();
+  });
+
   it("closes the drawer when the palette opens a result on the same page", async () => {
     setRoute("/spaces/personal/chat");
     renderShell();
@@ -217,5 +224,34 @@ describe("AppShellFrame on a phone", () => {
     // Same path, so no pathname change closes the drawer: the palette does.
     expect(router.push).toHaveBeenCalledWith("/spaces/personal/chat");
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+  });
+});
+
+describe("AppShellFrame on an iPad", () => {
+  it("uses the drawer held upright and the SideNav sideways", () => {
+    setViewport("tablet-portrait");
+    renderShell();
+    expect(screen.getByRole("button", { name: "Öppna menyn" })).toBeTruthy();
+
+    act(() => setViewport("tablet-landscape"));
+    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
+  });
+
+  it("closes the open drawer when the iPad turns sideways and hands focus to the page", async () => {
+    setViewport("tablet-portrait");
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+    within(drawer).getByRole("link", { name: "Alla ytor" }).focus();
+
+    act(() => setViewport("tablet-landscape"));
+    expect(screen.queryByRole("dialog", { name: "Meny" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("leaves focus alone on first paint", () => {
+    setViewport("tablet-landscape");
+    renderShell();
+    expect(document.activeElement).toBe(document.body);
   });
 });

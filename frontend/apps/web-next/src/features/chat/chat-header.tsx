@@ -280,10 +280,10 @@ function HistoryButton({
 }
 
 /**
- * Chat header. Desktop (≥768px, 56px): assistant selector, divider,
+ * Chat header. From 1024px (56px): assistant selector, divider,
  * conversation title (h1), the space's security classification, the
  * Chatt/Insikter switch, new conversation, history and a menu for session
- * actions. Phones: the app menu (opens the shell's drawer), the selector
+ * actions. Phones and iPads held upright: the app menu (opens the shell's drawer), the selector
  * centred with "space · model", new conversation and the same menu.
  */
 export function ChatHeader({
@@ -323,8 +323,8 @@ export function ChatHeader({
 
   return (
     <>
-      {/* Desktop and tablet */}
-      <div className="border-ax-border hidden min-h-14 shrink-0 items-center gap-3 border-b ps-2.5 pe-3 md:flex">
+      {/* From 1024px, beside the SideNav */}
+      <div className="border-ax-border hidden min-h-14 shrink-0 items-center gap-3 border-b ps-2.5 pe-3 lg:flex">
         {!minimal && (
           <>
             <PartnerSwitcher
@@ -378,8 +378,8 @@ export function ChatHeader({
         </div>
       </div>
 
-      {/* Phones: the shell hides its own top bar on chat routes. */}
-      <div className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 md:hidden">
+      {/* Below 1024px: the shell hides its own top bar on chat routes. */}
+      <div className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 lg:hidden">
         <AppMenuButton />
         <PartnerSwitcher
           partner={partner}

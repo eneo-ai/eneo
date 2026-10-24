@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 
 type Chunk = Record<string, unknown>;
@@ -329,6 +330,26 @@ describe("ChatPage", () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });
     await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("ChatPage history", () => {
+  const historyName = "Konversationer med Upphandlingsassistenten";
+
+  it("opens as a sheet below 1024px, an iPad held upright included", async () => {
+    setViewport("tablet-portrait");
+    renderPage(null);
+    fireEvent.click(screen.getByRole("button", { name: historyName }));
+    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: historyName })).toBeNull();
+  });
+
+  it("opens beside the conversation from 1024px", async () => {
+    setViewport("tablet-landscape");
+    renderPage(null);
+    fireEvent.click(screen.getByRole("button", { name: historyName }));
+    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: historyName })).toBeNull();
   });
 });
 

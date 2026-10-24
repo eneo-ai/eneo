@@ -268,11 +268,24 @@ async function openPalette(page: Page) {
   ).toBeVisible();
 }
 
-/** The touch layouts the page scans run at: phones and iPads, held both ways. */
+/**
+ * The touch layouts the page scans run at: phones and iPads, held both ways.
+ * `drawer`: below 1024 px the SideNav is a drawer behind the top bar's menu.
+ */
 const TOUCH_LAYOUTS = [
-  { name: "phone (390 × 844)", viewport: { width: 390, height: 844 }, phone: true },
-  { name: "iPad portrait (820 × 1180)", viewport: { width: 820, height: 1180 }, phone: false },
-  { name: "iPad landscape (1180 × 820)", viewport: { width: 1180, height: 820 }, phone: false }
+  { name: "phone (390 × 844)", viewport: { width: 390, height: 844 }, phone: true, drawer: true },
+  {
+    name: "iPad portrait (820 × 1180)",
+    viewport: { width: 820, height: 1180 },
+    phone: false,
+    drawer: true
+  },
+  {
+    name: "iPad landscape (1180 × 820)",
+    viewport: { width: 1180, height: 820 },
+    phone: false,
+    drawer: false
+  }
 ] as const;
 
 for (const colorScheme of ["light", "dark"] as const) {
@@ -528,8 +541,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     // Touch layouts: a phone, and an iPad upright and sideways. All report a
-    // coarse pointer, so the 44 px touch targets apply; on the phone the top bar
-    // or the chat's own header replaces the SideNav.
+    // coarse pointer, so the 44 px touch targets apply; below 1024 px (the
+    // phone, the iPad upright) the top bar or the chat's own header replaces
+    // the SideNav.
     for (const layout of TOUCH_LAYOUTS) {
       test.describe(layout.name, () => {
         test.use({ viewport: layout.viewport, hasTouch: true, isMobile: true });
@@ -562,7 +576,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        if (layout.phone) {
+        if (layout.drawer) {
           test("the navigation drawer open", async ({ page }) => {
             await spacesList(page);
             await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();

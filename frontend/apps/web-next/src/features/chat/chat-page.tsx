@@ -100,8 +100,8 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  // History is an inline panel from 768px up, an overlay drawer below.
-  const historyInline = useMediaQuery("(min-width: 768px)");
+  // History is an inline panel beside the SideNav (from 1024px), a bottom sheet below.
+  const historyInline = useMediaQuery("(min-width: 1024px)");
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );

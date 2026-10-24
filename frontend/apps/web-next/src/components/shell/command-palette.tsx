@@ -6,6 +6,8 @@ import {
   CommandPaletteInput,
   useCommandPaletteContext
 } from "@astryxdesign/core/CommandPalette";
+import { Button } from "@astryxdesign/core/Button";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -179,9 +181,32 @@ function EntryContent({ entry }: { entry: PaletteEntry }) {
   );
 }
 
+/** The palette's height on phones: all of it, clear of the notch and the home indicator. */
+const PHONE_MAX_HEIGHT =
+  "calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - max(1rem, env(safe-area-inset-bottom, 0px)))";
+
+/**
+ * "Avbryt" at the end of the field on touch screens, as in iOS search: they
+ * have no Escape key and the sheet leaves little backdrop to tap.
+ */
+function CancelButton() {
+  const t = useTranslations();
+  const close = useCommandPaletteContext()?.onClose;
+  return (
+    <Button
+      variant="ghost"
+      size="lg"
+      label={t("cancel")}
+      onClick={close}
+      className="pointer-fine:hidden"
+    />
+  );
+}
+
+/** A key hint in the footer; touch screens have no keys to hint at. */
 function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5 pointer-coarse:hidden">
       <span aria-hidden="true" className="flex items-center gap-1">
         {keys.map((key) => (
           <Kbd key={key} keys={key} />
@@ -213,6 +238,8 @@ export default function ShellCommandPalette({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  // An overlay opened by the user: a media query, not markup, picks its size.
+  const phone = useMediaQuery("(width < 40rem)");
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const { can, settings } = useAppContext();
@@ -283,10 +310,17 @@ export default function ShellCommandPalette({
       searchSource={searchSource}
       label={t("shell_palette_label")}
       width="min(640px, calc(100vw - 2rem))"
+      // A centred panel that never outgrows a short window (a phone on its
+      // side). On touch screens it hangs from the top, clear of the notch, so
+      // the software keyboard never covers the field and the field stays put
+      // while the results change; on phones it may grow to the full height.
+      maxHeight={phone ? PHONE_MAX_HEIGHT : "min(480px, calc(100dvh - 2rem))"}
+      className="pointer-coarse:mt-[max(1rem,env(safe-area-inset-top,0px))]"
       input={
         <CommandPaletteInput
           label={t("shell_palette_input_label")}
           placeholder={t("shell_palette_placeholder")}
+          endContent={<CancelButton />}
         />
       }
       renderItem={(item) =>
@@ -307,7 +341,9 @@ export default function ShellCommandPalette({
             label={t("shell_palette_hint_open")}
           />
           <Hint keys={["escape"]} keyName={t("shell_palette_key_escape")} label={t("close")} />
-          <span className="ms-auto hidden sm:inline">{t("shell_palette_scope")}</span>
+          <span className="ms-auto hidden sm:inline pointer-coarse:ms-0 pointer-coarse:inline">
+            {t("shell_palette_scope")}
+          </span>
         </CommandPaletteFooter>
       }
     />

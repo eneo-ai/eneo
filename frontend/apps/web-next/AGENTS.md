@@ -247,8 +247,10 @@ the default name on a backend name collision (9017).
   back with one class. Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
   the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
-  `/admin`, Astryx `MobileNav` below 768px and the ⌘K `CommandPalette`. A page
-  header that carries its own phone menu button (the chat header) calls
+  `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
+  markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
+  `CommandPalette`. A page header that carries its own phone menu button (the
+  chat header) calls
   `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
   opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
   (`src/components/shell/routes.ts`).
