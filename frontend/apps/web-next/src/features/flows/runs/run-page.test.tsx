@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { focusManager } from "@tanstack/react-query";
-import { Suspense } from "react";
+import { Profiler, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Permission } from "@/lib/auth/permissions";
@@ -100,14 +100,19 @@ async function comeBack() {
   await act(() => vi.advanceTimersByTimeAsync(100));
 }
 
-function renderRun(permissions: Permission[] = ["flows_view", "flows_run"]) {
+function renderRun(
+  permissions: Permission[] = ["flows_view", "flows_run"],
+  onCommit: () => void = () => {}
+) {
   const queryClient = testQueryClient();
   const flow = makeFlow({ published_version: 3 });
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
   return renderInApp(
     <Suspense>
-      <FlowRunPage flowId="flow-1" runId="run-1" />
+      <Profiler id="run-page" onRender={onCommit}>
+        <FlowRunPage flowId="flow-1" runId="run-1" />
+      </Profiler>
     </Suspense>,
     { queryClient, appContext: testAppContext({ permissions }) }
   );
@@ -531,6 +536,59 @@ describe("FlowRunPage", () => {
     expect(calls(EVIDENCE)).toHaveLength(2);
   });
 
+  it("offers to send a queued run again the moment its dispatch is due, without reading it again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queued = makeRunSummary({
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_next_attempt_at: new Date(Date.now() + 1_000).toISOString()
+    });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    expect(screen.queryByRole("button", { name: messages.flow_runs_redispatch })).toBeNull();
+    const reads = calls(STATUS).length;
+
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByRole("button", { name: messages.flow_runs_redispatch })).toBeTruthy();
+    expect(calls(STATUS)).toHaveLength(reads);
+  });
+
+  it("renders nothing again while the run's polls answer the same, and renders what moved or failed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queued = makeRunSummary({ status: "queued", started_at: null, finished_at: null });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    let commits = 0;
+    renderRun(undefined, () => (commits += 1));
+    await screen.findByText(messages.flow_runs_result_pending);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const reads = calls(STATUS).length;
+    commits = 0;
+
+    for (let poll = 0; poll < 3; poll += 1) await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(reads + 3);
+    expect(commits).toBe(0);
+
+    // A count the signature does not carry still reaches the page.
+    const counted = makeRunGraph([
+      { order: 1, label: "Sammanfatta", status: "completed" },
+      { order: 2, label: "Skriv svar", status: "completed" }
+    ]);
+    counted.nodes[0]!.num_tokens_input = 42;
+    state.routes[GRAPH] = () => ({ body: counted });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(commits).toBeGreaterThan(0);
+    expect(calls(DETAIL)).toHaveLength(1);
+
+    state.routes[STATUS] = () => ({
+      status: 503,
+      body: { message: "Busy", code: "service_unavailable" }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+  });
+
   describe("review", () => {
     function answerReview(checkpoint = makeCheckpoint()) {
       const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
@@ -762,6 +820,21 @@ describe("FlowRunPage", () => {
       renderRun(["flows_view", "flows_manage"]);
       expect(await screen.findByText(messages.flow_runs_review_expired_title)).toBeTruthy();
       expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+    });
+
+    it("takes the decision away the moment the review time runs out, without reading it again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerReview(makeCheckpoint({ expires_at: new Date(Date.now() + 1_000).toISOString() }));
+      renderRun(["flows_view", "flows_manage"]);
+      expect(
+        await screen.findByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+      const reads = calls(REVIEW).length + calls(STATUS).length;
+
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(screen.getByText(messages.flow_runs_review_expired_title)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+      expect(calls(REVIEW).length + calls(STATUS).length).toBe(reads);
     });
 
     it("shows the output to someone who may not review, and says who can", async () => {

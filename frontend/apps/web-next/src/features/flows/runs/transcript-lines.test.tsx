@@ -14,6 +14,8 @@ import {
 } from "./transcript";
 import { correctionSet, knownSpeakers, type CorrectionSet } from "./transcript-corrections";
 import { TranscriptLines } from "./transcript-lines";
+import { captionsFor, textRuns, wordsByLine } from "./transcript-playback";
+import { partAttributes } from "./transcript-selection";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -24,6 +26,20 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => state.announce
 }));
+// Counted, to tell how much of the transcript a tick of playback renders again.
+vi.mock("./transcript-playback", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./transcript-playback")>();
+  return {
+    ...actual,
+    captionsFor: vi.fn(actual.captionsFor),
+    textRuns: vi.fn(actual.textRuns),
+    wordsByLine: vi.fn(actual.wordsByLine)
+  };
+});
+vi.mock("./transcript-selection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./transcript-selection")>();
+  return { ...actual, partAttributes: vi.fn(actual.partAttributes) };
+});
 vi.mock("@/lib/api/browser", async () => {
   const { apiStub } = await import("../editor/testing/fixtures");
   state.stub = apiStub(new Proxy({}, { get: (_target, key: string) => state.routes[key] }));
@@ -69,14 +85,16 @@ function Harness({
   saves,
   audio = target,
   lines = segments,
-  speakerReview = null
+  speakerReview = null,
+  initial
 }: {
   saves: CorrectionSet[];
   audio?: TranscriptTarget;
   lines?: TranscriptSegment[];
   speakerReview?: TranscriptSpeakerReview | null;
+  initial?: CorrectionSet;
 }) {
-  const [set, setSet] = useState<CorrectionSet>(() => correctionSet(null, lines));
+  const [set, setSet] = useState<CorrectionSet>(() => initial ?? correctionSet(null, lines));
   const shown = shownSegments(lines, {
     occurrences: set.occurrences,
     speaker_edits: set.speakerEdits,
@@ -675,5 +693,245 @@ describe("TranscriptLines with audio", () => {
     fireEvent.click(screen.getByRole("combobox", { name: messages.flow_transcript_audio_rate }));
     fireEvent.click(await screen.findByRole("option", { name: "1,5×" }));
     expect(audio.playbackRate).toBe(1.5);
+  });
+});
+
+// Five hundred lines take seconds to render in jsdom.
+describe("TranscriptLines with audio, a long transcript", { timeout: 30_000 }, () => {
+  const COUNT = 500;
+  // Line n plays from 4n s for 3 s, four words of 0.75 s each, then a second of silence.
+  const long = parseSegments(
+    Array.from({ length: COUNT }, (_, n) => ({
+      segment_index: n,
+      file_index: 0,
+      start: n * 4,
+      end: n * 4 + 3,
+      speaker: n % 7 < 3 ? "SPEAKER_00" : "SPEAKER_01",
+      text: `ord${n} ett två tre`
+    }))
+  );
+  // Line 3 is corrected: its words are placed in raw text it no longer shows.
+  const corrected: CorrectionSet = {
+    ...correctionSet(null, long),
+    occurrences: [
+      { segment_index: 3, char_start: 5, char_end: 8, original: "ett", corrected: "Ett" }
+    ]
+  };
+  const audioTarget: TranscriptTarget = { ...target, fileIds: ["audio-1"] };
+
+  function answerLongAudio() {
+    state.routes[SIGN] = () => ({
+      body: {
+        url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+        expires_at: "2026-10-22T10:00:00Z"
+      }
+    });
+    state.routes[WORDS] = () => ({
+      body: {
+        alignment: "provider_words",
+        created_at: "2026-10-22T09:00:00Z",
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        segments_hash: "hash-1",
+        stale: false,
+        // Line 2 has no word timings.
+        segments: long
+          .filter((line) => line.index !== 2)
+          .map((line) => ({
+            segment_index: line.index,
+            words: line.text.split(" ").map((word, at) => ({
+              word,
+              start: line.start + at * 0.75,
+              end: line.start + (at + 1) * 0.75,
+              probability: 0.9
+            }))
+          }))
+      }
+    });
+  }
+
+  async function startLong(list: HTMLElement) {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    fireEvent.click(within(item(list, 0)).getByRole("button", { name: /^Spela från 0:00/ }));
+    // Found directly: a label query over five hundred lines takes seconds in jsdom.
+    const audio = await waitFor(() => {
+      const element = document.querySelector("audio");
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    fireEvent.loadedMetadata(audio);
+    await waitFor(() => expect(item(list, 0).querySelector("[data-word]")).not.toBeNull());
+    // Playing, so the list follows.
+    Object.defineProperty(audio, "paused", { configurable: true, value: false });
+    return audio;
+  }
+
+  function item(list: HTMLElement, position: number): HTMLElement {
+    return list.children[position] as HTMLElement;
+  }
+
+  function playAt(audio: HTMLAudioElement, time: number) {
+    Object.defineProperty(audio, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: time
+    });
+    fireEvent.timeUpdate(audio);
+  }
+
+  /** The one item marked playing, and the one word marked in it (null for none). */
+  function expectPlaying(list: HTMLElement, position: number, word: number | null) {
+    const current = list.querySelectorAll('[aria-current="time"]');
+    expect(current).toHaveLength(1);
+    const playing = item(list, position);
+    expect(playing.contains(current[0]!)).toBe(true);
+    expect([...list.querySelectorAll(":scope > li.bg-ax-selected")]).toEqual([playing]);
+    const marked = [...list.querySelectorAll(".bg-ax-accent-muted")];
+    expect(marked).toEqual(word === null ? [] : [playing.querySelector(`[data-word="${word}"]`)]);
+  }
+
+  it("moves the line and word marks as it plays, rendering again only the lines they leave and reach", async () => {
+    answerLongAudio();
+    renderInApp(<Harness saves={[]} audio={audioTarget} lines={long} initial={corrected} />);
+    const list = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    const audio = await startLong(list);
+    expect(list.querySelectorAll('[aria-current="time"]')).toHaveLength(0);
+    const scrolled: Element[] = [];
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+    vi.mocked(textRuns).mockClear();
+    vi.mocked(wordsByLine).mockClear();
+    vi.mocked(captionsFor).mockClear();
+
+    // [time, line, word marked]: twenty word changes, within lines, across them, by a seek
+    // forward and back, through a line without word timings and a corrected one.
+    const ticks: [number, number, number | null][] = [
+      [0, 0, 0],
+      [0.8, 0, 1],
+      [1.6, 0, 2],
+      [2.3, 0, 3],
+      [4, 1, 0],
+      [4.8, 1, 1],
+      [8.1, 2, null],
+      [12, 3, null],
+      [12.8, 3, null],
+      [16, 4, 0],
+      [16.8, 4, 1],
+      [17.6, 4, 2],
+      [18.3, 4, 3],
+      [400, 100, 0],
+      [400.8, 100, 1],
+      [399.5, 99, 3],
+      [1996, 499, 0],
+      [1996.8, 499, 1],
+      [1997.6, 499, 2],
+      [1998.3, 499, 3]
+    ];
+    const lineChanges: Element[] = [];
+    let previous = -1;
+    for (const [time, line, word] of ticks) {
+      const before = vi.mocked(textRuns).mock.calls.length;
+      playAt(audio, time);
+      expectPlaying(list, line, word);
+      expect(vi.mocked(textRuns).mock.calls.length - before).toBeLessThanOrEqual(2);
+      if (line !== previous) lineChanges.push(item(list, line));
+      previous = line;
+    }
+    // A pause between lines keeps the earlier one, and renders nothing.
+    const before = vi.mocked(textRuns).mock.calls.length;
+    playAt(audio, 1999.5);
+    expectPlaying(list, 499, 3);
+    expect(vi.mocked(textRuns).mock.calls.length).toBe(before);
+
+    // The list followed each new line, never a word.
+    expect(scrolled).toEqual(lineChanges);
+    // The words and the captions were worked out once, not on each tick.
+    expect(wordsByLine).not.toHaveBeenCalled();
+    expect(captionsFor).not.toHaveBeenCalled();
+  });
+
+  it("marks the turn and the line in it that plays, rendering again only the turns they leave and reach", async () => {
+    answerLongAudio();
+    renderInApp(<Harness saves={[]} audio={audioTarget} lines={long} />);
+    const lines = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    const audio = await startLong(lines);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const turns = screen.getByRole("list", { name: messages.flow_transcript_turns_list });
+    vi.mocked(partAttributes).mockClear();
+
+    /** The turn a line is in: speakers change after lines 3, 7, 10, 14, … (n % 7 < 3). */
+    const turnOf = (line: number) => Math.floor(line / 7) * 2 + (line % 7 < 3 ? 0 : 1);
+    const ticks: [number, number][] = [
+      [0, 0],
+      [0.8, 0],
+      [4, 1],
+      [8, 2],
+      [12, 3],
+      [12.8, 3],
+      [16, 4],
+      [400, 100],
+      [1996, 499]
+    ];
+    for (const [time, line] of ticks) {
+      const before = vi.mocked(partAttributes).mock.calls.length;
+      playAt(audio, time);
+      const current = turns.querySelectorAll('[aria-current="time"]');
+      expect(current).toHaveLength(1);
+      const turn = item(turns, turnOf(line));
+      expect(turn.contains(current[0]!)).toBe(true);
+      expect([...turns.querySelectorAll(":scope > li.bg-ax-selected")]).toEqual([turn]);
+      const marked = [...turns.querySelectorAll(".bg-ax-accent-muted")];
+      expect(marked).toHaveLength(1);
+      expect(marked[0]!.textContent).toBe(`ord${line} ett två tre`);
+      // A turn holds at most four lines: the turn left and the turn reached render.
+      expect(vi.mocked(partAttributes).mock.calls.length - before).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("marks the line playing in the part of the recording that plays", async () => {
+    const parts = parseSegments([
+      {
+        segment_index: 0,
+        file_index: 0,
+        start: 0,
+        end: 3,
+        speaker: "SPEAKER_00",
+        text: "Del ett."
+      },
+      { segment_index: 1, file_index: 1, start: 0, end: 3, speaker: "SPEAKER_00", text: "Del två." }
+    ]);
+    state.routes[SIGN] = (init: { params: { path: { file_id: string } } }) => ({
+      body: {
+        url: `http://backend:8000/api/v1/files/${init.params.path.file_id}/download/?token=t0k3n`,
+        expires_at: "2026-10-22T10:00:00Z"
+      }
+    });
+    // Words written for another transcript are not used: the lines are marked whole.
+    state.routes[WORDS] = () => ({
+      body: {
+        alignment: "provider_words",
+        created_at: "2026-10-22T09:00:00Z",
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        segments_hash: "hash-1",
+        stale: true,
+        segments: [{ segment_index: 1, words: [{ word: "Del", start: 0, end: 1, probability: 1 }] }]
+      }
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    renderInApp(
+      <Harness saves={[]} audio={{ ...target, fileIds: ["audio-1", "audio-2"] }} lines={parts} />
+    );
+    const list = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    fireEvent.click(within(item(list, 1)).getByRole("button", { name: /^Spela från/ }));
+    const audio = await screen.findByLabelText<HTMLAudioElement>(
+      "Ljudet till transkriptionen, del 2"
+    );
+    fireEvent.loadedMetadata(audio);
+    playAt(audio, 0.5);
+    expectPlaying(list, 1, null);
+    expect(list.querySelector("[data-word]")).toBeNull();
   });
 });

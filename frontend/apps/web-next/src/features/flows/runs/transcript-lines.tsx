@@ -28,7 +28,12 @@ import {
   type CorrectionSet
 } from "./transcript-corrections";
 import { saveText, transcriptText } from "./transcript-export";
-import { uncertainWordCount, useTranscriptPlayback } from "./transcript-player";
+import {
+  usePlayingLine,
+  usePlayingWord,
+  useTranscriptPlayback,
+  type PlaybackMarks
+} from "./transcript-player";
 import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
 import { partAttributes, selectedSpans, type SelectedSpan } from "./transcript-selection";
@@ -462,8 +467,8 @@ function SegmentLine({
   segment,
   multiFile,
   id,
-  active,
-  activeWord,
+  position,
+  marks,
   words,
   onSeek,
   editing,
@@ -476,8 +481,10 @@ function SegmentLine({
   segment: ShownSegment;
   multiFile: boolean;
   id: string;
-  active: boolean;
-  activeWord: number;
+  /** The line's place among the shown lines. */
+  position: number;
+  /** Which line and word play; null without audio. */
+  marks: PlaybackMarks | null;
   /** The line's placed words, when they still match its text. */
   words: readonly PlacedWord[] | undefined;
   /** Plays the line from `time`; absent without audio. */
@@ -491,6 +498,8 @@ function SegmentLine({
   badge: PartBadge;
 }) {
   const t = useTranslations();
+  const playingWord = usePlayingWord(marks, position);
+  const active = playingWord !== null;
   const time = placeTime(segment.fileIndex, segment.start, multiFile, t);
   // Words are placed in the raw text: a corrected or split line is marked as a whole.
   const runs =
@@ -512,7 +521,7 @@ function SegmentLine({
               runs={runs}
               words={words}
               active={active}
-              activeWord={activeWord}
+              activeWord={playingWord ?? -1}
               badge={badge}
             />
             {segment.corrected ? (
@@ -552,6 +561,87 @@ function turnKey(turn: Turn): string {
   return `${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`;
 }
 
+/** One speaker turn; it renders again only when one of its lines starts or stops playing. */
+function TurnItem({
+  turn,
+  id,
+  time,
+  marks,
+  onSeek,
+  canEdit,
+  isEditing,
+  onEdit,
+  editor,
+  badge,
+  toolbar
+}: {
+  turn: Turn;
+  id: string;
+  time: string;
+  marks: PlaybackMarks | null;
+  onSeek: ((fileIndex: number, time: number) => void) | null;
+  canEdit: boolean;
+  isEditing: boolean;
+  onEdit: (turn: Turn) => void;
+  editor: React.ReactNode;
+  badge: React.ReactNode;
+  toolbar: React.ReactNode;
+}) {
+  const t = useTranslations();
+  const playing = usePlayingLine(
+    marks,
+    turn.parts.map((part) => part.position)
+  );
+  const active = playing >= 0;
+  return (
+    <li id={id} className={active ? "bg-ax-selected rounded-ax-inner" : undefined}>
+      <div className="flex flex-col gap-1 px-1 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <TimeButton
+            time={time}
+            active={active}
+            onPlay={onSeek ? () => onSeek(turn.fileIndex, turn.start) : null}
+          />
+          {badge}
+          {turn.marker ? <Unresolved /> : null}
+          {canEdit && !isEditing ? (
+            <span id={`${id}-edit`} className="ms-auto shrink-0">
+              <IconButton
+                label={t("flow_transcript_turn_edit", { time })}
+                icon={<Pencil aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                onClick={() => onEdit(turn)}
+              />
+            </span>
+          ) : null}
+        </div>
+        <p className="text-ax-text m-0 text-sm break-words">
+          {turn.parts.map((part, at) => {
+            const previous = turn.parts[at - 1];
+            const gap = previous && !/\s$/.test(previous.text) && !/^\s/.test(part.text);
+            return (
+              <span key={`${part.segmentIndex}:${part.shownStart}`}>
+                {gap ? " " : null}
+                <span
+                  {...partAttributes(part.segmentIndex, part.shownStart)}
+                  className={
+                    part.position === playing ? "bg-ax-accent-muted rounded-sm" : undefined
+                  }
+                >
+                  {part.text}
+                </span>
+              </span>
+            );
+          })}
+        </p>
+      </div>
+      {editor}
+      {toolbar}
+    </li>
+  );
+}
+
 /**
  * The transcript as speaker turns: what one speaker said in a row, as one
  * paragraph, each playable from its start. Someone who may correct the
@@ -561,7 +651,7 @@ function turnKey(turn: Turn): string {
 function TurnList({
   turns,
   multiFile,
-  activeLine,
+  marks,
   onSeek,
   toolbarAt,
   toolbar,
@@ -574,7 +664,8 @@ function TurnList({
 }: {
   turns: readonly Turn[];
   multiFile: boolean;
-  activeLine: number;
+  /** Which line plays; null without audio. */
+  marks: PlaybackMarks | null;
   onSeek: ((fileIndex: number, time: number) => void) | null;
   /** The turn the marked text ends in, which shows the toolbar. */
   toolbarAt: number;
@@ -592,60 +683,23 @@ function TurnList({
   return (
     <ol aria-label={t("flow_transcript_turns_list")} className="m-0 flex flex-col gap-1 p-0">
       {turns.map((turn, index) => {
-        const active = turn.parts.some((part) => part.position === activeLine);
         const time = placeTime(turn.fileIndex, turn.start, multiFile, t);
-        const id = turnId(turn);
         const isEditing = openTurn === turnKey(turn);
         return (
-          <li
+          <TurnItem
             key={turnKey(turn)}
-            id={id}
-            className={active ? "bg-ax-selected rounded-ax-inner" : undefined}
-          >
-            <div className="flex flex-col gap-1 px-1 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <TimeButton
-                  time={time}
-                  active={active}
-                  onPlay={onSeek ? () => onSeek(turn.fileIndex, turn.start) : null}
-                />
-                {badge(turn, time)}
-                {turn.marker ? <Unresolved /> : null}
-                {canEdit && !isEditing ? (
-                  <span id={`${id}-edit`} className="ms-auto shrink-0">
-                    <IconButton
-                      label={t("flow_transcript_turn_edit", { time })}
-                      icon={<Pencil aria-hidden="true" />}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onEdit(turn)}
-                    />
-                  </span>
-                ) : null}
-              </div>
-              <p className="text-ax-text m-0 text-sm break-words">
-                {turn.parts.map((part, at) => {
-                  const previous = turn.parts[at - 1];
-                  const gap = previous && !/\s$/.test(previous.text) && !/^\s/.test(part.text);
-                  return (
-                    <span key={`${part.segmentIndex}:${part.shownStart}`}>
-                      {gap ? " " : null}
-                      <span
-                        {...partAttributes(part.segmentIndex, part.shownStart)}
-                        className={
-                          part.position === activeLine ? "bg-ax-accent-muted rounded-sm" : undefined
-                        }
-                      >
-                        {part.text}
-                      </span>
-                    </span>
-                  );
-                })}
-              </p>
-            </div>
-            {isEditing ? editor(turn, time) : null}
-            {index === toolbarAt ? toolbar : null}
-          </li>
+            turn={turn}
+            id={turnId(turn)}
+            time={time}
+            marks={marks}
+            onSeek={onSeek}
+            canEdit={canEdit}
+            isEditing={isEditing}
+            onEdit={onEdit}
+            editor={isEditing ? editor(turn, time) : null}
+            badge={badge(turn, time)}
+            toolbar={index === toolbarAt ? toolbar : null}
+          />
         );
       })}
     </ol>
@@ -1215,9 +1269,9 @@ export function TranscriptLines({
       />
       {playback?.player}
       {playback ? <SpeakerSamples shown={shown} onPlay={playback.seek} /> : null}
-      {playback && uncertainWordCount(playback.words) > 0 ? (
+      {playback && playback.uncertain > 0 ? (
         <Text type="supporting" as="p">
-          {t("flow_transcript_uncertain_words", { count: uncertainWordCount(playback.words) })}
+          {t("flow_transcript_uncertain_words", { count: playback.uncertain })}
         </Text>
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1291,7 +1345,7 @@ export function TranscriptLines({
           <TurnList
             turns={turns}
             multiFile={multiFile}
-            activeLine={playback?.activeLine ?? -1}
+            marks={playback?.marks ?? null}
             onSeek={seek}
             turnId={turnId}
             canEdit={editing !== null}
@@ -1346,8 +1400,8 @@ export function TranscriptLines({
                   id={id}
                   segment={segment}
                   multiFile={multiFile}
-                  active={playback?.activeLine === position}
-                  activeWord={playback?.activeLine === position ? playback.activeWord : -1}
+                  position={position}
+                  marks={playback?.marks ?? null}
                   words={playback?.words.get(segment.index)}
                   onSeek={seek ? (time) => seek(segment.fileIndex, time) : null}
                   editing={editing}

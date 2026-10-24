@@ -169,20 +169,33 @@ export function shownSegments(
   return shownSegmentsOf(segments, correctionSet(corrections, segments));
 }
 
+function bySegment<T extends { segment_index: number }>(items: readonly T[]): Map<number, T[]> {
+  const grouped = new Map<number, T[]>();
+  for (const item of items) {
+    const group = grouped.get(item.segment_index);
+    if (group) group.push(item);
+    else grouped.set(item.segment_index, [item]);
+  }
+  return grouped;
+}
+
 /** The lines with a set of corrections as the editor holds it (a draft not saved yet). */
 export function shownSegmentsOf(
   segments: readonly TranscriptSegment[],
   set: CorrectionSet
 ): ShownSegment[] {
   const nameOf = (label: string | null) => (label ? set.names[label]?.trim() || null : null);
+  // Each line's corrections, in the order they were made, gathered once.
+  const occurrences = bySegment(set.occurrences);
+  const speakerEdits = bySegment(set.speakerEdits);
   return segments.map((segment) => {
-    const own = set.occurrences.filter((occurrence) => occurrence.segment_index === segment.index);
+    const own = occurrences.get(segment.index) ?? [];
     const corrected = applicableOccurrences(segment.text, own).length > 0;
     const parts = lineParts(
       segment.text,
       segment.speaker,
       own,
-      set.speakerEdits.filter((edit) => edit.segment_index === segment.index)
+      speakerEdits.get(segment.index) ?? []
     ).map((part) => ({ ...part, name: nameOf(part.speaker) }));
     const single = parts.length === 1 ? parts[0]! : null;
     const label = single ? single.speaker : segment.speaker;

@@ -159,6 +159,30 @@ describe("RunSteps copying", () => {
       )
     );
   });
+
+  it("renders what a step was sent only while it is open", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: { text: "Ärendet gäller bygglov." } })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    const trigger = within(card).getByRole("button", { name: messages.flow_runs_step_input });
+    expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
+    expect(
+      within(card).queryByRole("button", { name: messages.flow_run_more_copy_input })
+    ).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(card.textContent).toContain("Ärendet gäller bygglov.");
+    fireEvent.click(trigger);
+    expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
+    fireEvent.click(trigger);
+    expect(card.textContent).toContain("Ärendet gäller bygglov.");
+    expect(
+      within(card).getByRole("button", { name: messages.flow_run_more_copy_input })
+    ).toBeTruthy();
+  });
 });
 
 describe("RunLiveProgress", () => {

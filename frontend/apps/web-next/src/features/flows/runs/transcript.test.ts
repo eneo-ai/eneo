@@ -5,12 +5,22 @@ import {
   parseSegments,
   reviewTranscriptTarget,
   shownSegments,
+  shownSegmentsOf,
   speakerLabels,
   speakerNamesRequest,
   transcriptTargets,
+  type ShownSegment,
   type TranscriptCorrections,
+  type TranscriptSegment,
   type TranscriptSourceSegment
 } from "./transcript";
+import {
+  applicableOccurrences,
+  lineParts,
+  type CorrectionSet,
+  type Occurrence,
+  type WireSpeakerEdit
+} from "./transcript-corrections";
 
 const raw: TranscriptSourceSegment[] = [
   {
@@ -147,6 +157,180 @@ describe("shownSegments", () => {
       })
     );
     expect(shown[2]?.text).toBe("Bra.");
+  });
+});
+
+/** `shownSegmentsOf` as it was before it grouped the corrections by line: the reference. */
+function referenceShownSegmentsOf(
+  segments: readonly TranscriptSegment[],
+  set: CorrectionSet
+): ShownSegment[] {
+  const nameOf = (label: string | null) => (label ? set.names[label]?.trim() || null : null);
+  return segments.map((segment) => {
+    const own = set.occurrences.filter((occurrence) => occurrence.segment_index === segment.index);
+    const corrected = applicableOccurrences(segment.text, own).length > 0;
+    const parts = lineParts(
+      segment.text,
+      segment.speaker,
+      own,
+      set.speakerEdits.filter((edit) => edit.segment_index === segment.index)
+    ).map((part) => ({ ...part, name: nameOf(part.speaker) }));
+    const single = parts.length === 1 ? parts[0]! : null;
+    const label = single ? single.speaker : segment.speaker;
+    return {
+      ...segment,
+      text: parts.map((part) => part.text).join(""),
+      raw: segment.text,
+      label,
+      name: nameOf(label),
+      corrected,
+      parts,
+      decision: single?.decision ?? null,
+      unsure: Boolean(segment.provisional) && !parts.some((part) => part.overridden)
+    };
+  });
+}
+
+/** A small seeded generator, so a failing case can be run again. */
+function random(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+const WORDS = ["Tack", "vi", "börjar", "med", "budgeten", "Anna", "säger", "nej", "ja", "bra"];
+const SPEAKERS = ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02", null];
+
+function randomCase(seed: number): { segments: TranscriptSegment[]; set: CorrectionSet } {
+  const next = random(seed);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
+  const count = 1 + Math.floor(next() * 12);
+  const segments: TranscriptSegment[] = Array.from({ length: count }, (_, position) => {
+    const text = Array.from({ length: 1 + Math.floor(next() * 6) }, () => pick(WORDS)).join(" ");
+    return {
+      // Now and then two lines share an index, or an index is skipped.
+      index: next() < 0.1 && position > 0 ? position - 1 : position + (next() < 0.1 ? 1 : 0),
+      fileIndex: 0,
+      start: position * 3,
+      end: position * 3 + 2,
+      speaker: pick(SPEAKERS),
+      text,
+      ...(next() < 0.3 ? { provisional: true } : {})
+    };
+  });
+  const span = (text: string) => {
+    const start = Math.floor(next() * text.length);
+    const end = Math.min(text.length, start + 1 + Math.floor(next() * 8));
+    return { start, end };
+  };
+  const occurrences: Occurrence[] = Array.from({ length: Math.floor(next() * 20) }, () => {
+    const line = pick(segments);
+    const { start, end } = span(line.text);
+    const stale = next() < 0.2;
+    return {
+      segment_index: next() < 0.1 ? 99 : line.index,
+      char_start: start,
+      char_end: end,
+      original: stale ? "inte här" : line.text.slice(start, end),
+      corrected: pick(WORDS)
+    };
+  });
+  const speakerEdits: WireSpeakerEdit[] = Array.from({ length: Math.floor(next() * 15) }, () => {
+    const line = pick(segments);
+    const whole = next() < 0.5;
+    const { start, end } = span(line.text);
+    return {
+      segment_index: line.index,
+      original_speaker: line.speaker,
+      speaker: pick(SPEAKERS),
+      ...(next() < 0.5 ? { decision: pick(["confirmed", "unresolved"] as const) } : {}),
+      ...(whole ? {} : { char_start: start, char_end: end, original: line.text.slice(start, end) })
+    };
+  });
+  const names: Record<string, string | null> = {
+    SPEAKER_00: pick(["Anna", " ", null]),
+    SPEAKER_01: pick(["Bo", ""])
+  };
+  return { segments, set: { occurrences, speakerEdits, names } };
+}
+
+describe("shownSegmentsOf", () => {
+  it("shows every line as the reference does, on many random transcripts and corrections", () => {
+    for (let seed = 1; seed <= 400; seed += 1) {
+      const { segments, set } = randomCase(seed);
+      expect(shownSegmentsOf(segments, set), `seed ${seed}`).toEqual(
+        referenceShownSegmentsOf(segments, set)
+      );
+    }
+  });
+
+  it("applies a line's corrections in the order they were made, and only to that line", () => {
+    const lines = parseSegments([
+      { segment_index: 0, file_index: 0, start: 0, end: 2, speaker: "SPEAKER_00", text: "ja ja" },
+      { segment_index: 1, file_index: 0, start: 2, end: 4, speaker: "SPEAKER_00", text: "ja ja" }
+    ]);
+    const shown = shownSegmentsOf(lines, {
+      occurrences: [
+        { segment_index: 1, char_start: 3, char_end: 5, original: "ja", corrected: "nej" },
+        { segment_index: 1, char_start: 0, char_end: 2, original: "ja", corrected: "Jo" },
+        { segment_index: 7, char_start: 0, char_end: 2, original: "ja", corrected: "aldrig" }
+      ],
+      speakerEdits: [],
+      names: {}
+    });
+    expect(shown.map((line) => [line.text, line.corrected])).toEqual([
+      ["ja ja", false],
+      ["Jo nej", true]
+    ]);
+  });
+
+  it("gives part of one line to another speaker, named, and leaves an unsure line decided", () => {
+    const lines = parseSegments([
+      {
+        segment_index: 0,
+        file_index: 0,
+        start: 0,
+        end: 2,
+        speaker: "SPEAKER_00",
+        text: "Hej. Tack.",
+        speaker_attribution: "provisional"
+      },
+      {
+        segment_index: 1,
+        file_index: 0,
+        start: 2,
+        end: 4,
+        speaker: "SPEAKER_00",
+        text: "Bra.",
+        speaker_attribution: "provisional"
+      }
+    ]);
+    const shown = shownSegmentsOf(lines, {
+      occurrences: [],
+      speakerEdits: [
+        {
+          segment_index: 0,
+          original_speaker: "SPEAKER_00",
+          speaker: "SPEAKER_01",
+          char_start: 5,
+          char_end: 10,
+          original: "Tack."
+        }
+      ],
+      names: { SPEAKER_01: "Bo" }
+    });
+    expect(shown[0]!.parts.map((part) => [part.speaker, part.name, part.text.trim()])).toEqual([
+      ["SPEAKER_00", null, "Hej."],
+      ["SPEAKER_01", "Bo", "Tack."]
+    ]);
+    expect(shown[0]!.unsure).toBe(false);
+    expect(shown[1]).toMatchObject({
+      label: "SPEAKER_00",
+      unsure: true,
+      parts: [{ text: "Bra." }]
+    });
   });
 });
 

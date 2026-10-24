@@ -66,6 +66,7 @@ import {
   type RunDetail,
   type RunSummary
 } from "./runs-api";
+import { useNowAt } from "./use-now-at";
 
 type Notice = RunActionNotice;
 
@@ -288,6 +289,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const rescue = useFocusRescue();
   const lastStatus = useRef<string | null>(null);
 
+  // A poll that answers the same keeps the same data, so the page does not
+  // render again: the data carries no clock (`useNowAt` keeps the deadlines),
+  // and reading `isFetching` or `dataUpdatedAt` here on the success path
+  // would bring back one render per poll.
   const progress = useQuery({
     queryKey: runKeys.progress(flowId, runId),
     queryFn: async ({ signal }) => {
@@ -295,7 +300,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         getRunStatus(flowId, runId, signal),
         getRunGraph(flowId, runId, signal)
       ]);
-      return { status, graph, checkedAt: Date.now() };
+      return { status, graph };
     },
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -327,6 +332,12 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
+  // "Send again" and a review's decision turn at their deadline, not at the next poll.
+  const now = useNowAt([
+    summary?.dispatch_next_attempt_at,
+    awaitingReview ? review.data?.expires_at : null
+  ]);
+  const stepViews = progress.data ? runStepViews(progress.data.graph, steps.data) : [];
   // A review of a transcript shows it, correctable, in the review itself.
   const reviewTranscript =
     awaitingReview && review.data
@@ -392,10 +403,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         publishedVersion: flow.published_version
       })
     : null;
-  const offersRedispatch =
-    summary !== undefined &&
-    progress.data !== undefined &&
-    canRedispatch(summary, progress.data.checkedAt);
+  const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">
@@ -512,13 +520,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           />
         ) : (
           <>
-            {run ? (
-              <RunProblem
-                run={run}
-                flow={flow}
-                steps={runStepViews(progress.data.graph, steps.data)}
-              />
-            ) : null}
+            {run ? <RunProblem run={run} flow={flow} steps={stepViews} /> : null}
             {awaitingReview && review.isError ? (
               <ListError
                 error={review.error}
@@ -532,7 +534,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 checkpoint={review.data}
                 transcript={reviewTranscript}
                 mayReview={can("flows_manage")}
-                now={progress.data.checkedAt}
+                now={now}
                 onStale={(message) =>
                   setNotice({
                     status: "warning",
@@ -569,14 +571,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               ) : (
                 <>
-                  <RunLiveProgress
-                    summary={progress.data.status}
-                    steps={runStepViews(progress.data.graph, steps.data)}
-                  />
+                  <RunLiveProgress summary={progress.data.status} steps={stepViews} />
                   <RunSteps
                     flowId={flowId}
                     runId={runId}
-                    steps={runStepViews(progress.data.graph, steps.data)}
+                    steps={stepViews}
                     runStatus={status}
                     canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
                   />
@@ -591,9 +590,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   targets={transcriptTargets(steps.data)}
                   labelFor={(target) =>
                     stepTitle(
-                      runStepViews(progress.data.graph, steps.data).find(
-                        (step) => step.order === target.stepOrder
-                      ) ?? { order: target.stepOrder, label: "" },
+                      stepViews.find((step) => step.order === target.stepOrder) ?? {
+                        order: target.stepOrder,
+                        label: ""
+                      },
                       t
                     )
                   }
@@ -608,7 +608,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 <RunKnowledge
                   flowId={flowId}
                   runId={runId}
-                  steps={runStepViews(progress.data.graph, steps.data)}
+                  steps={stepViews}
                   runSettled={settled}
                 />
               </Section>
@@ -629,9 +629,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                       deliveries={run.webhook_deliveries}
                       stepName={(order) =>
                         stepTitle(
-                          runStepViews(progress.data.graph, steps.data).find(
-                            (step) => step.order === order
-                          ) ?? { order, label: "" },
+                          stepViews.find((step) => step.order === order) ?? { order, label: "" },
                           t
                         )
                       }
@@ -644,7 +642,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               <RunTrace
                 flow={flow}
                 summary={summary}
-                steps={runStepViews(progress.data.graph, steps.data)}
+                steps={stepViews}
                 access={run?.evidence_access}
               />
             ) : null}

@@ -3,6 +3,7 @@
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "next-intl";
+import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
@@ -97,6 +98,32 @@ function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; 
       </div>
       <CopyButton label={t("flow_run_more_copy_output")} value={structured ?? text} />
     </div>
+  );
+}
+
+/**
+ * What a step was sent, with a button that copies it: closed until asked
+ * for, and rendered only while open, since a large input weighs on the page.
+ */
+function StepInput({ payload }: { payload: NonNullable<RunStep["input_payload_json"]> }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible
+      isOpen={open}
+      onOpenChange={setOpen}
+      chevronPosition="start"
+      trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
+    >
+      {open ? (
+        <div className="flex items-start gap-2 pt-2">
+          <div className="min-w-0 flex-1">
+            <JsonValue value={payload} />
+          </div>
+          <CopyButton label={t("flow_run_more_copy_input")} value={payload} />
+        </div>
+      ) : null}
+    </Collapsible>
   );
 }
 
@@ -227,18 +254,7 @@ function StepCard({
       ) : null}
       {result ? <StepTranscriptionFacts result={result} /> : null}
       {result?.input_payload_json && Object.keys(result.input_payload_json).length > 0 ? (
-        <Collapsible
-          defaultIsOpen={false}
-          chevronPosition="start"
-          trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
-        >
-          <div className="flex items-start gap-2 pt-2">
-            <div className="min-w-0 flex-1">
-              <JsonValue value={result.input_payload_json} />
-            </div>
-            <CopyButton label={t("flow_run_more_copy_input")} value={result.input_payload_json} />
-          </div>
-        </Collapsible>
+        <StepInput payload={result.input_payload_json} />
       ) : null}
       {result ? <StepPromptDetails result={result} /> : null}
       {canReadEvidence && result?.started_at ? (

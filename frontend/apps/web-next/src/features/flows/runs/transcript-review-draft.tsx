@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl";
 import {
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -245,7 +246,7 @@ export function ReviewDraftLines({
     tellUnsaved.current?.(unsaved);
   }, [unsaved]);
 
-  const shown = shownSegmentsOf(segments, state.set);
+  const shown = useMemo(() => shownSegmentsOf(segments, state.set), [segments, state.set]);
   return (
     <TranscriptLines
       flowId={flowId}
