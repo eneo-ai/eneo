@@ -6,9 +6,6 @@ MAX_RETENTION_DAYS = 2555  # ~7 years, Swedish statute of limitations
 DEFAULT_AUDIT_RETENTION_DAYS = 365  # Swedish Arkivlagen default
 DEFAULT_CONVERSATION_RETENTION_DAYS = 90  # Default for conversation data
 
-# Session cleanup
-ORPHANED_SESSION_CLEANUP_DAYS = 1  # Delete sessions without questions after 1 day
-
 # Recommended minimum retention for compliance
 RECOMMENDED_MIN_AUDIT_DAYS = 90
 RECOMMENDED_MIN_CONVERSATION_DAYS = 30
@@ -40,3 +37,16 @@ def validate_retention_days(days: int, context: str = "retention") -> int:
         )
 
     return days
+
+
+# The least a conversation root costs: its discovery row and its own DELETE.
+# Child rows, examined by the bounded proof, and Files work come on top.
+CONVERSATION_UNIT_OVERHEAD_ROWS = 2
+
+
+def validate_conversation_unit_budget(*, unit_rows: int, execution_rows: int) -> None:
+    if unit_rows + CONVERSATION_UNIT_OVERHEAD_ROWS > execution_rows:
+        raise ValueError(
+            "RETENTION_CONVERSATIONS_MAX_UNIT_ROWS plus the discovery and root rows must fit "
+            "RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN."
+        )

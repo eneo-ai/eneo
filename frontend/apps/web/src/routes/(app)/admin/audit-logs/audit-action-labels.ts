@@ -601,6 +601,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_retention_policy_applied,
     description: m.audit_action_retention_policy_applied_description
   },
+  data_retention_batch: {
+    name: m.audit_action_data_retention_batch,
+    description: m.audit_action_data_retention_batch_description
+  },
+  data_retention_run: {
+    name: m.audit_action_data_retention_run,
+    description: m.audit_action_data_retention_run_description
+  },
+  data_retention_skipped: {
+    name: m.audit_action_data_retention_skipped,
+    description: m.audit_action_data_retention_skipped_description
+  },
   encryption_key_rotated: {
     name: m.audit_action_encryption_key_rotated,
     description: m.audit_action_encryption_key_rotated_description

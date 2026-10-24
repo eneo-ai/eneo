@@ -178,6 +178,9 @@ class ActionType(str, Enum):
 
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
+    DATA_RETENTION_BATCH = "data_retention_batch"
+    DATA_RETENTION_RUN = "data_retention_run"
+    DATA_RETENTION_SKIPPED = "data_retention_skipped"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"
     SYSTEM_MAINTENANCE = "system_maintenance"
 
