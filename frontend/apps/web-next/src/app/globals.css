@@ -796,4 +796,13 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
     padding-inline-start: env(safe-area-inset-left, 0px);
   }
+  /* The touch type scale (eneo-theme.ts → adaptations) for hand-built text:
+     Tailwind's text-sm and text-xs grow with Astryx's body and supporting
+     sizes, so the two never sit side by side at different sizes. */
+  @media (pointer: coarse) {
+    :root {
+      --text-sm: 0.9375rem;
+      --text-xs: 0.8125rem;
+    }
+  }
 }

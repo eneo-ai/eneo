@@ -106,8 +106,14 @@ describe("globals.css", () => {
     expect(coarse.get(":scope")).toMatchObject({
       "--size-element-sm": "44px",
       "--size-element-md": "44px",
-      "--size-element-lg": "44px"
+      "--size-element-lg": "44px",
+      // The touch type scale: body and labels 15 px, supporting text 13 px.
+      "--text-body-size": "0.9375rem",
+      "--text-label-size": "0.9375rem",
+      "--text-supporting-size": "0.8125rem"
     });
+    // Hand-built text follows it: Tailwind's text-sm and text-xs.
+    expect(coarse.get(":root")).toMatchObject({ "--text-sm": "0.9375rem", "--text-xs": "0.8125rem" });
     for (const component of [
       "segmented-control-item",
       "checkbox-input",
