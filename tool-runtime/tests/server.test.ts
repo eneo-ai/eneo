@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config";
-import { createHandler, parseOrigin } from "../src/server";
+import { z } from "zod";
+import { createHandler, parseOrigin, toolInputElementLimit } from "../src/server";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { runJavaScript } from "../src/tools/compute/engine/quickjs";
 import type { ComputeJob } from "../src/tools/compute/ports";
@@ -183,3 +184,63 @@ describe("the built-in template download", () => {
     ).toBe(404);
   });
 });
+
+describe("tool input size", () => {
+  // The densest arguments a body can carry: one small number per element.
+  const MAX_BODY = 16 * 1024;
+  const ids = (n: number) => Array.from({ length: n }, () => 0);
+  const counted = mockTool();
+  const sized = createHandler({
+    token: TOKEN,
+    maxConcurrency: 1,
+    maxBodyBytes: MAX_BODY,
+    endpoints: [{ slug: "sized", toolTimeoutMs: 1000, tools: [counted.tool] }],
+  });
+  const body = (values: number[]) =>
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "count", arguments: { values } } });
+  function call(values: number[]) {
+    return sized(
+      new Request("http://tool-runtime:3010/mcp/sized", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: body(values),
+      }),
+    );
+  }
+
+  test("bounds the elements by the body limit, so it never refuses what the limit accepts", async () => {
+    expect(toolInputElementLimit(MAX_BODY)).toBe(MAX_BODY / 2);
+    // As many elements as still fit in the body: the call runs.
+    let n = MAX_BODY / 2;
+    while (Buffer.byteLength(body(ids(n))) > MAX_BODY) n--;
+    const response = await call(ids(n));
+    expect(response.status).toBe(200);
+    const { result } = (await response.json()) as { result: { isError?: boolean } };
+    expect(result.isError).toBeFalsy();
+    expect(counted.seen()).toBe(n);
+    // One more no longer fits in the body, which is refused before the SDK sees it.
+    expect((await call(ids(n + 1))).status).toBe(413);
+  });
+});
+
+function mockTool() {
+  let seen = 0;
+  return {
+    seen: () => seen,
+    tool: {
+      name: "count",
+      title: "Count",
+      description: "Counts values.",
+      inputSchema: { values: z.array(z.number()) },
+      readOnly: true,
+      async execute(raw: unknown) {
+        seen = (raw as { values: number[] }).values.length;
+        return { count: seen };
+      },
+    },
+  };
+}
