@@ -6052,6 +6052,8 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
         == executor.runtime_policy.default_step_timeout_seconds
     )
     assert attempt_start.input_text_length == 5
+    # The provider reports the input's real token count; the start counts none.
+    assert attempt_start.input_tokens_estimate is None
     assert attempt_input.resolved_input is not None
     assert attempt_input.resolved_input["text"] == "hello"
     assert attempt_input.execution_inputs is not None

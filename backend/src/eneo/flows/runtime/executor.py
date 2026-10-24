@@ -20,7 +20,6 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.audit.domain.outcome import Outcome
 from eneo.completion_models.infrastructure.completion_service import CompletionService
-from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
@@ -618,7 +617,6 @@ def _start_describes_a_completion_request(start: FlowStepAttemptStart | None) ->
     return start is not None and (
         start.requested_model is not None
         or start.provider is not None
-        or start.input_tokens_estimate is not None
         or start.mapped_admission is not None
     )
 
@@ -1835,7 +1833,6 @@ class FlowRunExecutor:
             provider=_provider_from_assistant(prepared.assistant),
             resolved_timeout_seconds=resolved_timeout_seconds,
             input_text_length=input_text_length,
-            input_tokens_estimate=count_tokens(prepared.step_input.text),
             mapped_admission=state.mapped_admission_by_step.get(step.step_id),
         )
 
