@@ -141,7 +141,6 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             ),
             "inspect_flow_template": "flow_template_router.inspect_flow_template",
             "get_flow_step_kinds": "flow_step_kinds_router.get_flow_step_kinds",
-            "get_flow_suggestions": "flow_suggestions_router.get_flow_suggestions",
         }.items()
     },
     **{
@@ -626,6 +625,19 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "run_id",
             "evidence_detail",
             "checkpoint_present",
+        ),
+    ),
+    # Static suggestions (`runs=0`) read the definition and emit nothing; a
+    # measured read (`runs>0`) emits one entry on the flow naming its runs.
+    "get_flow_suggestions": _required_read(
+        ActionType.FLOW_EVIDENCE_VIEWED,
+        owner="flow_trace_audit.log_flow_evidence_read_audit_or_raise",
+        metadata_keys=(
+            "flow_id",
+            "evidence_detail",
+            "requested_runs",
+            "run_ids",
+            "left_out_run_count",
         ),
     ),
     "get_flow_run_evidence": _required_read(
