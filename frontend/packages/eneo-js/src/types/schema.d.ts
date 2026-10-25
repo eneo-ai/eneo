@@ -6184,7 +6184,11 @@ export interface paths {
     };
     /**
      * Get Flow Suggestions
-     * @description What the draft could do cheaper or simpler, judged from the saved definition: where a step's model receives the same earlier result twice (`duplicate_read`), through its input (`previous_step`, `all_previous_steps`, a question or source references) and a read of the same step in its assistant's prompt, or twice in one of them. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model, no run content is read, and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at. Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits, an `impact` level and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
+     * @description What the draft could do cheaper or simpler. By default it is judged from the saved definition alone: where a step's model receives the same earlier result twice (`duplicate_read`), takes more of the earlier results than it needs, carries data no later step reads, or relays a result another step could read directly. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at.
+     *
+     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and three findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts and call reasons), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted and how many it left out, and is refused with 503 when that entry cannot be written.
+     *
+     *     Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits and measurements, an `impact` and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
      */
     get: operations["get_flow_suggestions"];
     put?: never;
@@ -27939,7 +27943,10 @@ export interface components {
       | "relay_step"
       | "per_item_prompt_read"
       | "repeated_long_material"
-      | "unused_form_field";
+      | "unused_form_field"
+      | "identical_inputs"
+      | "context_headroom"
+      | "format_fallback";
     /** FlowSuggestionFixPublic */
     FlowSuggestionFixPublic: {
       /**
@@ -27975,18 +27982,42 @@ export interface components {
     FlowSuggestionImpactPublic: {
       /**
        * Basis
-       * @description What the impact is judged from: `definition`, the draft alone, which proves the duplication but not its size.
-       * @example definition
-       * @constant
+       * @description What the impact is judged from: `definition`, the draft alone, which proves the finding but not its size; `runs`, measured over recent runs as well (asked for with `runs`), with the measured fields set.
+       * @example runs
+       * @enum {string}
        */
-      basis: "definition";
+      basis: "definition" | "runs";
       /**
        * Level
-       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field).
+       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field). The measured codes: `high` for `identical_inputs` and `context_headroom`, `medium` for `format_fallback`.
        * @example high
        * @enum {string}
        */
       level: "high" | "medium" | "low";
+      /**
+       * Run Count
+       * @description Measured: how many of the counted runs measured it.
+       * @example 8
+       */
+      run_count?: number | null;
+      /**
+       * Step Changed Since
+       * @description Measured: true when the draft's step (its input, output, prompt or model) differs from the step in `version`, so the number describes the step as it was.
+       * @example false
+       */
+      step_changed_since?: boolean | null;
+      /**
+       * Tokens Per Run
+       * @description Measured: the tokens per run the duplicated or unused part cost, averaged over the runs that measured it. For a duplicate, the size of the redundant input times the tokens per byte of each call that sent it; for a step run once per item, the copies beyond the first item's; for an unread result, everything the step was billed. Null when the impact is from the definition, and for a measured finding without a token cost of its own (`context_headroom`, `format_fallback`).
+       * @example 1840
+       */
+      tokens_per_run?: number | null;
+      /**
+       * Version
+       * @description Measured: the published version of the newest of those runs.
+       * @example 3
+       */
+      version?: number | null;
     };
     /**
      * FlowSuggestionPublic
@@ -28011,8 +28042,12 @@ export interface components {
      *         }
      *       },
      *       "impact": {
-     *         "basis": "definition",
-     *         "level": "high"
+     *         "basis": "runs",
+     *         "level": "high",
+     *         "run_count": 8,
+     *         "step_changed_since": false,
+     *         "tokens_per_run": 1840,
+     *         "version": 3
      *       },
      *       "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
      *       "params": {
@@ -28043,7 +28078,7 @@ export interface components {
      */
     FlowSuggestionPublic: {
       /**
-       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads.
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format.
        * @example duplicate_read
        */
       code: components["schemas"]["FlowSuggestionCode"];
@@ -28062,7 +28097,7 @@ export interface components {
       message: string;
       /**
        * Params
-       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`.
+       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`. `identical_inputs`: `producer_step_ids`, `producer_step_orders`, `sites`, `byte_size`, `observed_runs`, `step_runs`. `context_headroom`: `peak_input_tokens`, `token_limit`, `limit_share`, `inline_cap_failures`, `duplicated_tokens_per_run` and `duplicated_share` (what the step's measured duplicates account for), `related_fingerprints` (those duplicates), `step_runs`. `format_fallback`: `fallback_runs`, `step_runs`. No param holds run content.
        */
       params: {
         [key: string]: unknown;
@@ -28072,6 +28107,27 @@ export interface components {
        * @description The steps the suggestion is about; the first is the step it is shown on, the second, when there is one, the step it reads, copies or shares a source with. Empty for `unused_form_field`, which is about the run form.
        */
       steps: string[];
+    };
+    /** FlowSuggestionRunsPublic */
+    FlowSuggestionRunsPublic: {
+      /**
+       * Counted
+       * @description The finished runs whose evidence was measured: the newest ones in which a step ran, completed, failed or cancelled, that the caller may see evidence for.
+       * @example 8
+       */
+      counted: number;
+      /**
+       * Left Out
+       * @description Runs among the newest `requested` that were left out because the caller may not see their evidence (another member's run, outside the caller's space role).
+       * @example 2
+       */
+      left_out: number;
+      /**
+       * Requested
+       * @description The `runs` asked for.
+       * @example 10
+       */
+      requested: number;
     };
     /**
      * FlowSuggestionsAppliedPublic
@@ -28235,8 +28291,12 @@ export interface components {
      *             }
      *           },
      *           "impact": {
-     *             "basis": "definition",
-     *             "level": "high"
+     *             "basis": "runs",
+     *             "level": "high",
+     *             "run_count": 8,
+     *             "step_changed_since": false,
+     *             "tokens_per_run": 1840,
+     *             "version": 3
      *           },
      *           "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
      *           "params": {
@@ -28264,7 +28324,12 @@ export interface components {
      *             "00000000-0000-0000-0000-000000000101"
      *           ]
      *         }
-     *       ]
+     *       ],
+     *       "runs": {
+     *         "counted": 8,
+     *         "left_out": 2,
+     *         "requested": 10
+     *       }
      *     }
      */
     FlowSuggestionsPublic: {
@@ -28283,9 +28348,11 @@ export interface components {
       flow_id: string;
       /**
        * Items
-       * @description The suggestions, by impact level (high, medium, low), then step order; at most 50. Empty when the draft gives none.
+       * @description The suggestions: those with a measured `impact.tokens_per_run` first, most tokens first, then by impact level (high, medium, low), then step order; at most 50. Empty when the draft gives none.
        */
       items: components["schemas"]["FlowSuggestionPublic"][];
+      /** @description Which runs were measured, when `runs` asked for them; null for the definition alone. */
+      runs?: components["schemas"]["FlowSuggestionRunsPublic"] | null;
     };
     /**
      * FlowTemplateAssetPublic
@@ -64589,7 +64656,10 @@ export interface operations {
   };
   get_flow_suggestions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description How many of the newest finished runs to measure; 0, the default, judges the definition alone. Above 0 it needs the permission to view flow traces. */
+        runs?: number;
+      };
       header?: never;
       path: {
         /** @description Identifier of the draft flow. */
@@ -64631,8 +64701,12 @@ export interface operations {
            *             }
            *           },
            *           "impact": {
-           *             "basis": "definition",
-           *             "level": "high"
+           *             "basis": "runs",
+           *             "level": "high",
+           *             "run_count": 8,
+           *             "step_changed_since": false,
+           *             "tokens_per_run": 1840,
+           *             "version": 3
            *           },
            *           "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
            *           "params": {
@@ -64660,13 +64734,18 @@ export interface operations {
            *             "00000000-0000-0000-0000-000000000101"
            *           ]
            *         }
-           *       ]
+           *       ],
+           *       "runs": {
+           *         "counted": 8,
+           *         "left_out": 2,
+           *         "requested": 10
+           *       }
            *     }
            */
           "application/json": components["schemas"]["FlowSuggestionsPublic"];
         };
       };
-      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller may not edit flows in the space, and `flow_owner_required` when another member owns the draft. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller may not edit flows in the space, `flow_owner_required` when another member owns the draft, and `insufficient_tenant_permission` when `runs` is above 0 and the caller may not view flow traces. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -64707,6 +64786,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The audit entry of a measured read could not be written; nothing is returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

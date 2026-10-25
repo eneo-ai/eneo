@@ -56,6 +56,10 @@ class FlowSuggestionCode(str, Enum):
     PER_ITEM_PROMPT_READ = "per_item_prompt_read"
     REPEATED_LONG_MATERIAL = "repeated_long_material"
     UNUSED_FORM_FIELD = "unused_form_field"
+    # Measured from recent runs (``flow_suggestion_measured``).
+    IDENTICAL_INPUTS = "identical_inputs"
+    CONTEXT_HEADROOM = "context_headroom"
+    FORMAT_FALLBACK = "format_fallback"
 
 
 # What to do so a flow never earns the suggestion: one rule per code, for
@@ -97,24 +101,55 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
     FlowSuggestionCode.UNUSED_FORM_FIELD: (
         "Declare only the run form fields that a step reads."
     ),
+    FlowSuggestionCode.IDENTICAL_INPUTS: (
+        "Give a step each text once: read the original rather than also a "
+        "step that copies it."
+    ),
+    FlowSuggestionCode.CONTEXT_HEADROOM: (
+        "Keep what a step sends its model well below the model's limit: send "
+        "each text once and only what the step needs."
+    ),
+    FlowSuggestionCode.FORMAT_FALLBACK: (
+        "Ask for structured output only from a model that supports it, or "
+        "let the step write text."
+    ),
 }
 
 
 FlowSuggestionFixKind = Literal["patch", "assisted", "advice"]
 FlowSuggestionLevel = Literal["high", "medium", "low"]
-FlowSuggestionImpactBasis = Literal["definition"]
+FlowSuggestionImpactBasis = Literal["definition", "runs"]
 
 LEVEL_RANK: dict[FlowSuggestionLevel, int] = {"high": 0, "medium": 1, "low": 2}
 
 
 class FlowSuggestionImpact(BaseModel):
-    """What the suggestion costs: judged from the definition alone, at a
-    level; measured bases and their numbers come with run evidence."""
+    """What the suggestion costs. ``definition``: judged from the draft
+    alone, at a level. ``runs``: measured over recent runs as well, with
+    ``run_count`` runs of which the newest was of published ``version``;
+    ``tokens_per_run`` is the measured cost of the duplicated or unused part
+    (None when the runs measure the finding but not a token cost), and
+    ``step_changed_since`` says the draft's step differs from the step in
+    that version."""
 
     model_config = ConfigDict(frozen=True)
 
     basis: FlowSuggestionImpactBasis
     level: FlowSuggestionLevel
+    tokens_per_run: int | None = None
+    run_count: int | None = None
+    version: int | None = None
+    step_changed_since: bool | None = None
+
+    @model_validator(mode="after")
+    def _measured_exactly_from_runs(self) -> Self:
+        measured = (self.run_count, self.version, self.step_changed_since)
+        if self.basis == "runs":
+            if any(value is None for value in measured):
+                raise ValueError("A measured impact names its runs and version.")
+        elif any(value is not None for value in (*measured, self.tokens_per_run)):
+            raise ValueError("An impact from the definition carries no measurement.")
+        return self
 
 
 class FlowSuggestionFix(BaseModel):
@@ -254,10 +289,13 @@ def make_suggestion(
     level: FlowSuggestionLevel,
     fix: FlowSuggestionFix,
     identity_steps: Sequence[UUID] | None = None,
+    impact: FlowSuggestionImpact | None = None,
 ) -> FlowSuggestion:
     """``identity_steps``, when given, are the steps the fingerprint names
     in place of ``steps``: a suggestion that names a step for the reader
-    without that step being part of its premise."""
+    without that step being part of its premise. ``impact``, when given,
+    replaces the impact judged from the definition at ``level`` (a measured
+    rule's)."""
     return FlowSuggestion(
         code=code,
         fingerprint=suggestion_fingerprint(
@@ -266,7 +304,7 @@ def make_suggestion(
         steps=tuple(steps),
         params=params,
         message=message,
-        impact=FlowSuggestionImpact(basis="definition", level=level),
+        impact=impact or FlowSuggestionImpact(basis="definition", level=level),
         fix=fix,
     )
 
