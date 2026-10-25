@@ -200,9 +200,14 @@ describe("FlowStepEditor", () => {
     const onAskChat = vi.fn();
     const { container } = renderEditor(flow, { onAskChat });
 
-    const section = await screen.findByRole("region", { name: "Förslag för steget (1)" });
+    // The person opened the step on purpose: its suggestions start open.
+    const toggle = await screen.findByRole("button", { name: "1 förslag" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const section = document.getElementById(toggle.getAttribute("aria-controls") ?? "")!;
+    expect(section.hidden).toBe(false);
     expect(screen.queryByText("Svaret från steg 1 skickas två gånger")).toBeNull();
     await expectNoAxeViolations(container);
+    fireEvent.click(within(section).getByRole("button", { name: "Mer om ”Förslag”" }));
     fireEvent.click(
       within(section).getByRole("button", {
         name: "Fråga assistenten om ”Förslag”"

@@ -22,7 +22,12 @@ import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 import { useSuggestionFix, type SuggestionFix } from "./flow-suggestion-item";
-import { StepCardSuggestions, SuggestionsSummary } from "./flow-suggestions-section";
+import {
+  StepCardSuggestions,
+  SuggestionsSummary,
+  type OpenKeys,
+  useOpenKeys
+} from "./flow-suggestions-section";
 import {
   flowSuggestions,
   flowSuggestionsQueryOptions,
@@ -86,6 +91,9 @@ function StepCard({
   /** The core's suggestions about this step, with what they offer. */
   suggestions: {
     items: readonly ShownSuggestion[];
+    /** Which of the cards' disclosures are open, held by the list. */
+    open: OpenKeys;
+    rows: OpenKeys;
     onAskChat?: (text: string) => void;
     onFix?: (fingerprints: string[]) => void;
     fixPending?: boolean;
@@ -227,7 +235,10 @@ function StepCard({
         </MetadataListItem>
       </MetadataList>
       <StepCardSuggestions
+        stepId={id}
         items={suggestions.items}
+        open={suggestions.open}
+        rows={suggestions.rows}
         steps={steps}
         onAskChat={suggestions.onAskChat}
         onFix={suggestions.onFix}
@@ -321,6 +332,9 @@ export function FlowStepList({
     enabled: canEdit
   });
   const shown = canEdit ? shownSuggestions(suggestions.data?.items, steps) : [];
+  // Held here, so a card re-rendered by a refetch or a fix keeps what was open.
+  const openSections = useOpenKeys(false);
+  const openRows = useOpenKeys(false);
   const byStep = suggestionsByStep(shown);
   const formItems = canEdit ? flowSuggestions(suggestions.data?.items) : [];
   // A fixed suggestion leaves its card; focus stays on the card's step.
@@ -396,6 +410,8 @@ export function FlowStepList({
                 canEdit={canEdit}
                 suggestions={{
                   items: (step.id && byStep.get(step.id)) || [],
+                  open: openSections,
+                  rows: openRows,
                   onAskChat,
                   onFix: fixOnCard
                     ? (fingerprints) => {

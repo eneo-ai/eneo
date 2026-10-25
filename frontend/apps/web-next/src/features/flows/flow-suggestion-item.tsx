@@ -1,11 +1,14 @@
 "use client";
 
+import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { ChevronDown, ChevronRight, MessageSquareText, Trash2, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useFlowReferences } from "./chat/reference-pill";
 import { ReferenceText, referencePlainText } from "./chat/reference-text";
@@ -32,8 +35,6 @@ export type SuggestionFix = {
 
 /** What a suggestion offers to do, by where it is shown. */
 export type SuggestionActions = {
-  /** Opens the step the suggestion is about; left out where that step is already open. */
-  onOpenStep?: (step: FlowStep) => void;
   /**
    * Puts a prepared request about the suggestion in the flow chat's composer
    * (never sends it); left out while the chat is not available.
@@ -77,19 +78,56 @@ export function useSuggestionFix(
   };
 }
 
+const LEVEL_BADGES = {
+  high: {
+    variant: "info",
+    label: "flow_suggestion_level_high",
+    named: "flow_suggestion_level_high_named"
+  },
+  medium: {
+    variant: "neutral",
+    label: "flow_suggestion_level_medium",
+    named: "flow_suggestion_level_medium_named"
+  },
+  low: {
+    variant: "neutral",
+    label: "flow_suggestion_level_low",
+    named: "flow_suggestion_level_low_named"
+  }
+} as const;
+
+/** How much a suggestion is worth, in a word: the badge says it, its colour only repeats it. */
+function LevelBadge({ level }: { level: string }) {
+  const t = useTranslations();
+  const badge = LEVEL_BADGES[level as keyof typeof LEVEL_BADGES];
+  if (!badge) return null;
+  return (
+    <Badge
+      variant={badge.variant}
+      label={
+        <>
+          <span aria-hidden="true">{t(badge.label)}</span>
+          <span className="sr-only">{t(badge.named)}</span>
+        </>
+      }
+    />
+  );
+}
+
 /**
- * One suggestion, on its step's card and at the top of the step editor
- * alike: what was found (steps and values as the chat's pills), why behind a
- * disclosure, and its actions. "Fråga assistenten" is offered for every fix
- * kind, since an author may want any of them explained; "Åtgärda" for a
- * patch; "Ta bort steget" for a step nothing reads.
+ * One suggestion as a row of a suggestion list: its level, what was found
+ * (steps and values as the chat's pills) and, for a patch, "Åtgärda" on the
+ * right. The chevron before it shows why, with the secondary actions:
+ * "Fråga assistenten" for every kind (an author may want any of them
+ * explained) and "Ta bort steget" for a step nothing reads. Collapsing
+ * keeps focus on the chevron, which stays.
  */
-export function FlowSuggestionItem({
+export function SuggestionRow({
   suggestion,
   step,
   steps,
-  showStep = false,
-  onOpenStep,
+  isOpen,
+  onOpenChange,
   onAskChat,
   onFix,
   fixPending = false,
@@ -101,68 +139,73 @@ export function FlowSuggestionItem({
   step: FlowStep | null;
   /** The draft's steps, to name the others the suggestion is about. */
   steps: readonly FlowStep[];
-  /** Shows the step's name above the suggestion, where steps are listed together. */
-  showStep?: boolean;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
   const refs = useFlowReferences();
-  const whyId = useId();
-  const [open, setOpen] = useState(false);
+  const panelId = useId();
   const label = step ? stepLabel(step, t) : null;
   const text = suggestionText(suggestion, t, step ?? undefined, steps);
   // The title in words, each pill as it reads, for the buttons' names.
   const title = referencePlainText(text.title, refs?.flow ?? { steps: [...steps] }, t);
+  const removable = onRemoveStep && step && label && suggestion.code === "unread_result";
 
   return (
-    <li className="flex flex-col gap-1">
-      {(showStep && label) || (onOpenStep && step) ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {showStep && label ? (
-            <span className="text-ax-text text-sm font-semibold break-words">{label}</span>
-          ) : null}
-          {onOpenStep && step && label ? (
-            <Button
-              label={t("flow_editor_tools_check_open_step")}
-              aria-label={t("flow_editor_tools_check_open_step_named", { step: label })}
-              size="sm"
-              variant="ghost"
-              onClick={() => onOpenStep(step)}
-            />
-          ) : null}
-        </div>
-      ) : null}
-      <Text size="sm" as="p" display="block" className="m-0 leading-7">
-        <ReferenceText text={text.title} />
-      </Text>
-      <div className="flex flex-wrap items-center gap-1">
-        {/* A native disclosure: Astryx's Collapsible has no compact trigger. */}
-        <Button
-          label={t("flow_suggestion_why")}
-          aria-label={t("flow_suggestion_why_named", { title })}
-          aria-expanded={open}
-          aria-controls={whyId}
-          size="sm"
+    <ListItem
+      align="first-line"
+      startContent={
+        <IconButton
+          label={t("flow_suggestion_more_named", { title })}
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          icon={isOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
           variant="ghost"
-          icon={
-            open ? (
-              <ChevronDown aria-hidden="true" className="size-4" />
-            ) : (
-              <ChevronRight aria-hidden="true" className="size-4" />
-            )
-          }
-          onClick={() => setOpen((current) => !current)}
+          size="sm"
+          onClick={() => onOpenChange(!isOpen)}
         />
-        {onAskChat ? (
-          <Button
-            label={t("flow_suggestion_ask")}
-            aria-label={t("flow_suggestion_ask_named", { title })}
-            size="sm"
-            variant="ghost"
-            icon={<MessageSquareText aria-hidden="true" className="size-4" />}
-            onClick={() => onAskChat(suggestionRequest(suggestion, steps, t))}
-          />
-        ) : null}
-        {onFix && isPatchable(suggestion) ? (
+      }
+      label={
+        <div className="flex min-w-0 flex-col gap-1 py-0.5">
+          <p className="text-ax-text m-0 text-sm leading-6">
+            <span className="mr-2 inline-block align-middle">
+              <LevelBadge level={suggestion.impact.level} />
+            </span>
+            <ReferenceText text={text.title} />
+          </p>
+          <div id={panelId} hidden={!isOpen} className="flex flex-col gap-1">
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
+              <ReferenceText text={text.explanation} />
+            </Text>
+            {onAskChat || removable ? (
+              <div className="-ml-2 flex flex-wrap items-center gap-1">
+                {onAskChat ? (
+                  <Button
+                    label={t("flow_suggestion_ask")}
+                    aria-label={t("flow_suggestion_ask_named", { title })}
+                    size="sm"
+                    variant="ghost"
+                    icon={<MessageSquareText aria-hidden="true" className="size-4" />}
+                    onClick={() => onAskChat(suggestionRequest(suggestion, steps, t))}
+                  />
+                ) : null}
+                {removable ? (
+                  <Button
+                    label={t("flow_suggestion_remove_step")}
+                    aria-label={t("flow_suggestion_remove_step_named", { step: label })}
+                    size="sm"
+                    variant="ghost"
+                    icon={<Trash2 aria-hidden="true" className="size-4" />}
+                    onClick={() => onRemoveStep(step)}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      }
+      endContent={
+        onFix && isPatchable(suggestion) ? (
           <Button
             label={t("flow_suggestion_fix")}
             aria-label={t("flow_suggestion_fix_named", { title })}
@@ -176,23 +219,8 @@ export function FlowSuggestionItem({
               if (!fixPending && !fixBlockedBy) onFix(suggestion);
             }}
           />
-        ) : null}
-        {onRemoveStep && step && label && suggestion.code === "unread_result" ? (
-          <Button
-            label={t("flow_suggestion_remove_step")}
-            aria-label={t("flow_suggestion_remove_step_named", { step: label })}
-            size="sm"
-            variant="ghost"
-            icon={<Trash2 aria-hidden="true" className="size-4" />}
-            onClick={() => onRemoveStep(step)}
-          />
-        ) : null}
-      </div>
-      <div id={whyId} hidden={!open}>
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-7">
-          <ReferenceText text={text.explanation} />
-        </Text>
-      </div>
-    </li>
+        ) : undefined
+      }
+    />
   );
 }

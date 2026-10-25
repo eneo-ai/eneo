@@ -239,9 +239,10 @@ function applyBodies() {
 const suggestionReads = () =>
   api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/").length;
 
-/** The "Åtgärda" of the suggestion on step 2's card, by its role and name. */
+/** The "Åtgärda" of the suggestion on step 2's card, by its role and name, its list opened. */
 async function cardFix() {
   const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+  fireEvent.click(await within(second).findByRole("button", { name: /^\d+ förslag/ }));
   return within(second).findByRole("button", { name: /^Åtgärda ”/ });
 }
 
@@ -696,6 +697,9 @@ describe("FlowPage", () => {
     const chat = screen.getByRole("region", { name: "Chatt om flödet" });
     expect(chat.className).toContain("max-lg:hidden");
 
+    fireEvent.click(await screen.findByRole("button", { name: /^1 förslag/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Mer om/ }));
+    // Offered once the chat's composer is on the page.
     fireEvent.click(
       await screen.findByRole("button", {
         name: "Fråga assistenten om ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
@@ -723,7 +727,8 @@ describe("FlowPage", () => {
   it("offers no request to a chat that is not available", async () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     renderPage();
-    expect(await screen.findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /^1 förslag/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Mer om/ }));
     expect(screen.queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Optimera flödet" })).toBeNull();
   });
@@ -746,7 +751,7 @@ describe("FlowPage", () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     renderPage();
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
-    expect(await within(second).findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
+    expect(await within(second).findByRole("button", { name: /^1 förslag/ })).toBeTruthy();
     expect(screen.getByText("1 förslag kan göra flödet enklare eller billigare")).toBeTruthy();
 
     // The chat removed the duplicate: a new revision, and no suggestion on it.
@@ -755,7 +760,7 @@ describe("FlowPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
 
     await waitFor(() =>
-      expect(within(second).queryByRole("region", { name: "Förslag (1)" })).toBeNull()
+      expect(within(second).queryByRole("button", { name: /^1 förslag/ })).toBeNull()
     );
     expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
     // One request per revision.
@@ -898,7 +903,8 @@ describe("FlowPage", () => {
     const chat = screen.getByRole("region", { name: "Chatt om flödet" });
 
     const card = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
-    fireEvent.click(await within(card).findByRole("button", { name: "Steg 1: Sammanfatta" }));
+    fireEvent.click(await within(card).findByRole("button", { name: /^1 förslag/ }));
+    fireEvent.click(within(card).getByRole("button", { name: "Steg 1: Sammanfatta" }));
     const dialog = await screen.findByRole("dialog", { name: "Referens" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Infoga i meddelandet" }));
 
