@@ -213,19 +213,23 @@ def test_custom_secret_headers_use_the_core_credential_policy():
         )
 
 
-async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode(
-    monkeypatch,
-):
+def _suggestions_chat(monkeypatch, *, may_trace: bool = False):
+    """A view-mode chat whose user may or may not view flow traces, and the
+    mocked answer of the suggestions read."""
     from eneo.flows.api import flow_suggestions_router
     from eneo.flows.api.flow_suggestions_models import (
         FLOW_SUGGESTIONS_EXAMPLE,
         FlowSuggestionsPublic,
     )
+    from eneo.roles.permissions import Permission
 
     chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
-    monkeypatch.setattr(
-        flows, "internal_tool_context", _tool_context(_transaction_container([]))
+    container = _transaction_container([])
+    container.user.return_value = SimpleNamespace(
+        permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_MANAGE]
+        + ([Permission.FLOWS_TRACE] if may_trace else [])
     )
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
     )
@@ -235,7 +239,14 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
         {**FLOW_SUGGESTIONS_EXAMPLE, "flow_id": str(chat.flow_id)}
     )
     read = AsyncMock(return_value=answer)
-    monkeypatch.setattr(flow_suggestions_router, "get_flow_suggestions", read)
+    monkeypatch.setattr(flow_suggestions_router, "read_flow_suggestions_answer", read)
+    return chat, answer, read, edit
+
+
+async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode(
+    monkeypatch,
+):
+    chat, answer, read, edit = _suggestions_chat(monkeypatch)
 
     result = await flows.read_flow_suggestions(MagicMock(), offset=0)
 
@@ -244,9 +255,36 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
     assert page["flow_id"] == str(chat.flow_id)
     assert page["draft_revision"] == answer.draft_revision
     assert '"code":"duplicate_read"' in page["content"]
-    # A read: the tool asks the router for this chat's flow and needs no edit mode.
+    # A read: the tool asks for this chat's flow, judged from the definition
+    # alone, and needs no edit mode.
     assert read.await_args.kwargs["id"] == chat.flow_id
+    assert read.await_args.kwargs["runs"] == 0
     edit.assert_not_awaited()
+
+
+async def test_include_runs_measures_ten_runs_for_a_user_who_may_view_traces(
+    monkeypatch,
+):
+    _chat, _answer, read, _edit = _suggestions_chat(monkeypatch, may_trace=True)
+
+    result = await flows.read_flow_suggestions(MagicMock(), include_runs=True, offset=0)
+
+    assert result.isError is not True
+    assert read.await_args.kwargs["runs"] == flows.MCP_MEASURED_RUNS == 10
+    assert '"note"' not in json.loads(result.content[0].text)["content"]
+
+
+async def test_include_runs_without_trace_permission_is_static_with_a_note(
+    monkeypatch,
+):
+    _chat, _answer, read, _edit = _suggestions_chat(monkeypatch, may_trace=False)
+
+    result = await flows.read_flow_suggestions(MagicMock(), include_runs=True, offset=0)
+
+    assert result.isError is not True
+    assert read.await_args.kwargs["runs"] == 0
+    content = json.loads(json.loads(result.content[0].text)["content"])
+    assert "permission to view flow traces" in content["note"]
 
 
 def _apply_chat(monkeypatch, *, editing: bool):

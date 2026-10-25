@@ -32,6 +32,7 @@ _REVIEWED_JSONB_COLUMNS = frozenset(
     flow_runs.error_json
     flow_runs.input_payload_json
     flow_runs.output_payload_json
+    flow_step_attempt_resolved_inputs.forwarding_facts_jsonb
     flow_step_attempt_resolved_inputs.resolved_input_edges_jsonb
     flow_step_attempts.input_payload_json
     flow_step_attempts.output_payload_json

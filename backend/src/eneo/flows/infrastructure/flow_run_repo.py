@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -68,6 +69,10 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptToolCallWrite,
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
+)
+from eneo.flows.domain.forwarding_facts import (
+    ForwardingFacts,
+    parse_forwarding_facts,
 )
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
@@ -143,6 +148,8 @@ from eneo.flows.infrastructure.flow_step_attempt_numbering import (
 )
 from eneo.flows.principal import FlowPrincipal
 from eneo.object_content.content import ContentState
+
+logger = logging.getLogger(__name__)
 
 
 class PreseedStep(TypedDict):
@@ -3708,6 +3715,79 @@ class FlowRunRepository:
             attempt_id: parse_resolved_input_edges(raw_resolved_inputs)
             for attempt_id, raw_resolved_inputs in rows
         }
+
+    async def record_forwarding_facts(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        facts: ForwardingFacts,
+    ) -> bool:
+        """Store the forwarding facts of an attempt on its resolved inputs.
+
+        Written once: a retry, or a second writer, finds the facts in place and
+        changes nothing. An attempt without resolved inputs, or of another
+        tenant, is left alone. Returns whether this call wrote the facts.
+        """
+        attempt_id = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .scalar_subquery()
+        )
+        written = await self.session.scalar(
+            sa.update(FlowStepAttemptResolvedInputs)
+            .where(FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id)
+            .where(FlowStepAttemptResolvedInputs.forwarding_facts_jsonb.is_(None))
+            .values(forwarding_facts_jsonb=facts.model_dump(mode="json"))
+            .returning(FlowStepAttemptResolvedInputs.flow_step_attempt_id)
+        )
+        return written is not None
+
+    async def list_forwarding_facts_by_attempt_id(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_ids: Sequence[UUID],
+    ) -> dict[UUID, ForwardingFacts]:
+        """The forwarding facts of the given attempts of one tenant, in one
+        statement. An attempt without facts, of another tenant, or whose facts
+        no longer parse is absent from the result."""
+        if not attempt_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+                    FlowStepAttemptResolvedInputs.forwarding_facts_jsonb,
+                )
+                .join(
+                    FlowStepAttempts,
+                    FlowStepAttempts.id
+                    == FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+                )
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(attempt_ids))
+                .where(
+                    FlowStepAttemptResolvedInputs.forwarding_facts_jsonb.is_not(None)
+                )
+            )
+        ).all()
+        facts_by_attempt: dict[UUID, ForwardingFacts] = {}
+        for attempt_id, raw_facts in rows:
+            facts = parse_forwarding_facts(raw_facts)
+            if facts is None:
+                logger.warning(
+                    "flow_run_repo.forwarding_facts_unreadable attempt_id=%s",
+                    attempt_id,
+                )
+                continue
+            facts_by_attempt[attempt_id] = facts
+        return facts_by_attempt
 
     async def _record_resolved_input_edges_for_locked_attempt(
         self,

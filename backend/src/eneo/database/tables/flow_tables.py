@@ -1349,7 +1349,7 @@ class FlowStepAttempts(BasePublic):
 
 
 class FlowStepAttemptResolvedInputs(BaseCrossReference):
-    """Stores one immutable resolved-input aggregate per Flow step attempt. Writer: FlowRunRepository. Purpose: preserve exact dependency evidence without widening the hot attempt row."""
+    """Stores one immutable resolved-input aggregate per Flow step attempt, and the attempt's forwarding facts once its first model call returns. Writer: FlowRunRepository. Purpose: preserve exact dependency evidence without widening the hot attempt row."""
 
     flow_step_attempt_id: Mapped[UUID] = mapped_column(
         ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
@@ -1369,6 +1369,14 @@ class FlowStepAttemptResolvedInputs(BaseCrossReference):
             persisted=True,
         ),
         nullable=False,
+    )
+    # Forwarding facts of the attempt's first model call (overlap between its
+    # inputs and with its output): numbers and edge indexes only, written once
+    # after the call. Null for steps that call no model and for attempts
+    # recorded before the facts existed.
+    forwarding_facts_jsonb: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB(none_as_null=True),
+        nullable=True,
     )
 
     __table_args__ = (

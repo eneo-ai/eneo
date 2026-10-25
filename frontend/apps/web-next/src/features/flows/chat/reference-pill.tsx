@@ -51,23 +51,14 @@ export function useFlowReferences(): FlowReferencesValue | null {
   return useContext(FlowReferencesContext);
 }
 
-/** What a pill says: "1 Extrahera" for a step, "1 Extrahera › fastighet" for a value. */
+/**
+ * What a pill says, the same as the editor's chips: "Steg 1: Extrahera" for a
+ * step, "Steg 1: Extrahera › fastighet" for a value.
+ */
 export function referenceLabel(reference: Reference, flow: Flow, t: Translate): string {
-  const step = referenceStep(reference, flow);
-  const stepText = step
-    ? `${step.step_order} ${step.user_description?.trim() || t("flows_step_unnamed")}`
-    : null;
-  if (reference.kind === "step") return stepText ?? reference.name;
-  const what = valueWhat(reference.meaning);
-  const whatText =
-    what === null
-      ? null
-      : what.type === "field"
-        ? what.field
-        : what.type === "text"
-          ? t("flows_chat_reference_value_text")
-          : t("flows_chat_reference_value_structured");
-  if (stepText && whatText) return `${stepText} › ${whatText}`;
+  if (reference.kind === "step") {
+    return reference.step ? stepLabel(reference.step, t) : reference.name;
+  }
   return meaningLabel(reference.meaning, reference.token, flow, t);
 }
 

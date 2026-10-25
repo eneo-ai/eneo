@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import UUID
 
 from pydantic import ValidationError
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.flows.api.flow_models import FlowEditorStepPatch, FlowEditorUpdateRequest
 from eneo.flows.application.flow_authoring_operations import sparse_placement
 from eneo.flows.application.flow_service import draft_write_metadata, steps_as_written
@@ -27,7 +28,21 @@ from eneo.flows.application.flow_step_structure import (
     form_field_change,
     restructure_steps,
 )
-from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_evidence_read_audit_or_raise,
+)
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowPersistedJsonObject,
+    FlowRunStatusSnapshot,
+    FlowStep,
+)
+from eneo.flows.domain.flow_suggestion_evidence import (
+    EvidenceRun,
+    RunEvidence,
+    StepDefinitionFacts,
+    step_definition_facts,
+)
 from eneo.flows.domain.flow_suggestions import (
     FlowSuggestion,
     FlowSuggestionFix,
@@ -36,6 +51,7 @@ from eneo.flows.domain.flow_suggestions import (
     analyze_flow,
 )
 from eneo.flows.enums import flow_output_mode_uses_completion_model
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_metadata import normalize_persisted_flow_metadata
 from eneo.flows.flow_validators import publish_step_refusals
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
@@ -95,13 +111,19 @@ def suggestion_flow(
 
 
 def flow_suggestions(
-    flow: Flow, *, prompts: Mapping[UUID, StoredAssistantPrompt]
+    flow: Flow,
+    *,
+    prompts: Mapping[UUID, StoredAssistantPrompt],
+    evidence: RunEvidence | None = None,
 ) -> tuple[FlowSuggestion, ...]:
     """Every suggestion the draft proves, given the saved prompt of each step
     assistant (an assistant without one reads as an empty prompt), each
-    patch checked against the publish rules."""
+    patch checked against the publish rules; with ``evidence``, measured
+    over recent runs as well."""
     return checked_suggestions(
-        flow, analyze_flow(suggestion_flow(flow, prompts=prompts)), prompts=prompts
+        flow,
+        analyze_flow(suggestion_flow(flow, prompts=prompts), evidence),
+        prompts=prompts,
     )
 
 
@@ -113,6 +135,141 @@ async def list_flow_suggestions(
     The caller has decided that the user may edit the flow."""
     stored = await container.flow_service().get_flow_assistant_prompts(flow)
     return flow_suggestions(flow, prompts=stored)
+
+
+# What the audit entry of a measured read names as its detail.
+SUGGESTION_EVIDENCE_DETAIL = "suggestion_measurements"
+
+
+@dataclass(frozen=True, slots=True)
+class MeasuredRuns:
+    """The runs a measured answer read: how many were asked for, the ids of
+    those counted and how many were left out because the user may not see
+    their evidence."""
+
+    requested: int
+    counted_run_ids: tuple[UUID, ...]
+    left_out: int
+
+
+async def list_measured_flow_suggestions(
+    *, container: Container, flow: Flow, runs: int
+) -> tuple[tuple[FlowSuggestion, ...], MeasuredRuns]:
+    """The suggestions of ``flow``'s draft measured over its last ``runs``
+    finished runs, and which runs those were.
+
+    Only runs the user may see evidence for are counted
+    (``FlowRunAccessPolicy``, ``evidence_view``); the others are left out
+    and counted. Nothing of a run's content is read: the evidence is sizes,
+    hashes, token counts and reasons. The read writes one audit entry on the
+    flow naming the runs it counted and how many it left out, and fails
+    closed when it cannot. The caller has decided that the user may edit the
+    flow and may view flow traces."""
+
+    user = container.user()
+    tenant_id = user.tenant_id
+    flow_id = flow.require_persisted_id()
+    repo = container.flow_suggestion_evidence_repo()
+    policy = container.flow_run_access_policy()
+    counted: list[FlowRunStatusSnapshot] = []
+    left_out = 0
+    for run in await repo.list_recent_runs(
+        flow_id=flow_id, tenant_id=tenant_id, limit=runs
+    ):
+        try:
+            await policy.ensure_can_access_run(run, access_kind="evidence_view")
+        except FlowUnauthorizedException:
+            left_out += 1
+            continue
+        counted.append(run)
+    attempts = await repo.read_attempts(
+        flow_id=flow_id, run_ids=[run.id for run in counted], tenant_id=tenant_id
+    )
+    published = await repo.published_step_facts(
+        flow_id=flow_id,
+        versions={run.flow_version for run in counted},
+        tenant_id=tenant_id,
+    )
+    stored = await container.flow_service().get_flow_assistant_prompts(flow)
+    models = await repo.assistant_completion_models(
+        assistant_ids={step.assistant_id for step in flow.steps}, tenant_id=tenant_id
+    )
+    draft = {
+        step.id: draft_step_facts(
+            step,
+            prompt=stored.get(step.assistant_id),
+            completion_model_id=models.get(step.assistant_id),
+        )
+        for step in flow.steps
+        if step.id is not None
+    }
+    model_ids = {
+        facts.completion_model_id
+        for facts in (*draft.values(), *published.values())
+        if facts.completion_model_id is not None
+    }
+    evidence = RunEvidence(
+        runs=tuple(
+            EvidenceRun(
+                run_id=run.id,
+                version=run.flow_version,
+                attempts=attempts.get(run.id, ()),
+            )
+            for run in counted
+        ),
+        published_steps=published,
+        draft_steps=draft,
+        model_input_limits=await repo.model_input_limits(
+            model_ids=model_ids, tenant_id=tenant_id
+        ),
+    )
+    suggestions = flow_suggestions(flow, prompts=stored, evidence=evidence)
+    measured = MeasuredRuns(
+        requested=runs,
+        counted_run_ids=tuple(run.id for run in counted),
+        left_out=left_out,
+    )
+    await log_flow_evidence_read_audit_or_raise(
+        container=container,
+        user=user,
+        flow=flow,
+        action=ActionType.FLOW_EVIDENCE_VIEWED,
+        description=f"Read measurements of recent runs for suggestions on flow {flow_id}",
+        extra={
+            "evidence_detail": SUGGESTION_EVIDENCE_DETAIL,
+            "requested_runs": runs,
+            "run_ids": [str(run_id) for run_id in measured.counted_run_ids],
+            "left_out_run_count": left_out,
+        },
+    )
+    return suggestions, measured
+
+
+def draft_step_facts(
+    step: FlowStep,
+    *,
+    prompt: StoredAssistantPrompt | None,
+    completion_model_id: UUID | None,
+) -> StepDefinitionFacts:
+    """A draft step's facts, built as a published step's are, so an
+    unchanged step has the facts of its version."""
+    return step_definition_facts(
+        input_source=_value(step.input_source),
+        input_type=_value(step.input_type),
+        input_contract=step.input_contract,
+        input_bindings=step.input_bindings,
+        input_config=step.input_config,
+        output_mode=_value(step.output_mode),
+        output_type=_value(step.output_type),
+        output_contract=step.output_contract,
+        output_config=step.output_config,
+        prompt_text=prompt.text if prompt is not None else None,
+        completion_model_id=completion_model_id,
+    )
+
+
+def _value(value: object) -> str:
+    return str(getattr(value, "value", value))
 
 
 # At most this many introduced suggestions are reported after one change.
@@ -340,7 +497,11 @@ def _ordered(steps: Sequence[FlowStep]) -> list[FlowStep]:
 
 
 __all__ = [
+    "SUGGESTION_EVIDENCE_DETAIL",
+    "MeasuredRuns",
     "checked_suggestions",
+    "draft_step_facts",
+    "list_measured_flow_suggestions",
     "flow_suggestions",
     "list_flow_suggestions",
     "patched_draft",

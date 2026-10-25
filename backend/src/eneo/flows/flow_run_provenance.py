@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast
 from uuid import UUID
@@ -204,6 +206,29 @@ class FlowResolvedInputEdgeGrouping:
     indexes_by_group: tuple[FlowResolvedInputEdgeIndexes, ...]
 
 
+SelectedValueObserver: TypeAlias = Callable[
+    [FlowResolvedInputHashedSelection, object], None
+]
+_selected_value_observer: ContextVar[SelectedValueObserver | None] = ContextVar(
+    "flow_resolved_input_selected_value_observer", default=None
+)
+
+
+@contextmanager
+def observe_selected_values(
+    observer: SelectedValueObserver,
+) -> Generator[None]:
+    """Show ``observer`` every value an edge is built from while the scope is
+    open. The edges themselves keep only a hash and a size; the observer is
+    the one way to see the value next to its selection, in memory, for as long
+    as the scope lasts."""
+    token = _selected_value_observer.set(observer)
+    try:
+        yield
+    finally:
+        _selected_value_observer.reset(token)
+
+
 def build_resolved_input_edge(
     *,
     binding_ref: str,
@@ -216,14 +241,18 @@ def build_resolved_input_edge(
     else:
         encoded = canonical_json_bytes(selected_value)
         encoding = "canonical_json"
+    selection = FlowResolvedInputHashedSelection(
+        encoding=encoding,
+        sha256=hashlib.sha256(encoded).hexdigest(),
+        byte_size=len(encoded),
+    )
+    observer = _selected_value_observer.get()
+    if observer is not None:
+        observer(selection, selected_value)
     return FlowResolvedInputEdge(
         binding_ref=binding_ref,
         source=source,
-        selection=FlowResolvedInputHashedSelection(
-            encoding=encoding,
-            sha256=hashlib.sha256(encoded).hexdigest(),
-            byte_size=len(encoded),
-        ),
+        selection=selection,
     )
 
 
