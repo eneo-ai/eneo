@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { createSpace, uniqueName } from "./helpers";
+import { apiPost, createSpace, uniqueName } from "./helpers";
 
 /**
  * Creates an app in a new space and starts a text run; returns the run's
@@ -9,19 +9,13 @@ import { createSpace, uniqueName } from "./helpers";
  */
 async function pendingResultPage(page: Page): Promise<string> {
   const space = await createSpace(page, uniqueName("App result"));
-  // The API proxy accepts writes from the app's own origin only.
-  const post = async (path: string, data: object) => {
-    const response = await page.request.post(`/api/eneo/api/v1${path}`, {
-      data,
-      headers: { origin: new URL(page.url()).origin }
-    });
-    expect(response.ok(), await response.text()).toBe(true);
-    return ((await response.json()) as { id: string }).id;
-  };
-  const appId = await post(`/spaces/${space.split("/").pop()}/applications/apps/`, {
+  const appId = await apiPost(page, `/spaces/${space.split("/").pop()}/applications/apps/`, {
     name: uniqueName("Protokoll")
   });
-  const runId = await post(`/apps/${appId}/runs/`, { text: "Sammanfatta protokollet", files: [] });
+  const runId = await apiPost(page, `/apps/${appId}/runs/`, {
+    text: "Sammanfatta protokollet",
+    files: []
+  });
   return `${space}/apps/${appId}/results/${runId}`;
 }
 

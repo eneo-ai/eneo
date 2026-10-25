@@ -1,16 +1,13 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { createSpace, uniqueName } from "./helpers";
+import { apiPost, createSpace, uniqueName } from "./helpers";
 
 /** A new space with one assistant (or app); returns the space's path and the editor's. */
 async function assistantEditor(page: Page, kind: "assistants" | "apps" = "assistants") {
   const space = await createSpace(page, uniqueName("Editor"));
-  const response = await page.request.post(
-    `/api/eneo/api/v1/spaces/${space.split("/").pop()}/applications/${kind}/`,
-    { data: { name: uniqueName("Bygglov") }, headers: { origin: new URL(page.url()).origin } }
-  );
-  expect(response.ok(), await response.text()).toBe(true);
-  const id = ((await response.json()) as { id: string }).id;
+  const id = await apiPost(page, `/spaces/${space.split("/").pop()}/applications/${kind}/`, {
+    name: uniqueName("Bygglov")
+  });
   return { space, editor: `${space}/${kind}/${id}/edit` };
 }
 

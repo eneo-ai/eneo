@@ -7,11 +7,13 @@ import {
   activityPill,
   addActivityToAnswers,
   askChatQuestion,
+  auditLogs,
   chatComposer,
   conversationLog,
   createSpace,
   MOCK_REPLY,
   openCreateCollectionDialog,
+  spaceWithWork,
   uniqueName
 } from "./helpers";
 
@@ -671,6 +673,82 @@ for (const colorScheme of ["light", "dark"] as const) {
             ).toBeVisible();
           });
         });
+
+        test("admin overview and models", async ({ page }) => {
+          await scan(page, "/admin", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
+            ).toBeVisible();
+          });
+          await scan(page, "/admin/models", async () => {
+            await expect(
+              page.getByRole("heading", { level: 2, name: "E2E Mock Provider" })
+            ).toBeVisible();
+          });
+        });
+
+        // A phone only: each scan opens an access session, and the backend
+        // allows five an hour (admin-audit.spec.ts opens one more).
+        if (layout.phone) {
+          test("admin audit log", async ({ page }) => {
+            await auditLogs(page);
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("a space's assistants, apps and members, an editor and an app result", async ({
+          page
+        }) => {
+          const work = await spaceWithWork(page, uniqueName(`E2E A11y Touch Work ${colorScheme}`));
+          for (const [tab, name] of [
+            ["assistants", /^(Assistenter|Assistants)$/],
+            ["apps", /^(Appar|Apps)$/],
+            ["members", /^(Medlemmar|Members)$/]
+          ] as const) {
+            await scan(page, `${work.space}/${tab}`, async () => {
+              await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+            });
+          }
+          // A phone opens the editor on its index of sections (decision 21).
+          for (const editor of layout.phone
+            ? [work.editor, `${work.editor}?section=instructions`]
+            : [work.editor]) {
+            await scan(page, editor, async () => {
+              await expect(
+                page.getByRole("heading", { level: 1, name: /^Bygglov / })
+              ).toBeVisible();
+            });
+          }
+          await scan(page, work.result, async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
+            ).toBeVisible();
+          });
+        });
+
+        test("Konto's pages, and Nyheter", async ({ page }) => {
+          for (const [path, title] of [
+            ["/account/password", /^(Byt lösenord|Change password)$/],
+            ["/account/copy-format", /^(Kopieringsformat|Copy format)$/],
+            ["/account/api-keys", /^(Mina API-nycklar|My API keys)$/],
+            ["/account/integrations", /^(Integrationer|Integrations)$/]
+          ] as const) {
+            await scan(page, path, async () => {
+              // Below 1024 px the page's own heading; sideways, "Mitt konto".
+              await expect(
+                page.getByRole("heading", {
+                  level: 1,
+                  name: layout.drawer ? title : /^(Mitt konto|My account)$/
+                })
+              ).toBeAttached();
+            });
+          }
+          await scan(page, "/whats-new", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
+            ).toBeVisible();
+          });
+        });
       });
     }
   });
@@ -726,6 +804,37 @@ test.describe("reflow at 320 px (1.4.10)", () => {
   test("account", async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+    for (const path of [
+      "/account/appearance",
+      "/account/copy-format",
+      "/account/password",
+      "/account/api-keys",
+      "/account/integrations",
+      "/whats-new"
+    ]) {
+      await page.goto(path);
+      await expect(
+        page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })
+      ).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+  });
+
+  test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {
+    const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
+    for (const tab of ["assistants", "apps", "members"]) {
+      await page.goto(`${work.space}/${tab}`);
+      await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+    for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
+      await page.goto(editor);
+      await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+    await page.goto(work.result);
+    await expect(page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
 });

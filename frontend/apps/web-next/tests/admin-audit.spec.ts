@@ -1,24 +1,5 @@
-import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-
-/** The audit logs, past their gate: a justified access session. */
-async function auditLogs(page: Page) {
-  await page.goto("/admin/audit-logs");
-  const table = page.getByRole("table", { name: "Granskningsloggar" });
-  const gate = page.getByRole("combobox", { name: "Åtkomstskäl" });
-  await expect(table.or(gate)).toBeVisible();
-  if (await gate.isVisible()) {
-    await gate.click();
-    await page.getByRole("option").first().click();
-    await expect(page.getByRole("listbox")).toBeHidden();
-    const reason = page.getByLabel("Detaljerad motivering");
-    await reason.fill("Granskning av responsiva tabeller i testmiljön.");
-    await expect(reason).toHaveValue("Granskning av responsiva tabeller i testmiljön.");
-    await page.getByRole("button", { name: "Få åtkomst till loggar" }).click();
-  }
-  await expect(table).toBeVisible();
-  return { table, region: page.getByRole("group", { name: "Granskningsloggar" }) };
-}
+import { auditLogs } from "./helpers";
 
 // One test, one access session: the backend allows five an hour.
 test.describe("the audit log on a phone, then a tablet (decision 9)", () => {
