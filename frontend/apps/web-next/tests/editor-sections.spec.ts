@@ -177,3 +177,35 @@ test.describe("an editor turned across 768 px", () => {
     await expect(heading).toBeFocused();
   });
 });
+
+test.describe("an editor turned while a section is open from the index", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("keeps Back and Forward as they were", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(editor);
+    const index = page.getByRole("navigation", { name: "Avsnitt" });
+    await index.getByRole("link", { name: /^Allmänt/ }).click();
+    await expect(page).toHaveURL(/\?section=general$/);
+
+    // Widened, the prompt in Instruktioner takes focus; narrowed, its section
+    // replaces Allmänt in the same history entry.
+    await page.setViewportSize({ width: 820, height: 1180 });
+    const prompt = page.locator("#assistant-prompt");
+    await prompt.focus();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page).toHaveURL(/\?section=instructions$/);
+    await expect(prompt).toBeFocused();
+
+    // The bar's Back pops that entry to the index; Forward brings it back.
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    await expect(page).not.toHaveURL(/section=/);
+    await expect(index.getByRole("link", { name: /^Instruktioner/ })).toBeFocused();
+    await page.goForward();
+    await expect(page).toHaveURL(/\?section=instructions$/);
+    await expect(prompt).toBeVisible();
+  });
+});

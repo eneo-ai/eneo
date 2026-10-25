@@ -181,6 +181,11 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
     window.history[method](fromIndex ? { [OPENED_FROM_INDEX]: true } : null, "", href(id));
     addressRef.current = window.location.pathname + window.location.search;
   };
+  // For the listeners below, which outlive a render.
+  const goRef = useRef(go);
+  useEffect(() => {
+    goRef.current = go;
+  });
 
   const open = (id: string, focus?: HTMLElement | null) => {
     // From a section, another one replaces it: Back still leads to the index.
@@ -238,8 +243,9 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
       const section = element.closest<HTMLElement>("[data-editor-section]")?.dataset.editorSection;
       if (list.matches) {
         if (section && section !== inView) {
-          window.history.replaceState(null, "", `${window.location.pathname}?section=${section}`);
-          addressRef.current = window.location.pathname + window.location.search;
+          // The entry stays what it was: one opened from the index keeps its
+          // marker, so Back still pops it and Forward brings it back.
+          goRef.current("replaceState", section, openedFromIndex());
           focusNext.current = { element };
           setChosen(section);
           return;
