@@ -1,22 +1,20 @@
 """Integration tests for OTEL auto-instrumentation.
 
-Spec acceptance criterion this covers:
-    "SQLAlchemy, Redis, and HTTP instrumentation are verifiable with
-    InMemorySpanExporter in tests."
-
 A request hits the real FastAPI app (built via the `app` / `client` fixtures
 in conftest.py with init_observability() and instrument_fastapi() wired in
-production order). A test-scoped TracerProvider backed by InMemorySpanExporter
-captures every span produced during the request. We then assert:
+production order). An InMemorySpanExporter attached to the app's
+TracerProvider captures every span produced during the request. We then
+assert:
 
   - A FastAPI server span exists (SpanKind.SERVER).
-  - At least one auto-instrumented child span exists (SpanKind.CLIENT), which
-    is what SQLAlchemy, Redis, httpx, and aiohttp-client all emit.
+  - At least one auto-instrumented client span exists (SpanKind.CLIENT).
   - All spans share the same trace_id.
 
-The instrumentors resolve `trace.get_tracer(...)` at span-creation time, so
-swapping the global TracerProvider after init_observability() has run is
-sufficient to redirect new spans to our exporter without touching app code.
+This proves correlated server/client spans, not SQLAlchemy statement tracing.
+For this route the client span is SQLAlchemy's `connect` (one per connection
+checkout); no statement spans are produced because the engine is created with
+the `create_async_engine` imported before init_observability() patched it
+(see docs/OBSERVABILITY.md, "SQLAlchemy spans").
 """
 
 from __future__ import annotations
@@ -47,7 +45,7 @@ def captured_spans():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_request_produces_correlated_auto_instrumented_spans(
+async def test_request_produces_correlated_server_and_client_spans(
     client, admin_user_api_key, captured_spans
 ):
     """An authenticated request must produce a FastAPI server span and at least
@@ -67,8 +65,8 @@ async def test_request_produces_correlated_auto_instrumented_spans(
 
     client_spans = [s for s in spans if s.kind.name == "CLIENT"]
     assert client_spans, (
-        f"No auto-instrumented client spans captured (SQLAlchemy / Redis / "
-        f"HTTP). Got names: {[s.name for s in spans]}"
+        f"No auto-instrumented client spans captured (SQLAlchemy connect / "
+        f"Redis / HTTP). Got names: {[s.name for s in spans]}"
     )
 
     trace_ids = {s.get_span_context().trace_id for s in spans}

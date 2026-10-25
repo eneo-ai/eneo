@@ -717,6 +717,16 @@ OTEL_SERVICE_VERSION=unknown
 # Mapped to resource.deployment.environment.name (OTel semconv >= 1.24).
 OTEL_DEPLOYMENT_ENVIRONMENT=production
 
+# Trace sampling (standard OpenTelemetry SDK variables). Unset = parentbased_always_on:
+# every new root trace is recorded. parentbased_* follows an incoming traceparent:
+# sampled (-01) is recorded, unsampled (-00) is dropped. Unsampled instrumented
+# requests keep X-Trace-Id and log trace_id (/api/healthz* is not instrumented).
+# These apply to every process that receives them, workers included, so set them
+# only on the API service if worker Flow spans should stay recorded.
+# See docs/OBSERVABILITY.md, "Trace sampling".
+# OTEL_TRACES_SAMPLER=parentbased_traceidratio
+# OTEL_TRACES_SAMPLER_ARG=0.1
+
 # ----------------------------------------------------------------------------
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
 # Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
