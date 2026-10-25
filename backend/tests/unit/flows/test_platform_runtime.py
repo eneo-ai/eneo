@@ -33,6 +33,7 @@ from eneo.tasks.routing import (
     FLOW_DELIVER_AUDIT_OUTBOX_TASK,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     FLOW_DRAIN_RETIRED_RUNS_TASK,
+    FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
     FLOW_EXECUTE_TASK,
     FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
     FLOW_RECONCILE_RUNNING_TASK,
@@ -175,10 +176,14 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
         function.name for function in PlatformExecutionWorkerSettings.functions
     ] == [FLOW_EXECUTE_TASK]
     assert PlatformExecutionWorkerSettings.cron_jobs == []
-    assert PlatformMaintenanceWorkerSettings.functions == []
-    # Every recovery and delivery job is scheduled on the maintenance worker:
-    # stale running runs, expired reviews, lost queued deliveries, retired
-    # runs, and the audit and webhook outboxes.
+    # The maintenance worker runs the webhook outbox job a request asks for,
+    # and schedules every recovery and delivery job: stale running runs,
+    # expired reviews, lost queued deliveries, retired runs, and the audit and
+    # webhook outboxes.
+    maintenance_functions = [
+        function.name for function in PlatformMaintenanceWorkerSettings.functions
+    ]
+    assert maintenance_functions == [FLOW_DRAIN_WEBHOOK_OUTBOX_TASK]
     maintenance_jobs = [job.name for job in PlatformMaintenanceWorkerSettings.cron_jobs]
     assert sorted(maintenance_jobs) == sorted(
         [
@@ -190,7 +195,7 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
             FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
         ]
     )
-    for name in maintenance_jobs:
+    for name in [*maintenance_functions, *maintenance_jobs]:
         assert TASK_CAPACITY_BY_NAME[name] is TaskCapacityClass.MAINTENANCE, name
     assert PlatformExecutionWorkerSettings.queue_name != (
         PlatformMaintenanceWorkerSettings.queue_name
@@ -251,15 +256,30 @@ def test_audit_outbox_drain_ends_well_before_the_job_timeout_and_the_next_tick(
     assert policy.flow_audit_outbox_drain_seconds() == drain_seconds
 
 
-def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it() -> (
+def test_webhook_outbox_job_stops_itself_before_arq_cancels_it_and_keeps_nothing() -> (
     None
 ):
-    """Kills: the webhook cron left on the maintenance default timeout, which
-    cancels the job before its deadline with unsent rows still charged; and
-    the cron without its fixed job id or with a kept result, so ticks queue
-    overlapping jobs or are skipped after a job ended; and the maintenance
-    worker keeping a failed job's result (an hour by default), which skips
-    every webhook tick once a job killed mid-run is recorded as failed."""
+    """Kills: the outbox job left on the maintenance default timeout, which
+    cancels it before its deadline with unsent rows still charged; and a result
+    kept under its fixed key, by the job or by the worker for a job killed
+    mid-run, which refuses every request for the job until it expires (an hour
+    by default)."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+
+    [outbox_job] = PlatformMaintenanceWorkerSettings.functions
+    budget = policy.flow_webhook_delivery_budget()
+
+    assert outbox_job.timeout_s == budget.job_timeout_seconds
+    # The override matters: the job outlasts the maintenance default.
+    assert outbox_job.timeout_s > PlatformMaintenanceWorkerSettings.job_timeout
+    assert outbox_job.keep_result_s == 0
+    assert not outbox_job.keep_result_forever
+    assert PlatformMaintenanceWorkerSettings.keep_result == 0
+
+
+def test_webhook_outbox_cron_ticks_at_its_interval_under_its_own_job_ids() -> None:
+    """Kills: the cron under one fixed job id, whose ended tick keeps ARQ's
+    60-second in-progress marker and so holds back the ticks after it."""
     from eneo.flows.application import flow_webhook_delivery_policy as policy
 
     [webhook] = [
@@ -267,16 +287,111 @@ def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it(
         for job in PlatformMaintenanceWorkerSettings.cron_jobs
         if job.name == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
     ]
-    budget = policy.flow_webhook_delivery_budget()
 
-    assert webhook.timeout_s == budget.job_timeout_seconds
     assert webhook.second == set(
         range(0, 60, policy.FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS)
     )
-    assert webhook.job_id == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
-    assert webhook.keep_result_s == 0
-    assert not webhook.keep_result_forever
-    assert PlatformMaintenanceWorkerSettings.keep_result == 0
+    assert webhook.job_id is None
+    assert webhook.unique
+
+
+async def test_webhook_outbox_request_reaches_the_registered_job_under_one_key() -> (
+    None
+):
+    """Kills: a request the adapter refuses (a name or capacity it does not
+    route), one that names a job the maintenance worker does not register, and
+    one without the fixed key that keeps a single outbox job running."""
+    from eneo.flows.application.flow_webhook_delivery_policy import (
+        flow_webhook_delivery_request,
+    )
+
+    manager = AsyncMock()
+    manager.enqueue_named.return_value = SimpleNamespace(
+        job_id=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    )
+    adapter = ArqTaskEnqueuer(
+        job_manager=manager,
+        routing=task_queue_routing(
+            SimpleNamespace(
+                task_execution_queue="tasks:execution",
+                task_maintenance_queue="tasks:maintenance",
+            )
+        ),
+    )
+
+    result = await adapter.enqueue(flow_webhook_delivery_request())
+
+    assert result.status is TaskEnqueueStatus.ACCEPTED
+    assert manager.enqueue_named.await_args.kwargs == {
+        "task_name": FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        "payload": {},
+        "job_id": FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        "queue_name": "tasks:maintenance",
+    }
+
+
+@pytest.fixture
+def webhook_cron_enqueuer(monkeypatch: pytest.MonkeyPatch):
+    """The enqueuer the webhook cron's container hands out; the cron's session
+    is never used."""
+    from contextlib import asynccontextmanager
+
+    from dependency_injector import providers
+
+    from eneo.main.container.container import Container
+    from eneo.worker import worker as worker_module
+
+    @asynccontextmanager
+    async def session():
+        yield MagicMock()
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+    enqueuer = AsyncMock()
+    Container.platform_task_enqueuer.override(providers.Object(enqueuer))
+    try:
+        yield enqueuer
+    finally:
+        Container.platform_task_enqueuer.reset_last_overriding()
+
+
+def _webhook_cron():
+    [webhook] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
+    ]
+    return webhook
+
+
+async def test_webhook_outbox_cron_requests_the_outbox_job(
+    webhook_cron_enqueuer: AsyncMock,
+) -> None:
+    webhook_cron_enqueuer.enqueue.return_value = TaskEnqueueResult(
+        status=TaskEnqueueStatus.ACCEPTED, task_id=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    )
+
+    result = await _webhook_cron().coroutine({"job_id": "tick"})
+
+    assert result == {"status": "accepted"}
+    [request] = [call.args[0] for call in webhook_cron_enqueuer.enqueue.await_args_list]
+    assert request.task_name == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    assert request.capacity_class is TaskCapacityClass.MAINTENANCE
+    assert request.idempotency_key == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+
+
+@pytest.mark.parametrize(
+    "status", [TaskEnqueueStatus.REFUSED, TaskEnqueueStatus.OUTCOME_UNKNOWN]
+)
+async def test_webhook_outbox_cron_fails_when_its_request_is_not_accepted(
+    webhook_cron_enqueuer: AsyncMock, status: TaskEnqueueStatus
+) -> None:
+    """Kills: a recovery tick that reports success while nothing will deliver."""
+    webhook_cron_enqueuer.enqueue.return_value = TaskEnqueueResult(status=status)
+
+    with pytest.raises(RuntimeError, match=status.value):
+        await _webhook_cron().coroutine({"job_id": "tick"})
 
 
 @pytest.mark.parametrize("max_request_timeout_seconds", [1, 120, 600])

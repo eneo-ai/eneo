@@ -410,6 +410,7 @@ async def _execute_flow_run_async_traced(
                     template_asset_repo=runtime_container.flow_template_asset_repo(),
                     encryption_service=runtime_container.encryption_service(),
                     audit_service=runtime_container.audit_service(),
+                    task_enqueuer=runtime_container.platform_task_enqueuer(),
                     read_audit_service=partial(
                         audit_service_on_own_session,
                         Container(session=providers.Object(SessionProxy())),

@@ -30,6 +30,10 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
 )
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    flow_webhook_delivery_request,
+    flow_webhook_delivery_request_timeout_seconds,
+)
 from eneo.flows.assistant_execution_snapshot import (
     AssistantExecutionSnapshotV2,
     validate_assistant_execution_snapshot,
@@ -318,6 +322,7 @@ from eneo.object_content.content import ObjectContentIntegrityError
 from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
+from eneo.tasks.contracts import TaskEnqueuer, TaskEnqueueStatus
 
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
@@ -713,6 +718,7 @@ class FlowRunExecutor:
             [], AbstractAsyncContextManager[AuditService | None]
         ],
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
+        task_enqueuer: TaskEnqueuer | None = None,
         references_service: ReferencesService | None = None,
         transcribers: FlowTranscribers | None = None,
         max_audio_files: int = 10,
@@ -752,6 +758,7 @@ class FlowRunExecutor:
             if webhook_delivery_repo is not None
             else FlowRunWebhookDeliveryRepository(session=session)
         )
+        self.task_enqueuer = task_enqueuer
         self.flow_version_repo = flow_version_repo
         self.space_repo = space_repo
         self.completion_service = completion_service
@@ -1375,6 +1382,7 @@ class FlowRunExecutor:
                         intent=delivery_intent,
                     )
                 await self._commit()
+                await self._request_webhook_delivery(run_id=run_id)
                 return {"status": FlowRunStatus.RUNNING.value}
 
         finalization = await finalize_run_from_current_results(
@@ -3688,6 +3696,49 @@ class FlowRunExecutor:
 
     async def _commit(self) -> None:
         await self.session.commit()
+
+    async def _request_webhook_delivery(self, *, run_id: UUID) -> None:
+        """Ask for the webhook deliveries this run just committed to be sent now.
+
+        Best-effort, outside any transaction: the outbox cron requests delivery
+        every interval once workers and the task broker are available, so a
+        request that is refused, has an unknown outcome, fails or outlasts its
+        deadline is logged and the run goes on as committed. The interval is a
+        cadence, not a delivery bound: a backlog, the job's row cap, slow waves
+        and worker or broker outages delay delivery. A request that would
+        outlast the run's invocation is cut short, or not sent when no time is
+        left. Cancellation propagates."""
+        if self.task_enqueuer is None:
+            return
+        timeout = flow_webhook_delivery_request_timeout_seconds(
+            invocation_remaining_seconds=None
+            if self.invocation_deadline is None
+            else self.invocation_deadline - asyncio.get_running_loop().time()
+        )
+        if timeout <= 0:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_skipped run_id=%s",
+                run_id,
+            )
+            return
+        try:
+            async with asyncio.timeout(timeout):
+                result = await self.task_enqueuer.enqueue(
+                    flow_webhook_delivery_request()
+                )
+        except Exception:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_failed run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+            return
+        if result.status is not TaskEnqueueStatus.ACCEPTED:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_not_accepted run_id=%s status=%s",
+                run_id,
+                result.status.value,
+            )
 
     async def _end_read_transaction(self) -> None:
         """End the session's transaction before outside work, if it only read.

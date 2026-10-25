@@ -15,6 +15,7 @@ import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 import eneo.flows.runtime.flow_runtime_trace as flow_runtime_trace
 from eneo.assistants.assistant import AssistantOrigin
@@ -28,6 +29,7 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
+from eneo.flows.application import flow_webhook_delivery_policy as webhook_policy
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
@@ -124,6 +126,12 @@ from eneo.main.exceptions import (
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
+from eneo.tasks.contracts import (
+    TaskCapacityClass,
+    TaskEnqueueResult,
+    TaskEnqueueStatus,
+)
+from eneo.tasks.routing import FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
 from tests.fixtures import retrieved_info_blob_chunk
 from tests.unittests.flows import executor_test_support
 from tests.unittests.flows.executor_test_support import (
@@ -859,6 +867,255 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
         "delivery_inserted",
     ]
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+
+
+def _webhook_run(user, *, task_enqueuer):
+    """An executor whose one step ends in a webhook, requesting delivery
+    through ``task_enqueuer``. ``events`` records the delivery's insert, every
+    commit and every delivery request, in order."""
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    flow_run_repo.get = AsyncMock(return_value=running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(
+        return_value=_claimed_step_result(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            step_id=step_id,
+            assistant_id=assistant_id,
+        )
+    )
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "http_post",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        return_value=_webhook_step_result(
+            _minimal_step_execution_output(), run_id=queued_run.id, step_id=step_id
+        )
+    )
+    events: list[str] = []
+
+    async def _insert_delivery(**_kwargs):
+        events.append("delivery_inserted")
+        return uuid4()
+
+    executor.webhook_delivery_repo.insert_pending_delivery = AsyncMock(
+        side_effect=_insert_delivery
+    )
+    executor.session.commit.side_effect = lambda: events.append("commit")
+    executor.task_enqueuer = task_enqueuer
+
+    async def execute():
+        return await executor.execute(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            run_revision=queued_run.revision,
+            dispatch_task_id="task-1",
+            retry_count=0,
+        )
+
+    return executor, execute, events
+
+
+@pytest.mark.asyncio
+async def test_webhook_run_requests_its_delivery_after_the_commit(user):
+    """Kills: a run that leaves its committed delivery to the next cron tick,
+    and a request sent before the delivery row is committed."""
+    enqueuer = AsyncMock()
+    executor, execute, events = _webhook_run(user, task_enqueuer=enqueuer)
+
+    async def _enqueue(request):
+        events.append("delivery_requested")
+        return TaskEnqueueResult(
+            status=TaskEnqueueStatus.ACCEPTED, task_id=request.idempotency_key
+        )
+
+    enqueuer.enqueue.side_effect = _enqueue
+
+    result = await execute()
+
+    assert result == {"status": "running"}
+    assert events[-3:] == ["delivery_inserted", "commit", "delivery_requested"]
+    [request] = [call.args[0] for call in enqueuer.enqueue.await_args_list]
+    assert request.task_name == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    assert request.capacity_class is TaskCapacityClass.MAINTENANCE
+    assert request.idempotency_key == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webhook_run_whose_commit_fails_requests_no_delivery(user):
+    enqueuer = AsyncMock()
+    executor, execute, events = _webhook_run(user, task_enqueuer=enqueuer)
+
+    def _commit():
+        if "delivery_inserted" in events:
+            raise RuntimeError("commit failed")
+        events.append("commit")
+
+    executor.session.commit.side_effect = _commit
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await execute()
+
+    enqueuer.enqueue.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        TaskEnqueueResult(status=TaskEnqueueStatus.REFUSED),
+        TaskEnqueueResult(status=TaskEnqueueStatus.OUTCOME_UNKNOWN),
+        RedisConnectionError("lost reply"),
+        OSError("broker unreachable"),
+        RuntimeError("enqueue failed"),
+    ],
+    ids=["refused", "outcome_unknown", "redis_error", "os_error", "other_error"],
+)
+@pytest.mark.asyncio
+async def test_webhook_run_stays_as_committed_when_its_delivery_request_fails(
+    user, caplog, outcome
+):
+    """Kills: a failed best-effort request that fails the run's task or writes
+    to the run after its delivery commit; the cron recovers the delivery."""
+    enqueuer = AsyncMock()
+    if isinstance(outcome, Exception):
+        enqueuer.enqueue.side_effect = outcome
+    else:
+        enqueuer.enqueue.return_value = outcome
+    executor, execute, events = _webhook_run(user, task_enqueuer=enqueuer)
+
+    with caplog.at_level(logging.WARNING, logger="eneo.flows.runtime.executor"):
+        result = await execute()
+
+    assert result == {"status": "running"}
+    enqueuer.enqueue.assert_awaited_once()
+    assert events[-2:] == ["delivery_inserted", "commit"]
+    executor.session.rollback.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+    assert "flow_executor.webhook_delivery_request_" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_webhook_run_stops_waiting_for_its_delivery_request_at_the_deadline(
+    user, caplog, monkeypatch
+):
+    """Kills: a request held by a broker that stops answering, which keeps the
+    run's execution slot until the task's own timeout fails it."""
+    monkeypatch.setattr(
+        webhook_policy,
+        "get_settings",
+        lambda: SimpleNamespace(redis_conn_timeout=0.05),
+    )
+    request_cancelled = asyncio.Event()
+
+    async def _never_answers(_request):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            request_cancelled.set()
+
+    enqueuer = AsyncMock()
+    enqueuer.enqueue.side_effect = _never_answers
+    executor, execute, events = _webhook_run(user, task_enqueuer=enqueuer)
+
+    with caplog.at_level(logging.WARNING, logger="eneo.flows.runtime.executor"):
+        async with asyncio.timeout(5):
+            result = await execute()
+
+    assert result == {"status": "running"}
+    assert request_cancelled.is_set()
+    assert events[-2:] == ["delivery_inserted", "commit"]
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+    assert "flow_executor.webhook_delivery_request_failed" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("left_seconds", [0.5, 1.3], ids=["none_left", "some_left"])
+async def test_webhook_run_fits_its_delivery_request_in_what_is_left_of_its_invocation(
+    user, caplog, monkeypatch, left_seconds
+):
+    """Kills: a request that outlasts the run's invocation, so the task's own
+    timeout fails a run that has committed its delivery."""
+    monkeypatch.setattr(
+        webhook_policy,
+        "get_settings",
+        lambda: SimpleNamespace(redis_conn_timeout=30),
+    )
+
+    async def _never_answers(_request):
+        await asyncio.Event().wait()
+
+    enqueuer = AsyncMock()
+    enqueuer.enqueue.side_effect = _never_answers
+    executor, execute, events = _webhook_run(user, task_enqueuer=enqueuer)
+    executor.invocation_deadline = asyncio.get_running_loop().time() + left_seconds
+
+    with caplog.at_level(logging.WARNING, logger="eneo.flows.runtime.executor"):
+        # The task's own timeout, as execute_flow_run_task sets it.
+        async with asyncio.timeout_at(executor.invocation_deadline):
+            result = await execute()
+
+    assert result == {"status": "running"}
+    assert events[-2:] == ["delivery_inserted", "commit"]
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+    if (
+        left_seconds
+        <= webhook_policy.FLOW_WEBHOOK_DELIVERY_REQUEST_RETURN_MARGIN_SECONDS
+    ):
+        enqueuer.enqueue.assert_not_awaited()
+        assert "flow_executor.webhook_delivery_request_skipped" in caplog.text
+    else:
+        enqueuer.enqueue.assert_awaited_once()
+        assert "flow_executor.webhook_delivery_request_failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_webhook_run_cancelled_while_requesting_delivery_stays_cancelled(user):
+    """Kills: a request whose failure handling swallows the task's own
+    cancellation (a worker shutdown or ownership loss)."""
+    requested = asyncio.Event()
+
+    async def _pending(_request):
+        requested.set()
+        await asyncio.Event().wait()
+
+    enqueuer = AsyncMock()
+    enqueuer.enqueue.side_effect = _pending
+    _, execute, _ = _webhook_run(user, task_enqueuer=enqueuer)
+
+    task = asyncio.create_task(execute())
+    async with asyncio.timeout(5):
+        await requested.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 @pytest.mark.asyncio

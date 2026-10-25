@@ -92,9 +92,11 @@ two platform processes:
 - `task-execution-worker` for run execution;
 - `task-maintenance-worker` for scheduled recovery and outbox work.
 
-The maintenance worker registers five Flow tasks: reconcile stale running runs,
-expire review checkpoints, redispatch stale queued runs, deliver lifecycle audit
-outbox rows, and deliver webhook outbox rows. ARQ configuration, queues,
+The maintenance worker schedules six Flow crons (reconcile stale running runs,
+expire review checkpoints, redispatch stale queued runs, drain retired runs,
+deliver lifecycle audit outbox rows, and request webhook delivery) and runs one
+Flow task, the webhook outbox job, which those requests and a run that ends in
+a webhook enqueue. ARQ configuration, queues,
 capacity, scheduling, timeouts, tracing, and health belong to the platform.
 Flow services remain queue-neutral.
 

@@ -47,7 +47,7 @@ def _job_id_from_ctx(ctx: ARQContext) -> UUID | None:
 _tracer = trace.get_tracer("eneo.worker")
 
 
-def _traced_job(kind: str, wrapper_fn: Callable[..., Any]) -> Callable[..., Any]:
+def traced_job(kind: str, wrapper_fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap an ARQ job coroutine in a root span.
 
     All log lines and auto-instrumented child spans produced while the job runs
@@ -286,7 +286,7 @@ class Worker:
                     assert job_id is not None
                     return await func(job_id, params, container=container)
 
-            traced = _traced_job("job", wrapper)
+            traced = traced_job("job", wrapper)
             self.functions.append(
                 arq_func(traced, name=name, keep_result=keep_result)
                 if keep_result is not None or name is not None
@@ -396,7 +396,7 @@ class Worker:
                 assert job_id is not None
                 return await func(job_id, params, container=container)
 
-            traced = _traced_job("job", wrapper)
+            traced = traced_job("job", wrapper)
             self.functions.append(
                 arq_func(traced, name=name, keep_result=keep_result)
                 if keep_result is not None or name is not None
@@ -575,7 +575,7 @@ class Worker:
 
                 return success
 
-            self.functions.append(_traced_job("job", wrapper))
+            self.functions.append(traced_job("job", wrapper))
             return wrapper
 
         return decorator
@@ -627,9 +627,7 @@ class Worker:
                         container = await self._create_container(session)
                         return await func(container=container)
 
-            self.cron_jobs.append(
-                cron(_traced_job("cron", wrapper), **decorator_kwargs)
-            )
+            self.cron_jobs.append(cron(traced_job("cron", wrapper), **decorator_kwargs))
             return wrapper
 
         return decorator

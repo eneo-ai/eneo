@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import NamedTuple, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -15,6 +16,10 @@ from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
 
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -32,6 +37,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
+from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
@@ -69,7 +75,17 @@ from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ConflictException, TypedIOValidationException
 from eneo.settings.encryption_service import EncryptionService
+from eneo.tasks.contracts import TaskEnqueueStatus
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.integration.flows.maintenance_worker_support import (
+    clear_webhook_outbox_jobs,
+    eventually,
+    outbox_job_key_is_free,
+    platform_task_enqueuer,
+    running_maintenance_worker,
+    tick_webhook_cron,
+    webhook_cron_scheduler,
+)
 from tests.unittests.flows.egress.egress_test_support import recording_server
 
 
@@ -149,7 +165,22 @@ def _build_flow(
     )
 
 
-async def _create_running_webhook_run(
+def _pinned_assistant_snapshot(assistant_id: UUID, model) -> dict[str, object]:
+    """The assistant as publishing pins it, bound to the model it runs on."""
+    snapshot = {
+        **assistant_snapshot(assistant_id),
+        "completion_model": {
+            "model_id": str(model.id),
+            "provider_id": str(model.provider_id),
+            "provider_type": "openai",
+            "resolved_route": f"openai/{model.name}",
+        },
+    }
+    snapshot["execution_surface_hash"] = assistant_execution_surface_hash(snapshot)
+    return snapshot
+
+
+async def _create_queued_webhook_run(
     *,
     session,
     admin_user,
@@ -157,9 +188,10 @@ async def _create_running_webhook_run(
     space_factory,
     assistant_factory,
     output_config: dict[str, object] | None = None,
-    prior_output_payload: dict[str, object] | None = None,
+    include_prior_step: bool = False,
     model_name: str = "gpt-4o-mini",
 ):
+    """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
     space = await space_factory(session, "Webhook outbox delivery space", [model.id])
     assistant = await assistant_factory(
@@ -177,7 +209,7 @@ async def _create_running_webhook_run(
             user_id=admin_user.id,
             assistant_id=assistant.id,
             output_config=output_config,
-            include_prior_step=prior_output_payload is not None,
+            include_prior_step=include_prior_step,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -196,8 +228,8 @@ async def _create_running_webhook_run(
                 {
                     "step_id": str(published_step.id),
                     "assistant_id": str(published_step.assistant_id),
-                    "assistant_snapshot": assistant_snapshot(
-                        published_step.assistant_id
+                    "assistant_snapshot": _pinned_assistant_snapshot(
+                        published_step.assistant_id, model
                     ),
                     "step_order": published_step.step_order,
                     "user_description": published_step.user_description,
@@ -233,6 +265,31 @@ async def _create_running_webhook_run(
             for published_step in flow.steps
         ],
     )
+    return flow, run, step
+
+
+async def _create_running_webhook_run(
+    *,
+    session,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    output_config: dict[str, object] | None = None,
+    prior_output_payload: dict[str, object] | None = None,
+    model_name: str = "gpt-4o-mini",
+):
+    flow, run, step = await _create_queued_webhook_run(
+        session=session,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        output_config=output_config,
+        include_prior_step=prior_output_payload is not None,
+        model_name=model_name,
+    )
+    run_repo = FlowRunRepository(session=session)
     await session.execute(
         sa.update(FlowRuns)
         .where(FlowRuns.id == run.id)
@@ -393,7 +450,7 @@ def _response(status_code: int) -> httpx.Response:
 async def _run_outbox(
     *, now: datetime | None = None, limit: int = 1
 ) -> dict[str, int | str]:
-    """One outbox job, as the cron runs it. ``now`` is the time its claims see.
+    """One outbox job, as a worker runs it. ``now`` is the time its claims see.
     One row per job unless ``limit`` says otherwise: a row retried within the
     job's own wave loop would otherwise be claimed again at a later ``now``."""
     return await tasks_module._deliver_flow_webhook_outbox(
@@ -1691,10 +1748,10 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
 ):
     """One task invocation runs at most FLOW_WEBHOOK_DELIVERY_CONCURRENCY sends.
 
-    The cron's fixed job id runs one invocation at a time, so this is the
-    ceiling a webhook receiver sees; it has to be observed rather than assumed.
-    Claiming more rows than the ceiling is what makes the observation
-    meaningful.
+    Every request for the job carries one fixed task key, so one invocation
+    runs at a time and this is the ceiling a webhook receiver sees; it has to
+    be observed rather than assumed. Claiming more rows than the ceiling is
+    what makes the observation meaningful.
     """
     from eneo.flows.runtime import tasks as tasks_module
 
@@ -2200,6 +2257,179 @@ async def test_flow_webhook_outbox_job_claims_only_what_its_deadline_can_send(
         and state.next_delivery_at >= min(send_stopped_at) + first_backoff
         for state in sent
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_row_committed_behind_a_slow_wave_is_delivered_by_the_cron(
+    setup_database,
+    seed_delivery,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    redis_client,
+    monkeypatch,
+):
+    """The best-effort request and its recovery, through ARQ.
+
+    A run commits its row while the outbox job is out on a slow wave: the
+    run's request joins the running job, which ends without claiming the row
+    because its claim window has passed. A later cron tick requests a new job,
+    which delivers the row. Nothing here bounds how long recovery takes."""
+    from eneo.flows.runtime import tasks as tasks_module
+
+    # The slow send has seconds to spare before its send deadline; the claim
+    # window closes 0.2 s after the job starts.
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=5.0,
+        preparation_margin_seconds=1.0,
+        persistence_margin_seconds=1.0,
+        finish_margin_seconds=1.0,
+        claim_window_seconds=0.2,
+    )
+    monkeypatch.setattr(tasks_module, "flow_webhook_delivery_budget", lambda: budget)
+    slow = await seed_delivery()
+    slow_send_started = asyncio.Event()
+    release_slow_send = asyncio.Event()
+
+    async def _send(_self, **_kwargs):
+        if not slow_send_started.is_set():
+            slow_send_started.set()
+            await release_slow_send.wait()
+        return _response(200)
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send)
+
+    async def delivered(delivery_id: UUID) -> bool:
+        state = (await _delivery_states([delivery_id]))[delivery_id]
+        return state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+
+    await clear_webhook_outbox_jobs(redis_client)
+    try:
+        async with (
+            platform_task_enqueuer() as enqueuer,
+            webhook_cron_scheduler() as scheduler,
+            running_maintenance_worker(),
+        ):
+            await enqueuer.enqueue(webhook_policy.flow_webhook_delivery_request())
+            async with asyncio.timeout(10):
+                await slow_send_started.wait()
+            [late_id] = await _insert_due_webhook_rows(
+                row_count=1,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+            )
+            late_request = await enqueuer.enqueue(
+                webhook_policy.flow_webhook_delivery_request()
+            )
+            assert late_request.status is TaskEnqueueStatus.ACCEPTED
+            await asyncio.sleep(budget.claim_window_seconds)
+            release_slow_send.set()
+            await eventually(lambda: outbox_job_key_is_free(redis_client))
+
+            assert await delivered(slow.delivery_id)
+            late = (await _delivery_states([late_id]))[late_id]
+            assert late.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+            assert late.delivery_attempts == 0
+
+            await tick_webhook_cron(
+                scheduler, at=datetime.now(timezone.utc) - timedelta(seconds=1)
+            )
+            await eventually(lambda: delivered(late_id))
+    finally:
+        await clear_webhook_outbox_jobs(redis_client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_worker_run_ending_in_a_webhook_requests_its_delivery_at_commit(
+    setup_database,
+    object_content_runtime_ready,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    redis_client,
+    monkeypatch,
+):
+    """The executor the worker assembles requests delivery once it commits.
+
+    The run goes through the worker's own execution task, on ARQ. No cron tick
+    is scheduled, so only the run's request can deliver its row. That request
+    is sent once, after the row and the running run are committed."""
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        _, run, _ = await _create_queued_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.commit()
+
+    async def _answer(_self, **_kwargs):
+        return SimpleNamespace(completion="done", total_token_count=1)
+
+    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _answer_200)
+
+    async def committed_state() -> tuple[str, list[str]]:
+        run_status = await _read_scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+        )
+        rows = await _read(
+            sa.select(FlowRunWebhookDeliveries.delivery_status).where(
+                FlowRunWebhookDeliveries.flow_run_id == run.id
+            )
+        )
+        return run_status, [row.delivery_status for row in rows]
+
+    async def completed() -> bool:
+        return await committed_state() == (
+            FlowRunStatus.COMPLETED.value,
+            [FlowOutboxDeliveryStatus.DELIVERED.value],
+        )
+
+    requests: list[tuple[object, tuple[str, list[str]]]] = []
+    await clear_webhook_outbox_jobs(redis_client)
+    try:
+        async with platform_task_enqueuer() as enqueuer, running_maintenance_worker():
+            enqueue = enqueuer.enqueue
+
+            async def recording_enqueue(request):
+                requests.append((request, await committed_state()))
+                return await enqueue(request)
+
+            monkeypatch.setattr(enqueuer, "enqueue", recording_enqueue)
+            result = await tasks_module.execute_flow_run_task(
+                run_id=str(run.id),
+                flow_id=str(run.flow_id),
+                tenant_id=str(run.tenant_id),
+                run_revision=run.revision,
+                principal_type=PrincipalType.USER.value,
+                principal_user_id=str(admin_user.id),
+                task_id=None,
+                retry_count=0,
+            )
+
+            assert result == {"status": FlowRunStatus.RUNNING.value}
+            assert requests == [
+                (
+                    webhook_policy.flow_webhook_delivery_request(),
+                    (
+                        FlowRunStatus.RUNNING.value,
+                        [FlowOutboxDeliveryStatus.PENDING.value],
+                    ),
+                )
+            ]
+            await eventually(completed)
+    finally:
+        await tasks_module.execution_heartbeats().stop()
+        await clear_webhook_outbox_jobs(redis_client)
 
 
 def _capture_logs(monkeypatch, caplog, logger: logging.Logger) -> None:
