@@ -3695,7 +3695,9 @@ class FlowRunRepository:
                 row.requested_model = merged_attempt_input.start.requested_model
                 row.provider = merged_attempt_input.start.provider
         await self.session.flush()
-        await self.session.refresh(row)
+        # The locked row holds what was just stored; only the server-set
+        # updated_at is read back, not the payloads.
+        await self.session.refresh(row, attribute_names=["updated_at"])
         return FlowStepAttempt.model_validate(row)
 
     async def write_attempt_tool_call_evidence(
@@ -3959,7 +3961,7 @@ class FlowRunRepository:
             row.output_payload_json = output_payload_json
         row.finished_at = datetime.now(timezone.utc)
         await self.session.flush()
-        await self.session.refresh(row)
+        await self.session.refresh(row, attribute_names=["updated_at"])
         return FlowStepAttempt.model_validate(row)
 
 

@@ -91,7 +91,10 @@ from eneo.flows.runtime.step_result_builder import (
     build_terminal_attempt_input,
 )
 from tests.flow_snapshot_fixtures import assistant_snapshot
-from tests.integration.flows.statement_capture_support import capture_queries
+from tests.integration.flows.statement_capture_support import (
+    CapturedStatement,
+    capture_queries,
+)
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _decode_explain,
     _json_object,
@@ -2907,6 +2910,107 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert resolved_input.aggregate == _resolved_input_aggregate(
             binding_ref="tracked-input"
         )
+
+
+def _attempt_payload_reads(queries: list[CapturedStatement]) -> list[str]:
+    return [
+        query.sql
+        for query in queries
+        if "flow_step_attempts.input_payload_json" in query.sql
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_attempt_activation_and_finish_return_the_stored_row_without_reading_it_back(
+    attempt_provenance_context,
+):
+    # Kills the mutants that return the caller's input instead of the evidence
+    # the repository merged and stored, return a row that differs from the
+    # stored one, or read the row's payloads back after writing them: the
+    # only payload read is the locked load the merge needs.
+    context = attempt_provenance_context
+    aggregate = _resolved_input_aggregate(binding_ref="question")
+    caller_input = build_activated_attempt_input(
+        start=None,
+        resolved_input={"question": "What happened?"},
+        completion_configuration=FlowStepAttemptCompletionConfiguration(
+            preferred_model_parameters={"temperature": 0.2}
+        ),
+        execution_inputs=(
+            FlowStepAttemptExecutionInput(
+                question="What happened?",
+                effective_prompt="Answer: What happened?",
+                assistant_context_version=1,
+            ),
+        ),
+    )
+    assert caller_input is not None
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="activation-returns-stored-row",
+        )
+        assert await repo.activate_step_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            resolved_input_edges=aggregate,
+            attempt_input=build_activated_attempt_input(start=context.attempt_start),
+        )
+        bind = session.sync_session.bind
+        assert bind is not None
+        with capture_queries(bind) as activation_reads:
+            activated = await repo.activate_step_attempt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                resolved_input_edges=aggregate,
+                attempt_input=caller_input,
+            )
+    assert activated is not None
+    async with sessionmanager.session() as session, session.begin():
+        stored = await session.get(FlowStepAttempts, attempt.id)
+        assert stored is not None
+        assert activated == FlowStepAttempt.model_validate(stored)
+    assert activated.input_payload_json != caller_input.to_payload()
+    (locked_load,) = _attempt_payload_reads(activation_reads)
+    assert "FOR UPDATE" in locked_load
+
+    async with sessionmanager.session() as session, session.begin():
+        bind = session.sync_session.bind
+        assert bind is not None
+        with capture_queries(bind) as finish_reads:
+            finished = await FlowRunRepository(session=session).finish_attempt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                status=FlowStepAttemptStatus.COMPLETED,
+                attempt_input=build_terminal_attempt_input(
+                    start=context.attempt_start,
+                    resolved_input={"question": "What happened?"},
+                ),
+                output_payload_json={"summary": "done"},
+            )
+    assert finished is not None
+    async with sessionmanager.session() as session, session.begin():
+        stored = await session.get(FlowStepAttempts, attempt.id)
+        assert stored is not None
+        assert finished == FlowStepAttempt.model_validate(stored)
+    assert finished.status == FlowStepAttemptStatus.COMPLETED
+    assert finished.output_payload_json == {"summary": "done"}
+    assert finished.updated_at > activated.updated_at
+    (locked_load,) = _attempt_payload_reads(finish_reads)
+    assert "FOR UPDATE" in locked_load
 
 
 @pytest.mark.asyncio
