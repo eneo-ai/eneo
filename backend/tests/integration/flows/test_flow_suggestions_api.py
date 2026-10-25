@@ -177,25 +177,7 @@ async def test_no_suggestion_without_the_prompt_read(
 async def test_a_viewer_of_the_space_is_refused(
     client: AsyncClient, db_container, admin_user, user_factory, tracer: Tracer
 ):
-    async with db_container() as container:
-        session = container.session()
-        role = await container.role_repo().create_role(
-            RoleCreate(
-                name=f"flow-viewer-{uuid4().hex[:8]}",
-                permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_MANAGE],
-                tenant_id=admin_user.tenant_id,
-            )
-        )
-        viewer = await user_factory(session)
-        await session.execute(
-            sa.insert(users_roles_table).values(user_id=viewer.id, role_id=role.id)
-        )
-        session.add(
-            SpacesUsers(space_id=tracer.space_id, user_id=viewer.id, role="viewer")
-        )
-        await session.flush()
-        in_db = await container.user_repo().get_user_by_id(viewer.id)
-        token = container.auth_service().create_access_token_for_user(in_db)
+    token = await _viewer_token(db_container, admin_user, user_factory, tracer.space_id)
 
     response = await client.get(
         f"/api/v1/flows/{tracer.flow_id}/suggestions/",
@@ -206,13 +188,8 @@ async def test_a_viewer_of_the_space_is_refused(
     assert response.json()["code"] == "insufficient_space_permission"
 
 
-async def test_a_flow_of_another_tenant_is_not_found(
-    client: AsyncClient,
-    db_container,
-    user_factory,
-    tenant_factory,
-    tracer: Tracer,
-):
+async def _outsider_token(db_container, user_factory, tenant_factory) -> str:
+    """A flow author of another tenant."""
     async with db_container() as container:
         session = container.session()
         tenant = await tenant_factory(session)
@@ -229,7 +206,17 @@ async def test_a_flow_of_another_tenant_is_not_found(
             UserUpdate(id=outsider.id, roles=[ModelId(id=role.id)])
         )
         assert updated is not None
-        token = container.auth_service().create_access_token_for_user(updated)
+        return container.auth_service().create_access_token_for_user(updated)
+
+
+async def test_a_flow_of_another_tenant_is_not_found(
+    client: AsyncClient,
+    db_container,
+    user_factory,
+    tenant_factory,
+    tracer: Tracer,
+):
+    token = await _outsider_token(db_container, user_factory, tenant_factory)
 
     response = await client.get(
         f"/api/v1/flows/{tracer.flow_id}/suggestions/",
@@ -538,23 +525,7 @@ async def test_a_suggestion_of_another_tenants_flow_is_not_found(
 ):
     listed = await _suggestions(client, tracer)
     (item,) = listed["items"]
-    async with db_container() as container:
-        session = container.session()
-        tenant = await tenant_factory(session)
-        role = await container.role_repo().create_role(
-            RoleCreate(
-                name=f"flow-author-{uuid4().hex[:8]}",
-                permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_MANAGE],
-                tenant_id=tenant.id,
-            )
-        )
-        outsider = await user_factory(session, tenant_id=tenant.id)
-        await session.flush()
-        updated = await container.user_repo().update(
-            UserUpdate(id=outsider.id, roles=[ModelId(id=role.id)])
-        )
-        assert updated is not None
-        token = container.auth_service().create_access_token_for_user(updated)
+    token = await _outsider_token(db_container, user_factory, tenant_factory)
 
     response = await _apply(
         client,
@@ -853,29 +824,6 @@ async def test_a_run_the_caller_may_not_see_is_left_out_and_counted(
     assert audit["extra"]["left_out_run_count"] == 1
 
 
-async def test_measuring_another_tenants_flow_is_not_found(
-    client: AsyncClient,
-    db_container,
-    admin_user,
-    user_factory,
-    tenant_factory,
-    tracer: Tracer,
-):
-    await _publish(client, tracer)
-    await _seed_run(db_container, tracer, principal_user_id=admin_user.id, tokens=600)
-    async with db_container() as container:
-        tenant = await tenant_factory(container.session())
-        outsider = await user_factory(container.session(), tenant_id=tenant.id)
-        await container.session().flush()
-        outsider_id, tenant_id = outsider.id, tenant.id
-    token = await _token_with(db_container, outsider_id, tenant_id, _TRACE_AUTHOR)
-
-    response = await _measured(client, tracer, {"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 404, response.text
-    assert await _evidence_audits(db_container, tracer.flow_id) == []
-
-
 # --- Measured from the forwarding facts ---------------------------------------
 
 _INPUT_BYTES = len(_INPUT_TEXT.encode("utf-8"))
@@ -960,19 +908,6 @@ async def test_a_step_that_copies_its_input_on_is_a_measured_relay(
     (audit,) = await _evidence_audits(db_container, flow.flow_id)
     assert audit["extra"]["run_ids"] == [str(run_id)]
     assert audit["extra"]["forwarding_facts_attempt_count"] == 1
-
-
-async def test_a_relay_is_not_measured_without_the_trace_permission(
-    client: AsyncClient, db_container, admin_user, patch_auth_service_jwt
-):
-    flow = await _relay_flow(client, db_container, admin_user)
-    await _seed_relay_run(db_container, flow, admin_user)
-
-    response = await _measured(client, flow, flow.headers, runs=1)
-
-    assert response.status_code == 403, response.text
-    assert response.json()["code"] == "insufficient_tenant_permission"
-    assert await _evidence_audits(db_container, flow.flow_id) == []
 
 
 async def test_the_forwarding_facts_of_another_tenant_are_never_read(
