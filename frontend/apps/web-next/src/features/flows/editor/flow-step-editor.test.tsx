@@ -72,6 +72,7 @@ function renderEditor(
     space?: ReturnType<typeof makeSpace>;
     onAskChat?: (text: string) => void;
     suggestionFix?: SuggestionFix;
+    suggestionRuns?: number;
     navigation?: StepNavigation;
     leaveRef?: React.Ref<EditorLeave>;
   } = {}
@@ -89,6 +90,7 @@ function renderEditor(
       onCancel={onCancel}
       onAskChat={overrides.onAskChat}
       suggestionFix={overrides.suggestionFix}
+      suggestionRuns={overrides.suggestionRuns}
       navigation={overrides.navigation}
       leaveRef={overrides.leaveRef}
     />,
@@ -226,6 +228,46 @@ describe("FlowStepEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
     // The saved revision keys the suggestions anew.
     await waitFor(() => expect(fetched()).toBe(2));
+  });
+
+  it("shows the open step's suggestions measured while the page measures them", async () => {
+    const SUGGESTIONS = "GET /api/v1/flows/{id}/suggestions/";
+    api.routes[SUGGESTIONS] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        runs: { requested: 10, counted: 8, left_out: 0 },
+        items: [
+          {
+            code: "format_fallback",
+            fingerprint: "c".repeat(64),
+            steps: ["step-1"],
+            params: { fallback_runs: 6, step_runs: 8 },
+            message: "A suggestion.",
+            impact: {
+              basis: "runs",
+              level: "medium",
+              tokens_per_run: null,
+              run_count: 8,
+              version: 3,
+              step_changed_since: false
+            },
+            fix: { kind: "advice" }
+          }
+        ]
+      }
+    });
+    const { container } = renderEditor(makeFlow(), { suggestionRuns: 10 });
+
+    const toggle = await screen.findByRole("button", { name: "1 förslag" });
+    const section = document.getElementById(toggle.getAttribute("aria-controls") ?? "")!;
+    expect(within(section).getByText("Steget behöver ofta två anrop till modellen")).toBeTruthy();
+    expect(within(section).getByText("Mätt i 8 körningar.")).toBeTruthy();
+    const reads = api.stub.calls.filter((call) => `${call.method} ${call.path}` === SUGGESTIONS);
+    expect(
+      reads.map((call) => (call.init as { params: { query?: unknown } }).params.query)
+    ).toEqual([{ runs: 10 }]);
+    await expectNoAxeViolations(container);
   });
 
   it("offers Åtgärda on the open step, and holds it while the step has unsaved changes", async () => {

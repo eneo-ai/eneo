@@ -33,6 +33,8 @@ const state = vi.hoisted(() => ({
   mode: null as unknown,
   kinds: null as unknown,
   suggestions: null as unknown,
+  // The suggestions measured over the latest runs (`?runs=`).
+  measured: null as unknown,
   apply: null as unknown,
   dirty: false,
   // What went into the chat's composer, text and pills (by the value they send) in order.
@@ -44,11 +46,13 @@ const state = vi.hoisted(() => ({
 }));
 
 const api = vi.hoisted(() => ({
-  GET: vi.fn(async (path: string) => {
+  GET: vi.fn(async (path: string, init?: { params?: { query?: { runs?: number } } }) => {
     if (path === "/api/v1/flows/{id}/") return state.flow;
     if (path === "/api/v1/flows/{id}/runs/") return state.runs;
     if (path === "/api/v1/flows/{id}/step-kinds/") return state.kinds;
-    if (path === "/api/v1/flows/{id}/suggestions/") return state.suggestions;
+    if (path === "/api/v1/flows/{id}/suggestions/") {
+      return init?.params?.query?.runs ? state.measured : state.suggestions;
+    }
     if (path === "/api/v1/assistants/{id}/") {
       return {
         data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
@@ -136,7 +140,8 @@ vi.mock("./editor/flow-step-editor", async () => {
       onCancel,
       leaveRef,
       navigation,
-      suggestionFix
+      suggestionFix,
+      suggestionRuns
     }: {
       stepId: string;
       onCancel: () => void;
@@ -146,6 +151,7 @@ vi.mock("./editor/flow-step-editor", async () => {
         onFix: (fingerprints: string[]) => Promise<boolean>;
         pending: boolean;
       };
+      suggestionRuns?: number;
     }) {
       const [asking, setAsking] = useState<(() => void) | null>(null);
       const leave = (go: () => void) => (state.dirty ? setAsking(() => go) : go());
@@ -154,6 +160,7 @@ vi.mock("./editor/flow-step-editor", async () => {
       return (
         <div>
           <p>Redigerar {stepId}</p>
+          {suggestionRuns ? <p>Förslagen räknas med {suggestionRuns} körningar</p> : null}
           {suggestionFix ? (
             <button
               type="button"
@@ -238,6 +245,33 @@ function applyBodies() {
 
 const suggestionReads = () =>
   api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/").length;
+
+/** The suggestion reads by the runs they measured: 0 for the definition alone. */
+const suggestionRuns = () =>
+  api.GET.mock.calls
+    .filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    .map(([, init]) => init?.params?.query?.runs ?? 0);
+
+/** The revision's suggestions measured over the latest runs: the duplicate, with its cost. */
+const measuredSuggestions = (revision: number) =>
+  ok({
+    flow_id: "flow-1",
+    draft_revision: revision,
+    runs: { requested: 10, counted: 8, left_out: 0 },
+    items: [
+      {
+        ...DUPLICATE_READ,
+        impact: {
+          basis: "runs",
+          level: "high",
+          tokens_per_run: 1840,
+          run_count: 8,
+          version: 3,
+          step_changed_since: false
+        }
+      }
+    ]
+  });
 
 /** The "Åtgärda" of the suggestion on step 2's card, by its role and name, its list opened. */
 async function cardFix() {
@@ -767,6 +801,72 @@ describe("FlowPage", () => {
     expect(
       api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
     ).toHaveLength(2);
+  });
+
+  it("offers no measuring to someone who may not view flow traces, and reads no runs", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    renderPage();
+    expect(
+      await screen.findByText("1 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Räkna med de senaste körningarna" })).toBeNull();
+    expect(suggestionRuns()).toEqual([0]);
+  });
+
+  it("measures the suggestions on a press for the visit, and again only for a new revision", async () => {
+    state.chat = ok({ ...CHAT, editing: true });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.measured = measuredSuggestions(4);
+    const { container } = renderPage(makeFlow({ steps }), [
+      "flows_view",
+      "flows_manage",
+      "flows_trace"
+    ]);
+    const measure = await screen.findByRole("button", { name: "Räkna med de senaste körningarna" });
+    expect(suggestionRuns()).toEqual([0]);
+
+    fireEvent.click(measure);
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Baserat på 8 körningar."));
+    expect(screen.getByText("Baserat på 8 körningar.")).toBeTruthy();
+    expect(suggestionRuns()).toEqual([0, 10]);
+    await expectNoAxeViolations(container);
+
+    // The editor is given the same measured answer; back on the list, it is not read again.
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
+    expect(screen.getByText("Förslagen räknas med 10 körningar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    expect(await screen.findByText("Baserat på 8 körningar.")).toBeTruthy();
+    expect(suggestionRuns()).toEqual([0, 10]);
+
+    // The chat's tools changed the draft: the new revision is measured.
+    state.flow = ok(makeFlow({ draft_revision: 5, steps }));
+    state.suggestions = suggestions(5, []);
+    state.measured = measuredSuggestions(5);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await waitFor(() => expect(suggestionRuns()).toEqual([0, 10, 10]));
+
+    // The way back reads the revision's plain answer, and says so.
+    fireEvent.click(screen.getByRole("button", { name: "Visa utan körningarna" }));
+    await waitFor(() => expect(suggestionRuns()).toEqual([0, 10, 10, 0]));
+    expect(state.announce).toHaveBeenCalledWith("Förslagen bygger nu bara på flödets definition.");
+    await waitFor(() => expect(screen.queryByText(/Baserat på/)).toBeNull());
+    expect(screen.getByRole("button", { name: "Räkna med de senaste körningarna" })).toBeTruthy();
+  });
+
+  it("keeps a measured answer out of a re-read after a stale fix", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.measured = measuredSuggestions(4);
+    state.apply = refused(409, { code: "flow_suggestion_stale", message: "Gone." });
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_trace"]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    expect(await screen.findByText("Baserat på 8 körningar.")).toBeTruthy();
+
+    fireEvent.click(await cardFix());
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    // Each measured read writes an audit entry: a refused fix reads none.
+    expect(suggestionRuns()).toEqual([0, 10]);
   });
 
   it("fixes a suggestion from its card on the revision on screen and takes the new draft", async () => {

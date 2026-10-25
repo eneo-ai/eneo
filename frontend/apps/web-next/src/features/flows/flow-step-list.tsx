@@ -24,8 +24,10 @@ import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps
 import { useSuggestionFix, type SuggestionFix } from "./flow-suggestion-item";
 import {
   StepCardSuggestions,
+  SuggestionsMeasure,
   SuggestionsSummary,
   type OpenKeys,
+  type SuggestionMeasure,
   useOpenKeys
 } from "./flow-suggestions-section";
 import {
@@ -294,7 +296,8 @@ function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts
  * about, with a summary above the list ("Åtgärda alla" for those a patch
  * fixes) that also holds the ones about the run form. "Åtgärda" and
  * "Åtgärda alla" are offered while `suggestionFix` is given; "Fråga
- * assistenten" while `onAskChat` is (the chat is on the page).
+ * assistenten" while `onAskChat` is (the chat is on the page); "Räkna med
+ * de senaste körningarna" while `measure` is (the person may view traces).
  */
 export function FlowStepList({
   flowId,
@@ -306,6 +309,7 @@ export function FlowStepList({
   changes = null,
   onAskChat,
   suggestionFix,
+  measure,
   ...actions
 }: StepActions & {
   flowId: string;
@@ -321,6 +325,8 @@ export function FlowStepList({
   onAskChat?: (text: string) => void;
   /** Makes suggestions' patches; absent, no "Åtgärda" is offered. */
   suggestionFix?: SuggestionFix;
+  /** Measures the suggestions over the latest runs; absent, it is not offered. */
+  measure?: SuggestionMeasure;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -328,7 +334,7 @@ export function FlowStepList({
   const [removePending, setRemovePending] = useState(false);
   const prompts = useStepPrompts(flowId, steps);
   const suggestions = useQuery({
-    ...flowSuggestionsQueryOptions(flowId, draftRevision),
+    ...flowSuggestionsQueryOptions(flowId, draftRevision, measure?.runs ?? 0),
     enabled: canEdit
   });
   const shown = canEdit ? shownSuggestions(suggestions.data?.items, steps) : [];
@@ -372,7 +378,11 @@ export function FlowStepList({
       {suggestions.isError ? (
         <ListError
           error={suggestions.error}
-          title={t("flow_suggestions_error_title")}
+          title={
+            measure && measure.runs > 0
+              ? t("flow_suggestions_runs_error_title")
+              : t("flow_suggestions_error_title")
+          }
           isRetrying={suggestions.isFetching}
           onRetry={() => void suggestions.refetch()}
         />
@@ -386,6 +396,15 @@ export function FlowStepList({
           rescueTarget={listHeading}
         />
       )}
+      {/* Its own place in the list, so its button keeps focus whatever the summary shows. */}
+      {canEdit && measure && steps.length > 0 ? (
+        <SuggestionsMeasure
+          measure={measure}
+          runs={suggestions.data?.runs}
+          found={shown.length + formItems.length}
+          failed={suggestions.isError}
+        />
+      ) : null}
       {steps.length === 0 ? (
         <EmptyState
           icon={<Workflow />}

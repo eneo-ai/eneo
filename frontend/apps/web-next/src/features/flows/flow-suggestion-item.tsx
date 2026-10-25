@@ -16,6 +16,7 @@ import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
   isPatchable,
+  measuredImpactText,
   suggestionRequest,
   suggestionText,
   type FlowSuggestion
@@ -116,8 +117,9 @@ function LevelBadge({ level }: { level: string }) {
 
 /**
  * One suggestion as a row of a suggestion list: its level, what was found
- * (steps and values as the chat's pills) and, for a patch, "Åtgärda" on the
- * right. The chevron before it shows why, with the secondary actions:
+ * (steps and values as the chat's pills), for a measured one what the runs
+ * measured (always in view) and, for a patch, "Åtgärda" on the right. The
+ * chevron before it shows why, with the secondary actions:
  * "Fråga assistenten" for every kind (an author may want any of them
  * explained) and "Ta bort steget" for a step nothing reads. Collapsing
  * keeps focus on the chevron, which stays.
@@ -147,6 +149,7 @@ export function SuggestionRow({
   const panelId = useId();
   const label = step ? stepLabel(step, t) : null;
   const text = suggestionText(suggestion, t, step ?? undefined, steps);
+  const measured = measuredImpactText(suggestion.impact, t);
   // The title in words, each pill as it reads, for the buttons' names.
   const title = referencePlainText(text.title, refs?.flow ?? { steps: [...steps] }, t);
   const removable = onRemoveStep && step && label && suggestion.code === "unread_result";
@@ -173,6 +176,11 @@ export function SuggestionRow({
             </span>
             <ReferenceText text={text.title} />
           </p>
+          {measured ? (
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
+              {measured}
+            </Text>
+          ) : null}
           <div id={panelId} hidden={!isOpen} className="flex flex-col gap-1">
             <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
               <ReferenceText text={text.explanation} />

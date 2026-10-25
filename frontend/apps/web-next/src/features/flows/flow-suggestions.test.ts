@@ -6,11 +6,15 @@ import { makeStep } from "./flow-fixtures";
 import {
   flowSuggestions,
   flowSuggestionsQueryOptions,
+  inSuggestionOrder,
+  measuredBasisText,
+  measuredImpactText,
   shownSuggestions,
   suggestionRequest,
   suggestionsByStep,
   suggestionText,
-  type FlowSuggestion
+  type FlowSuggestion,
+  type FlowSuggestionImpact
 } from "./flow-suggestions";
 
 /** The app's real catalogs, looked up by any key as the section does. */
@@ -124,11 +128,133 @@ describe("flowSuggestionsQueryOptions", () => {
       "flows",
       "flow-1",
       "suggestions",
-      4
+      4,
+      0
     ]);
     expect(flowSuggestionsQueryOptions("flow-1", 5).queryKey).not.toEqual(
       flowSuggestionsQueryOptions("flow-1", 4).queryKey
     );
+  });
+
+  it("keys a measured answer by its runs, and never reads it again by itself", () => {
+    const plain = flowSuggestionsQueryOptions("flow-1", 4);
+    const measured = flowSuggestionsQueryOptions("flow-1", 4, 10);
+    expect(measured.queryKey).toEqual(["flows", "flow-1", "suggestions", 4, 10]);
+    expect(measured.queryKey).not.toEqual(plain.queryKey);
+    // Each measured read writes an audit entry: no focus, reconnect, remount
+    // or retry reads it again, and it stays for the visit.
+    expect(measured).toMatchObject({
+      staleTime: Infinity,
+      gcTime: Infinity,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: false
+    });
+    expect(plain.refetchOnWindowFocus).toBeUndefined();
+  });
+});
+
+function measured(impact: Partial<FlowSuggestionImpact>): FlowSuggestionImpact {
+  return {
+    basis: "runs",
+    level: "high",
+    tokens_per_run: 1840,
+    run_count: 8,
+    version: 3,
+    step_changed_since: false,
+    ...impact
+  };
+}
+
+describe("measuredImpactText", () => {
+  it("says about what a run costs, over how many runs of which version", () => {
+    expect(measuredImpactText(measured({}), t)).toBe(
+      "Kostar cirka 1\u00a0800 tokens per körning, mätt i 8 körningar av version 3."
+    );
+    expect(measuredImpactText(measured({}), tEn)).toBe(
+      "Costs about 1,800 tokens per run, measured in 8 runs of version 3."
+    );
+  });
+
+  it("rounds to a number a person reads, and keeps a small one as it is", () => {
+    expect(measuredImpactText(measured({ tokens_per_run: 123_456, run_count: 1 }), t)).toBe(
+      "Kostar cirka 120\u00a0000 tokens per körning, mätt i 1 körning av version 3."
+    );
+    expect(measuredImpactText(measured({ tokens_per_run: 87 }), t)).toContain("cirka 87 tokens");
+  });
+
+  it("says when the step has changed since the runs it measured", () => {
+    expect(measuredImpactText(measured({ step_changed_since: true }), t)).toBe(
+      "Kostar cirka 1\u00a0800 tokens per körning, mätt i 8 körningar av version 3. " +
+        "Steget har ändrats sedan dess."
+    );
+  });
+
+  it("gives a finding without a token cost its run count only", () => {
+    expect(measuredImpactText(measured({ tokens_per_run: null }), t)).toBe("Mätt i 8 körningar.");
+  });
+
+  it("says nothing for an impact judged from the definition", () => {
+    expect(measuredImpactText({ basis: "definition", level: "high" }, t)).toBeNull();
+  });
+});
+
+describe("measuredBasisText", () => {
+  it("names the runs counted, and those left out because the person may not see them", () => {
+    expect(measuredBasisText({ requested: 10, counted: 8, left_out: 0 }, 3, t)).toBe(
+      "Baserat på 8 körningar."
+    );
+    expect(measuredBasisText({ requested: 10, counted: 8, left_out: 2 }, 3, t)).toBe(
+      "Baserat på 8 körningar. " +
+        "2 körningar räknades inte med eftersom du inte har behörighet att se dem."
+    );
+    expect(measuredBasisText({ requested: 10, counted: 1, left_out: 1 }, 3, tEn)).toBe(
+      "Based on 1 run. 1 run was left out because you may not see it."
+    );
+  });
+
+  it("says when there are no finished runs to count yet, or no suggestion", () => {
+    expect(measuredBasisText({ requested: 10, counted: 0, left_out: 0 }, 2, t)).toBe(
+      "Det finns inga avslutade körningar att räkna med än."
+    );
+    expect(measuredBasisText({ requested: 10, counted: 0, left_out: 3 }, 2, t)).toBe(
+      "3 körningar räknades inte med eftersom du inte har behörighet att se dem."
+    );
+    expect(measuredBasisText({ requested: 10, counted: 8, left_out: 0 }, 0, t)).toBe(
+      "Inga förslag. Baserat på 8 körningar."
+    );
+  });
+});
+
+describe("inSuggestionOrder", () => {
+  const item = (name: string, level: string, tokens?: number) => ({
+    name,
+    suggestion: {
+      impact:
+        tokens === undefined
+          ? { basis: "definition", level }
+          : { basis: "runs", level, tokens_per_run: tokens, run_count: 8, version: 3 }
+    } as FlowSuggestion
+  });
+
+  it("puts a known cost first, the highest first, then the level, then the core's order", () => {
+    const ordered = inSuggestionOrder([
+      item("låg", "low"),
+      item("hög", "high"),
+      item("billig", "low", 200),
+      item("medel", "medium"),
+      item("dyr", "medium", 4000),
+      item("hög igen", "high")
+    ]);
+    expect(ordered.map(({ name }) => name)).toEqual([
+      "dyr",
+      "billig",
+      "hög",
+      "hög igen",
+      "medel",
+      "låg"
+    ]);
   });
 });
 
@@ -226,6 +352,62 @@ describe("suggestionText with the draft's steps", () => {
       suggestion("unused_form_field", [], { field: "Diarienummer" }),
       "Formulärfältet ”Diarienummer” används inte",
       "fyller i det i onödan"
+    ],
+    [
+      suggestion("identical_inputs", ["step-3", "step-1", "step-2"], {
+        producer_step_ids: ["step-1", "step-2"],
+        producer_step_orders: [1, 2],
+        sites: ["input_source", "assistant_prompt:step_2.output.text"],
+        byte_size: 2048,
+        observed_runs: 6,
+        step_runs: 8
+      }),
+      "Steget får samma text från @[Sammanfatta](step:step-1) och @[Skriv svar](step:step-2)",
+      "I 6 av de 8 senaste körningarna fick steget exakt samma text som indata " +
+        "(föregående steg) och i prompten ({{step_2.output.text}}), fast den läses från två olika steg"
+    ],
+    [
+      suggestion("identical_inputs", ["step-3", "step-1", "step-2"], {
+        producer_step_ids: ["step-1", "step-2"],
+        producer_step_orders: [1, 2],
+        sites: ["input_bindings.question", "input_bindings.source_refs[0]"],
+        observed_runs: 1,
+        step_runs: 1
+      }),
+      "Steget får samma text från @[Sammanfatta](step:step-1) och @[Skriv svar](step:step-2)",
+      "I den senaste körningen fick steget exakt samma text i frågan och i källhänvisning 1"
+    ],
+    [
+      suggestion("context_headroom", ["step-2"], {
+        peak_input_tokens: 117_000,
+        token_limit: 128_000,
+        limit_share: 0.91,
+        inline_cap_failures: 0,
+        duplicated_tokens_per_run: 30_000,
+        duplicated_share: 0.26,
+        related_fingerprints: [],
+        step_runs: 8
+      }),
+      "Steget är nära modellens gräns för hur mycket text den tar emot",
+      "Som mest fick modellen 91\u00a0% av vad den kan ta emot. " +
+        "Ungefär 26\u00a0% av det är text som steget får två gånger. Skicka mindre till steget"
+    ],
+    [
+      suggestion("context_headroom", ["step-2"], {
+        peak_input_tokens: null,
+        token_limit: 128_000,
+        limit_share: null,
+        inline_cap_failures: 2,
+        duplicated_share: null,
+        step_runs: 8
+      }),
+      "Underlaget har varit för stort för steget",
+      "2 gånger misslyckades steget för att underlaget var för stort. Skicka mindre"
+    ],
+    [
+      suggestion("format_fallback", ["step-2"], { fallback_runs: 5, step_runs: 8 }),
+      "Steget behöver ofta två anrop till modellen",
+      "I 5 av de 8 senaste körningarna klarade modellen inte att svara i fast format"
     ]
   ])("renders %#: %s", (item, title, explanation) => {
     const step = STEPS.find((candidate) => candidate.id === item.steps[0]);

@@ -91,6 +91,11 @@ type EditorProps = {
   onAskChat?: (text: string) => void;
   /** Makes a suggestion's patch; absent, no "Åtgärda" is offered. */
   suggestionFix?: SuggestionFix;
+  /**
+   * The runs the page's suggestions are measured over ("Räkna med de
+   * senaste körningarna"); 0 or absent for the definition alone.
+   */
+  suggestionRuns?: number;
   /** The steps before and after this one, for "Föregående steg" and "Nästa steg". */
   navigation?: StepNavigation;
   /** For the page: whether leaving loses edits, and leaving after asking. */
@@ -237,6 +242,7 @@ function StepEditorSession({
   onCancel,
   onAskChat,
   suggestionFix,
+  suggestionRuns = 0,
   leaveRef
 }: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
@@ -648,6 +654,7 @@ function StepEditorSession({
         <StepSuggestions
           flow={latest}
           stepId={stepId}
+          runs={suggestionRuns}
           onAskChat={onAskChat}
           fix={suggestionFix}
           fixBlocked={dirty}
