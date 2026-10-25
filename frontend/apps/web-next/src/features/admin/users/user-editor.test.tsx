@@ -78,7 +78,7 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 const type = (dialog: HTMLElement, name: RegExp, value: string) =>
   fireEvent.change(field(dialog, name), { target: { value } });
 const replaceSwitch = (dialog: HTMLElement) =>
-  within(dialog).getByRole("switch", { name: /^Generera ett nytt lösenord/ });
+  within(dialog).getByRole("checkbox", { name: /^Generera ett nytt lösenord/ }) as HTMLInputElement;
 const submit = (dialog: HTMLElement) =>
   fireEvent.submit(
     within(dialog)
@@ -97,6 +97,28 @@ const errorOf = (input: HTMLInputElement) =>
     : null;
 
 afterEach(() => vi.clearAllMocks());
+
+describe("UserEditorDialog's fields", () => {
+  it("shows a username that cannot change as such, and marks only the exception", async () => {
+    const { dialog } = await renderEditor(existing);
+
+    // Read-only, said so, not a disabled field a screen reader skips.
+    const username = field(dialog, /^Användarnamn/);
+    expect(username.readOnly).toBe(true);
+    expect(username.disabled).toBe(false);
+    expect(within(dialog).getByText("Användarnamnet kan inte ändras.")).toBeTruthy();
+    // Required is the default and unmarked (decision 40).
+    const email = within(dialog).getByRole("textbox", { name: "E-post" });
+    expect(email.getAttribute("aria-required")).toBe("true");
+    expect(dialog.textContent).not.toContain("Obligatoriskt");
+    // The new password is a choice made on save: a checkbox, not a switch.
+    expect(replaceSwitch(dialog).checked).toBe(false);
+    // The roles in named groups, each a whole-row checkbox.
+    const standard = within(dialog).getByRole("group", { name: "Standardroller" });
+    expect(within(standard).getByRole("checkbox", { name: "Användare" })).toBeTruthy();
+    await expectNoAxeViolations(dialog);
+  });
+});
 
 describe("UserEditorDialog", () => {
   it("offers no field for typing a password and says one is generated", async () => {

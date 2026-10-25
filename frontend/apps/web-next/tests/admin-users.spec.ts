@@ -56,6 +56,29 @@ test.describe("the admin users table on a phone (decision 9)", () => {
   });
 });
 
+test.describe("the user editor on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("takes a tap anywhere on a role's row", async ({ page }) => {
+    await page.goto("/admin/users");
+    const menu = page.getByRole("button", { name: /^Fler åtgärder för / }).first();
+    await menu.scrollIntoViewIfNeeded();
+    await menu.click();
+    await page.getByRole("menuitem", { name: /redigera/i }).click();
+    const dialog = page.getByRole("dialog", { name: "Redigera användare" });
+    const role = dialog.getByRole("checkbox").last();
+    const before = await role.isChecked();
+    // The row's far end, well past the role's name.
+    const row = (await dialog.getByRole("group").last().boundingBox())!;
+    const box = (await role.boundingBox())!;
+    await page.mouse.click(row.x + row.width - 8, box.y + box.height / 2);
+    expect(await role.isChecked()).toBe(!before);
+    // Nothing is saved.
+    await dialog.getByRole("button", { name: "Avbryt" }).click();
+    await expect(dialog).toBeHidden();
+  });
+});
+
 test.describe("the admin users table on a tablet", () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
 
