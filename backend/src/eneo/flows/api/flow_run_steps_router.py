@@ -351,8 +351,8 @@ async def get_flow_graph(
             wizard_metadata=wizard,
             speaker_identification_available=await speakers_identifiable(
                 wizard,
-                load_space=lambda: container.space_service().get_space(
-                    access.flow.space_id
+                load_space=lambda: container.space_service().get_transcription_space(
+                    access.actor
                 ),
             ),
             speaker_labels=versioned_view.speaker_labels,
@@ -375,8 +375,8 @@ async def get_flow_graph(
         wizard_metadata=wizard,
         speaker_identification_available=await speakers_identifiable(
             wizard,
-            load_space=lambda: container.space_service().get_space(
-                published_access.flow.space_id
+            load_space=lambda: container.space_service().get_transcription_space(
+                published_access.actor
             ),
         ),
     )

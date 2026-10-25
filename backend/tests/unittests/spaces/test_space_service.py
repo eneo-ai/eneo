@@ -131,6 +131,36 @@ async def test_get_applications_projection_rejects_unauthorized_access(
         await service.get_applications_projection(uuid4())
 
 
+async def test_the_transcription_space_is_read_for_the_space_the_actor_reads(
+    service: SpaceService, actor: MagicMock
+):
+    space = MagicMock()
+    service.repo.get_transcription_space.return_value = space
+    actor.can_read_space.return_value = True
+    actor.space.id = uuid4()
+
+    assert await service.get_transcription_space(actor) is space
+    service.repo.get_transcription_space.assert_awaited_once_with(actor.space.id)
+
+
+async def test_the_transcription_space_refuses_an_actor_get_space_refuses(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_read_space.return_value = False
+
+    with pytest.raises(UnauthorizedException) as refused:
+        await service.get_transcription_space(actor)
+    with pytest.raises(UnauthorizedException) as refused_full:
+        await service.get_space(uuid4())
+
+    assert (str(refused.value), refused.value.code, refused.value.context) == (
+        str(refused_full.value),
+        refused_full.value.code,
+        refused_full.value.context,
+    )
+    service.repo.get_transcription_space.assert_not_awaited()
+
+
 async def test_raise_unauthorized_if_user_can_not_edit(
     service: SpaceService, actor: MagicMock
 ):

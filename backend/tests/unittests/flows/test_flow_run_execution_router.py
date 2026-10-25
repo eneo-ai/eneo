@@ -256,7 +256,9 @@ async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_label
         speaker_labels=speaker_labels,
     )
     # The flow's space can use the speaker service the flow chose.
-    container.space_service.return_value.get_space.return_value = _space(None, [chosen])
+    container.space_service.return_value.get_transcription_space.return_value = _space(
+        None, [chosen]
+    )
 
     graph = await get_flow_graph(
         id=flow_id,

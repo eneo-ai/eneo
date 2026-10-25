@@ -28,6 +28,9 @@ from eneo.flows.flow_run_contract_service import (
     max_speakers_option,
     settle_max_speakers,
     speaker_labels_option,
+    speaker_service_gap,
+    speaker_service_gap_in_space,
+    speakers_identifiable,
 )
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -1497,3 +1500,66 @@ def test_the_speaker_bound_comes_from_the_run_the_form_the_flow_or_automatic(
     )
 
     assert bound == settled
+
+
+_USABLE = _connection(1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("wizard", "gap", "reads"),
+    [
+        (None, SpeakerServiceGap.NOT_CHOSEN, 0),
+        (
+            {"transcription_speaker_service": {"id": str(_USABLE.id)}},
+            SpeakerServiceGap.NOT_CHOSEN,
+            0,
+        ),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": "not-a-uuid"},
+            },
+            SpeakerServiceGap.NOT_CHOSEN,
+            0,
+        ),
+        ({"transcription_enabled": True}, SpeakerServiceGap.NOT_CHOSEN, 0),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": str(_USABLE.id)},
+            },
+            None,
+            1,
+        ),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": str(uuid4())},
+            },
+            SpeakerServiceGap.PICKED_UNAVAILABLE,
+            1,
+        ),
+    ],
+    ids=[
+        "no_settings",
+        "transcribes_nothing",
+        "unreadable_choice",
+        "no_service_chosen",
+        "usable_service",
+        "service_the_space_may_not_use",
+    ],
+)
+async def test_the_space_is_read_only_when_the_flow_chose_a_speaker_service(
+    wizard: dict[str, object] | None, gap: SpeakerServiceGap | None, reads: int
+) -> None:
+    space = _space(None, [_USABLE])
+    load_space = AsyncMock(return_value=space)
+
+    found = await speaker_service_gap(wizard, load_space=load_space)
+
+    assert found is gap
+    # The answer a caller holding the whole space gets.
+    assert found is speaker_service_gap_in_space(wizard, space)
+    assert load_space.await_count == reads
+    assert await speakers_identifiable(wizard, load_space=load_space) is (gap is None)

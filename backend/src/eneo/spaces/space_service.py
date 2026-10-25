@@ -293,6 +293,15 @@ class SpaceService:
         _require_space_read(self.actor_manager.get_space_actor(access))
         return access
 
+    async def get_transcription_space(self, actor: "SpaceActor") -> Space:
+        """The space ``actor`` acts in, as far as deciding which transcription
+        services it may use needs (``SpaceRepository.get_transcription_space``),
+        with ``get_space``'s refusal, decided on the facts the actor was built
+        from rather than read again."""
+        _require_space_read(actor)
+        assert actor.space.id is not None, "an actor's facts name their space"
+        return await self.repo.get_transcription_space(actor.space.id)
+
     async def get_applications_projection(
         self, id: UUID
     ) -> SpaceApplicationsProjection:

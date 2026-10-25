@@ -287,19 +287,28 @@ def speaker_service_gap_in_space(
     return resolve_speaker_service(config, space).gap
 
 
+async def speaker_service_gap(
+    wizard_metadata: FlowPersistedJsonObject | None,
+    *,
+    load_space: Callable[[], Awaitable[Space]],
+) -> SpeakerServiceGap | None:
+    """``speaker_service_gap_in_space`` for a caller that has not loaded the
+    space: it is read only when the flow chose a speaker service, the one case
+    the answer depends on it."""
+    config = _transcription_choice(wizard_metadata)
+    if config is None or config.speaker_service_id is None:
+        return SpeakerServiceGap.NOT_CHOSEN
+    return resolve_speaker_service(config, await load_space()).gap
+
+
 async def speakers_identifiable(
     wizard_metadata: FlowPersistedJsonObject | None,
     *,
     load_space: Callable[[], Awaitable[Space]],
 ) -> bool:
-    """Whether a connected service would label this flow's speakers, as
-    ``speaker_service_gap_in_space`` decides it, for a caller that has not
-    loaded the space: it is read only when the flow chose a speaker service,
-    the one case the answer depends on it."""
-    config = _transcription_choice(wizard_metadata)
-    if config is None or config.speaker_service_id is None:
-        return False
-    return resolve_speaker_service(config, await load_space()).gap is None
+    """Whether a connected service would label this flow's speakers
+    (``speaker_service_gap``)."""
+    return await speaker_service_gap(wizard_metadata, load_space=load_space) is None
 
 
 def _transcription_choice(

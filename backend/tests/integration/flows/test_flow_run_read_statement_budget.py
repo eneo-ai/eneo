@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -23,6 +23,17 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserState
+from tests.integration.flows.speaker_service_support import (
+    grant,
+    published_speaker_flow,
+    shared_space,
+    speaker_service,
+)
+from tests.integration.spaces.space_applications_support import (
+    add_apps,
+    add_assistants,
+    space_mcp_servers,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
@@ -33,22 +44,27 @@ _SPACES_USER_GROUPS = re.compile(r"\bFROM spaces_user_groups\b")
 # ceiling when a change saves statements; raise one only with the reason.
 _CEILINGS: dict[str, dict[str, int]] = {
     "space member": {
-        "status": 13,
-        "graph": 14,
-        "run detail": 19,
-        "steps": 19,
-        "runs list": 14,
-        "evidence": 39,
+        "status": 12,
+        "graph": 13,
+        "published graph": 12,
+        "run detail": 18,
+        "steps": 18,
+        "runs list": 13,
+        "evidence": 36,
     },
     "tenant admin": {
-        "status": 13,
-        "graph": 14,
-        "run detail": 18,
-        "steps": 19,
-        "runs list": 14,
-        "evidence": 39,
+        "status": 12,
+        "graph": 13,
+        "published graph": 12,
+        "run detail": 17,
+        "steps": 18,
+        "runs list": 13,
+        "evidence": 36,
     },
 }
+# What a graph read adds for a flow that chose a speaker service: the space's
+# classification and its links to transcription services.
+_SPEAKER_SERVICE_READ = 2
 
 
 async def _no_dispatch(*, run_id, tenant_id, expected_revision) -> None:
@@ -148,6 +164,7 @@ async def test_each_run_read_stays_within_its_statement_budget(
         for route, url in {
             "status": f"{base}/runs/{run_id}/status/",
             "graph": f"{base}/graph/?run_id={run_id}",
+            "published graph": f"{base}/graph/",
             "run detail": f"{base}/runs/{run_id}/",
             "steps": f"{base}/runs/{run_id}/steps/",
             "runs list": f"{base}/runs/?limit=25",
@@ -164,3 +181,148 @@ async def test_each_run_read_stays_within_its_statement_budget(
                 f"{reader} {route} read issued {len(statements)} statements, "
                 f"ceiling {ceiling}:\n" + "\n---\n".join(statements)
             )
+
+
+async def test_a_speaker_flows_graph_poll_reads_none_of_its_spaces_applications(
+    client,
+    db_container,
+    admin_user,
+    flow_process_auth_headers,
+    monkeypatch,
+) -> None:
+    """A flow that chose a speaker service asks its space whether the space
+    may use it on every graph poll, of a run or of the published flow: that
+    answer reads the space's link to the service, never its applications,
+    whatever their number."""
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _no_dispatch,
+    )
+    admin = flow_process_auth_headers
+    space_id = await shared_space(client, admin)
+    service = await speaker_service(client, admin)
+    await grant(client, admin, space_id, service)
+    flow_id = await published_speaker_flow(
+        client, admin, db_container, space_id=space_id, service_id=service
+    )
+    member = await _member_headers(db_container, admin_user, space_id)
+    graph_urls: dict[str, dict[str, str]] = {}
+    for reader, headers in (("tenant admin", admin), ("space member", member)):
+        created = await client.post(
+            f"/api/v1/flows/{flow_id}/runs/",
+            json={"speaker_labels": True},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        graph_urls[reader] = {
+            "graph": f"/api/v1/flows/{flow_id}/graph/?run_id={created.json()['id']}",
+            "published graph": f"/api/v1/flows/{flow_id}/graph/",
+        }
+    servers = await space_mcp_servers(
+        db_container,
+        tenant_id=admin_user.tenant_id,
+        space_id=UUID(space_id),
+        tools=[("a", "b"), ("c",)],
+    )
+
+    counts: dict[tuple[str, str], list[int]] = {}
+    for grown in (0, 4):
+        await add_assistants(
+            client,
+            admin,
+            db_container,
+            space_id=UUID(space_id),
+            servers=servers,
+            count=grown,
+        )
+        await add_apps(client, admin, space_id=UUID(space_id), count=grown)
+        for reader, headers in (("tenant admin", admin), ("space member", member)):
+            for route, url in graph_urls[reader].items():
+                response = await client.get(url, headers=headers)
+                [audio] = [
+                    node
+                    for node in response.json()["nodes"]
+                    if node["input_type"] == "audio"
+                ]
+                assert audio["speaker_identification"] is True
+                statements = await _read(client, url, headers)
+                facts = (
+                    sum(bool(_SPACES_USERS.search(s)) for s in statements),
+                    sum(bool(_SPACES_USER_GROUPS.search(s)) for s in statements),
+                )
+                assert facts == (1, 1), (reader, route, len(statements))
+                ceiling = _CEILINGS[reader][route] + _SPEAKER_SERVICE_READ
+                assert len(statements) <= ceiling, (
+                    f"{reader} speaker {route} read issued {len(statements)} "
+                    f"statements, ceiling {ceiling}:\n" + "\n---\n".join(statements)
+                )
+                counts.setdefault((reader, route), []).append(len(statements))
+
+    assert all(before == after for before, after in counts.values()), counts
+
+
+async def test_a_speaker_flows_run_admission_reads_none_of_its_spaces_applications(
+    client,
+    db_container,
+    admin_user,
+    flow_process_auth_headers,
+    monkeypatch,
+) -> None:
+    """Admitting a run of a flow that chose a speaker service asks the space
+    whether it may use the service from the facts the flow gate read: the
+    caller's facts are read once, and the space's applications never,
+    whatever their number."""
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _no_dispatch,
+    )
+    admin = flow_process_auth_headers
+    space_id = await shared_space(client, admin)
+    service = await speaker_service(client, admin)
+    await grant(client, admin, space_id, service)
+    flow_id = await published_speaker_flow(
+        client, admin, db_container, space_id=space_id, service_id=service
+    )
+    servers = await space_mcp_servers(
+        db_container,
+        tenant_id=admin_user.tenant_id,
+        space_id=UUID(space_id),
+        tools=[("a", "b"), ("c",)],
+    )
+
+    async def admit() -> list[str]:
+        with _statements() as statements:
+            response = await client.post(
+                f"/api/v1/flows/{flow_id}/runs/",
+                json={"speaker_labels": True},
+                headers=admin,
+            )
+        # Admitted with labels: the service still labels this space's speakers.
+        assert response.status_code == 201, response.text
+        return statements
+
+    # The first admission warms per-process caches. The tenant admits a few
+    # runs at once, so each size admits one.
+    await admit()
+    counts: list[int] = []
+    for grown in (0, 4):
+        await add_assistants(
+            client,
+            admin,
+            db_container,
+            space_id=UUID(space_id),
+            servers=servers,
+            count=grown,
+        )
+        await add_apps(client, admin, space_id=UUID(space_id), count=grown)
+        statements = await admit()
+        facts = (
+            sum(bool(_SPACES_USERS.search(s)) for s in statements),
+            sum(bool(_SPACES_USER_GROUPS.search(s)) for s in statements),
+        )
+        assert facts == (1, 1), (grown, len(statements))
+        counts.append(len(statements))
+
+    assert counts[0] == counts[1], counts

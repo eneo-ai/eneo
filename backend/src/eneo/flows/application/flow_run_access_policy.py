@@ -76,9 +76,9 @@ class FlowRunEvidenceAccess:
 
 
 class FlowRunSpaceServiceProtocol(Protocol):
-    async def get_space(self, id: UUID) -> "Space": ...
-
     async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts": ...
+
+    async def get_transcription_space(self, actor: "SpaceActor") -> "Space": ...
 
 
 class FlowRunActorManagerProtocol(Protocol):

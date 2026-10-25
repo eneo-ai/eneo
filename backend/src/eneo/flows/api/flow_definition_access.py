@@ -42,6 +42,7 @@ _FLOW_READ_PERMISSION_MESSAGE = "You do not have permission to access this flow.
 class PublishedFlowRuntimeAccess:
     flow: Flow
     published_version: int
+    actor: SpaceActor
 
 
 def _raise_service_key_admin_required() -> NoReturn:
@@ -172,10 +173,10 @@ async def require_flow_published_runtime_access(
     if published_version is None:
         raise NotFoundException("Flow not found.")
 
-    _require_flow_reader_actor(access_context)
     return PublishedFlowRuntimeAccess(
         flow=access_context.flow,
         published_version=published_version,
+        actor=_require_flow_reader_actor(access_context),
     )
 
 
