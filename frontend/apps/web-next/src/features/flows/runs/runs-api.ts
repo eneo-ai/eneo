@@ -154,7 +154,10 @@ export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine
               ...(filter.mine ? { mine: true } : {}),
               ...(filter.status ? { status: [filter.status] } : {}),
               ...(filter.search ? { search: filter.search } : {}),
-              ...(filter.sort ? { sort: filter.sort.key, order: filter.sort.order } : {})
+              ...(filter.sort ? { sort: filter.sort.key, order: filter.sort.order } : {}),
+              // The list shows the first page's counts; counting the whole
+              // history again for every older page would only be thrown away.
+              ...(pageParam > 0 ? { include_status_counts: false } : {})
             }
           },
           signal
@@ -209,7 +212,10 @@ export function lastOwnRunQueryOptions(flowId: string) {
     queryFn: async ({ signal }): Promise<RunSummary | null> => {
       const page = await unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/", {
-          params: { path: { id: flowId }, query: { limit: 1, mine: true } },
+          params: {
+            path: { id: flowId },
+            query: { limit: 1, mine: true, include_status_counts: false }
+          },
           signal
         })
       );

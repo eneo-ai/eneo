@@ -1703,12 +1703,13 @@ class FlowRunListPublic(BaseModel):
     has_more: bool = Field(
         description="Whether another page exists after the returned offset window."
     )
-    status_counts: FlowRunStatusCountsPublic = Field(
+    status_counts: FlowRunStatusCountsPublic | None = Field(
         description=(
             "How many runs the caller may list have each status, counted over every "
             "page within `mine` and `search` and without the `status` filter, so a "
             "status filter can show what each choice would leave. Counted when the "
-            "page is read; a run can move on before the next read."
+            "page is read; a run can move on before the next read. Null only when "
+            "the request passed `include_status_counts=false`."
         ),
     )
 

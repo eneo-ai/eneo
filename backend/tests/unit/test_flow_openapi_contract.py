@@ -3046,6 +3046,27 @@ def test_openapi_flow_pagination_response_shape_is_current(
     assert "PaginatedResponse_FlowRunSummaryPublic_" not in schemas
 
 
+def test_openapi_flow_run_list_counts_by_default_and_says_null_when_asked_not_to(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "get")
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+    option = parameters["include_status_counts"]
+    assert option["in"] == "query"
+    assert option.get("required", False) is False
+    assert option["schema"]["type"] == "boolean"
+    assert option["schema"]["default"] is True
+
+    component = openapi_spec["components"]["schemas"]["FlowRunListPublic"]
+    # Still always present, so a client reads the key without guessing; null
+    # only for a caller that asked not to count.
+    assert "status_counts" in component["required"]
+    assert component["properties"]["status_counts"]["anyOf"] == [
+        {"$ref": "#/components/schemas/FlowRunStatusCountsPublic"},
+        {"type": "null"},
+    ]
+
+
 def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) -> None:
     schema = (
         openapi_spec.get("components", {})

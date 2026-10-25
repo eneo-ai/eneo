@@ -72,13 +72,21 @@ async def test_migrated_postgres_saves_and_publishes_copy_input_and_guards_rollb
     config.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
     with pytest.raises(RuntimeError, match="1 flow step"):
         command.downgrade(config, "202610121300")
+    script = ScriptDirectory.from_config(config)
+    head = script.get_current_head()
+    assert head is not None
+    version = sa.text("SELECT version_num FROM alembic_version")
     async with db_container() as container:
-        assert (
-            await container.session().scalar(
-                sa.text("SELECT version_num FROM alembic_version")
-            )
-            == ScriptDirectory.from_config(config).get_current_head()
-        )
+        # Index revisions run outside a transaction, so those above the guard
+        # can commit before it refuses; the guarded revision stays applied.
+        assert await container.session().scalar(version) in {
+            revision.revision
+            for revision in script.iterate_revisions(head, "202610121300")
+        }
+    # Those revisions are rerunnable, so an upgrade restores what they undid.
+    command.upgrade(config, "head")
+    async with db_container() as container:
+        assert await container.session().scalar(version) == head
         await container.flow_service().update_flow(
             flow_id=flow.id,
             steps=[

@@ -269,8 +269,53 @@ describe("FlowRunsList", () => {
     renderInApp(<List />);
     fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_show_more }));
     await vi.waitFor(() =>
-      expect(listCalls().at(-1)?.init.params?.query).toEqual({ ...FIRST_PAGE, offset: 25 })
+      expect(listCalls().at(-1)?.init.params?.query).toEqual({
+        ...FIRST_PAGE,
+        offset: 25,
+        include_status_counts: false
+      })
     );
+  });
+
+  it("counts on the first page only, and keeps those counts fresh while it polls", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const OLDER_PAGE = { ...FIRST_PAGE, offset: 25, include_status_counts: false };
+    let failed = 1;
+    state.routes[LIST] = (init: { params?: { query?: { offset?: number } } }) =>
+      init.params?.query?.offset
+        ? {
+            body: {
+              count: 1,
+              items: [makeRunSummary({ id: "run-1", status: "failed" })],
+              has_more: false,
+              status_counts: null
+            }
+          }
+        : {
+            body: {
+              count: 1,
+              items: [makeRunSummary({ id: "run-2", status: "running", finished_at: null })],
+              has_more: true,
+              status_counts: { ...NO_COUNTS, running: 1, failed }
+            }
+          };
+    renderInApp(<List />);
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_show_more }));
+    await vi.waitFor(() => expect(listCalls()).toHaveLength(2));
+    expect(listCalls()[1]?.init.params?.query).toEqual(OLDER_PAGE);
+
+    failed = 2;
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    await vi.waitFor(() => expect(listCalls()).toHaveLength(4));
+    expect(
+      listCalls()
+        .slice(2)
+        .map((call) => call.init.params?.query)
+    ).toEqual([FIRST_PAGE, OLDER_PAGE]);
+    fireEvent.click(screen.getByRole("combobox", { name: messages.flow_run_extras_status_filter }));
+    expect(
+      await screen.findByRole("option", { name: `${messages.flow_runs_status_failed} (2)` })
+    ).toBeTruthy();
   });
 
   it("sends a queued run whose start is due again from its row", async () => {

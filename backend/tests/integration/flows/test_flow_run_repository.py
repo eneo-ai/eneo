@@ -5610,6 +5610,34 @@ def _plan_index_scans(
     ]
 
 
+async def _plan_of_one_read(
+    session, read: Awaitable[object]
+) -> list[tuple[str, object, object]]:
+    """The plan nodes of the one statement ``read`` sends."""
+    bind = session.sync_session.bind
+    assert bind is not None
+    with capture_queries(bind) as captured:
+        await read
+    assert len(captured) == 1
+    connection = await session.connection()
+    explain = await connection.exec_driver_sql(
+        f"EXPLAIN (FORMAT JSON) {captured[0].sql}", captured[0].parameters
+    )
+    return _plan_index_scans(_decode_explain(explain.scalar_one()))
+
+
+def _vacuum_flow_runs(test_settings) -> None:
+    """An index-only scan pays off once the visibility map marks the pages."""
+    engine = sa.create_engine(
+        test_settings.sync_database_url, isolation_level="AUTOCOMMIT"
+    )
+    try:
+        with engine.connect() as autocommit:
+            autocommit.execute(sa.text("VACUUM (ANALYZE) flow_runs"))
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_count(
@@ -5677,35 +5705,12 @@ async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_cou
                 "base": _LISTED_RUN_BASE,
             },
         )
-    # An index-only scan pays off once the visibility map marks the pages.
-    engine = sa.create_engine(
-        test_settings.sync_database_url, isolation_level="AUTOCOMMIT"
-    )
-    try:
-        with engine.connect() as autocommit:
-            autocommit.execute(sa.text("VACUUM (ANALYZE) flow_runs"))
-    finally:
-        engine.dispose()
+    _vacuum_flow_runs(test_settings)
     async with db_container() as container:
         session = container.session()
         await session.execute(sa.text("SET LOCAL enable_seqscan = off"))
         await session.execute(sa.text("SET LOCAL enable_bitmapscan = off"))
         run_repo = FlowRunRepository(session=session)
-        bind = session.sync_session.bind
-        assert bind is not None
-        connection = await session.connection()
-
-        async def plan_of(
-            read: Awaitable[object],
-        ) -> list[tuple[str, object, object]]:
-            with capture_queries(bind) as captured:
-                await read
-            assert len(captured) == 1
-            explain = await connection.exec_driver_sql(
-                f"EXPLAIN (FORMAT JSON) {captured[0].sql}", captured[0].parameters
-            )
-            return _plan_index_scans(_decode_explain(explain.scalar_one()))
-
         pages = {
             "ix_flow_runs_flow_listing": {},
             "ix_flow_runs_flow_user_listing": {
@@ -5717,7 +5722,8 @@ async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_cou
         }
         for index_name, principals in pages.items():
             for order in _LIST_ORDERS:
-                nodes = await plan_of(
+                nodes = await _plan_of_one_read(
+                    session,
                     run_repo.list_statuses(
                         tenant_id=history.tenant_id,
                         flow_id=history.flow_id,
@@ -5725,7 +5731,7 @@ async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_cou
                         offset=0,
                         listing=FlowRunListing.of(sort="started_at", order=order),
                         **principals,  # type: ignore[arg-type]
-                    )
+                    ),
                 )
                 direction = "Forward" if order == "desc" else "Backward"
                 assert ("Index Scan", index_name, direction) in nodes, (
@@ -5735,12 +5741,75 @@ async def test_run_list_indexes_are_eligible_for_the_started_at_page_and_the_cou
                 )
                 assert not any("Sort" in node[0] for node in nodes), nodes
 
-        count_nodes = await plan_of(
+        count_nodes = await _plan_of_one_read(
+            session,
             run_repo.count_statuses(
                 tenant_id=history.tenant_id, flow_id=history.flow_id
-            )
+            ),
         )
         assert any(
             node[:2] == ("Index Only Scan", "ix_flow_runs_flow_listing")
             for node in count_nodes
         ), count_nodes
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_starter_status_counts_are_eligible_for_their_status_indexes(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    user_factory,
+    test_settings,
+):
+    """Plan eligibility only: a vacuumed flow's status count for a member or a
+    service key can be read from that starter's status index alone, already
+    in status order. Sequential and bitmap scans are disabled because a
+    fixture this small is cheaper to read whole. Sorts and hash aggregation
+    are disabled because, in a table other tests have filled, the starter's
+    foreign-key index plus a sort can cost about the same. The plans
+    measured at scale are in revision 202610241100."""
+    async with db_container() as container:
+        session = container.session()
+        history = await _seed_listed_run_history(
+            session,
+            admin_user=admin_user,
+            user_factory=user_factory,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    _vacuum_flow_runs(test_settings)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL enable_seqscan = off"))
+        await session.execute(sa.text("SET LOCAL enable_bitmapscan = off"))
+        await session.execute(sa.text("SET LOCAL enable_sort = off"))
+        await session.execute(sa.text("SET LOCAL enable_hashagg = off"))
+        run_repo = FlowRunRepository(session=session)
+        counts = (
+            ("ix_flow_runs_flow_user_status", {"principal_user_id": history.user_id}),
+            (
+                "ix_flow_runs_flow_user_status",
+                {"principal_user_id": history.colleague_id},
+            ),
+            (
+                "ix_flow_runs_flow_service_status",
+                {"principal_service_id": history.service_principal_id},
+            ),
+        )
+        for index_name, principal in counts:
+            nodes = await _plan_of_one_read(
+                session,
+                run_repo.count_statuses(
+                    tenant_id=history.tenant_id,
+                    flow_id=history.flow_id,
+                    **principal,  # type: ignore[arg-type]
+                ),
+            )
+            assert any(node[:2] == ("Index Only Scan", index_name) for node in nodes), (
+                index_name,
+                nodes,
+            )

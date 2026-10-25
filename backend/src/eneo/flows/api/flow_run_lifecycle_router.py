@@ -574,7 +574,8 @@ async def create_flow_run(
                 "Flow run page. `items` contains the returned page only; "
                 "`count` is the number of returned runs, `has_more` tells "
                 "clients whether to request the next offset window, and "
-                "`status_counts` counts every listed run by status."
+                "`status_counts` counts every listed run by status, or is null "
+                "when `include_status_counts=false`."
             ),
             "content": {
                 "application/json": {
@@ -663,6 +664,17 @@ async def list_flow_runs(
         FlowRunListOrder,
         Query(description="`desc` (the default) or `asc`.", examples=["desc"]),
     ] = "desc",
+    include_status_counts: Annotated[
+        bool,
+        Query(
+            description=(
+                "Whether to count the listed runs by status (the default). A client "
+                "that already has the counts, such as one reading a later page of "
+                "the same list, can pass `false` to skip the count over the whole "
+                "listed history; `status_counts` is then null."
+            ),
+        ),
+    ] = True,
     container: Container = Depends(
         get_container(with_user=True, with_module_user=True)
     ),
@@ -686,8 +698,12 @@ async def list_flow_runs(
         history=True,
         listing=listing,
     )
-    status_counts = await run_service.count_run_statuses(
-        flow_id=id, mine=mine, history=True, search=listing.search
+    status_counts = (
+        await run_service.count_run_statuses(
+            flow_id=id, mine=mine, history=True, search=listing.search
+        )
+        if include_status_counts
+        else None
     )
     page_runs = runs[:limit]
     started_by = await started_by_for_runs(container, page_runs)
@@ -699,9 +715,11 @@ async def list_flow_runs(
             for run in page_runs
         ],
         "has_more": len(runs) > limit,
-        "status_counts": {
-            status.value: count for status, count in status_counts.items()
-        },
+        "status_counts": (
+            None
+            if status_counts is None
+            else {status.value: count for status, count in status_counts.items()}
+        ),
     }
 
 

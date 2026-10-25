@@ -76,12 +76,15 @@ _RETIRED_TABLE_INDEXES = {
 }
 NEW_INDEX_NAMES = ORM_INDEX_NAMES | _RETIRED_TABLE_INDEXES.keys()
 # ORM-declared indexes that later revisions add, absent at REVISION and checked by
-# their own revision's test (202610241000: test_flow_run_listing_indexes_round_trip).
+# their own revision's test (202610241000: test_flow_run_listing_indexes_round_trip,
+# 202610241100: test_flow_run_status_count_indexes_round_trip).
 _LATER_INDEX_NAMES = frozenset(
     {
         "ix_flow_runs_flow_listing",
         "ix_flow_runs_flow_user_listing",
         "ix_flow_runs_flow_service_listing",
+        "ix_flow_runs_flow_user_status",
+        "ix_flow_runs_flow_service_status",
     }
 )
 

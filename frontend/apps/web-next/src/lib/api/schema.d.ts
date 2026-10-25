@@ -23717,8 +23717,8 @@ export interface components {
        * @description The returned page of runs, in the requested order.
        */
       items: components["schemas"]["FlowRunSummaryPublic"][];
-      /** @description How many runs the caller may list have each status, counted over every page within `mine` and `search` and without the `status` filter, so a status filter can show what each choice would leave. Counted when the page is read; a run can move on before the next read. */
-      status_counts: components["schemas"]["FlowRunStatusCountsPublic"];
+      /** @description How many runs the caller may list have each status, counted over every page within `mine` and `search` and without the `status` filter, so a status filter can show what each choice would leave. Counted when the page is read; a run can move on before the next read. Null only when the request passed `include_status_counts=false`. */
+      status_counts: components["schemas"]["FlowRunStatusCountsPublic"] | null;
     };
     /** FlowRunOutboundHttpResultPublic */
     FlowRunOutboundHttpResultPublic: {
@@ -60671,6 +60671,8 @@ export interface operations {
         sort?: "created_at" | "started_at" | "status" | "duration";
         /** @description `desc` (the default) or `asc`. */
         order?: "asc" | "desc";
+        /** @description Whether to count the listed runs by status (the default). A client that already has the counts, such as one reading a later page of the same list, can pass `false` to skip the count over the whole listed history; `status_counts` is then null. */
+        include_status_counts?: boolean;
       };
       header?: never;
       path: {
@@ -60681,7 +60683,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs, `has_more` tells clients whether to request the next offset window, and `status_counts` counts every listed run by status. */
+      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs, `has_more` tells clients whether to request the next offset window, and `status_counts` counts every listed run by status, or is null when `include_status_counts=false`. */
       200: {
         headers: {
           [name: string]: unknown;

@@ -196,6 +196,27 @@ def _flow_run_listing_index(name: str, *starter: str, **options: Any) -> Index:
     )
 
 
+def _flow_run_status_count_index(name: str, starter: str) -> Index:
+    """One starter's runs of a flow by status, so the run list's status count
+    for a member or a service key reads the index alone.
+
+    Measured on 1M runs, 600k in one flow (revision 202610241100): a heavy
+    member's unsearched count went from 60.6 ms (sequential scan) to 7.9 ms
+    (index-only scan), other members' and a service key's from 6-10 to
+    0.5-0.9 ms. The admin count does not use these indexes. Searched counts
+    now start from them too: most are about even, but the heavy member's went
+    from 265 to 306 ms (+16 %, 77k -> 86k buffers).
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        starter,
+        "status",
+        postgresql_where=sa.text(f"{starter} IS NOT NULL"),
+    )
+
+
 def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
     return ",".join(f"('{left}','{right}')" for left, right in values)
 
@@ -1105,6 +1126,12 @@ class FlowRuns(BasePublic):
             "ix_flow_runs_flow_service_listing",
             "principal_service_id",
             postgresql_where=sa.text("principal_service_id IS NOT NULL"),
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_user_status", "principal_user_id"
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_service_status", "principal_service_id"
         ),
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),

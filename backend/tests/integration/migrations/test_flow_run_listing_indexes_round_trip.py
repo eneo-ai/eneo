@@ -35,6 +35,11 @@ NEW_INDEXES = (
     "ix_flow_runs_flow_user_listing",
     "ix_flow_runs_flow_service_listing",
 )
+# ORM-declared indexes that later revisions add, absent at REVISION and checked by
+# their own revision's test (202610241100: test_flow_run_status_count_indexes_round_trip).
+_LATER_INDEX_NAMES = frozenset(
+    {"ix_flow_runs_flow_user_status", "ix_flow_runs_flow_service_status"}
+)
 REPLACED_INDEX = "ix_flow_runs_flow_id"
 REPLACED_DEFINITION = f"CREATE INDEX {REPLACED_INDEX} ON flow_runs (flow_id)"
 
@@ -100,7 +105,7 @@ def _assert_upgraded(conn, engine) -> None:
         assert valid, name
         assert ddl_text(ddl) == ddl_text(_declared_ddl(name))
     assert all(valid for _, valid, _ in indexes.values())
-    assert index_drift(engine) == {}
+    assert index_drift(engine, introduced_later=_LATER_INDEX_NAMES) == {}
 
 
 def _invalidate(conn, name: str) -> None:

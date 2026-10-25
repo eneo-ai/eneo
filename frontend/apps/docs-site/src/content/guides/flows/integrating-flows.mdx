@@ -1192,7 +1192,7 @@ Service keys can drive published runtime paths inside their scope and cannot ins
 
 1. Use a key scoped to the flow's space.
 2. Create runs through published runtime paths, not draft authoring paths.
-3. List runs with `runtime_paths.list_runs`; service keys see only their own runs. Tenant admins and same-space admins and owners also see other people's runs, and `mine=true` lists only the caller's own, which in a module session are the signed-in user's. `search` matches the run label and the starter's name (never run content), `sort` orders by `created_at` (default), `started_at`, `status` or `duration` with `order=asc|desc`, and every page carries `status_counts` for the listed runs before any `status` filter.
+3. List runs with `runtime_paths.list_runs`; service keys see only their own runs. Tenant admins and same-space admins and owners also see other people's runs, and `mine=true` lists only the caller's own, which in a module session are the signed-in user's. `search` matches the run label and the starter's name (never run content), `sort` orders by `created_at` (default), `started_at`, `status` or `duration` with `order=asc|desc`, and each page carries `status_counts` for the listed runs before any `status` filter. Counting costs a query, so pass `include_status_counts=false` (default `true`) on pages that do not show the counts, such as later pages of the same list; `status_counts` is then `null`.
 4. Request evidence only when the key has the explicit evidence permission. The run detail's `evidence_access` says which evidence routes would answer the caller (`can_read_evidence`, `can_export_redacted`, `can_export_raw`) and the code each refusal would carry.
 
 Endpoint facts:

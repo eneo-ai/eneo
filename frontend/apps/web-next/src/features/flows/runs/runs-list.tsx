@@ -251,7 +251,7 @@ export function FlowRunsList({
   const listed = useMemo(() => runs.data?.pages.flatMap((page) => page.items) ?? [], [runs.data]);
   const shown = withStartedRuns(
     listed,
-    runs.data?.pages[0]?.status_counts,
+    runs.data?.pages[0]?.status_counts ?? undefined,
     started,
     filter,
     runs.dataUpdatedAt
