@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
   mode: null as unknown,
   kinds: null as unknown,
   suggestions: null as unknown,
+  apply: null as unknown,
   dirty: false,
   // What went into the chat's composer, text and pills (by the value they send) in order.
   inserted: [] as string[],
@@ -63,6 +64,7 @@ const api = vi.hoisted(() => ({
     if (path === "/api/v1/flows/{id}/authoring-chat/") return state.chat;
     if (path === "/api/v1/flows/{id}/publish/") return state.publish;
     if (path === "/api/v1/flows/{id}/unpublish/") return state.unpublish;
+    if (path === "/api/v1/flows/{id}/suggestions/apply/") return state.apply;
     return { data: undefined, response: new Response() };
   }),
   PATCH: vi.fn(async (path: string) => {
@@ -133,12 +135,17 @@ vi.mock("./editor/flow-step-editor", async () => {
       stepId,
       onCancel,
       leaveRef,
-      navigation
+      navigation,
+      suggestionFix
     }: {
       stepId: string;
       onCancel: () => void;
       leaveRef: React.Ref<{ isDirty: () => boolean; requestLeave: (go: () => void) => void }>;
       navigation: { next: { id: string } | null; onGo: (id: string) => void };
+      suggestionFix?: {
+        onFix: (fingerprints: string[]) => Promise<boolean>;
+        pending: boolean;
+      };
     }) {
       const [asking, setAsking] = useState<(() => void) | null>(null);
       const leave = (go: () => void) => (state.dirty ? setAsking(() => go) : go());
@@ -147,6 +154,15 @@ vi.mock("./editor/flow-step-editor", async () => {
       return (
         <div>
           <p>Redigerar {stepId}</p>
+          {suggestionFix ? (
+            <button
+              type="button"
+              disabled={suggestionFix.pending}
+              onClick={() => void suggestionFix.onFix(["e".repeat(64)])}
+            >
+              Åtgärda i steget
+            </button>
+          ) : null}
           <button type="button" onClick={() => leave(onCancel)}>
             Alla steg
           </button>
@@ -206,6 +222,28 @@ const DUPLICATE_READ = {
 
 const suggestions = (revision: number, items: unknown[]) =>
   ok({ flow_id: "flow-1", draft_revision: revision, items });
+
+/** Another patch suggestion on step 2, for "Åtgärda alla". */
+const SECOND_DUPLICATE = { ...DUPLICATE_READ, fingerprint: "d".repeat(64) };
+
+/** The core's answer to a fix: the flow at its new revision and what became of each. */
+const fixed = (applied: string[], skipped: string[] = []) =>
+  ok({ flow: makeFlow({ draft_revision: 5, steps }), applied, skipped });
+
+function applyBodies() {
+  return api.POST.mock.calls
+    .filter(([path]) => path === "/api/v1/flows/{id}/suggestions/apply/")
+    .map((call) => (call as unknown as [string, { body: unknown }])[1].body);
+}
+
+const suggestionReads = () =>
+  api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/").length;
+
+/** The "Åtgärda" of the suggestion on step 2's card, by its role and name. */
+async function cardFix() {
+  const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+  return within(second).findByRole("button", { name: /^Åtgärda ”/ });
+}
 
 /** The flow's chat, opened for someone who may edit. */
 const CHAT = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
@@ -724,6 +762,132 @@ describe("FlowPage", () => {
     expect(
       api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
     ).toHaveLength(2);
+  });
+
+  it("fixes a suggestion from its card on the revision on screen and takes the new draft", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.apply = fixed([DUPLICATE_READ.fingerprint]);
+    renderPage();
+    const button = await cardFix();
+    // The fixed draft has no suggestion left.
+    state.suggestions = suggestions(5, []);
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Förslaget är åtgärdat"));
+    expect(applyBodies()).toEqual([
+      { expected_revision: 4, fingerprints: [DUPLICATE_READ.fingerprint] }
+    ]);
+    // The flow came back with the answer: its revision asks for its suggestions.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Åtgärda ”/ })).toBeNull());
+    expect(suggestionReads()).toBe(2);
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/{id}/", expect.anything());
+  });
+
+  it("fixes every patch suggestion at once after Åtgärda alla is confirmed", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ, SECOND_DUPLICATE]);
+    state.apply = fixed([DUPLICATE_READ.fingerprint, SECOND_DUPLICATE.fingerprint]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Åtgärda alla (2)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Åtgärda 2 förslag?" });
+    expect(applyBodies()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Åtgärda" }));
+
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("2 förslag är åtgärdade"));
+    expect(applyBodies()).toEqual([
+      {
+        expected_revision: 4,
+        fingerprints: [DUPLICATE_READ.fingerprint, SECOND_DUPLICATE.fingerprint]
+      }
+    ]);
+  });
+
+  it("notes the suggestions an earlier fix made unnecessary", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ, SECOND_DUPLICATE]);
+    state.apply = fixed([DUPLICATE_READ.fingerprint], [SECOND_DUPLICATE.fingerprint]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Åtgärda alla (2)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Åtgärda 2 förslag?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Åtgärda" }));
+
+    const title = await screen.findByText("Ett förslag behövdes inte längre");
+    const note = title.closest("[role=status]");
+    expect(note).not.toBeNull();
+    expect(
+      within(note as HTMLElement).getByText("De andra åtgärderna tog redan hand om det.")
+    ).toBeTruthy();
+    // The fix itself is announced once, where it was pressed.
+    expect(state.announce).toHaveBeenCalledWith("2 förslag är åtgärdade");
+  });
+
+  it("explains a fix of a suggestion that no longer holds and asks for the suggestions again", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.apply = refused(409, { code: "flow_suggestion_stale", message: "Gone." });
+    renderPage();
+    const button = await cardFix();
+    expect(suggestionReads()).toBe(1);
+
+    fireEvent.click(button);
+
+    const notice = await screen.findByRole("alert");
+    expect(within(notice).getByText("Inget förslag åtgärdades")).toBeTruthy();
+    expect(within(notice).getByText(messages.flow_error_flow_suggestion_stale)).toBeTruthy();
+    await waitFor(() => expect(suggestionReads()).toBe(2));
+    expect(state.announce).not.toHaveBeenCalledWith("Förslaget är åtgärdat");
+  });
+
+  it("explains a fix that is not a patch with the catalogue's text", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.apply = refused(409, { code: "flow_suggestion_not_patchable", message: "No." });
+    renderPage();
+
+    fireEvent.click(await cardFix());
+
+    const notice = await screen.findByRole("alert");
+    expect(
+      within(notice).getByText(messages.flow_error_flow_suggestion_not_patchable)
+    ).toBeTruthy();
+  });
+
+  it("makes one fix at a time: a press while one is saved is ignored", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    let answer: (reply: Reply) => void = () => {};
+    state.apply = new Promise<Reply>((resolve) => {
+      answer = resolve;
+    });
+    renderPage();
+    const button = await cardFix();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(applyBodies()).toHaveLength(1));
+    // The same button, now showing that it saves, and "Åtgärda alla".
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: /^Åtgärda alla/ }));
+
+    expect(applyBodies()).toHaveLength(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await act(async () => answer(fixed([DUPLICATE_READ.fingerprint])));
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Förslaget är åtgärdat"));
+  });
+
+  it("fixes the open step's suggestion from its editor through the same call", async () => {
+    setRoute("/?step=step-2");
+    window.history.replaceState(null, "", "/?step=step-2");
+    let answer: (reply: Reply) => void = () => {};
+    state.apply = new Promise<Reply>((resolve) => {
+      answer = resolve;
+    });
+    renderPage();
+    const button = screen.getByRole("button", { name: "Åtgärda i steget" });
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    expect(applyBodies()).toEqual([{ expected_revision: 4, fingerprints: ["e".repeat(64)] }]);
+    await act(async () => answer(fixed(["e".repeat(64)])));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("opens one reference card for both sides, and inserts from the definition into the chat", async () => {

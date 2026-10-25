@@ -46,6 +46,8 @@ import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
+import type { SuggestionFix } from "./flow-suggestion-item";
+import { applyFlowSuggestions, flowSuggestionKeys, SUGGESTION_STALE } from "./flow-suggestions";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
@@ -56,7 +58,12 @@ import { FlowRunsList, runHref } from "./runs/runs-list";
 import { rememberStartedRun } from "./runs/runs-optimistic";
 import { StartRunDialog } from "./runs/start-run-dialog";
 
-type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
+type Notice = {
+  key: number;
+  status: "error" | "warning" | "info";
+  title: string;
+  description: string;
+};
 type View = "definition" | "chat";
 type PageTab = "definition" | "runs";
 type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> & {
@@ -236,6 +243,49 @@ export function FlowPage({ flowId }: { flowId: string }) {
     onSuccess: saved,
     onError: (error) => refused(error, t("flows_notice_not_saved"), steps)
   });
+
+  // "Åtgärda" and "Åtgärda alla": the core makes the fixes on the draft on
+  // screen and answers with the flow, which refetches the step list, the
+  // editor and the suggestions by its revision.
+  const fix = useMutation({
+    mutationFn: (fingerprints: string[]) =>
+      applyFlowSuggestions(flowId, flow.draft_revision, fingerprints),
+    onSuccess: (result) => {
+      saved(result.flow);
+      // The fix itself is announced where it was pressed; that some needed
+      // no fix is a note beside it.
+      const skipped = result.skipped.length;
+      if (skipped > 0) {
+        noticeKey.current += 1;
+        setNotice({
+          key: noticeKey.current,
+          status: "info",
+          title: t("flow_suggestions_skipped_title", { count: skipped }),
+          description: t("flow_suggestions_skipped_description", { count: skipped })
+        });
+      }
+    },
+    onError: (error) => {
+      if (refusalCode(error) === SUGGESTION_STALE) {
+        void queryClient.invalidateQueries({ queryKey: flowSuggestionKeys.all(flowId) });
+      }
+      refused(error, t("flow_suggestions_notice_not_fixed"), steps);
+    }
+  });
+  const suggestionFix: SuggestionFix | undefined = canEdit
+    ? {
+        onFix: async (fingerprints) => {
+          try {
+            await fix.mutateAsync(fingerprints);
+            return true;
+          } catch {
+            // Refused: the notice above the columns says why.
+            return false;
+          }
+        },
+        pending: fix.isPending
+      }
+    : undefined;
 
   const publish = useMutation({
     mutationFn: () => publishFlow(flow),
@@ -626,6 +676,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     stepId={openedStep.id}
                     readOnly={!canEdit}
                     onAskChat={askChat}
+                    suggestionFix={suggestionFix}
                     onSaved={(updated) => {
                       saved(updated);
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
@@ -679,6 +730,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     canEdit={canEdit}
                     changes={chatChanges}
                     onAskChat={askChat}
+                    suggestionFix={suggestionFix}
                     headingRef={stepsHeadingRef}
                     onOpen={openStep}
                     onMove={moveStep}
