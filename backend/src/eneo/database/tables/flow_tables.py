@@ -999,6 +999,15 @@ class FlowRuns(BasePublic):
         Index("ix_flow_runs_job_id", "job_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
+        # One flow's runs newest first (its run list, the suggestions'
+        # measured runs): a read of N runs costs N rows, not the flow's history.
+        Index(
+            "ix_flow_runs_tenant_flow_created_at",
+            "tenant_id",
+            "flow_id",
+            "created_at",
+            "id",
+        ),
         Index(
             "ix_flow_runs_queued_dispatch_due",
             "tenant_id",
