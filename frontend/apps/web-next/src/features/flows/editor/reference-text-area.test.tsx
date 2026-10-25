@@ -115,7 +115,7 @@ describe("TemplateTextArea", () => {
         .getAllByRole("listitem")
         .map((item) => item.textContent)
     ).toEqual([
-      expect.stringContaining("Steg 1: Sammanfatta: Svaret som text"),
+      expect.stringContaining("Steg 1: Sammanfatta › text"),
       expect.stringContaining("Steg 3 finns inte")
     ]);
     await expectNoAxeViolations(container);
@@ -135,7 +135,7 @@ describe("TemplateTextArea", () => {
     );
     const reads = screen.getByRole("list", { name: "Texten läser" });
     expect(within(reads).getByRole("listitem").textContent).toContain(
-      "Steg 1: Sammanfatta: fält, men steget svarar inte i fast format"
+      "Steg 1: Sammanfatta › fält, men steget svarar inte i fast format"
     );
   });
 

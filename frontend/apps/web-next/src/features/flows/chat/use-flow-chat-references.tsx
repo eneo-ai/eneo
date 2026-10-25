@@ -9,10 +9,9 @@ import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
 import type { FlowPublic } from "../editor/step-types";
-import { meaningLabel } from "../editor/step-labels";
 import { stepLabel } from "../flow-labels";
 import { referenceComponents, referenceRemarkPlugins } from "./answer-references";
-import { ReferencePill, ReferencePillButton } from "./reference-pill";
+import { ReferencePill, ReferencePillButton, referenceLabel } from "./reference-pill";
 import {
   RUN_CHOICES,
   referenceChoices,
@@ -25,27 +24,6 @@ import {
 
 type Flow = Pick<FlowPublic, "steps" | "metadata_json">;
 type ChoiceItem = SearchableItem<{ choice: ReferenceChoice; group: string }>;
-
-/** What a menu row says: the step ("1 Extrahera"), or what the value is ("fastighet", "text"). */
-function rowLabel(
-  choice: ReferenceChoice,
-  flow: Flow,
-  t: ReturnType<typeof useTranslations>
-): string {
-  if (choice.kind === "run") {
-    const value = valueOf(choice.token, flow);
-    return value.kind === "value" ? meaningLabel(value.meaning, choice.token, flow, t) : choice.raw;
-  }
-  const step = `${choice.step.step_order} ${choice.step.user_description?.trim() || t("flows_step_unnamed")}`;
-  if (choice.kind === "step") return step;
-  const what =
-    choice.what.type === "field"
-      ? choice.what.field
-      : choice.what.type === "text"
-        ? t("flows_chat_reference_value_text")
-        : t("flows_chat_reference_value_structured");
-  return `${step} › ${what}`;
-}
 
 function toReference(choice: ReferenceChoice, flow: Flow): Reference {
   if (choice.kind === "step") {
@@ -94,7 +72,8 @@ export function useFlowChatReferences(flow: Flow): {
     () =>
       [...referenceChoices(flow), ...RUN_CHOICES].map((choice) => ({
         id: choice.raw,
-        label: rowLabel(choice, flow, t),
+        // What the row's pill says.
+        label: referenceLabel(toReference(choice, flow), flow, t),
         auxiliaryData: {
           choice,
           group:

@@ -85,7 +85,10 @@ export function stepLabel(order: number, name: string | null | undefined, t: T):
     : t("flow_step_editor_step_number", { order });
 }
 
-/** What a reference in a template reads, as a chip names it ("Steg 1: Sammanfatta: svaret"). */
+/**
+ * What a reference reads, as its pill names it wherever it shows: the step as
+ * a step card heads it, then what of it ("Steg 1: Extrahera › fastighet").
+ */
 export function meaningLabel(
   meaning: ReadMeaning,
   token: string,
@@ -112,20 +115,17 @@ export function meaningLabel(
     case "fields_of_text":
       return t("flow_step_editor_read_fields_of_text", { step: step(meaning.order) });
     case "step_answer":
-      return t("flow_editor_tools_preview_read_step", {
+      return t("flows_chat_reference_value", {
         step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_text")
+        what: t("flows_chat_reference_value_text")
       });
     case "step_structured":
-      return t("flow_editor_tools_preview_read_step", {
+      return t("flows_chat_reference_value", {
         step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_structured")
+        what: t("flows_chat_reference_value_structured")
       });
     case "step_field":
-      return t("flow_editor_tools_preview_read_step", {
-        step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_field", { field: meaning.field })
-      });
+      return t("flows_chat_reference_value", { step: step(meaning.order), what: meaning.field });
     case "missing":
       return t("flow_editor_tools_preview_read_missing", { order: meaning.order });
     case "other":

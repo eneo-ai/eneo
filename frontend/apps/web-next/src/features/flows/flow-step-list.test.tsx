@@ -219,15 +219,15 @@ describe("FlowStepList", () => {
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
     const own = await within(second).findByRole("region", { name: "Förslag (1)" });
     // The step it reads is a step pill; the prompt's read a value pill.
-    expect(within(own).getByRole("button", { name: "1 Sammanfatta" })).toBeTruthy();
+    expect(within(own).getByRole("button", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
     fireEvent.click(within(own).getByRole("button", { name: /^Varför\?/ }));
-    const value = within(own).getByRole("button", { name: "1 Sammanfatta › text" });
+    const value = within(own).getByRole("button", { name: "Steg 1: Sammanfatta › text" });
     fireEvent.click(value);
     expect(await screen.findByRole("dialog", { name: "Referens" })).toBeTruthy();
     // The disclosure is named in words, not in the references' syntax.
     expect(
       within(own).getByRole("button", {
-        name: "Varför? Svaret från 1 Sammanfatta skickas två gånger"
+        name: "Varför? Svaret från Steg 1: Sammanfatta skickas två gånger"
       })
     ).toBeTruthy();
     expect(screen.getAllByRole("region", { name: "Förslag (1)" })).toHaveLength(2);
@@ -236,7 +236,7 @@ describe("FlowStepList", () => {
 
     fireEvent.click(
       within(own).getByRole("button", {
-        name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
+        name: "Fråga assistenten om ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
       })
     );
     expect(onAskChat).toHaveBeenCalledWith(
@@ -283,7 +283,7 @@ describe("FlowStepList", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Åtgärda 2 förslag?" });
     expect(within(dialog).getByText("Steg 2: Skriv svar")).toBeTruthy();
     expect(within(dialog).getByText("Körningens formulär")).toBeTruthy();
-    expect(within(dialog).getByText("1 Sammanfatta")).toBeTruthy();
+    expect(within(dialog).getByText("Steg 1: Sammanfatta")).toBeTruthy();
     expect(within(dialog).queryByText("Steg 3: Granska")).toBeNull();
     await expectNoAxeViolations(document.body);
 
@@ -300,7 +300,7 @@ describe("FlowStepList", () => {
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
     fireEvent.click(
       await within(second).findByRole("button", {
-        name: "Åtgärda ”Svaret från 1 Sammanfatta skickas två gånger”"
+        name: "Åtgärda ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
       })
     );
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["a".repeat(64)]));
