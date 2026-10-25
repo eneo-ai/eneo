@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Self, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.config import JsonDict
 
+from eneo.flows.api.flow_suggestion_dismissal_models import (
+    FlowSuggestionDismissedPublic,
+)
+from eneo.flows.domain.flow_suggestion_dismissal import (
+    FlowSuggestionDismissal,
+    split_dismissed,
+)
 from eneo.flows.domain.flow_suggestions import (
     FlowSuggestion,
     FlowSuggestionCode,
@@ -64,6 +72,7 @@ _DUPLICATE_READ_EXAMPLE: JsonDict = {
             ],
         },
     },
+    "dismissed": None,
 }
 
 _THIRD_STEP_ID = "00000000-0000-0000-0000-000000000103"
@@ -106,6 +115,7 @@ _MODEL_RELAY_EXAMPLE: JsonDict = {
         "step_changed_since": False,
     },
     "fix": {"kind": "assisted", "patch": None},
+    "dismissed": None,
 }
 
 _PATCH_EXAMPLE: JsonDict = cast(
@@ -116,6 +126,7 @@ FLOW_SUGGESTIONS_EXAMPLE: JsonDict = {
     "flow_id": _FLOW_ID,
     "draft_revision": 4,
     "runs": {"requested": 10, "counted": 8, "left_out": 2},
+    "dismissed_count": 1,
     "items": [_MODEL_RELAY_EXAMPLE, _DUPLICATE_READ_EXAMPLE],
 }
 
@@ -337,9 +348,21 @@ class FlowSuggestionPublic(BaseModel):
     )
     impact: FlowSuggestionImpactPublic
     fix: FlowSuggestionFixPublic
+    dismissed: FlowSuggestionDismissedPublic | None = Field(
+        default=None,
+        description=(
+            "Who dismissed the suggestion and when, for a suggestion an editor "
+            "of the flow dismissed (listed only with `include_dismissed`); "
+            "null for one that is shown."
+        ),
+    )
 
     @classmethod
-    def from_suggestion(cls, suggestion: FlowSuggestion) -> Self:
+    def from_suggestion(
+        cls,
+        suggestion: FlowSuggestion,
+        dismissal: FlowSuggestionDismissal | None = None,
+    ) -> Self:
         return cls(
             code=suggestion.code,
             fingerprint=suggestion.fingerprint,
@@ -356,6 +379,11 @@ class FlowSuggestionPublic(BaseModel):
                     if suggestion.fix.patch is not None
                     else None
                 ),
+            ),
+            dismissed=(
+                FlowSuggestionDismissedPublic.from_dismissal(dismissal)
+                if dismissal is not None
+                else None
             ),
         )
 
@@ -394,12 +422,21 @@ class FlowSuggestionsPublic(BaseModel):
             "the definition alone."
         ),
     )
+    dismissed_count: int = Field(
+        default=0,
+        description=(
+            "How many of the draft's suggestions an editor of the flow "
+            "dismissed: left out of `items`, unless `include_dismissed` lists "
+            "them with their `dismissed`."
+        ),
+        examples=[1],
+    )
     items: list[FlowSuggestionPublic] = Field(
         description=(
             "The suggestions: those with a measured `impact.tokens_per_run` "
             "first, most tokens first, then by impact level (high, medium, "
-            "low), then step order; at most 50. Empty when the draft gives "
-            "none."
+            "low), then step order; at most 50, dismissed ones counted among "
+            "them. Empty when the draft gives none."
         ),
     )
 
@@ -411,12 +448,26 @@ class FlowSuggestionsPublic(BaseModel):
         draft_revision: int,
         suggestions: tuple[FlowSuggestion, ...],
         runs: FlowSuggestionRunsPublic | None = None,
+        dismissals: Mapping[str, FlowSuggestionDismissal] | None = None,
+        include_dismissed: bool = False,
     ) -> Self:
+        """The answer for ``suggestions``: those ``dismissals`` name are left
+        out and counted, or with ``include_dismissed`` listed in their place
+        and marked."""
+        dismissals = dismissals or {}
+        split = split_dismissed(suggestions, dismissals)
+        listed = suggestions if include_dismissed else split.shown
         return cls(
             flow_id=flow_id,
             draft_revision=draft_revision,
             runs=runs,
-            items=[FlowSuggestionPublic.from_suggestion(s) for s in suggestions],
+            dismissed_count=len(split.dismissed),
+            items=[
+                FlowSuggestionPublic.from_suggestion(
+                    item, dismissals.get(item.fingerprint)
+                )
+                for item in listed
+            ],
         )
 
 

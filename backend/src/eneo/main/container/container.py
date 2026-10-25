@@ -161,6 +161,9 @@ from eneo.flows.infrastructure.flow_run_starter_repo import FlowRunStarterReposi
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.flows.infrastructure.flow_suggestion_dismissal_repo import (
+    FlowSuggestionDismissalRepository,
+)
 from eneo.flows.infrastructure.flow_suggestion_evidence_repo import (
     FlowSuggestionEvidenceRepository,
 )
@@ -956,6 +959,10 @@ class Container(containers.DeclarativeContainer):
     )
     flow_suggestion_evidence_repo = providers.Factory(
         FlowSuggestionEvidenceRepository,
+        session=session,
+    )
+    flow_suggestion_dismissal_repo = providers.Factory(
+        FlowSuggestionDismissalRepository,
         session=session,
     )
     flow_run_starter_repo = providers.Factory(

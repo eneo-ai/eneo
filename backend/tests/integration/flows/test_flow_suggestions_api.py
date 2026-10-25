@@ -1,10 +1,13 @@
-"""``GET /flows/{id}/suggestions/``: the draft's suggestions, for the people
-who may edit the flow, inside their tenant."""
+"""The suggestion routes of a flow: reading the draft's suggestions,
+applying their fixes and dismissing them, for the people who may edit the
+flow, inside their tenant."""
 
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -948,3 +951,278 @@ async def test_the_forwarding_facts_of_another_tenant_are_never_read(
     )
     assert reader.forwarding == _relay_facts()
     assert other == {}
+
+
+# --- Dismissing suggestions ---------------------------------------------------
+
+
+def _dismissal_path(flow: Tracer, fingerprint: str) -> str:
+    return f"/api/v1/flows/{flow.flow_id}/suggestions/{fingerprint}/dismissal/"
+
+
+async def _dismiss(
+    client: AsyncClient,
+    flow: Tracer,
+    fingerprint: str,
+    code: str = "duplicate_read",
+    headers: dict[str, str] | None = None,
+):
+    return await client.post(
+        _dismissal_path(flow, fingerprint),
+        json={"code": code},
+        headers=headers or flow.headers,
+    )
+
+
+async def _restore(
+    client: AsyncClient,
+    flow: Tracer,
+    fingerprint: str,
+    headers: dict[str, str] | None = None,
+):
+    return await client.delete(
+        _dismissal_path(flow, fingerprint), headers=headers or flow.headers
+    )
+
+
+async def _audits(db_container, flow_id: UUID, action: ActionType) -> list[Any]:
+    async with db_container() as container:
+        rows = await container.session().scalars(
+            sa.select(AuditLog.log_metadata)
+            .where(AuditLog.entity_id == flow_id)
+            .where(AuditLog.action == action.value)
+        )
+        return [dict(row) for row in rows]
+
+
+async def test_a_dismissed_suggestion_is_left_out_counted_and_listed_on_request(
+    client: AsyncClient, db_container, admin_user, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+
+    response = await _dismiss(client, tracer, item["fingerprint"])
+
+    assert response.status_code == 200, response.text
+    dismissal = response.json()
+    assert dismissal["flow_id"] == str(tracer.flow_id)
+    assert dismissal["fingerprint"] == item["fingerprint"]
+    assert dismissal["code"] == "duplicate_read"
+    assert dismissal["dismissed_by"] == str(admin_user.id)
+    listed = await _suggestions(client, tracer)
+    assert listed["items"] == []
+    assert listed["dismissed_count"] == 1
+    with_dismissed = await client.get(
+        f"/api/v1/flows/{tracer.flow_id}/suggestions/",
+        params={"include_dismissed": "true"},
+        headers=tracer.headers,
+    )
+    assert with_dismissed.status_code == 200, with_dismissed.text
+    (marked,) = with_dismissed.json()["items"]
+    assert marked["fingerprint"] == item["fingerprint"]
+    assert marked["dismissed"] == {
+        "dismissed_by": str(admin_user.id),
+        "dismissed_at": dismissal["dismissed_at"],
+    }
+    assert with_dismissed.json()["dismissed_count"] == 1
+    (audit,) = await _audits(
+        db_container, tracer.flow_id, ActionType.FLOW_SUGGESTION_DISMISSED
+    )
+    assert audit["extra"]["suggestion_fingerprint"] == item["fingerprint"]
+    assert audit["extra"]["suggestion_code"] == "duplicate_read"
+    # A dismissal changes nothing of the draft, and apply still names it.
+    assert listed["draft_revision"] == with_dismissed.json()["draft_revision"]
+    applied = await _apply(
+        client, tracer, [item["fingerprint"]], listed["draft_revision"]
+    )
+    assert applied.status_code == 200, applied.text
+
+
+async def test_dismissing_again_answers_as_the_first_and_audits_once(
+    client: AsyncClient, db_container, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+
+    first = await _dismiss(client, tracer, item["fingerprint"])
+    second = await _dismiss(client, tracer, item["fingerprint"])
+
+    assert first.status_code == second.status_code == 200, second.text
+    assert second.json() == first.json()
+    assert (
+        len(
+            await _audits(
+                db_container, tracer.flow_id, ActionType.FLOW_SUGGESTION_DISMISSED
+            )
+        )
+        == 1
+    )
+
+
+async def test_restoring_shows_the_suggestion_again_and_a_second_restore_is_404(
+    client: AsyncClient, db_container, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+    await _dismiss(client, tracer, item["fingerprint"])
+
+    response = await _restore(client, tracer, item["fingerprint"])
+
+    assert response.status_code == 204, response.text
+    assert response.content == b""
+    listed = await _suggestions(client, tracer)
+    assert [entry["fingerprint"] for entry in listed["items"]] == [item["fingerprint"]]
+    assert listed["dismissed_count"] == 0
+    (audit,) = await _audits(
+        db_container, tracer.flow_id, ActionType.FLOW_SUGGESTION_RESTORED
+    )
+    assert audit["extra"]["suggestion_fingerprint"] == item["fingerprint"]
+    assert audit["extra"]["suggestion_code"] == "duplicate_read"
+
+    again = await _restore(client, tracer, item["fingerprint"])
+
+    assert again.status_code == 404, again.text
+    assert (
+        len(
+            await _audits(
+                db_container, tracer.flow_id, ActionType.FLOW_SUGGESTION_RESTORED
+            )
+        )
+        == 1
+    )
+
+
+async def test_a_static_suggestion_the_draft_does_not_have_is_stale(
+    client: AsyncClient, db_container, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+
+    unknown = await _dismiss(client, tracer, "0" * 64)
+    # The draft's suggestion under a code it does not have.
+    miscoded = await _dismiss(client, tracer, item["fingerprint"], code="model_relay")
+    malformed = await _dismiss(client, tracer, "not-a-fingerprint")
+
+    for response in (unknown, miscoded):
+        assert response.status_code == 409, response.text
+        assert response.json()["code"] == "flow_suggestion_stale"
+    assert unknown.json()["context"]["fingerprint"] == "0" * 64
+    assert malformed.status_code == 422, malformed.text
+    assert (await _suggestions(client, tracer))["dismissed_count"] == 0
+    assert (
+        await _audits(
+            db_container, tracer.flow_id, ActionType.FLOW_SUGGESTION_DISMISSED
+        )
+        == []
+    )
+
+
+async def test_a_viewer_may_neither_dismiss_nor_restore(
+    client: AsyncClient, db_container, admin_user, user_factory, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+    await _dismiss(client, tracer, item["fingerprint"])
+    token = await _viewer_token(db_container, admin_user, user_factory, tracer.space_id)
+    viewer = {"Authorization": f"Bearer {token}"}
+
+    dismissed = await _dismiss(client, tracer, "1" * 64, headers=viewer)
+    restored = await _restore(client, tracer, item["fingerprint"], headers=viewer)
+
+    assert dismissed.status_code == 403, dismissed.text
+    assert restored.status_code == 403, restored.text
+    assert dismissed.json()["code"] == "insufficient_space_permission"
+    assert (await _suggestions(client, tracer))["dismissed_count"] == 1
+
+
+async def test_dismissals_of_another_tenants_flow_are_not_found_or_read(
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    user_factory,
+    tenant_factory,
+    tracer: Tracer,
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+    await _dismiss(client, tracer, item["fingerprint"])
+    token = await _outsider_token(db_container, user_factory, tenant_factory)
+    outsider = {"Authorization": f"Bearer {token}"}
+
+    dismissed = await _dismiss(client, tracer, item["fingerprint"], headers=outsider)
+    restored = await _restore(client, tracer, item["fingerprint"], headers=outsider)
+
+    assert dismissed.status_code == 404, dismissed.text
+    assert restored.status_code == 404, restored.text
+    # Every statement of the repository names the tenant it is asked for.
+    other_tenant = uuid4()
+    async with db_container() as container:
+        repo = container.flow_suggestion_dismissal_repo()
+        own = await repo.list_for_flow(
+            flow_id=tracer.flow_id, tenant_id=admin_user.tenant_id
+        )
+        assert set(own) == {item["fingerprint"]}
+        assert (
+            await repo.list_for_flow(flow_id=tracer.flow_id, tenant_id=other_tenant)
+            == {}
+        )
+        assert (
+            await repo.get(
+                flow_id=tracer.flow_id,
+                tenant_id=other_tenant,
+                fingerprint=item["fingerprint"],
+            )
+            is None
+        )
+        assert (
+            await repo.remove(
+                flow_id=tracer.flow_id,
+                tenant_id=other_tenant,
+                fingerprint=item["fingerprint"],
+            )
+            is None
+        )
+    assert (await _suggestions(client, tracer))["dismissed_count"] == 1
+
+
+async def test_a_measured_read_leaves_out_a_dismissed_measured_suggestion(
+    client: AsyncClient, db_container, admin_user, patch_auth_service_jwt
+):
+    flow = await _relay_flow(client, db_container, admin_user)
+    await _seed_relay_run(db_container, flow, admin_user)
+    token = await _token_with(
+        db_container, admin_user.id, admin_user.tenant_id, _TRACE_AUTHOR
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    measured = (await _measured(client, flow, headers, runs=1)).json()
+    (relay,) = [item for item in measured["items"] if item["code"] == "model_relay"]
+
+    # A measured code is taken as given: checking it would read the runs.
+    response = await _dismiss(
+        client, flow, relay["fingerprint"], code="model_relay", headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    after = (await _measured(client, flow, headers, runs=1)).json()
+    assert [item for item in after["items"] if item["code"] == "model_relay"] == []
+    assert after["dismissed_count"] == 1
+    assert len(after["items"]) == len(measured["items"]) - 1
+
+
+async def test_a_package_export_carries_no_dismissal(
+    client: AsyncClient, tracer: Tracer
+):
+    (item,) = (await _suggestions(client, tracer))["items"]
+    assert (await _dismiss(client, tracer, item["fingerprint"])).status_code == 200
+
+    response = await client.post(
+        f"/api/v1/flows/{tracer.flow_id}/package-exports/",
+        json={
+            "package_id": "se.demo.letter-summary",
+            "package_version": "1.0.0",
+            "name": "Letter summary",
+        },
+        headers=tracer.headers,
+    )
+
+    assert response.status_code == 200, response.text
+    with zipfile.ZipFile(BytesIO(response.content)) as package:
+        members = [package.read(name) for name in package.namelist()]
+    assert members
+    for content in members:
+        assert item["fingerprint"].encode() not in content
+        assert b"dismiss" not in content.lower()

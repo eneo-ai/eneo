@@ -355,6 +355,83 @@ async def test_apply_flow_suggestions_reports_a_stale_suggestion(monkeypatch):
     assert json.loads(result.content[0].text)["code"] == "flow_suggestion_stale"
 
 
+def _dismissing_chat(monkeypatch, *, editing: bool):
+    from datetime import datetime, timezone
+
+    from eneo.flows.application import flow_suggestion_dismissals
+    from eneo.flows.domain.flow_suggestion_dismissal import FlowSuggestionDismissal
+
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=editing)
+    monkeypatch.setattr(
+        flows, "internal_tool_context", _tool_context(_transaction_container([]))
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    if editing:
+        monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+    dismiss = AsyncMock(
+        return_value=FlowSuggestionDismissal(
+            fingerprint=_FINGERPRINT,
+            code="duplicate_read",
+            dismissed_by=uuid4(),
+            dismissed_at=datetime.now(timezone.utc),
+        )
+    )
+    monkeypatch.setattr(flow_suggestion_dismissals, "dismiss_flow_suggestion", dismiss)
+    return chat, dismiss
+
+
+_FINGERPRINT = "9b2d3f1a" * 8
+
+
+async def test_dismiss_flow_suggestion_is_refused_outside_edit_mode(monkeypatch):
+    _, dismiss = _dismissing_chat(monkeypatch, editing=False)
+
+    result = await flows.dismiss_flow_suggestion(
+        MagicMock(), fingerprint=_FINGERPRINT, code="duplicate_read"
+    )
+
+    assert result.isError is True
+    dismiss.assert_not_awaited()
+
+
+async def test_dismiss_flow_suggestion_dismisses_in_edit_mode(monkeypatch):
+    from eneo.flows.domain.flow_suggestions import FlowSuggestionCode
+
+    chat, dismiss = _dismissing_chat(monkeypatch, editing=True)
+
+    result = await flows.dismiss_flow_suggestion(
+        MagicMock(), fingerprint=_FINGERPRINT, code="duplicate_read"
+    )
+
+    assert result.isError is not True
+    assert json.loads(json.loads(result.content[0].text)["content"]) == {
+        "dismissed": True,
+        "fingerprint": _FINGERPRINT,
+        "code": "duplicate_read",
+    }
+    assert dismiss.await_args.args[0] == chat.flow_id
+    assert dismiss.await_args.kwargs["fingerprint"] == _FINGERPRINT
+    assert dismiss.await_args.kwargs["code"] is FlowSuggestionCode.DUPLICATE_READ
+
+
+async def test_dismiss_flow_suggestion_refuses_an_unknown_code_or_fingerprint(
+    monkeypatch,
+):
+    _, dismiss = _dismissing_chat(monkeypatch, editing=True)
+
+    for fingerprint, code in (
+        (_FINGERPRINT, "no_such_code"),
+        ("abc", "duplicate_read"),
+    ):
+        result = await flows.dismiss_flow_suggestion(
+            MagicMock(), fingerprint=fingerprint, code=code
+        )
+        assert result.isError is True
+    dismiss.assert_not_awaited()
+
+
 # --- Suggestions a chat change introduces ------------------------------------
 
 
@@ -384,10 +461,21 @@ def _draft(prompt: str):
 _DRAFT_IDS = [uuid4() for _ in range(4)]
 
 
-def _changing_chat(monkeypatch, *, before: str, after: str, fail: bool = False):
+def _changing_chat(
+    monkeypatch,
+    *,
+    before: str,
+    after: str,
+    fail: bool = False,
+    dismissed: dict | None = None,
+):
     """A chat in edit mode whose update_step saves the draft from ``before``
-    to ``after`` (the step 2 prompt); ``fail`` breaks the analysis."""
+    to ``after`` (the step 2 prompt); ``fail`` breaks the analysis, and
+    ``dismissed`` are the flow's dismissals by fingerprint."""
     container = _transaction_container([])
+    container.flow_suggestion_dismissal_repo.return_value.list_for_flow = AsyncMock(
+        return_value=dismissed or {}
+    )
     chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
@@ -454,6 +542,36 @@ async def test_a_change_that_adds_nothing_reports_an_empty_list(monkeypatch):
 
 async def test_a_change_that_fixes_a_suggestion_reports_none_and_fewer(monkeypatch):
     _changing_chat(monkeypatch, before=_DUPLICATE_PROMPT, after="Sammanfatta.")
+
+    page = await _update_step()
+
+    assert page["introduced_suggestions"] == []
+    assert page["suggestion_count"] == 0
+
+
+async def test_a_dismissed_suggestion_a_change_brings_back_is_not_reported(
+    monkeypatch,
+):
+    from datetime import datetime, timezone
+
+    from eneo.flows.application.flow_suggestion_service import flow_suggestions
+    from eneo.flows.domain.flow_suggestion_dismissal import FlowSuggestionDismissal
+
+    flow, prompts = _draft(_DUPLICATE_PROMPT)
+    (duplicate,) = flow_suggestions(flow, prompts=prompts)
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after=_DUPLICATE_PROMPT,
+        dismissed={
+            duplicate.fingerprint: FlowSuggestionDismissal(
+                fingerprint=duplicate.fingerprint,
+                code=duplicate.code.value,
+                dismissed_by=None,
+                dismissed_at=datetime.now(timezone.utc),
+            )
+        },
+    )
 
     page = await _update_step()
 

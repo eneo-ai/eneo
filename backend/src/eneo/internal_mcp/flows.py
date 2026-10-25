@@ -164,10 +164,14 @@ async def _call(
 
 async def _draft_suggestions(container, flow_id: UUID):
     """The draft's static suggestions and its steps, read in a savepoint of
-    the change's transaction; None when they cannot be computed. A failure
-    is logged by its kind only and never fails the change."""
+    the change's transaction, without those the flow's editors dismissed;
+    None when they cannot be computed. A failure is logged by its kind only
+    and never fails the change."""
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from eneo.flows.application.flow_suggestion_dismissals import (
+        shown_flow_suggestions,
+    )
     from eneo.flows.application.flow_suggestion_service import (
         list_flow_suggestions,
     )
@@ -175,8 +179,9 @@ async def _draft_suggestions(container, flow_id: UUID):
     try:
         async with cast(AsyncSession, container.session()).begin_nested():
             flow = await container.flow_service().get_flow(flow_id)
-            return flow.steps, await list_flow_suggestions(
-                container=container, flow=flow
+            suggestions = await list_flow_suggestions(container=container, flow=flow)
+            return flow.steps, await shown_flow_suggestions(
+                container, flow, suggestions
             )
     except Exception as exc:  # noqa: BLE001 - the change must not depend on it
         logger.warning(
@@ -191,8 +196,8 @@ async def _with_introduced(
 ) -> CallToolResult:
     """``result`` with the suggestions the change introduced
     (``introduced_suggestions``, in short) and the draft's
-    ``suggestion_count`` added to its page; ``result`` unchanged when either
-    side could not be computed."""
+    ``suggestion_count`` added to its page, dismissed suggestions left out
+    of both; ``result`` unchanged when either side could not be computed."""
     from eneo.flows.application.flow_suggestion_service import (
         MAX_REPORTED_INTRODUCED,
         introduced_suggestions,
@@ -758,12 +763,15 @@ async def read_flow_suggestions(
     deterministic_candidate (a model step only copies its inputs, which a
     compose_text step does without a model), and oversized_reasoning (a step
     asks for high reasoning effort for a small extraction into JSON);
-    runs.counted and runs.left_out say how many runs were measured. Only numbers come from the runs, never
-    their content, and the read is audited. It needs the permission to view flow traces: without
-    it the result is the definition alone and its note says why. Suggestions
-    never block publishing and the tool changes nothing: a fix the user
-    agrees to is made with apply_flow_suggestions when its fix.kind is patch,
-    otherwise with update_step, both in edit mode. Works in view mode."""
+    runs.counted and runs.left_out say how many runs were measured. Only
+    numbers come from the runs, never their content, and the read is
+    audited. It needs the permission to view flow traces: without it the
+    result is the definition alone and its note says why. Suggestions an
+    editor of the flow dismissed are left out; dismissed_count says how
+    many. Suggestions never block publishing and the tool changes nothing: a
+    fix the user agrees to is made with apply_flow_suggestions when its
+    fix.kind is patch, otherwise with update_step, both in edit mode. Works
+    in view mode."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_suggestions_router import (
@@ -849,6 +857,50 @@ async def apply_flow_suggestions(
         )
 
     return await _call(ctx, operation, changes_draft=True)
+
+
+@mcp.tool()
+async def dismiss_flow_suggestion(
+    ctx: Context, fingerprint: str, code: str
+) -> CallToolResult:
+    """Hide one suggestion read_flow_suggestions reported, named by its
+    fingerprint and code, only when the user asks to hide or ignore that
+    suggestion; never on your own judgement. The suggestion is then left out
+    for everyone who edits this flow until a change to the draft changes
+    what it is about. It changes nothing of the flow itself. A suggestion
+    from the definition is refused with flow_suggestion_stale when the draft
+    no longer has it (read the suggestions again). Dismissing one again
+    changes nothing. Edit mode only."""
+
+    async def operation(container, chat, request):
+        from pydantic import TypeAdapter
+
+        from eneo.flows.api.flow_suggestion_dismissal_models import (
+            FlowSuggestionDismissalRequest,
+            SuggestionFingerprint,
+        )
+        from eneo.flows.application.flow_suggestion_dismissals import (
+            dismiss_flow_suggestion as dismiss,
+        )
+
+        body = FlowSuggestionDismissalRequest.model_validate({"code": code})
+        dismissal = await dismiss(
+            chat.flow_id,
+            request,
+            fingerprint=TypeAdapter(SuggestionFingerprint).validate_python(fingerprint),
+            code=body.code,
+            container=container,
+        )
+        return page_result(
+            {
+                "dismissed": True,
+                "fingerprint": dismissal.fingerprint,
+                "code": dismissal.code,
+            },
+            flow_id=chat.flow_id,
+        )
+
+    return await _call(ctx, operation, editing=True)
 
 
 @mcp.tool()

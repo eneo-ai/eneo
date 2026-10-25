@@ -137,6 +137,8 @@ class ActionType(str, Enum):
     FLOW_DELETED = "flow_deleted"
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"
+    FLOW_SUGGESTION_DISMISSED = "flow_suggestion_dismissed"
+    FLOW_SUGGESTION_RESTORED = "flow_suggestion_restored"
     FLOW_RUN_RETENTION_POLICY_CHANGED = "flow_run_retention_policy_changed"
     FLOW_RUN_HISTORY_PURGED = "flow_run_history_purged"
     FLOW_RETENTION_HOLD_PLACED = "flow_retention_hold_placed"

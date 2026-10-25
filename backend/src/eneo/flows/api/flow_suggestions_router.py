@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Path, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -23,6 +25,12 @@ from eneo.flows.api.flow_suggestion_apply_models import (
     FlowSuggestionsAppliedPublic,
     FlowSuggestionsApplyRequest,
 )
+from eneo.flows.api.flow_suggestion_dismissal_models import (
+    FLOW_SUGGESTION_DISMISSAL_EXAMPLE,
+    FlowSuggestionDismissalPublic,
+    FlowSuggestionDismissalRequest,
+    SuggestionFingerprint,
+)
 from eneo.flows.api.flow_suggestions_models import (
     FLOW_SUGGESTIONS_EXAMPLE,
     FlowSuggestionRunsPublic,
@@ -32,6 +40,12 @@ from eneo.flows.application import flow_authoring_operations as authoring_operat
 from eneo.flows.application import flow_suggestion_apply
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_suggestion_dismissals import (
+    NOT_DISMISSED_MESSAGE,
+    dismiss_flow_suggestion,
+    flow_suggestion_dismissals,
+    restore_flow_suggestion,
 )
 from eneo.flows.application.flow_suggestion_service import (
     list_flow_suggestions,
@@ -64,6 +78,10 @@ _AUTHORING_CONTAINER = get_container_for_explicit_transaction(
 # Reading suggestions owns its transaction too: a measured read commits its
 # audit entry before the answer is sent.
 _READ_CONTAINER = get_container_for_explicit_transaction(
+    with_user=True, with_module_user=True
+)
+# A dismissal and its required audit entry commit together in the route.
+_DISMISSAL_CONTAINER = get_container_for_explicit_transaction(
     with_user=True, with_module_user=True
 )
 
@@ -144,7 +162,12 @@ _SUGGESTIONS_DESCRIPTION = (
     "(`fix.kind`). Suggestions never block publishing and never change the "
     "flow: acting on one is a separate, explicit editor update. The answer "
     "judges `draft_revision`; read again after a save. It reads the prompts "
-    "of the flow's assistants, so it needs the permission to edit the flow."
+    "of the flow's assistants, so it needs the permission to edit the flow.\n\n"
+    "A suggestion an editor of the flow dismissed (`POST .../dismissal/`) is "
+    "left out for every editor and counted in `dismissed_count`, static and "
+    "measured alike; with `include_dismissed=true` it is listed in its place "
+    "with `dismissed` saying who dismissed it and when. A dismissal hides "
+    "only the fingerprint it names, so it lapses when the premise changes."
 )
 
 
@@ -212,6 +235,16 @@ async def get_flow_suggestions(
             ),
         ),
     ] = 0,
+    include_dismissed: Annotated[
+        bool,
+        Query(
+            description=(
+                "List the suggestions an editor of the flow dismissed too, "
+                "each with `dismissed`; by default they are left out and "
+                "counted in `dismissed_count`."
+            ),
+        ),
+    ] = False,
     container: Container = Depends(_READ_CONTAINER),
 ) -> FlowSuggestionsPublic:
     # The audit entry of a measured read commits with the read, before the
@@ -220,7 +253,11 @@ async def get_flow_suggestions(
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             answer = await read_flow_suggestions_answer(
-                id=id, request=request, runs=runs, container=container
+                id=id,
+                request=request,
+                runs=runs,
+                include_dismissed=include_dismissed,
+                container=container,
             )
             audited_flow = id if answer.runs is not None else None
     except AuditLoggingUnavailableException:
@@ -238,11 +275,17 @@ async def get_flow_suggestions(
 
 
 async def read_flow_suggestions_answer(
-    *, id: UUID, request: Request, runs: int, container: Container
+    *,
+    id: UUID,
+    request: Request,
+    runs: int,
+    container: Container,
+    include_dismissed: bool = False,
 ) -> FlowSuggestionsPublic:
     """The answer of ``GET .../suggestions/`` in the caller's transaction:
     edit access to the flow, and with ``runs`` above 0 the trace permission,
-    then the suggestions, measured over ``runs`` runs when asked."""
+    then the suggestions, measured over ``runs`` runs when asked, without
+    those the flow's editors dismissed unless ``include_dismissed``."""
     access = await require_flow_edit_access(request, container, flow_id=id)
     flow = access.flow
     if runs <= 0:
@@ -263,6 +306,8 @@ async def read_flow_suggestions_answer(
         draft_revision=flow.draft_revision,
         suggestions=suggestions,
         runs=measured_runs,
+        dismissals=await flow_suggestion_dismissals(container, flow),
+        include_dismissed=include_dismissed,
     )
 
 
@@ -360,4 +405,165 @@ async def apply_flow_suggestions(
     )
 
 
-__all__ = ["read_flow_suggestions_answer", "router"]
+FingerprintPath = Annotated[
+    SuggestionFingerprint,
+    Path(
+        description=(
+            "The `fingerprint` of the suggestion, as the suggestions answer "
+            "gives it: 64 lowercase hex characters."
+        ),
+    ),
+]
+_DISMISSAL_DESCRIPTION = (
+    "Dismissal is the flow's, not the caller's: a dismissed suggestion is "
+    "left out of `GET .../suggestions/` for every editor of the flow, static "
+    "and measured reads alike, and counted in its `dismissed_count`. It hides "
+    "only the fingerprint it names, so it lapses by itself when a change to "
+    "the draft changes the suggestion's premise. It changes nothing of the "
+    "flow: not the draft or its revision, not publishing, and a flow package "
+    "carries no dismissals. Applying a suggestion still works on a dismissed "
+    "one, since apply names its fingerprints. It needs the permission to "
+    "edit the flow. Each change writes one audit entry on the flow, saved "
+    "with it: when the entry cannot be written, nothing is saved."
+)
+
+
+@router.post(
+    "/{id}/suggestions/{fingerprint}/dismissal/",
+    response_model=FlowSuggestionDismissalPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="dismiss_flow_suggestion",
+    summary="Dismiss Flow Suggestion",
+    description=(
+        "Hide one suggestion of the draft from the flow's suggestions, for "
+        "example a finding the flow's editors decided to keep as it is. "
+        "`code` is the suggestion's code. A suggestion the definition proves "
+        "is checked against the draft's suggestions now and refused with "
+        "`flow_suggestion_stale` when the draft no longer has it (or has it "
+        "under another code); a suggestion only runs prove "
+        "(`identical_inputs`, `context_headroom`, `format_fallback`, "
+        "`model_relay`, `overlapping_inputs`, `deterministic_candidate`, "
+        "`oversized_reasoning`) is taken as given, since checking it would "
+        "read the runs' evidence. Dismissing a suggestion again answers with "
+        "the dismissal as it was first made and writes nothing, so the "
+        "request can be retried; the audit entry "
+        "(`flow_suggestion_dismissed`) names the fingerprint and the code. "
+        "Service API keys cannot dismiss: a dismissal names the person who "
+        "made it. " + _DISMISSAL_DESCRIPTION
+    ),
+    responses={
+        200: {
+            "description": "The suggestion is dismissed.",
+            "content": {
+                "application/json": {"example": FLOW_SUGGESTION_DISMISSAL_EXAMPLE}
+            },
+        },
+        403: error_response(
+            description=(
+                "Forbidden. Machine-readable codes include "
+                "`service_key_cannot_create_resources` for a service API key, "
+                "`insufficient_scope` when the API key space scope does not "
+                "match the flow, `insufficient_space_permission` when the "
+                "caller may not edit flows in the space, and "
+                "`flow_owner_required` when another member owns the draft."
+            ),
+            message="You do not have permission to edit flows in this space.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The draft does not have the suggestion the fingerprint and a "
+                "code the definition proves name (`flow_suggestion_stale`, "
+                "with the `fingerprint` in `context`). Nothing is saved."
+            ),
+            examples={
+                FlowApiErrorCode.SUGGESTION_STALE.value: _SUGGESTION_STALE_EXAMPLE,
+            },
+        ),
+    },
+    dependencies=[Depends(require_user_for_creation)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def dismiss_flow_suggestion_route(
+    id: Annotated[UUID, Path(description="Identifier of the draft flow.")],
+    fingerprint: FingerprintPath,
+    request: Request,
+    body: Annotated[FlowSuggestionDismissalRequest, Body()],
+    container: Container = Depends(_DISMISSAL_CONTAINER),
+) -> FlowSuggestionDismissalPublic:
+    async with _session(container).begin():
+        dismissal = await dismiss_flow_suggestion(
+            id,
+            request,
+            fingerprint=fingerprint,
+            code=body.code,
+            container=container,
+        )
+    return FlowSuggestionDismissalPublic.of(flow_id=id, dismissal=dismissal)
+
+
+@router.delete(
+    "/{id}/suggestions/{fingerprint}/dismissal/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    operation_id="restore_flow_suggestion",
+    summary="Restore Flow Suggestion",
+    description=(
+        "Take back the dismissal of one suggestion, so it is listed again "
+        "while the draft has it. Answers 204 with no content, and 404 when "
+        "the flow has no dismissal of that fingerprint (it was never "
+        "dismissed, or the dismissal was already taken back). The audit "
+        "entry (`flow_suggestion_restored`) names the fingerprint and the "
+        "code it was dismissed with. " + _DISMISSAL_DESCRIPTION
+    ),
+    responses={
+        403: error_response(
+            description=FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to edit flows in this space.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description=(
+                "Flow not found in tenant scope, or the flow has no dismissal "
+                "of that fingerprint."
+            ),
+            message=NOT_DISMISSED_MESSAGE,
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def restore_flow_suggestion_route(
+    id: Annotated[UUID, Path(description="Identifier of the draft flow.")],
+    fingerprint: FingerprintPath,
+    request: Request,
+    container: Container = Depends(_DISMISSAL_CONTAINER),
+) -> None:
+    async with _session(container).begin():
+        await restore_flow_suggestion(
+            id, request, fingerprint=fingerprint, container=container
+        )
+
+
+def _session(container: Container) -> AsyncSession:
+    return cast(AsyncSession, container.session())
+
+
+__all__ = ["router"]

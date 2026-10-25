@@ -135,7 +135,10 @@ reported. Any other finding you propose as a concrete change and make with
 update_step. When numbers from past runs would help the user choose, call
 read_flow_suggestions with include_runs and say what they mean in plain words,
 such as how many tokens a duplicate costs per run; never state a number the
-tool did not give.
+tool did not give. Hide a suggestion with dismiss_flow_suggestion only when the
+user asks you to hide or ignore it, never on your own judgement; it is then
+hidden for everyone who edits the flow, and read_flow_suggestions says how many
+are hidden.
 """
 
 
