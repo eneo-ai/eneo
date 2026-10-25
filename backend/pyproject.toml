@@ -216,7 +216,7 @@ pytest_add_cli_args_test_selection = [
 # sentry-sdk is declared for the planned Sentry integration but not yet wired up
 # (no sentry_sdk.init call) — kept available rather than dropping observability.
 [tool.deptry.per_rule_ignores]
-DEP003 = ["sqlalchemy", "starlette", "aiohttp", "multidict", "pdfminer", "pypdfium2", "pydantic_core", "yaml"]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp", "multidict", "pdfminer", "pypdfium2", "pydantic_core", "yaml", "certifi"]
 DEP002 = [
     "alembic",
     "asyncpg",
