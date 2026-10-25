@@ -2351,6 +2351,11 @@ async def test_speaker_names_are_kept_replaced_and_pruned_under_the_revision(
                 .order_by(AuditLog.created_at)
             )
         ).all()
+        # The edits share a transaction, so their audit rows can share a
+        # created_at; the revision each one records orders them.
+        audits = sorted(
+            audits, key=lambda audit: audit.log_metadata["extra"]["revision"]
+        )
         assert [
             audit.log_metadata["extra"]["speaker_name_count"] for audit in audits
         ] == [3, 3, 3, 2]
