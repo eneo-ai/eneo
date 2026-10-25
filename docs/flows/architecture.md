@@ -63,6 +63,11 @@ not repeated automatically.
 | Step move, insert and remove | `flows/application/flow_step_structure.py` |
 | Authoring chat and its tools | `flows/application/flow_authoring_chat.py` and `internal_mcp/flows.py` |
 | Publish validation | `flows/flow_validators.py` |
+| A step's reads, by channel | `flows/step_lineage.py` |
+| Flow suggestions | `flows/domain/flow_suggestions.py` and `flow_suggestion_*.py`, `flows/application/flow_suggestion_service.py` |
+| Applying suggestions | `flows/application/flow_suggestion_apply.py` on `apply_editor_update` |
+| Suggestion evidence (numbers from runs) | `flows/infrastructure/flow_suggestion_evidence_repo.py` |
+| Forwarding facts | `flows/runtime/forwarding_facts.py` and `forwarding_capture.py` |
 | Published definition build/parse | `flows/published_definition.py` |
 | Runtime consumer contract | `flows/flow_run_contract_service.py` |
 | API authorization context | `flows/api/flow_access_context.py` and `flow_access_policy.py` |

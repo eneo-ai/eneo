@@ -857,6 +857,12 @@ same editor update, validation, permissions, classification and audit as the
 editor. The chat requires a user principal and edit mode in the editor; it is
 not a service-key authoring surface.
 
+**Suggestions.** The chat reads the same suggestions as the editor
+(`read_flow_suggestions`) when asked to make a flow simpler or cheaper, applies
+a fix only after the person agrees (`apply_flow_suggestions`, in edit mode),
+and checks every step it writes for the patterns the suggestions look for. See
+[Let the suggestions point out waste](/docs/flows-best-practices#let-the-suggestions-point-out-waste).
+
 **Model.** Each person chooses the chat's model in the chat header
 (`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/` with
 `completion_model_id` and `reasoning_effort`; null returns to the default). The

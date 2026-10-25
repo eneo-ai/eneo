@@ -346,8 +346,9 @@ ends over one core path, not separate engines.
   (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
   `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
   `move_step`, `remove_step`, `publish_flow`, `unpublish_flow`,
-  `read_tool_options`, and the run tools `run_flow`, `read_run`, `cancel_run`,
-  `read_review` and `review_run`. The chat starts in view mode; tools that
+  `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`, and
+  the run tools `run_flow`, `read_run`, `cancel_run`, `read_review` and
+  `review_run`. The chat starts in view mode; tools that
   change the Flow are refused until the user turns on edit mode
   (`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/`).
 - Both save through `flows/application/flow_authoring_operations.py`. The
@@ -374,6 +375,68 @@ Important authoring rules:
 - Credentials stay with the editor. The chat's tools refuse step configuration
   that carries a credential, or that changes an HTTP configuration holding one.
 
+## Suggestions
+
+`GET /api/v1/flows/{id}/suggestions/` says what a draft could do cheaper or
+simpler: data a step's model receives twice, takes without needing it, or
+produces for no one. It needs edit access, never blocks publish, and never
+changes the flow by itself.
+
+- **From the draft.** The static rules read the steps through
+  `eneo.flows.step_lineage`, which splits each step's reads by the channel that
+  carries them to the model (`input`, `prompt`, `config`). These are the reads
+  publish and the runtime resolve, so a suggestion states what the definition
+  proves: no model judges a prompt. Codes: `duplicate_read`,
+  `broad_all_previous_steps`, `whole_structured_read`,
+  `unread_contract_fields`, `unread_result`, `relay_step`,
+  `per_item_prompt_read`, `repeated_long_material`, `unused_form_field`.
+- **From recent runs** (`?runs=1..50`). This also needs the `flows_trace`
+  permission. Only runs the caller may see evidence for are counted; the
+  others are reported in `runs.left_out`. The read takes numbers only (edge
+  sizes and hashes, token counts, call reasons and forwarding facts), never
+  content, and writes one `flow_evidence_viewed` audit entry on the flow that
+  names the runs it counted; it answers 503 when that entry cannot be
+  written. Measured impact adds `tokens_per_run`, `run_count`, `version` and
+  `step_changed_since` where the runs support an honest number, and the
+  measured codes are `identical_inputs`, `context_headroom`,
+  `format_fallback`, `model_relay`, `overlapping_inputs` and
+  `deterministic_candidate`.
+- **Forwarding facts.** After the first model call of each step attempt, the
+  worker measures how much of each input recurs in another input of the call
+  and how much of the output was copied from each input (8-word shingles after
+  NFKC, casefold and whitespace folding). It stores numbers and edge indexes
+  in `flow_step_attempt_resolved_inputs.forwarding_facts_jsonb`, never text,
+  within a 50 ms budget per attempt; past it the facts say
+  `measured: false`. Mapped steps are measured on their first call.
+- **The suggestion.** Each one has a `code`, the `steps` it is about,
+  `params`, an `impact` (`basis` `definition` or `runs`, a `level`) and a
+  `fix.kind`: `patch` (an editor update body the core can apply), `assisted`
+  (the chat proposes the change) or `advice`. A patch that would make publish
+  refuse the draft is offered as `assisted`. The `fingerprint` comes from the
+  code, the step ids and the finding's premise, so it survives renumbering,
+  renaming and unrelated edits, and changes when the finding does.
+- **Applying.** `POST /api/v1/flows/{id}/suggestions/apply/` with
+  `{expected_revision, fingerprints}` recomputes the suggestions and applies
+  each patch in order through `apply_editor_update`, in one transaction: one
+  draft revision per fix, all or none. A fix an earlier one made unnecessary
+  is skipped and listed in `skipped`. A fingerprint that no longer matches is
+  `409 flow_suggestion_stale`, a fix that is not a patch
+  `409 flow_suggestion_not_patchable`, and a stale revision the editor's own
+  conflict. The audit entries carry `origin: "suggestion"`.
+- **The chat.** `read_flow_suggestions` reads them (with `include_runs`, only
+  for users with the trace permission) and `apply_flow_suggestions` applies
+  patches in edit mode. The chat's writing tools report the suggestions their
+  change introduced, and the chat's guidance is built from
+  `FLOW_SUGGESTION_AUTHORING_RULES`, so a step the chat writes avoids the
+  patterns from the start.
+
+To add a rule: a `FlowSuggestionCode`, the rule in a domain module next to
+the others (pure, thresholds as named constants), a fingerprint premise built
+from step ids (`read_premise`, `producer_key`), a line in
+`FLOW_SUGGESTION_AUTHORING_RULES`, and the code's text in web-next's
+`features/flows/flow-suggestions.ts` (a code the UI does not know shows a
+generic text until then).
+
 ## Canonical owners
 
 Before changing Flow behavior, identify the owner and extend that owner instead
@@ -393,6 +456,10 @@ of adding a parallel path.
 | Step move, insert and remove | `flow_step_structure.restructure_steps` |
 | Authoring chat binding and edit mode | `flow_authoring_chat` and the loopback `internal_mcp/flows.py` server |
 | Publish validation | `flow_validators` |
+| A step's reads, by channel | `eneo.flows.step_lineage` |
+| Flow suggestions (rules, fingerprints, fixes) | `flow_suggestions` and the `flow_suggestion_*` domain modules, served by `flow_suggestion_service` |
+| Applying suggestions | `flow_suggestion_apply` on `apply_editor_update` |
+| Forwarding facts | `eneo.flows.runtime.forwarding_facts` and `forwarding_capture` |
 | Package and draft-spec authoring | `flow_authoring_command` and draft materialization |
 | Flow package layout rules | [package-layout.md](./package-layout.md) |
 
