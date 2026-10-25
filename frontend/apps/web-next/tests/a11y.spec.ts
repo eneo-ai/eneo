@@ -696,7 +696,8 @@ test.describe("reflow at 320 px (1.4.10)", () => {
   test("admin models", async ({ page }) => {
     await page.goto("/admin/models");
     await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
-    await expect(page.getByRole("main").getByRole("table").first()).toBeVisible();
+    // A phone lists a provider's models as rows (decision 31).
+    await expect(page.getByRole("main").getByRole("list").first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
 

@@ -207,17 +207,19 @@ export function AdminUsersPage() {
         className="focus-visible:outline-ring rounded-ax-element flex flex-col gap-4 focus-visible:outline-2 focus-visible:outline-offset-4"
       >
         <div className="flex flex-wrap items-center gap-2.5">
-          <TextInput
-            label={t("admin_users_search")}
-            isLabelHidden
-            placeholder={t("admin_users_search_placeholder")}
-            startIcon={Search}
-            value={searchInput}
-            onChange={setSearchInput}
-            hasClear
-            autoComplete="off"
-            className="w-full sm:w-80"
-          />
+          <div className="w-full sm:w-80">
+            <TextInput
+              label={t("admin_users_search")}
+              isLabelHidden
+              placeholder={t("admin_users_search_placeholder")}
+              startIcon={Search}
+              value={searchInput}
+              onChange={setSearchInput}
+              hasClear
+              autoComplete="off"
+              width="100%"
+            />
+          </div>
           {roleId && (
             <div className="bg-ax-muted rounded-ax-element flex items-center gap-2 py-1 ps-3 pe-1 text-sm">
               <span>

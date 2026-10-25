@@ -242,12 +242,19 @@
  *    transparent native <input> centred on their indicator, which Astryx sizes
  *    to 24 px: grow it to 44 × 44. The theme gives their rows 44 px, so the
  *    enlarged inputs of neighbouring rows never overlap.
+ *    A Token is 8 px under the element size, so the theme made it 36 px high:
+ *    one that is only a label (a capability, where a model runs, a run's
+ *    status) is no target and keeps a label's height. A token with a link or
+ *    a button (a removable filter) keeps its size.
  */
 @layer components {
   @media (pointer: coarse) {
     :where(.astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field) input {
       min-inline-size: 44px;
       min-block-size: 44px;
+    }
+    .astryx-token[data-size="sm"]:not(a, :has(a, button)) {
+      block-size: 1.5rem;
     }
   }
 }

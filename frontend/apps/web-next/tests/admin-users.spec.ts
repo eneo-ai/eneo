@@ -72,7 +72,8 @@ test.describe("the user editor on a phone", () => {
     const row = (await dialog.getByRole("group").last().boundingBox())!;
     const box = (await role.boundingBox())!;
     await page.mouse.click(row.x + row.width - 8, box.y + box.height / 2);
-    expect(await role.isChecked()).toBe(!before);
+    // Retried: the box is checked once React has re-rendered.
+    await expect(role).toBeChecked({ checked: !before });
     // Nothing is saved.
     await dialog.getByRole("button", { name: "Avbryt" }).click();
     await expect(dialog).toBeHidden();

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
+import { setViewport } from "@/test/setup-dom";
 import { CAPABILITIES_KEY, PROVIDERS_KEY } from "./model-providers";
 import { MODELS_KEY, type ModelsPresentation } from "./models";
 
@@ -41,6 +42,7 @@ const completion = (overrides: Record<string, unknown>) => ({
   security_classification: { id: "s3", name: "Klass 3", security_level: 3 },
   token_limit: 200000,
   supported_model_kwargs: {},
+  hosting: "swe",
   ...overrides
 });
 
@@ -557,5 +559,40 @@ describe("ModelsPage", () => {
 
     fireEvent.keyDown(document.activeElement ?? menu, { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
+describe("ModelsPage on a phone (decision 31)", () => {
+  it("lists a provider's models as rows: name, hosting, class, its switch and its menu", async () => {
+    setViewport("phone");
+    renderPage();
+    const anthropic = screen.getByRole("region", { name: "Anthropic" });
+    expect(within(anthropic).queryByRole("table")).toBeNull();
+
+    const list = within(anthropic).getByRole("list", { name: "Anthropic" });
+    // The rows, not the capability lists inside them.
+    const [opus, sonnet] = Array.from(list.children) as HTMLElement[];
+    expect(within(opus!).getByRole("button", { name: "Claude Opus 4.7" })).toBeTruthy();
+    expect(within(opus!).getByText("Standard")).toBeTruthy();
+    // Where it runs, and the class it is approved for.
+    expect(within(opus!).getByText("Sverige")).toBeTruthy();
+    // The badge; the row menu also lists the class as a (hidden) radio item.
+    expect(within(opus!).getByTitle("Klass 3")).toBeTruthy();
+    expect(within(opus!).getByRole("switch", { name: "Aktivera Claude Opus 4.7" })).toBeTruthy();
+    expect(
+      within(opus!).getByRole("button", { name: "Fler åtgärder för Claude Opus 4.7" })
+    ).toBeTruthy();
+    expect(within(sonnet!).getByText("Utfasad")).toBeTruthy();
+    // Its technical id, price and capabilities, as the table has them.
+    expect(within(opus!).getByText("claude-opus-4-7")).toBeTruthy();
+    expect(within(opus!).getByRole("list", { name: "Funktioner" })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("filters by type and class from selectors that open as sheets, not a wrapping strip", () => {
+    setViewport("phone");
+    renderPage();
+    expect(screen.queryByRole("radiogroup", { name: "Modelltyp" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: /^Modelltyp/ })).toBeTruthy();
   });
 });
