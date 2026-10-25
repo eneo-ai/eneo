@@ -6,15 +6,26 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
-import { ChevronDown, ChevronRight, MessageSquareText, Trash2, Wrench } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  MessageSquareText,
+  Trash2,
+  Wrench
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
+import { ClientTime } from "@/components/composites/client-time";
+import { useAppContext } from "@/components/providers/app-context";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useFlowReferences } from "./chat/reference-pill";
 import { ReferenceText, referencePlainText } from "./chat/reference-text";
 import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
+  dismissedByText,
   isPatchable,
   measuredSuggestionText,
   suggestionRequest,
@@ -33,6 +44,56 @@ export type SuggestionFix = {
   /** A fix is being saved: the buttons show it and ignore another press. */
   pending: boolean;
 };
+
+/**
+ * "Ignorera" and "Visa igen": the page dismisses a suggestion for the flow
+ * (for every editor of it) or takes the dismissal back, reads the
+ * suggestions on screen again and resolves to whether it was saved; a
+ * refusal is the page's to show. Absent for someone who may not edit.
+ */
+export type SuggestionDismissal = {
+  onDismiss: (suggestion: FlowSuggestion) => Promise<boolean>;
+  onRestore: (suggestion: FlowSuggestion) => Promise<boolean>;
+  /**
+   * The fingerprint whose dismissal or restore is being saved: its button
+   * shows it, and every "Ignorera" and "Visa igen" ignores another press.
+   */
+  busy: string | null;
+  /** "Visa ignorerade": the dismissed suggestions are listed, held by the page for the visit. */
+  showDismissed: boolean;
+  onShowDismissed: (show: boolean) => void;
+};
+
+/**
+ * Runs a dismissal or its restore and says how it went: announced politely,
+ * and focus moved to `rescueTarget` when the row (and the button pressed)
+ * leaves the page. A refusal is announced by the page with its notice.
+ */
+export function useSuggestionDismissal(
+  dismissal: SuggestionDismissal | undefined,
+  rescueTarget: () => HTMLElement | null
+):
+  | { dismiss: (suggestion: FlowSuggestion) => void; restore: (suggestion: FlowSuggestion) => void }
+  | undefined {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const rescue = useFocusRescue();
+  if (!dismissal) return undefined;
+  const run =
+    (act: (suggestion: FlowSuggestion) => Promise<boolean>, done: string) =>
+    (suggestion: FlowSuggestion) => {
+      if (dismissal.busy !== null) return;
+      void act(suggestion).then((saved) => {
+        if (!saved) return;
+        announce(done);
+        rescue(rescueTarget);
+      });
+    };
+  return {
+    dismiss: run(dismissal.onDismiss, t("flow_suggestion_dismissed_done")),
+    restore: run(dismissal.onRestore, t("flow_suggestion_restored_done"))
+  };
+}
 
 /** What a suggestion offers to do, by where it is shown. */
 export type SuggestionActions = {
@@ -54,6 +115,12 @@ export type SuggestionActions = {
    * with its confirmation and its check of what reads the step.
    */
   onRemoveStep?: (step: FlowStep) => void;
+  /** "Ignorera": dismisses the suggestion for the flow (`useSuggestionDismissal`). */
+  onDismiss?: (suggestion: FlowSuggestion) => void;
+  /** "Visa igen" on a dismissed suggestion. */
+  onRestore?: (suggestion: FlowSuggestion) => void;
+  /** The fingerprint whose dismissal or restore is being saved (`SuggestionDismissal.busy`). */
+  dismissBusy?: string | null;
 };
 
 /**
@@ -121,8 +188,12 @@ function LevelBadge({ level }: { level: string }) {
  * measured (always in view) and, for a patch, "Åtgärda" on the right. The
  * chevron before it shows why, with the secondary actions:
  * "Fråga assistenten" for every kind (an author may want any of them
- * explained) and "Ta bort steget" for a step nothing reads. Collapsing
- * keeps focus on the chevron, which stays.
+ * explained), "Ignorera" for an editor and "Ta bort steget" for a step
+ * nothing reads. Collapsing keeps focus on the chevron, which stays.
+ *
+ * A dismissed suggestion ("Visa ignorerade") says which step it is about,
+ * who dismissed it and when, and offers "Visa igen" on the right instead of
+ * any fix; behind its chevron it says why, nothing else.
  */
 export function SuggestionRow({
   suggestion,
@@ -134,7 +205,10 @@ export function SuggestionRow({
   onFix,
   fixPending = false,
   fixBlockedBy,
-  onRemoveStep
+  onRemoveStep,
+  onDismiss,
+  onRestore,
+  dismissBusy = null
 }: SuggestionActions & {
   suggestion: FlowSuggestion;
   /** The step the suggestion is about; null for one about the run form. */
@@ -145,6 +219,7 @@ export function SuggestionRow({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const { user } = useAppContext();
   const refs = useFlowReferences();
   const panelId = useId();
   const label = step ? stepLabel(step, t) : null;
@@ -152,7 +227,12 @@ export function SuggestionRow({
   const measured = measuredSuggestionText(suggestion, t);
   // The title in words, each pill as it reads, for the buttons' names.
   const title = referencePlainText(text.title, refs?.flow ?? { steps: [...steps] }, t);
-  const removable = onRemoveStep && step && label && suggestion.code === "unread_result";
+  const dismissed = suggestion.dismissed ?? null;
+  const askable = onAskChat && !dismissed ? onAskChat : undefined;
+  const dismissable = onDismiss && !dismissed ? onDismiss : undefined;
+  const removable =
+    onRemoveStep && step && label && !dismissed && suggestion.code === "unread_result";
+  const busy = dismissBusy === suggestion.fingerprint;
 
   return (
     <ListItem
@@ -176,6 +256,13 @@ export function SuggestionRow({
             </span>
             <ReferenceText text={text.title} />
           </p>
+          {dismissed ? (
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
+              {label ?? t("flow_suggestions_fix_all_form")} ·{" "}
+              {dismissedByText(dismissed, user.id, t)} ·{" "}
+              <ClientTime value={dismissed.dismissed_at} format="auto" />
+            </Text>
+          ) : null}
           {measured ? (
             <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
               {measured}
@@ -185,16 +272,31 @@ export function SuggestionRow({
             <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
               <ReferenceText text={text.explanation} />
             </Text>
-            {onAskChat || removable ? (
+            {askable || dismissable || removable ? (
               <div className="-ml-2 flex flex-wrap items-center gap-1">
-                {onAskChat ? (
+                {askable ? (
                   <Button
                     label={t("flow_suggestion_ask")}
                     aria-label={t("flow_suggestion_ask_named", { title })}
                     size="sm"
                     variant="ghost"
                     icon={<MessageSquareText aria-hidden="true" className="size-4" />}
-                    onClick={() => onAskChat(suggestionRequest(suggestion, steps, t))}
+                    onClick={() => askable(suggestionRequest(suggestion, steps, t))}
+                  />
+                ) : null}
+                {dismissable ? (
+                  <Button
+                    label={t("flow_suggestion_dismiss")}
+                    aria-label={t("flow_suggestion_dismiss_named", { title })}
+                    tooltip={t("flow_suggestion_dismiss_hint")}
+                    size="sm"
+                    variant="ghost"
+                    icon={<EyeOff aria-hidden="true" className="size-4" />}
+                    isLoading={busy}
+                    isInterruptible
+                    onClick={() => {
+                      if (dismissBusy === null) dismissable(suggestion);
+                    }}
                   />
                 ) : null}
                 {removable ? (
@@ -213,7 +315,21 @@ export function SuggestionRow({
         </div>
       }
       endContent={
-        onFix && isPatchable(suggestion) ? (
+        dismissed ? (
+          onRestore ? (
+            <Button
+              label={t("flow_suggestion_restore")}
+              aria-label={t("flow_suggestion_restore_named", { title })}
+              size="sm"
+              icon={<Eye aria-hidden="true" className="size-4" />}
+              isLoading={busy}
+              isInterruptible
+              onClick={() => {
+                if (dismissBusy === null) onRestore(suggestion);
+              }}
+            />
+          ) : undefined
+        ) : onFix && isPatchable(suggestion) ? (
           <Button
             label={t("flow_suggestion_fix")}
             aria-label={t("flow_suggestion_fix_named", { title })}

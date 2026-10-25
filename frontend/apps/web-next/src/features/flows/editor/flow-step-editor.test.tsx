@@ -6,7 +6,7 @@ import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
-import type { SuggestionFix } from "../flow-suggestion-item";
+import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import type { FlowPublic } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
@@ -72,6 +72,7 @@ function renderEditor(
     space?: ReturnType<typeof makeSpace>;
     onAskChat?: (text: string) => void;
     suggestionFix?: SuggestionFix;
+    suggestionDismissal?: SuggestionDismissal;
     suggestionRuns?: number;
     navigation?: StepNavigation;
     leaveRef?: React.Ref<EditorLeave>;
@@ -90,6 +91,7 @@ function renderEditor(
       onCancel={onCancel}
       onAskChat={overrides.onAskChat}
       suggestionFix={overrides.suggestionFix}
+      suggestionDismissal={overrides.suggestionDismissal}
       suggestionRuns={overrides.suggestionRuns}
       navigation={overrides.navigation}
       leaveRef={overrides.leaveRef}
@@ -266,7 +268,7 @@ describe("FlowStepEditor", () => {
     const reads = api.stub.calls.filter((call) => `${call.method} ${call.path}` === SUGGESTIONS);
     expect(
       reads.map((call) => (call.init as { params: { query?: unknown } }).params.query)
-    ).toEqual([{ runs: 10 }]);
+    ).toEqual([{ runs: 10, include_dismissed: true }]);
     await expectNoAxeViolations(container);
   });
 
@@ -306,6 +308,70 @@ describe("FlowStepEditor", () => {
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["b".repeat(64)]));
+  });
+
+  it("dismisses the open step's suggestion, and keeps focus in the editor", async () => {
+    const SUGGESTIONS = "GET /api/v1/flows/{id}/suggestions/";
+    const suggestion = {
+      code: "unread_result",
+      fingerprint: "b".repeat(64),
+      steps: ["step-1"],
+      params: {},
+      message: "A suggestion.",
+      impact: { basis: "definition", level: "medium" },
+      fix: { kind: "advice" }
+    };
+    let dismissed = false;
+    api.routes[SUGGESTIONS] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        dismissed_count: dismissed ? 1 : 0,
+        items: [
+          dismissed
+            ? {
+                ...suggestion,
+                dismissed: { dismissed_by: "user-1", dismissed_at: "2026-10-25T09:30:00Z" }
+              }
+            : suggestion
+        ]
+      }
+    });
+    const queryClient = { current: null as ReturnType<typeof testQueryClient> | null };
+    const onDismiss = vi.fn(async () => {
+      dismissed = true;
+      await queryClient.current!.invalidateQueries({
+        queryKey: ["flows", "flow-1", "suggestions"]
+      });
+      return true;
+    });
+    const { queryClient: client } = renderEditor(makeFlow(), {
+      suggestionDismissal: {
+        onDismiss,
+        onRestore: vi.fn(async () => true),
+        busy: null,
+        showDismissed: false,
+        onShowDismissed: vi.fn()
+      }
+    });
+    queryClient.current = client;
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Mer om ”Inget senare steg läser stegets svar”" })
+    );
+    const ignore = screen.getByRole("button", {
+      name: "Ignorera ”Inget senare steg läser stegets svar”"
+    });
+    ignore.focus();
+    fireEvent.click(ignore);
+
+    await waitFor(() =>
+      expect(onDismiss).toHaveBeenCalledWith(expect.objectContaining({ code: "unread_result" }))
+    );
+    // Dismissed, the step shows it no more; focus stays in the editor, never on <body>.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "1 förslag" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement?.closest("form")).toBeTruthy();
   });
 
   it("leads back to all steps and on to the neighbouring ones from the top", async () => {

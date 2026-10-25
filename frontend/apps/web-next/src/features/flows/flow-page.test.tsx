@@ -36,6 +36,9 @@ const state = vi.hoisted(() => ({
   // The suggestions measured over the latest runs (`?runs=`).
   measured: null as unknown,
   apply: null as unknown,
+  // The answers to a dismissal (`POST .../dismissal/`) and to taking one back (`DELETE`).
+  dismiss: null as unknown,
+  restore: null as unknown,
   dirty: false,
   // What went into the chat's composer, text and pills (by the value they send) in order.
   inserted: [] as string[],
@@ -69,6 +72,7 @@ const api = vi.hoisted(() => ({
     if (path === "/api/v1/flows/{id}/publish/") return state.publish;
     if (path === "/api/v1/flows/{id}/unpublish/") return state.unpublish;
     if (path === "/api/v1/flows/{id}/suggestions/apply/") return state.apply;
+    if (path === "/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/") return state.dismiss;
     return { data: undefined, response: new Response() };
   }),
   PATCH: vi.fn(async (path: string) => {
@@ -77,7 +81,10 @@ const api = vi.hoisted(() => ({
     return { data: undefined, response: new Response() };
   }),
   PUT: vi.fn(),
-  DELETE: vi.fn()
+  DELETE: vi.fn(async (path: string) => {
+    if (path === "/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/") return state.restore;
+    return { data: undefined, response: new Response(null, { status: 204 }) };
+  })
 }));
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -230,6 +237,42 @@ const DUPLICATE_READ = {
 const suggestions = (revision: number, items: unknown[]) =>
   ok({ flow_id: "flow-1", draft_revision: revision, items });
 
+/** The duplicate once an editor of the flow dismissed it, as the core lists it. */
+const DISMISSED_DUPLICATE = {
+  ...DUPLICATE_READ,
+  dismissed: { dismissed_by: "user-1", dismissed_at: "2026-10-25T09:30:00Z" }
+};
+const withDismissed = (revision: number, items: unknown[]) =>
+  ok({ flow_id: "flow-1", draft_revision: revision, dismissed_count: 1, items });
+/** The core's answer to a dismissal. */
+const DISMISSAL = ok({
+  flow_id: "flow-1",
+  fingerprint: DUPLICATE_READ.fingerprint,
+  code: "duplicate_read",
+  dismissed_by: "user-1",
+  dismissed_at: "2026-10-25T09:30:00Z"
+});
+
+/** What the page posted to dismiss suggestions: the path's fingerprint and the body. */
+function dismissals() {
+  return api.POST.mock.calls
+    .filter(([path]) => path === "/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/")
+    .map((call) => {
+      const init = (call as unknown as [string, { params: { path: unknown }; body: unknown }])[1];
+      return { path: init.params.path, body: init.body };
+    });
+}
+
+/** "Ignorera" of the suggestion on step 2's card, its list and row opened. */
+async function cardDismiss() {
+  const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+  fireEvent.click(await within(second).findByRole("button", { name: /^\d+ förslag/ }));
+  fireEvent.click(within(second).getByRole("button", { name: /^Mer om/ }));
+  const button = within(second).getByRole("button", { name: /^Ignorera ”/ });
+  button.focus();
+  return button;
+}
+
 /** Another patch suggestion on step 2, for "Åtgärda alla". */
 const SECOND_DUPLICATE = { ...DUPLICATE_READ, fingerprint: "d".repeat(64) };
 
@@ -279,6 +322,11 @@ async function cardFix() {
   fireEvent.click(await within(second).findByRole("button", { name: /^\d+ förslag/ }));
   return within(second).findByRole("button", { name: /^Åtgärda ”/ });
 }
+
+/** The step list, with the suggestions summary at its top. */
+const stepsRegion = () => screen.getByRole("region", { name: "Steg" });
+/** "Före publicering". */
+const draftCheck = () => screen.getByRole("region", { name: "Före publicering" });
 
 /** The flow's chat, opened for someone who may edit. */
 const CHAT = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
@@ -786,7 +834,13 @@ describe("FlowPage", () => {
     renderPage();
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
     expect(await within(second).findByRole("button", { name: /^1 förslag/ })).toBeTruthy();
-    expect(screen.getByText("1 förslag kan göra flödet enklare eller billigare")).toBeTruthy();
+    // The summary above the steps, and the line in "Före publicering", from the same read.
+    expect(
+      within(stepsRegion()).getByText("1 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    expect(
+      within(draftCheck()).getByText("1 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
 
     // The chat removed the duplicate: a new revision, and no suggestion on it.
     state.flow = ok(makeFlow({ draft_revision: 5, steps }));
@@ -807,7 +861,7 @@ describe("FlowPage", () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     renderPage();
     expect(
-      await screen.findByText("1 förslag kan göra flödet enklare eller billigare")
+      await within(stepsRegion()).findByText("1 förslag kan göra flödet enklare eller billigare")
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Räkna med de senaste körningarna" })).toBeNull();
     expect(suggestionRuns()).toEqual([0]);
@@ -993,6 +1047,151 @@ describe("FlowPage", () => {
     expect(applyBodies()).toEqual([{ expected_revision: 4, fingerprints: ["e".repeat(64)] }]);
     await act(async () => answer(fixed(["e".repeat(64)])));
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("dismisses a suggestion with its code, reads the plain suggestions again and keeps focus", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.dismiss = DISMISSAL;
+    renderPage();
+    const button = await cardDismiss();
+    expect(within(draftCheck()).getByText(/^1 förslag kan göra flödet/)).toBeTruthy();
+    // The core lists it as dismissed from now on.
+    state.suggestions = withDismissed(4, [DISMISSED_DUPLICATE]);
+
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_dismissed_done)
+    );
+    expect(dismissals()).toEqual([
+      {
+        path: { id: "flow-1", fingerprint: DUPLICATE_READ.fingerprint },
+        body: { code: "duplicate_read" }
+      }
+    ]);
+    // The revision stays: the suggestions on screen are read once more, measuring nothing.
+    expect(suggestionRuns()).toEqual([0, 0]);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" })
+      )
+    );
+    // Dismissed, it counts nowhere, before publishing included.
+    expect(within(draftCheck()).queryByText(/förslag kan göra flödet/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Visa ignorerade (1)" })).toBeTruthy();
+  });
+
+  it("measures once more after a dismissal while the page measures, and never otherwise", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.measured = measuredSuggestions(4);
+    state.dismiss = DISMISSAL;
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_trace"]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    expect(await screen.findByText("Baserat på 8 körningar.")).toBeTruthy();
+    expect(suggestionRuns()).toEqual([0, 10]);
+
+    fireEvent.click(await cardDismiss());
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_dismissed_done)
+    );
+    // Exactly one measured read, and no plain one while the plain answer is off screen.
+    expect(suggestionRuns()).toEqual([0, 10, 10]);
+    // Back to the definition alone, its answer is read anew (it was dismissed since).
+    fireEvent.click(screen.getByRole("button", { name: "Visa utan körningarna" }));
+    await waitFor(() => expect(suggestionRuns()).toEqual([0, 10, 10, 0]));
+  });
+
+  it("explains a refused dismissal above the definition, and reads nothing again", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.dismiss = refused(403, { code: "insufficient_space_permission", message: "No." });
+    renderPage();
+
+    fireEvent.click(await cardDismiss());
+
+    const notice = await screen.findByRole("alert");
+    expect(within(notice).getByText("Förslaget ignorerades inte")).toBeTruthy();
+    expect(within(notice).getByText(messages.flows_refusal_no_permission)).toBeTruthy();
+    expect(state.announce).not.toHaveBeenCalledWith(messages.flow_suggestion_dismissed_done);
+    expect(suggestionRuns()).toEqual([0]);
+  });
+
+  it("reads the plain suggestions again when the draft no longer has the one dismissed", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.dismiss = refused(409, { code: "flow_suggestion_stale", message: "Gone." });
+    renderPage();
+
+    fireEvent.click(await cardDismiss());
+
+    const notice = await screen.findByRole("alert");
+    expect(within(notice).getByText(messages.flow_error_flow_suggestion_stale)).toBeTruthy();
+    await waitFor(() => expect(suggestionRuns()).toEqual([0, 0]));
+  });
+
+  it("shows the dismissed suggestions for the visit and takes a dismissal back", async () => {
+    state.suggestions = withDismissed(4, [DISMISSED_DUPLICATE]);
+    state.restore = { data: undefined, response: new Response(null, { status: 204 }) };
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Visa ignorerade (1)" }));
+    // Held for the visit: the list remembers it after a step was open.
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    const hide = await screen.findByRole("button", { name: "Dölj ignorerade (1)" });
+    expect(hide.getAttribute("aria-expanded")).toBe("true");
+    expect(suggestionRuns()).toEqual([0]);
+
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Visa ”Svaret från Steg 1: Sammanfatta skickas två gånger” igen"
+      })
+    );
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_restored_done)
+    );
+    expect(api.DELETE.mock.calls.map((call) => (call as unknown as [string, unknown])[1])).toEqual([
+      { params: { path: { id: "flow-1", fingerprint: DUPLICATE_READ.fingerprint } } }
+    ]);
+    expect(suggestionRuns()).toEqual([0, 0]);
+    // Back on the card, and before publishing counted again.
+    expect(within(draftCheck()).getByText(/^1 förslag kan göra flödet/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /ignorerade/ })).toBeNull();
+  });
+
+  it("takes a dismissal back that someone else already took back, without a refusal", async () => {
+    state.suggestions = withDismissed(4, [DISMISSED_DUPLICATE]);
+    state.restore = refused(404, { message: "This suggestion is not dismissed." });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Visa ignorerade (1)" }));
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Visa ”.*” igen$/ }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_restored_done)
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(suggestionRuns()).toEqual([0, 0]);
+  });
+
+  it("brings the suggestions summary into view and focus from Före publicering", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    const { container } = renderPage();
+
+    fireEvent.click(await within(draftCheck()).findByRole("button", { name: "Visa förslagen" }));
+
+    const summary = within(stepsRegion())
+      .getByText("1 förslag kan göra flödet enklare eller billigare")
+      .closest("[tabindex='-1']");
+    expect(summary).not.toBeNull();
+    expect(document.activeElement).toBe(summary);
+    // Advice only: publishing is offered as before.
+    expect(screen.getByRole("button", { name: "Publicera" })).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 
   it("opens one reference card for both sides, and inserts from the definition into the chat", async () => {

@@ -21,7 +21,12 @@ import type { FlowStep } from "./flows-api";
 import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
-import { useSuggestionFix, type SuggestionFix } from "./flow-suggestion-item";
+import {
+  useSuggestionDismissal,
+  useSuggestionFix,
+  type SuggestionDismissal,
+  type SuggestionFix
+} from "./flow-suggestion-item";
 import {
   StepCardSuggestions,
   SuggestionsMeasure,
@@ -31,10 +36,10 @@ import {
   useOpenKeys
 } from "./flow-suggestions-section";
 import {
-  flowSuggestions,
   flowSuggestionsQueryOptions,
-  shownSuggestions,
   suggestionsByStep,
+  suggestionsOnPage,
+  type FlowSuggestion,
   type ShownSuggestion
 } from "./flow-suggestions";
 
@@ -99,6 +104,8 @@ function StepCard({
     onAskChat?: (text: string) => void;
     onFix?: (fingerprints: string[]) => void;
     fixPending?: boolean;
+    onDismiss?: (suggestion: FlowSuggestion) => void;
+    dismissBusy?: string | null;
   };
   speakerOffer: SpeakerStepOffer | null;
   /** What the chat just did to this step, while the mark lasts. */
@@ -246,6 +253,8 @@ function StepCard({
         onFix={suggestions.onFix}
         fixPending={suggestions.fixPending}
         onRemoveStep={canEdit ? actions.onAskRemove : undefined}
+        onDismiss={suggestions.onDismiss}
+        dismissBusy={suggestions.dismissBusy}
       />
       {speakerOffer && speakerOffer.stepId === step.id ? (
         <Banner
@@ -294,10 +303,12 @@ function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts
  *
  * For editors, the core's suggestions sit on the cards of the steps they are
  * about, with a summary above the list ("Åtgärda alla" for those a patch
- * fixes) that also holds the ones about the run form. "Åtgärda" and
- * "Åtgärda alla" are offered while `suggestionFix` is given; "Fråga
- * assistenten" while `onAskChat` is (the chat is on the page); "Räkna med
- * de senaste körningarna" while `measure` is (the person may view traces).
+ * fixes) that also holds the ones about the run form and, under "Visa
+ * ignorerade", the dismissed ones. "Åtgärda" and "Åtgärda alla" are offered
+ * while `suggestionFix` is given; "Ignorera" and "Visa ignorerade" while
+ * `dismissal` is; "Fråga assistenten" while `onAskChat` is (the chat is on
+ * the page); "Räkna med de senaste körningarna" while `measure` is (the
+ * person may view traces).
  */
 export function FlowStepList({
   flowId,
@@ -309,6 +320,7 @@ export function FlowStepList({
   changes = null,
   onAskChat,
   suggestionFix,
+  dismissal,
   measure,
   ...actions
 }: StepActions & {
@@ -325,6 +337,8 @@ export function FlowStepList({
   onAskChat?: (text: string) => void;
   /** Makes suggestions' patches; absent, no "Åtgärda" is offered. */
   suggestionFix?: SuggestionFix;
+  /** Dismisses suggestions and takes dismissals back; absent, neither is offered. */
+  dismissal?: SuggestionDismissal;
   /** Measures the suggestions over the latest runs; absent, it is not offered. */
   measure?: SuggestionMeasure;
 }) {
@@ -337,17 +351,19 @@ export function FlowStepList({
     ...flowSuggestionsQueryOptions(flowId, draftRevision, measure?.runs ?? 0),
     enabled: canEdit
   });
-  const shown = canEdit ? shownSuggestions(suggestions.data?.items, steps) : [];
+  // Dismissed suggestions count nowhere; "Visa ignorerade" lists them.
+  const onPage = suggestionsOnPage(canEdit ? suggestions.data?.items : [], steps);
+  const { shown, form: formItems } = onPage;
   // Held here, so a card re-rendered by a refetch or a fix keeps what was open.
   const openSections = useOpenKeys(false);
   const openRows = useOpenKeys(false);
   const byStep = suggestionsByStep(shown);
-  const formItems = canEdit ? flowSuggestions(suggestions.data?.items) : [];
-  // A fixed suggestion leaves its card; focus stays on the card's step.
-  const fixedStepId = useRef<string | null>(null);
-  const fixOnCard = useSuggestionFix(suggestionFix, () =>
-    fixedStepId.current ? document.getElementById(stepControlId(fixedStepId.current, "open")) : null
-  );
+  // A fixed or dismissed suggestion leaves its card; focus stays on the card's step.
+  const cardStepId = useRef<string | null>(null);
+  const cardStep = () =>
+    cardStepId.current ? document.getElementById(stepControlId(cardStepId.current, "open")) : null;
+  const fixOnCard = useSuggestionFix(suggestionFix, cardStep);
+  const dismissOnCard = useSuggestionDismissal(dismissal, cardStep);
   const listHeading = () => document.getElementById(headingId);
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
 
@@ -390,8 +406,10 @@ export function FlowStepList({
         <SuggestionsSummary
           shown={shown}
           formItems={formItems}
+          dismissed={onPage.dismissed}
           steps={steps}
           fix={suggestionFix}
+          dismissal={dismissal}
           onAskChat={onAskChat}
           rescueTarget={listHeading}
         />
@@ -434,11 +452,18 @@ export function FlowStepList({
                   onAskChat,
                   onFix: fixOnCard
                     ? (fingerprints) => {
-                        fixedStepId.current = step.id ?? null;
+                        cardStepId.current = step.id ?? null;
                         fixOnCard(fingerprints);
                       }
                     : undefined,
-                  fixPending: suggestionFix?.pending
+                  fixPending: suggestionFix?.pending,
+                  onDismiss: dismissOnCard
+                    ? (suggestion) => {
+                        cardStepId.current = step.id ?? null;
+                        dismissOnCard.dismiss(suggestion);
+                      }
+                    : undefined,
+                  dismissBusy: dismissal?.busy
                 }}
                 speakerOffer={speakerOffer}
                 change={(step.id && changes?.get(step.id)) || null}
