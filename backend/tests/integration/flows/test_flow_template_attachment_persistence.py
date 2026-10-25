@@ -626,7 +626,7 @@ async def test_a_template_fill_publish_validates_controls_and_pins_identity(
             asset_id=asset.id,
         )
         assert pinned_file.blob is not None
-        rendered, _mime = await render_docx_template(
+        rendered, _mime, _text = await render_docx_template(
             template_bytes=pinned_file.blob,
             template_name=pinned_file.name,
             context={"case_id": "KS-2026-42", "body": "**Verifierad** bakgrund."},
