@@ -1,0 +1,92 @@
+# Scale-test stack: layered on docker-compose.e2e.ci.yml, run from the repo root.
+# Own project, ports, network and image tags, so it never touches another
+# checkout's eneo-e2e stack. A second scale stack: set SCALE_PROJECT and the
+# SCALE_*_PORT values (scale.py reads the same env). See e2e/scale/README.md.
+#
+#   scale_compose() { docker compose -f docker-compose.e2e.ci.yml -f e2e/scale/docker-compose.scale.yml "$@"; }
+#   scale_compose up -d --build --wait
+#   scale_compose down -v
+
+name: ${SCALE_PROJECT:-eneo-scale}
+
+x-scale-env: &scale-env
+  ENEO_SUPER_API_KEY: scale-super-key-not-a-secret
+  LOGLEVEL: WARNING
+  MCP_APP_CONTENT_BASE_URL: http://127.0.0.1:${SCALE_API_PORT:-8125}
+  TASK_EXECUTION_MAX_JOBS: ${M:-4}
+  FLOW_MAX_CONCURRENT_RUNS_PER_TENANT: ${RUN_CAP:-1000}
+  E2E_TRANSCRIPTION_MODEL: whisper-1
+
+# Health checks probe every second until healthy, then hourly: the base file's
+# 2-5 s checks (a full worker import every 5 s) would otherwise add their own
+# CPU to every container's cgroup during a measured window.
+x-quiet-health: &quiet-health
+  interval: 1h
+  start_interval: 1s
+  start_period: 300s
+
+services:
+  e2e-db:
+    healthcheck: *quiet-health
+    command: [postgres, -c, max_connections=400, -c, shared_buffers=1GB,
+              -c, shared_preload_libraries=pg_stat_statements, -c, pg_stat_statements.track=all,
+              -c, track_io_timing=on, -c, log_lock_waits=on, -c, deadlock_timeout=200ms,
+              -c, log_min_duration_statement=500]
+    tmpfs: !reset []
+    volumes: ["scale_pg:/var/lib/postgresql/data"]
+    ports: ["${SCALE_DB_PORT:-55432}:5432"]
+    cpus: ${DB_CPUS:-1.5}
+
+  e2e-mock-model:
+    healthcheck: *quiet-health
+    environment:
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-0}
+      MOCK_LATENCY_JITTER_MS: ${MOCK_LATENCY_JITTER_MS:-0}
+      MOCK_TRANSCRIPT_WORDS: ${MOCK_TRANSCRIPT_WORDS:-200}
+      MOCK_REPLY: "${MOCK_REPLY:-E2E mock completion: pong}"
+    ports: ["${SCALE_MOCK_PORT:-58200}:8200"]
+
+  e2e-redis:
+    healthcheck: *quiet-health
+
+  e2e-tool-runtime:
+    image: ${SCALE_PROJECT:-eneo-scale}-tools
+
+  e2e-backend:
+    healthcheck: *quiet-health
+    image: ${SCALE_PROJECT:-eneo-scale}-backend
+    environment: *scale-env
+    ports: !override ["${SCALE_API_PORT:-8125}:8000"]
+    cpus: ${API_CPUS:-3}
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        export PATH="/app/.venv/bin:$$PATH"
+        python init_db.py
+        python /e2e/seed.py
+        exec gunicorn src.eneo.server.main:app \
+          --workers ${API_WORKERS:-3} --worker-class uvicorn.workers.UvicornWorker \
+          --keep-alive 75 --bind 0.0.0.0:8000
+
+  task-execution-worker:
+    healthcheck: *quiet-health
+    image: ${SCALE_PROJECT:-eneo-scale}-backend
+    environment: *scale-env
+    cpus: ${WORKER_CPUS:-1}
+
+  task-maintenance-worker:
+    image: ${SCALE_PROJECT:-eneo-scale}-backend
+    environment: *scale-env
+
+  crawler-worker:
+    image: ${SCALE_PROJECT:-eneo-scale}-backend
+    profiles: [crawler]
+
+networks:
+  e2e:
+    name: ${SCALE_PROJECT:-eneo-scale}
+
+volumes:
+  scale_pg: {}
