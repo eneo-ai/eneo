@@ -4,6 +4,7 @@ import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { makeStep } from "./flow-fixtures";
 import {
+  dismissedByText,
   flowSuggestions,
   flowSuggestionsQueryOptions,
   inSuggestionOrder,
@@ -11,8 +12,10 @@ import {
   measuredImpactText,
   measuredSuggestionText,
   shownSuggestions,
+  suggestionCount,
   suggestionRequest,
   suggestionsByStep,
+  suggestionsOnPage,
   suggestionText,
   type FlowSuggestion,
   type FlowSuggestionImpact
@@ -564,6 +567,45 @@ describe("oversized_reasoning", () => {
     expect(text.explanation).toContain(
       "In 4 of the latest 5 runs, the step's calls were small: the model got at most 3% of " +
         "what it can take in and wrote at most 3,400 tokens, its reasoning included."
+    );
+  });
+});
+
+describe("suggestionsOnPage", () => {
+  const dismissed = (item: FlowSuggestion): FlowSuggestion => ({
+    ...item,
+    dismissed: { dismissed_by: "user-1", dismissed_at: "2026-10-25T09:30:00Z" }
+  });
+
+  it("keeps the dismissed suggestions apart, so they count nowhere", () => {
+    const items = [
+      suggestion("unread_result", ["step-2"], {}),
+      dismissed(suggestion("relay_step", ["step-2", "step-1"], { source_step_order: 1 })),
+      suggestion("unused_form_field", [], { field: "x" }),
+      dismissed(suggestion("unused_form_field", [], { field: "y" })),
+      // About a step the draft no longer has: shown nowhere, dismissed or not.
+      dismissed(suggestion("unread_result", ["step-9"], {}))
+    ];
+    const page = suggestionsOnPage(items, STEPS);
+    expect(page.shown.map(({ suggestion: item }) => item.code)).toEqual(["unread_result"]);
+    expect(page.form.map((item) => item.params.field)).toEqual(["x"]);
+    expect(
+      page.dismissed.map(({ suggestion: item, step }) => [item.code, step?.id ?? null])
+    ).toEqual([
+      ["relay_step", "step-2"],
+      ["unused_form_field", null]
+    ]);
+    expect(suggestionCount(page)).toBe(2);
+    expect(suggestionCount(suggestionsOnPage(undefined, STEPS))).toBe(0);
+  });
+
+  it("says who dismissed one: the person reading, someone else, or a user who is gone", () => {
+    expect(dismissedByText({ dismissed_by: "user-1" }, "user-1", t)).toBe("Ignorerat av dig");
+    expect(dismissedByText({ dismissed_by: "user-2" }, "user-1", t)).toBe(
+      "Ignorerat av en annan person"
+    );
+    expect(dismissedByText({ dismissed_by: null }, "user-1", tEn)).toBe(
+      "Ignored by a user who no longer exists"
     );
   });
 });

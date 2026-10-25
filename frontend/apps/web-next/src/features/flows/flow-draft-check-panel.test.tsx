@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { makeAssistant } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
 
@@ -22,6 +22,8 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 }));
 
 import { FlowDraftCheck } from "./flow-draft-check-panel";
+import { SUGGESTIONS_SUMMARY_ID } from "./flow-suggestions-section";
+import { flowSuggestionsQueryOptions } from "./flow-suggestions";
 
 afterEach(() => {
   cleanup();
@@ -30,13 +32,40 @@ afterEach(() => {
 
 const reply = (data: unknown) => ({ data, response: new Response(null, { status: 200 }) });
 
-function route(assistants: Record<string, unknown>) {
-  api.GET.mockImplementation(
-    (_path: string, init: { params: { path: { assistant_id: string } } }) =>
-      Promise.resolve(reply(assistants[init.params.path.assistant_id]))
+/** The assistants by id, and the draft's suggestions (dismissed ones marked, as the page reads them). */
+function route(assistants: Record<string, unknown>, suggestions: Record<string, unknown>[] = []) {
+  api.GET.mockImplementation((path: string, init: { params: { path: { assistant_id: string } } }) =>
+    Promise.resolve(
+      path === "/api/v1/flows/{id}/suggestions/"
+        ? reply({
+            flow_id: "flow-1",
+            draft_revision: 4,
+            dismissed_count: suggestions.filter((item) => item.dismissed).length,
+            items: suggestions
+          })
+        : reply(assistants[init.params.path.assistant_id])
+    )
   );
   api.POST.mockResolvedValue(reply({ steps: [] }));
 }
+
+function suggestion(fingerprint: string, steps: string[], dismissed = false) {
+  return {
+    code: steps.length > 0 ? "unread_result" : "unused_form_field",
+    fingerprint: fingerprint.repeat(64),
+    steps,
+    params: steps.length > 0 ? {} : { field: "Diarienummer" },
+    message: "A suggestion.",
+    impact: { basis: "definition", level: "medium" },
+    fix: { kind: "advice" },
+    dismissed: dismissed ? { dismissed_by: "user-1", dismissed_at: "2026-10-25T09:30:00Z" } : null
+  };
+}
+
+const ASSISTANTS = {
+  "assistant-1": makeAssistant({ id: "assistant-1" }),
+  "assistant-2": makeAssistant({ id: "assistant-2" })
+};
 
 describe("FlowDraftCheck", () => {
   it("lists what stops publishing per step and opens the step it is about", async () => {
@@ -116,14 +145,54 @@ describe("FlowDraftCheck", () => {
     );
   });
 
-  it("lists no suggestions: they sit on the step cards", async () => {
-    route({
-      "assistant-1": makeAssistant({ id: "assistant-1" }),
-      "assistant-2": makeAssistant({ id: "assistant-2" })
+  it("says how many suggestions the draft has, and brings their summary into view and focus", async () => {
+    route(ASSISTANTS, [
+      suggestion("a", ["step-2"]),
+      suggestion("b", []),
+      // Dismissed: shown under "Visa ignorerade", never counted.
+      suggestion("c", ["step-1"], true),
+      // About a step the draft no longer has: shown nowhere.
+      suggestion("d", ["step-9"])
+    ]);
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { container } = renderInApp(
+      <>
+        <FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />
+        {/* The step list's summary, as the page puts it below. */}
+        <div id={SUGGESTIONS_SUMMARY_ID} tabIndex={-1}>
+          Sammanfattningen
+        </div>
+      </>
+    );
+
+    expect(
+      await screen.findByText("2 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    // Advice beside the check: what stops publishing is still nothing.
+    expect(screen.getByText("Inget hindrar publicering just nu.")).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa förslagen" }));
+    const summary = document.getElementById(SUGGESTIONS_SUMMARY_ID)!;
+    expect(document.activeElement).toBe(summary);
+    expect(scrolled.mock.contexts).toContain(summary);
+    scrolled.mockRestore();
+  });
+
+  it("says nothing of suggestions while the draft has none, or only dismissed ones", async () => {
+    route(ASSISTANTS, [suggestion("c", ["step-1"], true)]);
+    const queryClient = testQueryClient();
+    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />, {
+      queryClient
     });
-    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />);
 
     expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
-    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything());
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData(flowSuggestionsQueryOptions("flow-1", 4).queryKey)
+      ).toBeTruthy()
+    );
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Visa förslagen" })).toBeNull();
   });
 });

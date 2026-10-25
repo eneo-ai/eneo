@@ -5,7 +5,7 @@ import {
   type QueryKey
 } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { reasoningEffortLabel } from "@/features/chat/reasoning-effort";
 import type { FlowStep } from "./flows-api";
@@ -13,9 +13,9 @@ import { stepMention, valueReference } from "./chat/references";
 
 /**
  * The core's suggestions for a draft (`GET /flows/{id}/suggestions/`): where
- * the flow moves the same data twice. Display only here; the text a person
- * reads is rendered from each suggestion's `code` and `params`, never from
- * its English `message` (that one is for the API and the chat model).
+ * the flow moves the same data twice, and what the runs measured. The text a
+ * person reads is rendered from each suggestion's `code` and `params`, never
+ * from its English `message` (that one is for the API and the chat model).
  */
 
 export type FlowSuggestion = Schema<"FlowSuggestionPublic">;
@@ -23,6 +23,8 @@ export type FlowSuggestions = Schema<"FlowSuggestionsPublic">;
 export type FlowSuggestionCode = Schema<"FlowSuggestionCode">;
 export type FlowSuggestionImpact = Schema<"FlowSuggestionImpactPublic">;
 export type FlowSuggestionRuns = Schema<"FlowSuggestionRunsPublic">;
+/** Who dismissed a suggestion of the flow, and when. */
+export type FlowSuggestionDismissed = Schema<"FlowSuggestionDismissedPublic">;
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -72,8 +74,67 @@ export function forgetMeasuredSuggestions(queryClient: QueryClient, flowId: stri
   });
 }
 
+/**
+ * Reads the suggestions on screen again after a change that keeps the draft
+ * revision (a dismissal, or taking one back): the plain answer on screen is
+ * read again and the others are marked stale, and while the page measures,
+ * its measured answer is read once more (one audit entry). No other measured
+ * answer is read.
+ */
+export async function refetchSuggestionsOnScreen(
+  queryClient: QueryClient,
+  flowId: string,
+  revision: number,
+  runs: number
+): Promise<void> {
+  await Promise.all([
+    invalidateDefinitionSuggestions(queryClient, flowId),
+    runs > 0
+      ? queryClient.refetchQueries({
+          queryKey: flowSuggestionKeys.list(flowId, revision, runs),
+          exact: true
+        })
+      : null
+  ]);
+}
+
 /** The suggestion is gone from the draft (a change since it was read). */
 export const SUGGESTION_STALE = "flow_suggestion_stale";
+
+/**
+ * Dismisses a suggestion for the flow, for every editor of it (`POST
+ * .../dismissal/` with the suggestion's code). Retrying answers with the
+ * dismissal as first made. The draft revision stays as it is.
+ */
+export function dismissFlowSuggestion(
+  flowId: string,
+  suggestion: Pick<FlowSuggestion, "fingerprint" | "code">
+): Promise<Schema<"FlowSuggestionDismissalPublic">> {
+  return unwrap(
+    browserApi.POST("/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/", {
+      params: { path: { id: flowId, fingerprint: suggestion.fingerprint } },
+      body: { code: suggestion.code }
+    })
+  );
+}
+
+/**
+ * Takes a dismissal back (`DELETE .../dismissal/`), so the suggestion is
+ * listed again while the draft has it. A dismissal that is already gone
+ * (someone else took it back) leaves the flow as asked: that is no refusal.
+ */
+export async function restoreFlowSuggestion(flowId: string, fingerprint: string): Promise<void> {
+  try {
+    await unwrap(
+      browserApi.DELETE("/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/", {
+        params: { path: { id: flowId, fingerprint } }
+      })
+    );
+  } catch (error) {
+    if (error instanceof EneoApiError && error.status === 404) return;
+    throw error;
+  }
+}
 
 /**
  * Makes the fixes of the suggestions named by fingerprint on the draft at
@@ -101,6 +162,11 @@ export function applyFlowSuggestions(
  * the page asks for it: never again on a remount, a window focus, a
  * reconnect or a retry, and it stays in the cache for the visit (the page
  * forgets it when it closes).
+ *
+ * The answer lists the dismissed suggestions too, marked (`dismissed`): the
+ * page leaves them out of its lists and counts (`suggestionsOnPage`) and
+ * shows them under "Visa ignorerade". One answer per revision serves both,
+ * so showing them never reads again, and never measures again.
  */
 export function flowSuggestionsQueryOptions(flowId: string, revision: number, runs = 0) {
   const measured = runs > 0;
@@ -109,7 +175,10 @@ export function flowSuggestionsQueryOptions(flowId: string, revision: number, ru
     queryFn: (): Promise<FlowSuggestions> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/suggestions/", {
-          params: { path: { id: flowId }, ...(measured ? { query: { runs } } : {}) }
+          params: {
+            path: { id: flowId },
+            query: measured ? { runs, include_dismissed: true } : { include_dismissed: true }
+          }
         })
       ),
     // While a new revision's suggestions load, the last ones stay on the
@@ -629,9 +698,63 @@ export function flowSuggestions(items: readonly FlowSuggestion[] | undefined): F
   return (items ?? []).filter((suggestion) => suggestion.steps.length === 0);
 }
 
-/** Whether "Åtgärda" can make the suggestion's fix in one step. */
+/** A dismissed suggestion, with the step it is about (null for one about the run form). */
+export type DismissedSuggestion = { suggestion: FlowSuggestion; step: FlowStep | null };
+
+/** What the page shows of an answer, the dismissed suggestions apart. */
+export type SuggestionsOnPage = {
+  /** On the step cards; none of them dismissed. */
+  shown: ShownSuggestion[];
+  /** About the run form; none of them dismissed. */
+  form: FlowSuggestion[];
+  /** Dismissed by an editor of the flow, for "Visa ignorerade", in the core's order. */
+  dismissed: DismissedSuggestion[];
+};
+
+/**
+ * Splits an answer into what the step list shows: the suggestions on the
+ * step cards and about the run form, and apart from them the dismissed ones.
+ * A dismissed suggestion never counts among the others. One whose step the
+ * draft no longer has is left out of all three.
+ */
+export function suggestionsOnPage(
+  items: readonly FlowSuggestion[] | undefined,
+  steps: readonly FlowStep[]
+): SuggestionsOnPage {
+  const active = (items ?? []).filter((suggestion) => !suggestion.dismissed);
+  const dismissed = (items ?? []).filter((suggestion) => suggestion.dismissed);
+  return {
+    shown: shownSuggestions(active, steps),
+    form: flowSuggestions(active),
+    dismissed: dismissed.flatMap((suggestion): DismissedSuggestion[] => {
+      if (suggestion.steps.length === 0) return [{ suggestion, step: null }];
+      const step = steps.find((candidate) => candidate.id === suggestion.steps[0]);
+      return step ? [{ suggestion, step }] : [];
+    })
+  };
+}
+
+/** How many suggestions the draft shows, the dismissed ones not counted. */
+export function suggestionCount(page: SuggestionsOnPage): number {
+  return page.shown.length + page.form.length;
+}
+
+/** "Ignorerat av dig": who dismissed a suggestion, as the signed-in person reads it. */
+export function dismissedByText(
+  dismissed: Pick<FlowSuggestionDismissed, "dismissed_by">,
+  userId: string,
+  t: Translate
+): string {
+  if (dismissed.dismissed_by === null) return t("flow_suggestion_dismissed_by_removed");
+  // The API names no other person, and a piece of an id names nobody.
+  return dismissed.dismissed_by === userId
+    ? t("flow_suggestion_dismissed_by_you")
+    : t("flow_suggestion_dismissed_by_other");
+}
+
+/** Whether "Åtgärda" can make the suggestion's fix in one step: a patch, and not dismissed. */
 export function isPatchable(suggestion: FlowSuggestion): boolean {
-  return suggestion.fix.kind === "patch";
+  return suggestion.fix.kind === "patch" && !suggestion.dismissed;
 }
 
 /**

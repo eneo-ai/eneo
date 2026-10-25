@@ -47,16 +47,20 @@ import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
-import type { SuggestionFix } from "./flow-suggestion-item";
+import type { SuggestionDismissal, SuggestionFix } from "./flow-suggestion-item";
 import type { SuggestionMeasure } from "./flow-suggestions-section";
 import {
   applyFlowSuggestions,
+  dismissFlowSuggestion,
   flowSuggestionsQueryOptions,
   forgetMeasuredSuggestions,
   invalidateDefinitionSuggestions,
   measuredBasisText,
   MEASURED_RUNS,
-  SUGGESTION_STALE
+  refetchSuggestionsOnScreen,
+  restoreFlowSuggestion,
+  SUGGESTION_STALE,
+  type FlowSuggestion
 } from "./flow-suggestions";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
@@ -112,7 +116,8 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * "Optimera flödet" put a prepared request in the chat's composer (showing
  * the chat first, on a phone); the person sends it. Someone who may view
  * flow traces can have the suggestions measured over the latest runs for
- * the visit ("Räkna med de senaste körningarna").
+ * the visit ("Räkna med de senaste körningarna"). An editor can dismiss a
+ * suggestion for the flow ("Ignorera") and show the dismissed ones again.
  */
 export function FlowPage({ flowId }: { flowId: string }) {
   const t = useTranslations();
@@ -336,6 +341,69 @@ export function FlowPage({ flowId }: { flowId: string }) {
   // The measured answers stay for the visit (no remount reads them again)
   // and go with it.
   useEffect(() => () => forgetMeasuredSuggestions(queryClient, flowId), [flowId, queryClient]);
+
+  // "Ignorera" and "Visa igen": a dismissal is the flow's, for every editor
+  // of it, and leaves the draft revision as it is, so the suggestions on
+  // screen are read again once it is saved (measured once more only while
+  // the page measures; no other measured answer is read). The pressed
+  // button stays busy until the row has left. "Visa ignorerade" is held for
+  // the visit, by flow, as the measured view is.
+  const [dismissedShownFlow, setDismissedShownFlow] = useState<string | null>(null);
+  const refreshSuggestions = () =>
+    refetchSuggestionsOnScreen(queryClient, flowId, flow.draft_revision, suggestionRuns);
+  const dismissal = useMutation({
+    mutationFn: async ({
+      suggestion,
+      restore
+    }: {
+      suggestion: FlowSuggestion;
+      restore: boolean;
+    }) => {
+      if (restore) await restoreFlowSuggestion(flowId, suggestion.fingerprint);
+      else await dismissFlowSuggestion(flowId, suggestion);
+    },
+    onSuccess: () => {
+      setNotice(null);
+      return refreshSuggestions();
+    },
+    onError: (error, { restore }) => {
+      // The draft no longer has the suggestion: its plain answer is read again.
+      if (refusalCode(error) === SUGGESTION_STALE) {
+        void invalidateDefinitionSuggestions(queryClient, flowId);
+      }
+      refused(
+        error,
+        restore
+          ? t("flow_suggestions_notice_not_restored")
+          : t("flow_suggestions_notice_not_dismissed"),
+        steps
+      );
+    }
+  });
+  const suggestionDismissal: SuggestionDismissal | undefined = canEdit
+    ? {
+        onDismiss: async (suggestion) => {
+          try {
+            await dismissal.mutateAsync({ suggestion, restore: false });
+            return true;
+          } catch {
+            // Refused: the notice above the columns says why.
+            return false;
+          }
+        },
+        onRestore: async (suggestion) => {
+          try {
+            await dismissal.mutateAsync({ suggestion, restore: true });
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        busy: dismissal.isPending ? (dismissal.variables?.suggestion.fingerprint ?? null) : null,
+        showDismissed: dismissedShownFlow === flowId,
+        onShowDismissed: (show) => setDismissedShownFlow(show ? flowId : null)
+      }
+    : undefined;
 
   const publish = useMutation({
     mutationFn: () => publishFlow(flow),
@@ -727,6 +795,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     readOnly={!canEdit}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}
+                    suggestionDismissal={suggestionDismissal}
                     suggestionRuns={suggestionRuns}
                     onSaved={(updated) => {
                       saved(updated);
@@ -769,6 +838,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   {canEdit ? (
                     <FlowDraftCheck
                       flow={flow}
+                      suggestionRuns={suggestionRuns}
                       speakerServices={space.transcription_services ?? []}
                       onOpenStep={openStep}
                       onRepair={repairReference}
@@ -782,6 +852,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     changes={chatChanges}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}
+                    dismissal={suggestionDismissal}
                     measure={measure}
                     headingRef={stepsHeadingRef}
                     onOpen={openStep}

@@ -5,6 +5,7 @@ import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { Lightbulb } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -47,6 +48,12 @@ import {
   type StepProblem
 } from "./flow-draft-check";
 import type { SpeakerServiceLink } from "./flow-transcription";
+import { showSuggestionsSummary } from "./flow-suggestions-section";
+import {
+  flowSuggestionsQueryOptions,
+  suggestionCount,
+  suggestionsOnPage
+} from "./flow-suggestions";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -203,15 +210,25 @@ function RemovedReadRepair({
  * link to the step in the editor; the flow's own (no steps, no transcription
  * model) say where they are fixed. A read of a removed step in a step's
  * underlag can be replaced here in one choice (`onRepair` saves it). The
- * core's suggestions are not listed here: they sit on the step cards.
+ * core's suggestions are not listed here, they sit on the step cards: while
+ * the draft has some, one line says how many (the dismissed ones not
+ * counted), and its button brings the summary above the step list into view
+ * and puts focus on it. They never block or delay publishing.
  */
 export function FlowDraftCheck({
   flow,
+  suggestionRuns = 0,
   speakerServices,
   onOpenStep,
   onRepair
 }: {
   flow: FlowPublic;
+  /**
+   * The runs the step list's suggestions are measured over; 0 for the
+   * definition alone. The line reads the step list's answer, never one of
+   * its own.
+   */
+  suggestionRuns?: number;
   speakerServices: readonly SpeakerServiceLink[];
   onOpenStep: (step: FlowStep) => void;
   /** Saves the step's repaired underlag; resolves to whether it was saved. */
@@ -233,6 +250,10 @@ export function FlowDraftCheck({
     ...classificationPreviewQueryOptions(flow.id, savedFlowPreviewRequest(flow)),
     enabled: flow.steps.length > 0
   });
+  const suggestions = useQuery(
+    flowSuggestionsQueryOptions(flow.id, flow.draft_revision, suggestionRuns)
+  );
+  const suggested = suggestionCount(suggestionsOnPage(suggestions.data?.items, flow.steps));
 
   const pending =
     assistants.some((query) => query.isPending) ||
@@ -363,6 +384,20 @@ export function FlowDraftCheck({
           </ul>
         </Banner>
       )}
+      {suggested > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Lightbulb aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
+          <Text size="sm" as="p" display="block" className="m-0">
+            {t("flow_suggestions_summary", { count: suggested })}
+          </Text>
+          <Button
+            label={t("flow_suggestions_draft_check_show")}
+            size="sm"
+            variant="ghost"
+            onClick={() => showSuggestionsSummary()}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

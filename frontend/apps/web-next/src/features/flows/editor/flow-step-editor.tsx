@@ -17,7 +17,7 @@ import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import type { SuggestionFix } from "../flow-suggestion-item";
+import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
 import {
   classificationPreviewQueryOptions,
@@ -91,6 +91,8 @@ type EditorProps = {
   onAskChat?: (text: string) => void;
   /** Makes a suggestion's patch; absent, no "Åtgärda" is offered. */
   suggestionFix?: SuggestionFix;
+  /** Dismisses one of the step's suggestions ("Ignorera"); absent, it is not offered. */
+  suggestionDismissal?: SuggestionDismissal;
   /**
    * The runs the page's suggestions are measured over ("Räkna med de
    * senaste körningarna"); 0 or absent for the definition alone.
@@ -242,6 +244,7 @@ function StepEditorSession({
   onCancel,
   onAskChat,
   suggestionFix,
+  suggestionDismissal,
   suggestionRuns = 0,
   leaveRef
 }: Omit<EditorProps, "navigation">) {
@@ -657,6 +660,7 @@ function StepEditorSession({
           runs={suggestionRuns}
           onAskChat={onAskChat}
           fix={suggestionFix}
+          dismissal={suggestionDismissal}
           fixBlocked={dirty}
           rescueTarget={() => summaryRef.current}
         />

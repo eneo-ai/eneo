@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { focusManager } from "@tanstack/react-query";
+import { focusManager, type QueryClient } from "@tanstack/react-query";
 import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { FlowReferences } from "./chat/reference-pill";
+import messages from "@/lib/i18n/messages/sv.json";
 import { makeFlow, makeStep } from "./flow-fixtures";
-import type { SuggestionFix } from "./flow-suggestion-item";
+import type { SuggestionDismissal, SuggestionFix } from "./flow-suggestion-item";
 
 const state = vi.hoisted(() => ({ announce: vi.fn() }));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
@@ -17,7 +18,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 
 const prompts = vi.hoisted(() => ({
   byAssistant: {} as Record<string, string>,
-  suggestions: [] as unknown[],
+  suggestions: [] as Record<string, unknown>[],
   // The answer measured over the latest runs (`?runs=`).
   measured: { runs: null as unknown, items: [] as unknown[] }
 }));
@@ -183,6 +184,73 @@ function renderMeasured(revision = 4) {
   }
   const view = renderInApp(<Measured draftRevision={revision} />);
   return { ...view, ui: (next: number) => <Measured draftRevision={next} /> };
+}
+
+/** A suggestion as the core lists it once an editor of the flow dismissed it. */
+function dismissedBy<T extends Record<string, unknown>>(
+  suggestion: T,
+  by: string | null = "user-1"
+) {
+  return { ...suggestion, dismissed: { dismissed_by: by, dismissed_at: "2026-10-25T09:30:00Z" } };
+}
+
+/**
+ * The list with "Ignorera" and "Visa ignorerade" as the page offers them: a
+ * dismissal or a restore changes what the core answers and reads the
+ * suggestions again, and the choice to show the dismissed ones is held as
+ * the page holds it. `calls` records what was dismissed and restored.
+ */
+function renderDismissable(fix?: SuggestionFix) {
+  const calls = { dismissed: [] as unknown[], restored: [] as unknown[] };
+  let client: QueryClient | null = null;
+  const reread = (fingerprint: string, dismiss: boolean) => {
+    prompts.suggestions = prompts.suggestions.map((item) =>
+      item.fingerprint !== fingerprint
+        ? item
+        : dismiss
+          ? dismissedBy(item)
+          : { ...item, dismissed: null }
+    );
+    return client!.invalidateQueries({ queryKey: ["flows", "flow-1", "suggestions"] });
+  };
+  function Dismissable() {
+    const [showDismissed, setShowDismissed] = useState(false);
+    const dismissal: SuggestionDismissal = {
+      onDismiss: async (suggestion) => {
+        calls.dismissed.push(suggestion);
+        await reread(suggestion.fingerprint, true);
+        return true;
+      },
+      onRestore: async (suggestion) => {
+        calls.restored.push(suggestion);
+        await reread(suggestion.fingerprint, false);
+        return true;
+      },
+      busy: null,
+      showDismissed,
+      onShowDismissed: setShowDismissed
+    };
+    return (
+      <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
+        <FlowStepList
+          flowId="flow-1"
+          draftRevision={4}
+          steps={steps}
+          canEdit
+          headingRef={createRef()}
+          suggestionFix={fix}
+          dismissal={dismissal}
+          onOpen={vi.fn()}
+          onMove={vi.fn()}
+          onRemove={vi.fn(async () => {})}
+          onAdd={vi.fn()}
+        />
+      </FlowReferences>
+    );
+  }
+  const view = renderInApp(<Dismissable />);
+  client = view.queryClient;
+  return { ...view, calls };
 }
 
 describe("FlowStepList", () => {
@@ -526,7 +594,10 @@ describe("FlowStepList", () => {
     rerender(ui(5));
     expect(screen.getByText("Baserat på 8 körningar.")).toBeTruthy();
     await waitFor(() => expect(suggestionReads()).toEqual([0, 10, 10]));
-    expect(api.GET.mock.calls.at(-1)?.[1].params.query).toEqual({ runs: 10 });
+    expect(api.GET.mock.calls.at(-1)?.[1].params.query).toEqual({
+      runs: 10,
+      include_dismissed: true
+    });
     unmount();
   });
 
@@ -635,6 +706,103 @@ describe("FlowStepList", () => {
       "Kostar cirka 300 tokens per körning, mätt i 8 körningar av version 3.",
       "Mätt i 8 körningar."
     ]);
+  });
+
+  it("dismisses a suggestion from its row and keeps focus on the step it was about", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64), "patch")];
+    const { calls } = renderDismissable();
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(
+      await within(second).findByRole("button", { name: "1 förslag, 1 kan åtgärdas" })
+    );
+    // Nothing is dismissed yet: nothing offers to show what is.
+    expect(screen.queryByRole("button", { name: /^Visa ignorerade/ })).toBeNull();
+    fireEvent.click(within(second).getByRole("button", { name: /^Mer om/ }));
+
+    const ignore = within(second).getByRole("button", {
+      name: "Ignorera ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
+    });
+    ignore.focus();
+    fireEvent.click(ignore);
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_dismissed_done)
+    );
+    expect(calls.dismissed).toEqual([
+      expect.objectContaining({ code: "duplicate_read", fingerprint: "a".repeat(64) })
+    ]);
+    // The row left with its button: focus is on the step it was about, never on <body>.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" })
+      )
+    );
+    expect(within(second).queryByRole("button", { name: /förslag/ })).toBeNull();
+    // Nothing counts it any more; it waits under "Visa ignorerade".
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+    expect(screen.getByText("Förslaget är ignorerat")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Visa ignorerade (1)" })).toBeTruthy();
+  });
+
+  it("lists the dismissed suggestions with who and when, without a fix, and shows one again", async () => {
+    prompts.suggestions = [
+      dismissedBy(suggestionAbout("step-2", "a".repeat(64), "patch")),
+      dismissedBy(UNUSED_FIELD, "user-2"),
+      suggestionAbout("step-3", "c".repeat(64))
+    ];
+    const fix = { onFix: vi.fn(async () => true), pending: false };
+    const { container, calls } = renderDismissable(fix);
+
+    // Only the suggestion that is not dismissed counts, and nothing offers to fix the others.
+    expect(
+      await screen.findByText("1 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Åtgärda alla/ })).toBeNull();
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    expect(within(second).queryByRole("button", { name: /förslag/ })).toBeNull();
+
+    const show = screen.getByRole("button", { name: "Visa ignorerade (2)" });
+    expect(show.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(show);
+    // The same button hides them again.
+    expect(show.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Dölj ignorerade (2)" })).toBe(show);
+    const panel = document.getElementById(show.getAttribute("aria-controls") ?? "")!;
+    const rows = within(panel).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(
+      within(rows[0]!)
+        .getByText(/^Steg 2: Skriv svar · Ignorerat av dig ·/)
+        .querySelector("time")
+    ).toBeTruthy();
+    expect(
+      within(rows[1]!)
+        .getByText(/^Körningens formulär · Ignorerat av en annan person ·/)
+        .querySelector("time")
+    ).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: /^Ignorera/ })).toBeNull();
+    await expectNoAxeViolations(container);
+
+    const again = within(rows[0]!).getByRole("button", {
+      name: "Visa ”Svaret från Steg 1: Sammanfatta skickas två gånger” igen"
+    });
+    again.focus();
+    fireEvent.click(again);
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_suggestion_restored_done)
+    );
+    expect(calls.restored).toEqual([expect.objectContaining({ fingerprint: "a".repeat(64) })]);
+    // Back on its step's card; focus stays on the list of the one left.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Dölj ignorerade (1)" })
+      )
+    );
+    expect(within(second).getByRole("button", { name: "1 förslag, 1 kan åtgärdas" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dölj ignorerade (1)" }));
+    expect(panel.hidden).toBe(true);
   });
 
   it("only shows the steps to someone who cannot change them", () => {

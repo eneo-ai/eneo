@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { List } from "@astryxdesign/core/List";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, History, Lightbulb, Undo2, Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, EyeOff, History, Lightbulb, Undo2, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useState, type ReactNode } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -14,8 +14,10 @@ import type { FlowPublic, FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
   SuggestionRow,
+  useSuggestionDismissal,
   useSuggestionFix,
   type SuggestionActions,
+  type SuggestionDismissal,
   type SuggestionFix
 } from "./flow-suggestion-item";
 import {
@@ -23,18 +25,38 @@ import {
   inSuggestionOrder,
   isPatchable,
   measuredBasisText,
-  shownSuggestions,
+  suggestionsOnPage,
   suggestionText,
+  type DismissedSuggestion,
   type FlowSuggestion,
   type FlowSuggestionRuns,
   type ShownSuggestion
 } from "./flow-suggestions";
 
-type ListActions = Pick<SuggestionActions, "onAskChat" | "onRemoveStep" | "fixBlockedBy"> & {
+type ListActions = Pick<
+  SuggestionActions,
+  "onAskChat" | "onRemoveStep" | "fixBlockedBy" | "onDismiss" | "onRestore" | "dismissBusy"
+> & {
   /** Fixes the suggestions by fingerprint (see `useSuggestionFix`). */
   onFix?: (fingerprints: string[]) => void;
   fixPending?: boolean;
 };
+
+/** The suggestions summary at the top of the step list, which "Före publicering" brings into view. */
+export const SUGGESTIONS_SUMMARY_ID = "flow-suggestions-summary";
+
+/**
+ * Brings the suggestions summary into view and puts focus on it, for the
+ * count in "Före publicering". False when it is not on the page.
+ */
+export function showSuggestionsSummary(): boolean {
+  const summary = document.getElementById(SUGGESTIONS_SUMMARY_ID);
+  if (!summary) return false;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  summary.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+  summary.focus({ preventScroll: true });
+  return true;
+}
 
 /**
  * Which disclosures are open, by key (a step's list by `step:<id>`, a row
@@ -74,11 +96,16 @@ export function SuggestionSection({
   rows,
   summary,
   note,
+  icon,
+  buttonId: givenButtonId,
   onAskChat,
   onFix,
   fixPending,
   fixBlockedBy,
-  onRemoveStep
+  onRemoveStep,
+  onDismiss,
+  onRestore,
+  dismissBusy
 }: ListActions & {
   items: readonly { suggestion: FlowSuggestion; step: FlowStep | null }[];
   steps: readonly FlowStep[];
@@ -88,13 +115,18 @@ export function SuggestionSection({
   open: OpenKeys;
   /** The rows' own disclosures, by fingerprint. */
   rows: OpenKeys;
-  /** What the button says instead of "3 förslag" (the run form's). */
+  /** What the button says instead of "3 förslag" (the run form's, the dismissed ones'). */
   summary?: string;
   /** Shown above the rows (why "Åtgärda" waits). */
   note?: ReactNode;
+  /** The button's icon instead of the light bulb. */
+  icon?: ReactNode;
+  /** The button's id, for a caller that puts focus on it. */
+  buttonId?: string;
 }) {
   const t = useTranslations();
-  const buttonId = useId();
+  const ownButtonId = useId();
+  const buttonId = givenButtonId ?? ownButtonId;
   const panelId = useId();
   if (items.length === 0) return null;
   const isOpen = open.isOpen(openKey);
@@ -116,7 +148,7 @@ export function SuggestionSection({
           aria-controls={panelId}
           variant="ghost"
           size="sm"
-          icon={<Lightbulb aria-hidden="true" className="size-4" />}
+          icon={icon ?? <Lightbulb aria-hidden="true" className="size-4" />}
           endContent={
             isOpen ? (
               <ChevronDown aria-hidden="true" className="size-4" />
@@ -151,6 +183,9 @@ export function SuggestionSection({
               fixPending={fixPending}
               fixBlockedBy={fixBlockedBy}
               onRemoveStep={onRemoveStep}
+              onDismiss={onDismiss}
+              onRestore={onRestore}
+              dismissBusy={dismissBusy}
             />
           ))}
         </List>
@@ -197,13 +232,19 @@ export function StepCardSuggestions({
  * The top of the step list while the core has suggestions: how many there
  * are, "Åtgärda alla" for those with a patch (after a confirmation that
  * lists them step by step), and the suggestions about the run form, which
- * no step card can hold. Nothing is rendered while there are none.
+ * no step card can hold. For an editor, "Visa ignorerade (2)" lists the
+ * suggestions an editor of the flow dismissed, each with "Visa igen"; the
+ * page holds that choice for the visit. Nothing is rendered while there are
+ * none, dismissed or not. "Före publicering" brings it into view and puts
+ * focus on it (`showSuggestionsSummary`).
  */
 export function SuggestionsSummary({
   shown,
   formItems,
+  dismissed = [],
   steps,
   fix,
+  dismissal,
   onAskChat,
   rescueTarget
 }: {
@@ -211,20 +252,33 @@ export function SuggestionsSummary({
   shown: readonly ShownSuggestion[];
   /** The suggestions about the run form (an unused field). */
   formItems: readonly FlowSuggestion[];
+  /** The suggestions an editor of the flow dismissed. */
+  dismissed?: readonly DismissedSuggestion[];
   steps: readonly FlowStep[];
   fix?: SuggestionFix;
+  /** "Ignorera" and "Visa ignorerade"; absent, neither is offered. */
+  dismissal?: SuggestionDismissal;
   onAskChat?: (text: string) => void;
-  /** Where focus goes once fixed suggestions have left the page. */
+  /** Where focus goes once fixed or dismissed suggestions have left the page. */
   rescueTarget: () => HTMLElement | null;
 }) {
   const t = useTranslations();
+  const dismissedButtonId = useId();
   const [confirming, setConfirming] = useState(false);
   const runFix = useSuggestionFix(fix, rescueTarget);
+  const forForm = useSuggestionDismissal(dismissal, rescueTarget);
+  // A restored suggestion leaves the dismissed list: focus stays on its
+  // button, or on the step list's heading once the last one has gone.
+  const forDismissed = useSuggestionDismissal(
+    dismissal,
+    () => document.getElementById(dismissedButtonId) ?? rescueTarget()
+  );
   // The run form's suggestions start collapsed, and stay as the person left them.
   const open = useOpenKeys(false);
   const rows = useOpenKeys(false);
   const count = shown.length + formItems.length;
-  if (count === 0) return null;
+  const listedDismissed = dismissal ? dismissed : [];
+  if (count === 0 && listedDismissed.length === 0) return null;
 
   const patchable = [
     ...shown.filter(({ suggestion }) => isPatchable(suggestion)),
@@ -244,41 +298,90 @@ export function SuggestionsSummary({
       (right.step?.step_order ?? Number.MAX_SAFE_INTEGER)
   );
 
+  // "Visa ignorerade" opens and closes with the page's choice for the visit.
+  const dismissedOpen: OpenKeys = {
+    isOpen: () => dismissal?.showDismissed ?? false,
+    setOpen: (_key, next) => dismissal?.onShowDismissed(next)
+  };
+  const showingDismissed = dismissal?.showDismissed ?? false;
+
   return (
     <>
-      <Banner
-        status="info"
-        title={t("flow_suggestions_summary", { count })}
-        description={t("flow_suggestions_summary_description")}
-        collapsible={false}
-        endContent={
-          runFix && patchable.length > 0 ? (
-            <Button
-              label={t("flow_suggestions_fix_all", { count: patchable.length })}
-              size="sm"
-              icon={<Wrench aria-hidden="true" className="size-4" />}
-              isLoading={fix?.pending}
-              isInterruptible
-              onClick={() => {
-                if (!fix?.pending) setConfirming(true);
-              }}
-            />
-          ) : undefined
-        }
+      <div
+        id={SUGGESTIONS_SUMMARY_ID}
+        tabIndex={-1}
+        className="focus-visible:outline-ring rounded-ax-container focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        <SuggestionSection
-          items={formItems.map((suggestion) => ({ suggestion, step: null }))}
-          steps={steps}
-          headingLevel={3}
-          openKey="form"
-          open={open}
-          rows={rows}
-          summary={t("flow_suggestions_form_count", { count: formItems.length })}
-          onAskChat={onAskChat}
-          onFix={runFix}
-          fixPending={fix?.pending}
-        />
-      </Banner>
+        <Banner
+          status="info"
+          title={
+            count > 0
+              ? t("flow_suggestions_summary", { count })
+              : t("flow_suggestions_summary_all_dismissed", { count: listedDismissed.length })
+          }
+          description={
+            count > 0
+              ? t("flow_suggestions_summary_description")
+              : t("flow_suggestions_summary_all_dismissed_description")
+          }
+          collapsible={false}
+          endContent={
+            runFix && patchable.length > 0 ? (
+              <Button
+                label={t("flow_suggestions_fix_all", { count: patchable.length })}
+                size="sm"
+                icon={<Wrench aria-hidden="true" className="size-4" />}
+                isLoading={fix?.pending}
+                isInterruptible
+                onClick={() => {
+                  if (!fix?.pending) setConfirming(true);
+                }}
+              />
+            ) : undefined
+          }
+        >
+          {formItems.length > 0 || listedDismissed.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <SuggestionSection
+                items={formItems.map((suggestion) => ({ suggestion, step: null }))}
+                steps={steps}
+                headingLevel={3}
+                openKey="form"
+                open={open}
+                rows={rows}
+                summary={t("flow_suggestions_form_count", { count: formItems.length })}
+                onAskChat={onAskChat}
+                onFix={runFix}
+                fixPending={fix?.pending}
+                onDismiss={forForm?.dismiss}
+                dismissBusy={dismissal?.busy}
+              />
+              <SuggestionSection
+                items={listedDismissed}
+                steps={steps}
+                headingLevel={3}
+                openKey="dismissed"
+                open={dismissedOpen}
+                rows={rows}
+                buttonId={dismissedButtonId}
+                icon={<EyeOff aria-hidden="true" className="size-4" />}
+                summary={
+                  showingDismissed
+                    ? t("flow_suggestions_dismissed_hide", { count: listedDismissed.length })
+                    : t("flow_suggestions_dismissed_show", { count: listedDismissed.length })
+                }
+                note={
+                  <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                    {t("flow_suggestions_dismissed_note")}
+                  </Text>
+                }
+                onRestore={forDismissed?.restore}
+                dismissBusy={dismissal?.busy}
+              />
+            </div>
+          ) : null}
+        </Banner>
+      </div>
       {runFix ? (
         <ConfirmDialogControlled
           open={confirming}
@@ -389,9 +492,10 @@ export function SuggestionsMeasure({
 
 /**
  * The open step's suggestions at the top of the step editor: the step
- * card's section, open from the start. It reads the same query as the step
- * list, measured while the list's are. Nothing is rendered while the step
- * has none, or while they load or fail (the step list says so).
+ * card's section, open from the start, without the dismissed ones. It reads
+ * the same query as the step list, measured while the list's are. Nothing
+ * is rendered while the step has none, or while they load or fail (the step
+ * list says so).
  */
 export function StepSuggestions({
   flow,
@@ -399,6 +503,7 @@ export function StepSuggestions({
   runs = 0,
   onAskChat,
   fix,
+  dismissal,
   fixBlocked = false,
   rescueTarget
 }: {
@@ -408,23 +513,26 @@ export function StepSuggestions({
   runs?: number;
   onAskChat?: (text: string) => void;
   fix?: SuggestionFix;
+  /** "Ignorera"; absent, it is not offered. */
+  dismissal?: SuggestionDismissal;
   /**
    * The editor has unsaved changes: a fix would be made on the saved draft
    * beneath them, so "Åtgärda" waits, and says why, until they are saved or
    * undone.
    */
   fixBlocked?: boolean;
-  /** Where focus goes once a fixed suggestion has left the editor. */
+  /** Where focus goes once a fixed or dismissed suggestion has left the editor. */
   rescueTarget: () => HTMLElement | null;
 }) {
   const t = useTranslations();
   const blockedId = useId();
   const query = useQuery(flowSuggestionsQueryOptions(flow.id, flow.draft_revision, runs));
   const runFix = useSuggestionFix(fix, rescueTarget);
+  const dismiss = useSuggestionDismissal(dismissal, rescueTarget);
   // The person opened the step on purpose: its suggestions start open.
   const open = useOpenKeys(true);
   const rows = useOpenKeys(false);
-  const shown = shownSuggestions(query.data?.items, flow.steps).filter(
+  const shown = suggestionsOnPage(query.data?.items, flow.steps).shown.filter(
     ({ step }) => step.id === stepId
   );
   const blocked =
@@ -449,6 +557,8 @@ export function StepSuggestions({
       onFix={runFix}
       fixPending={fix?.pending}
       fixBlockedBy={blocked ? blockedId : undefined}
+      onDismiss={dismiss?.dismiss}
+      dismissBusy={dismissal?.busy}
     />
   );
 }
