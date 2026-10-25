@@ -3,12 +3,13 @@
 Reads what recent runs of one flow measured, tenant-scoped, as the domain's
 ``RunEvidence`` pieces: per step result, its status and failure code, its
 current attempt's resolved input edges (binding, producer, selector, size,
-hash) and that attempt's completion calls (reason, tokens, edge indexes,
-mapped index). Never a prompt, an output or an input value: the edge
-aggregate holds hashes and sizes only, and it is projected here before
-anything leaves. A published version's steps leave as their
-``StepDefinitionFacts`` (a hash, a model id, an output type), never as the
-definition with its prompts.
+hash), that attempt's completion calls (reason, tokens, edge indexes,
+mapped index) and the forwarding facts the worker recorded for it (shares,
+sizes and edge indexes). Never a prompt, an output or an input value: the
+edge aggregate holds hashes and sizes only, and it is projected here before
+anything leaves; the facts hold numbers only. A published version's steps
+leave as their ``StepDefinitionFacts`` (a hash, a model id, an output
+type), never as the definition with its prompts.
 
 The caller decides which runs the user may see evidence for: it lists the
 candidates (``list_recent_runs``), filters them with the run access policy
@@ -17,6 +18,7 @@ and reads the evidence of the rest (``read_attempts``) in one statement.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, cast
 from uuid import UUID
@@ -45,6 +47,10 @@ from eneo.flows.domain.flow_suggestion_evidence import (
     StepDefinitionFacts,
     step_definition_facts,
 )
+from eneo.flows.domain.forwarding_facts import (
+    ForwardingFacts,
+    parse_forwarding_facts,
+)
 from eneo.flows.domain.provider_call import ProviderCallKind
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputFlowInputSource,
@@ -53,6 +59,8 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputStepResultSource,
     parse_resolved_input_edges,
 )
+
+logger = logging.getLogger(__name__)
 
 _RUN_STATUS_COLUMNS = tuple(
     getattr(FlowRuns, name) for name in FlowRunStatusSnapshot.model_fields
@@ -94,7 +102,9 @@ class FlowSuggestionEvidenceRepository:
     ) -> dict[UUID, tuple[EvidenceAttempt, ...]]:
         """The current attempt of every step result of ``run_ids``, by run,
         in step order: one statement. The completion calls of each attempt
-        come aggregated in it, as plain numbers and reasons."""
+        come aggregated in it, as plain numbers and reasons, and its
+        forwarding facts beside its edges; facts that no longer parse read
+        as none."""
         if not run_ids:
             return {}
         call = sa.func.jsonb_build_object(
@@ -136,6 +146,9 @@ class FlowSuggestionEvidenceRepository:
                 FlowStepResults.status,
                 FlowStepResults.error_code,
                 FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb.label("edges"),
+                FlowStepAttemptResolvedInputs.forwarding_facts_jsonb.label(
+                    "forwarding_facts"
+                ),
                 calls.label("calls"),
             )
             .select_from(FlowStepResults)
@@ -169,6 +182,11 @@ class FlowSuggestionEvidenceRepository:
                     error_code=row.error_code,
                     edges=_edges(row.edges),
                     calls=_calls(row.calls),
+                    forwarding=_forwarding(
+                        row.forwarding_facts,
+                        run_id=row.flow_run_id,
+                        step_order=row.step_order,
+                    ),
                 )
             )
         return {run_id: tuple(attempts) for run_id, attempts in by_run.items()}
@@ -275,6 +293,22 @@ def _edges(raw: object) -> tuple[EvidenceEdge, ...]:
             )
         )
     return tuple(edges)
+
+
+def _forwarding(
+    raw: object, *, run_id: UUID, step_order: int
+) -> ForwardingFacts | None:
+    """The attempt's forwarding facts; None when it has none or they cannot
+    be read, which is logged without their content."""
+    facts = parse_forwarding_facts(raw)
+    if facts is None and raw is not None:
+        logger.warning(
+            "flow_suggestion_evidence.forwarding_facts_unreadable run_id=%s "
+            "step_order=%d",
+            run_id,
+            step_order,
+        )
+    return facts
 
 
 def _calls(raw: object) -> tuple[EvidenceCall, ...]:

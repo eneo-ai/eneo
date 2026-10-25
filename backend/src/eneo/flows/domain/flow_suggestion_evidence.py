@@ -2,10 +2,13 @@
 
 Content-free by construction: input edges as their binding, producer,
 selector, size and hash; provider calls as their reason, token counts and
-the edges they sent; a step's outcome as its status and failure code. No
-prompt text, no output text, no input value. The infrastructure reads it
-(``flow_suggestion_evidence_repo``), the service hands it to the analyzer,
-and the measured rules (``flow_suggestion_measured``) turn it into numbers.
+the edges they sent; a step's outcome as its status and failure code; the
+forwarding facts the worker measured on a model call (shares, sizes and edge
+indexes, ``domain.forwarding_facts``). No prompt text, no output text, no
+input value. The infrastructure reads it (``flow_suggestion_evidence_repo``),
+the service hands it to the analyzer, and the measured rules
+(``flow_suggestion_measured``, ``flow_suggestion_forwarding``) turn it into
+numbers.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.domain.forwarding_facts import ForwardingFacts
 from eneo.flows.domain.tool_input import TOOL_INPUT_CONFIG_KEY
 
 # The runs whose evidence is counted: finished, in any outcome. A run that is
@@ -76,7 +80,10 @@ class EvidenceCall:
 class EvidenceAttempt:
     """The current attempt of one step in one run, with the step result's
     status and failure code. ``edges`` are empty when the attempt never
-    resolved its inputs (it failed before, or did not start)."""
+    resolved its inputs (it failed before, or did not start).
+    ``forwarding`` are the forwarding facts of its first model call that
+    returned output, whose edge indexes point into ``edges``; None when the
+    attempt has none or they cannot be read."""
 
     step_id: UUID
     step_order: int
@@ -84,6 +91,18 @@ class EvidenceAttempt:
     error_code: str | None
     edges: tuple[EvidenceEdge, ...] = ()
     calls: tuple[EvidenceCall, ...] = ()
+    forwarding: ForwardingFacts | None = None
+
+    def measured_forwarding(self) -> ForwardingFacts | None:
+        """The forwarding facts when the worker measured them: facts that
+        record ``measured: false`` are no measurement."""
+        facts = self.forwarding
+        return facts if facts is not None and facts.measured else None
+
+    def measured_call(self) -> EvidenceCall | None:
+        """The call the forwarding facts describe: the attempt's first
+        completed call."""
+        return next((call for call in self.calls if call.completed), None)
 
     def tokens_per_byte(self, call: EvidenceCall) -> float | None:
         """The call's input tokens over the bytes of the edges it sent: how

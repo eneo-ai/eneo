@@ -747,11 +747,18 @@ async def read_flow_suggestions(
     definition proves: the reads publish and the runtime resolve, no
     judgement of prompt text, no run content. With include_runs it also
     measures the last 10 finished runs the user may see (impact.basis runs:
-    tokens_per_run, run_count, version, step_changed_since) and reports three
+    tokens_per_run, run_count, version, step_changed_since) and reports the
     findings only runs show (identical_inputs, context_headroom,
-    format_fallback); runs.counted and runs.left_out say how many runs were
-    measured. Only numbers come from the runs, never their content, and
-    the read is audited. It needs the permission to view flow traces: without
+    format_fallback), and from what the worker measured of each model call:
+    model_relay (a model step copies an earlier result into its output and a
+    later step reads it from there instead of the original),
+    overlapping_inputs (two inputs of a step share much of their text; when
+    a duplicate_read or broad_all_previous_steps names the same two reads,
+    the overlap is in its params.measured_overlaps instead) and
+    deterministic_candidate (a model step only copies its inputs, which a
+    compose_text step does without a model); runs.counted and runs.left_out
+    say how many runs were measured. Only numbers come from the runs, never
+    their content, and the read is audited. It needs the permission to view flow traces: without
     it the result is the definition alone and its note says why. Suggestions
     never block publishing and the tool changes nothing: a fix the user
     agrees to is made with apply_flow_suggestions when its fix.kind is patch,

@@ -66,6 +66,48 @@ _DUPLICATE_READ_EXAMPLE: JsonDict = {
     },
 }
 
+_THIRD_STEP_ID = "00000000-0000-0000-0000-000000000103"
+
+_MODEL_RELAY_EXAMPLE: JsonDict = {
+    "code": FlowSuggestionCode.MODEL_RELAY.value,
+    "fingerprint": "4c7e0a5d" * 8,
+    "steps": [_SECOND_STEP_ID, _FIRST_STEP_ID, _THIRD_STEP_ID],
+    "params": {
+        "producer_step_order": 1,
+        "producer_step_id": _FIRST_STEP_ID,
+        "reads": [
+            {"channel": "input", "site": "input_source", "selector": []},
+            {
+                "channel": "prompt",
+                "site": "assistant_prompt:step_1.output.text",
+                "selector": [],
+            },
+        ],
+        "readers": [
+            {"step_order": 3, "step_id": _THIRD_STEP_ID, "sites": ["input_source"]}
+        ],
+        "copied_share": 0.82,
+        "input_share": 0.91,
+        "copied_bytes": 24300,
+        "run_count": 8,
+        "held_runs": 7,
+    },
+    "message": (
+        "In 7 of the last 8 runs, 82 % of step 2's output was step 1's result "
+        "copied word for word, and step 3 reads it from step 2; reading step 1 "
+        "directly spares the model writing the copy."
+    ),
+    "impact": {
+        "basis": "runs",
+        "level": "high",
+        "tokens_per_run": 5200,
+        "run_count": 8,
+        "version": 3,
+        "step_changed_since": False,
+    },
+    "fix": {"kind": "assisted", "patch": None},
+}
+
 _PATCH_EXAMPLE: JsonDict = cast(
     JsonDict, cast(JsonDict, _DUPLICATE_READ_EXAMPLE["fix"])["patch"]
 )
@@ -74,7 +116,7 @@ FLOW_SUGGESTIONS_EXAMPLE: JsonDict = {
     "flow_id": _FLOW_ID,
     "draft_revision": 4,
     "runs": {"requested": 10, "counted": 8, "left_out": 2},
-    "items": [_DUPLICATE_READ_EXAMPLE],
+    "items": [_MODEL_RELAY_EXAMPLE, _DUPLICATE_READ_EXAMPLE],
 }
 
 
@@ -97,8 +139,9 @@ class FlowSuggestionImpactPublic(BaseModel):
             "results taken together and material digested twice, `low` for the "
             "rest (a read contained in another, a broad or whole read, a "
             "relay, an unused form field). The measured codes: `high` for "
-            "`identical_inputs` and `context_headroom`, `medium` for "
-            "`format_fallback`."
+            "`identical_inputs`, `context_headroom` and `model_relay`, `medium` "
+            "for `format_fallback`, `overlapping_inputs` and "
+            "`deterministic_candidate`."
         ),
         examples=["high"],
     )
@@ -110,8 +153,15 @@ class FlowSuggestionImpactPublic(BaseModel):
             "size of the redundant input times the tokens per byte of each "
             "call that sent it; for a step run once per item, the copies "
             "beyond the first item's; for an unread result, everything the "
-            "step was billed. Null when the impact is from the definition, "
-            "and for a measured finding without a token cost of its own "
+            "step was billed. From the forwarding facts, averaged over the runs "
+            "in which the finding held: for `model_relay`, the output tokens of "
+            "the measured call times the share of its output that was copied; "
+            "for `overlapping_inputs`, the shared bytes times the tokens per "
+            "byte of each call that sent both inputs; for "
+            "`deterministic_candidate`, everything the step was billed, which a "
+            "step without a model does not cost. Null when the impact is from "
+            "the definition, when the runs did not report the tokens, and for a "
+            "measured finding without a token cost of its own "
             "(`context_headroom`, `format_fallback`)."
         ),
         examples=[1840],
@@ -186,9 +236,22 @@ class FlowSuggestionPublic(BaseModel):
             "different steps; `context_headroom`, a step's model came close to "
             "its input limit or the step failed the inline input limit; "
             "`format_fallback`, a step often needed a second call because its "
-            "model did not accept the structured format."
+            "model did not accept the structured format. From the forwarding "
+            "facts the worker records for each model call, also only with "
+            "`runs`: `model_relay`, most of a model step's output was an "
+            "earlier result copied word for word, which a later step reads "
+            "from it (that step can read the original); `overlapping_inputs`, "
+            "two inputs of a step shared half or more of the shorter one's "
+            "text without being identical; `deterministic_candidate`, a model "
+            "step's output was its inputs copied word for word with little of "
+            "its own, which a `compose_text` step does without a model."
         ),
-        examples=["duplicate_read"],
+        examples=[
+            "duplicate_read",
+            "model_relay",
+            "overlapping_inputs",
+            "deterministic_candidate",
+        ],
     )
     fingerprint: str = Field(
         description=(
@@ -202,8 +265,9 @@ class FlowSuggestionPublic(BaseModel):
         description=(
             "The steps the suggestion is about; the first is the step it is "
             "shown on, the second, when there is one, the step it reads, "
-            "copies or shares a source with. Empty for `unused_form_field`, "
-            "which is about the run form."
+            "copies or shares a source with; for `model_relay` the later steps "
+            "that read the step follow. Empty for `unused_form_field`, which is "
+            "about the run form."
         ),
     )
     params: dict[str, Any] = Field(
@@ -239,8 +303,24 @@ class FlowSuggestionPublic(BaseModel):
             "`inline_cap_failures`, `duplicated_tokens_per_run` and "
             "`duplicated_share` (what the step's measured duplicates account "
             "for), `related_fingerprints` (those duplicates), `step_runs`. "
-            "`format_fallback`: `fallback_runs`, `step_runs`. No param holds "
-            "run content."
+            "`format_fallback`: `fallback_runs`, `step_runs`. `model_relay`: "
+            "`producer_step_order`, `producer_step_id`, `reads` (the step's "
+            "reads of that result), `readers` (`step_order`, `step_id`, "
+            "`sites` of the later steps that read the step), `copied_share` "
+            "(the share of the output found in that result), `input_share` "
+            "(the share of that result the copy holds), `copied_bytes`. "
+            "`overlapping_inputs`: `inputs` (two, each `step_order`, `step_id` "
+            "and `sites`), `shared_bytes`, `shared_share` (of the shorter "
+            "input). `deterministic_candidate`: `output_verbatim_ratio`, "
+            "`own_bytes` (the output's bytes not found in its inputs), "
+            "`input_share` (the share of the copied inputs the output holds). "
+            "The three carry `run_count` (runs that measured the finding) and "
+            "`held_runs` (runs in which it held), their shares and sizes "
+            "averaged over the latter. A measured overlap of the two reads a "
+            "`duplicate_read` or `broad_all_previous_steps` names is added to "
+            "it as `measured_overlaps`: a list of the `overlapping_inputs` "
+            "params, each with `tokens_per_run`, `version` and "
+            "`step_changed_since`. No param holds run content."
         ),
     )
     message: str = Field(
