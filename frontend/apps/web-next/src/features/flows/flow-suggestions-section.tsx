@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { List } from "@astryxdesign/core/List";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Lightbulb, Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Lightbulb, Undo2, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useState, type ReactNode } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -20,10 +20,13 @@ import {
 } from "./flow-suggestion-item";
 import {
   flowSuggestionsQueryOptions,
+  inSuggestionOrder,
   isPatchable,
+  measuredBasisText,
   shownSuggestions,
   suggestionText,
   type FlowSuggestion,
+  type FlowSuggestionRuns,
   type ShownSuggestion
 } from "./flow-suggestions";
 
@@ -56,25 +59,11 @@ export function useOpenKeys(openByDefault = false): OpenKeys {
   return { isOpen, setOpen };
 }
 
-const LEVEL_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
-
-/** By level (high, medium, low), then as the core ordered them. */
-export function byLevel<T extends { suggestion: FlowSuggestion }>(items: readonly T[]): T[] {
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort(
-      (left, right) =>
-        (LEVEL_ORDER[left.item.suggestion.impact.level] ?? 3) -
-          (LEVEL_ORDER[right.item.suggestion.impact.level] ?? 3) || left.index - right.index
-    )
-    .map(({ item }) => item);
-}
-
 /**
  * Suggestions behind one quiet disclosure (the APG accordion pattern: a
  * heading holding the button): "3 förslag · 2 kan åtgärdas" with a
- * chevron, and open, a compact list with dividers, by level. Nothing is
- * rendered while there are none.
+ * chevron, and open, a compact list with dividers, in the core's order
+ * (`inSuggestionOrder`). Nothing is rendered while there are none.
  */
 export function SuggestionSection({
   items,
@@ -149,7 +138,7 @@ export function SuggestionSection({
       <div id={panelId} hidden={!isOpen} className="flex flex-col gap-1">
         {note}
         <List hasDividers density="compact" edge="flush">
-          {byLevel(items).map(({ suggestion, step }) => (
+          {inSuggestionOrder(items).map(({ suggestion, step }) => (
             <SuggestionRow
               key={suggestion.fingerprint}
               suggestion={suggestion}
@@ -327,14 +316,87 @@ export function SuggestionsSummary({
 }
 
 /**
+ * Measuring the suggestions over the latest runs, for someone who may view
+ * flow traces. The page holds the choice for the visit; a measured read
+ * writes an audit entry on the flow, so it is made only when the person
+ * asks and for each new draft revision while the choice holds.
+ */
+export type SuggestionMeasure = {
+  /** The runs the answers on screen are measured over; 0 for the definition alone. */
+  runs: number;
+  /** "Räkna med de senaste körningarna": the page reads and says what the answer is based on. */
+  onMeasure: () => void;
+  /** Back to the answers from the definition alone. */
+  onPlain: () => void;
+};
+
+/**
+ * Below the summary: "Räkna med de senaste körningarna" while the
+ * suggestions judge the definition alone; once measured, what the numbers
+ * are based on ("Baserat på 8 körningar.") and the way back. It is one
+ * button whose label changes in place, so focus stays on it; while the
+ * first measured answer loads it shows that it is busy and ignores another
+ * press.
+ */
+export function SuggestionsMeasure({
+  measure,
+  runs,
+  found,
+  failed
+}: {
+  measure: SuggestionMeasure;
+  /** What the answer on screen measured; null or absent for one from the definition alone. */
+  runs: FlowSuggestionRuns | null | undefined;
+  /** How many suggestions the answer on screen gives. */
+  found: number;
+  /** The measured read failed (the list says why and offers to try again). */
+  failed: boolean;
+}) {
+  const t = useTranslations();
+  const measured = measure.runs > 0;
+  const answered = measured && runs != null;
+  const pending = measured && !answered && !failed;
+  const backToPlain = measured && !pending;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {answered ? (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
+          {measuredBasisText(runs, found, t)}
+        </Text>
+      ) : null}
+      <Button
+        label={backToPlain ? t("flow_suggestions_runs_plain") : t("flow_suggestions_runs_measure")}
+        size="sm"
+        icon={
+          backToPlain ? (
+            <Undo2 aria-hidden="true" className="size-4" />
+          ) : (
+            <History aria-hidden="true" className="size-4" />
+          )
+        }
+        isLoading={pending}
+        isInterruptible
+        onClick={() => {
+          if (pending) return;
+          if (backToPlain) measure.onPlain();
+          else measure.onMeasure();
+        }}
+      />
+    </div>
+  );
+}
+
+/**
  * The open step's suggestions at the top of the step editor: the step
  * card's section, open from the start. It reads the same query as the step
- * list. Nothing is rendered while the step has none, or while they load or
- * fail (the step list says so).
+ * list, measured while the list's are. Nothing is rendered while the step
+ * has none, or while they load or fail (the step list says so).
  */
 export function StepSuggestions({
   flow,
   stepId,
+  runs = 0,
   onAskChat,
   fix,
   fixBlocked = false,
@@ -342,6 +404,8 @@ export function StepSuggestions({
 }: {
   flow: FlowPublic;
   stepId: string;
+  /** The runs the step list's answers are measured over (`SuggestionMeasure`); 0 for none. */
+  runs?: number;
   onAskChat?: (text: string) => void;
   fix?: SuggestionFix;
   /**
@@ -355,7 +419,7 @@ export function StepSuggestions({
 }) {
   const t = useTranslations();
   const blockedId = useId();
-  const query = useQuery(flowSuggestionsQueryOptions(flow.id, flow.draft_revision));
+  const query = useQuery(flowSuggestionsQueryOptions(flow.id, flow.draft_revision, runs));
   const runFix = useSuggestionFix(fix, rescueTarget);
   // The person opened the step on purpose: its suggestions start open.
   const open = useOpenKeys(true);

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useStat
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
+import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
@@ -47,7 +48,16 @@ import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import type { SuggestionFix } from "./flow-suggestion-item";
-import { applyFlowSuggestions, flowSuggestionKeys, SUGGESTION_STALE } from "./flow-suggestions";
+import type { SuggestionMeasure } from "./flow-suggestions-section";
+import {
+  applyFlowSuggestions,
+  flowSuggestionsQueryOptions,
+  forgetMeasuredSuggestions,
+  invalidateDefinitionSuggestions,
+  measuredBasisText,
+  MEASURED_RUNS,
+  SUGGESTION_STALE
+} from "./flow-suggestions";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
@@ -100,7 +110,9 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * definition until it is unpublished. On a phone the two columns are one
  * view at a time. A suggestion's "Fråga assistenten" and the chat's
  * "Optimera flödet" put a prepared request in the chat's composer (showing
- * the chat first, on a phone); the person sends it.
+ * the chat first, on a phone); the person sends it. Someone who may view
+ * flow traces can have the suggestions measured over the latest runs for
+ * the visit ("Räkna med de senaste körningarna").
  */
 export function FlowPage({ flowId }: { flowId: string }) {
   const t = useTranslations();
@@ -108,6 +120,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
   const { routeId, space } = useSpace();
+  const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
@@ -267,7 +280,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
     },
     onError: (error) => {
       if (refusalCode(error) === SUGGESTION_STALE) {
-        void queryClient.invalidateQueries({ queryKey: flowSuggestionKeys.all(flowId) });
+        void invalidateDefinitionSuggestions(queryClient, flowId);
       }
       refused(error, t("flow_suggestions_notice_not_fixed"), steps);
     }
@@ -286,6 +299,43 @@ export function FlowPage({ flowId }: { flowId: string }) {
         pending: fix.isPending
       }
     : undefined;
+
+  // "Räkna med de senaste körningarna": the suggestions measured over the
+  // latest runs, held for this visit only. Each measured read writes an
+  // audit entry on the flow, so one is made on a press and for each new
+  // draft revision while the choice holds; nothing else reads one.
+  // Held by flow, so another flow opened in this page starts plain.
+  const [measuredFlow, setMeasuredFlow] = useState<string | null>(null);
+  const canMeasure = canEdit && can("flows_trace");
+  const suggestionRuns = canMeasure && measuredFlow === flowId ? MEASURED_RUNS : 0;
+  const measure: SuggestionMeasure | undefined = canMeasure
+    ? {
+        runs: suggestionRuns,
+        onMeasure: () => {
+          // A press reads anew, never an answer from an earlier press.
+          forgetMeasuredSuggestions(queryClient, flowId);
+          setMeasuredFlow(flowId);
+          // The step list and the editor read the same query: this read is
+          // the one they find, and once it lands it says what it is based on.
+          queryClient
+            .query(flowSuggestionsQueryOptions(flowId, flow.draft_revision, MEASURED_RUNS))
+            .then(
+              (answer) => {
+                if (answer.runs) announce(measuredBasisText(answer.runs, answer.items.length, t));
+              },
+              // Refused or failed: the step list says why and offers to try again.
+              () => undefined
+            );
+        },
+        onPlain: () => {
+          setMeasuredFlow(null);
+          announce(t("flow_suggestions_runs_plain_done"));
+        }
+      }
+    : undefined;
+  // The measured answers stay for the visit (no remount reads them again)
+  // and go with it.
+  useEffect(() => () => forgetMeasuredSuggestions(queryClient, flowId), [flowId, queryClient]);
 
   const publish = useMutation({
     mutationFn: () => publishFlow(flow),
@@ -677,6 +727,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     readOnly={!canEdit}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}
+                    suggestionRuns={suggestionRuns}
                     onSaved={(updated) => {
                       saved(updated);
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
@@ -731,6 +782,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     changes={chatChanges}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}
+                    measure={measure}
                     headingRef={stepsHeadingRef}
                     onOpen={openStep}
                     onMove={moveStep}
