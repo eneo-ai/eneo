@@ -1,5 +1,6 @@
 """The content-free run evidence: what a call's tokens per byte are, what an
-edge cost, and when a draft step counts as changed since a version."""
+edge cost, which forwarding facts count as measured, and when a draft step
+counts as changed since a version."""
 
 from __future__ import annotations
 
@@ -12,6 +13,10 @@ from eneo.flows.domain.flow_suggestion_evidence import (
     RunEvidence,
     average_over_runs,
     step_definition_facts,
+)
+from eneo.flows.domain.forwarding_facts import (
+    ForwardingFacts,
+    not_measured_forwarding_facts,
 )
 
 _STEP = UUID(int=1)
@@ -40,7 +45,9 @@ def _call(
     )
 
 
-def _attempt(edges, calls) -> EvidenceAttempt:
+def _attempt(
+    edges, calls, forwarding: ForwardingFacts | None = None
+) -> EvidenceAttempt:
     return EvidenceAttempt(
         step_id=_STEP,
         step_order=2,
@@ -48,6 +55,7 @@ def _attempt(edges, calls) -> EvidenceAttempt:
         error_code=None,
         edges=tuple(edges),
         calls=tuple(calls),
+        forwarding=forwarding,
     )
 
 
@@ -100,6 +108,28 @@ def test_billed_tokens_and_peak_input_count_completed_calls_only() -> None:
 
     assert attempt.billed_tokens() == 70 + 10 + 90 + 10
     assert attempt.peak_input_tokens() == 90
+
+
+def test_only_facts_the_worker_measured_count_as_forwarding_facts() -> None:
+    measured = ForwardingFacts(schema_version=1, measured=True, call_count=1)
+    unmeasured = not_measured_forwarding_facts(reason="computation_failed")
+
+    assert _attempt([], [], measured).measured_forwarding() == measured
+    assert _attempt([], [], unmeasured).measured_forwarding() is None
+    assert _attempt([], []).measured_forwarding() is None
+
+
+def test_the_facts_describe_the_first_completed_call() -> None:
+    attempt = _attempt(
+        [_edge(100)],
+        [_call(None, (0,), status="rejected"), _call(70, (0,)), _call(90, (0,))],
+    )
+
+    assert attempt.measured_call() == attempt.calls[1]
+    assert (
+        _attempt([_edge(100)], [_call(None, (0,), status="failed")]).measured_call()
+        is None
+    )
 
 
 def test_the_facts_ignore_what_changes_no_measurement() -> None:

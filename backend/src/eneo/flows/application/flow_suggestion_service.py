@@ -161,10 +161,12 @@ async def list_measured_flow_suggestions(
     Only runs the user may see evidence for are counted
     (``FlowRunAccessPolicy``, ``evidence_view``); the others are left out
     and counted. Nothing of a run's content is read: the evidence is sizes,
-    hashes, token counts and reasons. The read writes one audit entry on the
-    flow naming the runs it counted and how many it left out, and fails
-    closed when it cannot. The caller has decided that the user may edit the
-    flow and may view flow traces."""
+    hashes, token counts, reasons and the forwarding facts the worker
+    measured (shares and sizes). The read writes one audit entry on the
+    flow naming the runs it counted, how many it left out and how many of
+    their attempts had forwarding facts, and fails closed when it cannot.
+    The caller has decided that the user may edit the flow and may view
+    flow traces."""
 
     user = container.user()
     tenant_id = user.tenant_id
@@ -240,6 +242,12 @@ async def list_measured_flow_suggestions(
             "requested_runs": runs,
             "run_ids": [str(run_id) for run_id in measured.counted_run_ids],
             "left_out_run_count": left_out,
+            "forwarding_facts_attempt_count": sum(
+                1
+                for run in evidence.runs
+                for attempt in run.attempts
+                if attempt.forwarding is not None
+            ),
         },
     )
     return suggestions, measured
