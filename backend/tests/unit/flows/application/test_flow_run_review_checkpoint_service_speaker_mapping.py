@@ -367,7 +367,10 @@ async def test_review_skips_older_transcript_with_diagnostic(caplog):
     repo.update_input_payload.assert_not_awaited()
     assert run.input_payload_json["transkribering"] == SOURCE
     assert "transcript predates the current format" in caplog.text
-    assert any(record.run_id == str(run.id) for record in caplog.records)
+    # Other records, such as a once-per-process platform warning, carry no run_id.
+    assert any(
+        getattr(record, "run_id", None) == str(run.id) for record in caplog.records
+    )
 
 
 async def test_correction_approval_refuses_older_transcript_before_writing():
