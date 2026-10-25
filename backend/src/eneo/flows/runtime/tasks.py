@@ -13,6 +13,7 @@ from uuid import UUID
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.application.guaranteed_delivery import GuaranteedAuditDeliveryResult
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
 from eneo.flows.application.flow_dispatch import (
@@ -21,6 +22,7 @@ from eneo.flows.application.flow_dispatch import (
 )
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+    flow_audit_outbox_drain_seconds,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
@@ -983,16 +985,28 @@ async def _redispatch_stale_queued_runs_all_tenants(
 async def _deliver_flow_audit_outbox(
     *, limit: int = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
 ) -> dict[str, int | str]:
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            service = container.flow_run_audit_outbox_delivery_service()
-            result = await service.deliver_due(
-                now=datetime.now(timezone.utc),
-                limit=limit,
-            )
-            return result.to_task_payload()
+    """Deliver due rows in batches of ``limit``, each in its own transaction,
+    until a batch attempts fewer rows than that or the drain time has passed.
+    A batch that fails or is cancelled rolls back and leaves its rows due; the
+    batches before it stay committed."""
+    loop = asyncio.get_running_loop()
+    drain_ends_at = loop.time() + flow_audit_outbox_drain_seconds()
+    result = GuaranteedAuditDeliveryResult()
+    batches = 0
+    while True:
+        async with sessionmanager.session() as session:
+            enable_autobegin_for_flow_task_session(session)
+            async with session.begin():
+                container = Container(session=providers.Object(session))
+                service = container.flow_run_audit_outbox_delivery_service()
+                batch = await service.deliver_due(
+                    now=datetime.now(timezone.utc),
+                    limit=limit,
+                )
+        result = result.combine(batch)
+        batches += 1
+        if batch.attempted_count < limit or loop.time() >= drain_ends_at:
+            return {**result.to_task_payload(), "batches": batches}
 
 
 async def _deliver_flow_webhook_outbox(

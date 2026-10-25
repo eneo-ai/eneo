@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from eneo.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS,
+)
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
     flow_webhook_delivery_budget,
@@ -105,7 +108,7 @@ async def drain_retired_runs(*, container: Container) -> dict[str, int | str]:
 @maintenance_worker.cron_job(
     manages_own_session=True,
     name=FLOW_DELIVER_AUDIT_OUTBOX_TASK,
-    second=0,
+    second=set(range(0, 60, FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS)),
     keep_result=60,
 )
 async def deliver_audit_outbox(*, container: Container) -> dict[str, int | str]:

@@ -24,6 +24,9 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxNotFoundError,
     FlowRunAuditOutboxStateConflictError,
 )
+from eneo.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+)
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunLifecycleSource, FlowRunStatus
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -33,6 +36,8 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime import tasks as flow_runtime_tasks
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
@@ -977,3 +982,279 @@ async def test_flow_audit_outbox_delivery_constraints_reject_impossible_state(
                     .values(**invalid_update)
                 )
                 await session.flush()
+
+
+async def _seed_due_outbox_rows(
+    *,
+    row_count: int,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+) -> list[UUID]:
+    """Commit ``row_count`` due audit rows, one per revision of one run."""
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_repo = FlowRunAuditOutboxRepository(session=session)
+        outbox_ids = [
+            await _insert_completed_outbox(
+                outbox_repo=outbox_repo,
+                run=run.model_copy(update={"revision": revision}),
+                actor_id=admin_user.id,
+            )
+            for revision in range(1, row_count + 1)
+        ]
+        await session.commit()
+    return outbox_ids
+
+
+async def _delivery_statuses() -> dict[str, int]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(FlowRunAuditOutbox.delivery_status, sa.func.count()).group_by(
+                FlowRunAuditOutbox.delivery_status
+            )
+        )
+        return {status: count for status, count in rows.all()}
+
+
+async def _audit_log_count() -> int:
+    async with sessionmanager.session() as session, session.begin():
+        return await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(AuditLogTable.action == ActionType.FLOW_RUN_COMPLETED.value)
+        )
+
+
+def _record_claims(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record how many rows each delivery batch claims."""
+    claims: list[int] = []
+    real_list_due = FlowRunAuditOutboxRepository.list_due_delivery_rows
+
+    async def _list_due(self, *, now, limit):
+        rows = await real_list_due(self, now=now, limit=limit)
+        claims.append(len(rows))
+        return rows
+
+    monkeypatch.setattr(
+        FlowRunAuditOutboxRepository, "list_due_delivery_rows", _list_due
+    )
+    return claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_job_drains_more_than_one_batch(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    await _seed_due_outbox_rows(
+        row_count=2 * FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE + 50,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+
+    payload = await flow_runtime_tasks.deliver_flow_audit_outbox()
+
+    row_count = 2 * FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE + 50
+    assert payload == {
+        "status": "ok",
+        "attempted": row_count,
+        "delivered": row_count,
+        "retry_scheduled": 0,
+        "dead_lettered": 0,
+        "batches": 3,
+    }
+    assert await _delivery_statuses() == {
+        FlowOutboxDeliveryStatus.DELIVERED.value: row_count
+    }
+    assert await _audit_log_count() == row_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_job_ends_on_a_partly_attempted_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """A batch that claims fewer rows than its limit means nothing more is
+    due: the job stops there instead of asking again."""
+    await _seed_due_outbox_rows(
+        row_count=3,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    claims = _record_claims(monkeypatch)
+
+    payload = await flow_runtime_tasks._deliver_flow_audit_outbox(limit=2)
+
+    assert claims == [2, 1]
+    assert payload["delivered"] == 3
+    assert payload["batches"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_job_goes_on_after_a_full_batch_with_a_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """A full claim means more may be due even when a row in it failed: the
+    job stops on what it attempted, not on what it delivered."""
+    await _seed_due_outbox_rows(
+        row_count=3,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    claims = _record_claims(monkeypatch)
+    real_create_if_absent = AuditLogRepositoryImpl.create_if_absent
+    audit_writes = 0
+
+    async def _create_if_absent(self, audit_log):
+        nonlocal audit_writes
+        audit_writes += 1
+        if audit_writes == 1:
+            raise RuntimeError("audit log unavailable")
+        return await real_create_if_absent(self, audit_log)
+
+    monkeypatch.setattr(AuditLogRepositoryImpl, "create_if_absent", _create_if_absent)
+
+    payload = await flow_runtime_tasks._deliver_flow_audit_outbox(limit=2)
+
+    assert claims == [2, 1]
+    assert payload == {
+        "status": "ok",
+        "attempted": 3,
+        "delivered": 2,
+        "retry_scheduled": 1,
+        "dead_lettered": 0,
+        "batches": 2,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_job_stops_at_its_drain_time(
+    monkeypatch: pytest.MonkeyPatch,
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    row_count = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE + 1
+    await _seed_due_outbox_rows(
+        row_count=row_count,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    monkeypatch.setattr(
+        flow_runtime_tasks, "flow_audit_outbox_drain_seconds", lambda: 0
+    )
+
+    payload = await flow_runtime_tasks.deliver_flow_audit_outbox()
+
+    assert payload["delivered"] == FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
+    assert payload["batches"] == 1
+    assert await _delivery_statuses() == {
+        FlowOutboxDeliveryStatus.DELIVERED.value: FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+        FlowOutboxDeliveryStatus.PENDING.value: 1,
+    }
+
+
+@pytest.mark.parametrize("interruption", ["failure", "cancellation"])
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_job_interrupted_in_a_later_batch_keeps_earlier_batches(
+    interruption: str,
+    monkeypatch: pytest.MonkeyPatch,
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """Each batch commits on its own. A batch that fails or is cancelled after
+    delivering its rows rolls back; the batch before it stays delivered, and the
+    rolled-back rows stay due for the next job."""
+    row_count = 2 * FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE + 50
+    await _seed_due_outbox_rows(
+        row_count=row_count,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    real_deliver_due = FlowRunAuditOutboxDeliveryService.deliver_due
+    batches_started = 0
+    second_batch_delivered = asyncio.Event()
+
+    async def _deliver_due(self, *, now, limit=None):
+        nonlocal batches_started
+        batches_started += 1
+        result = await real_deliver_due(self, now=now, limit=limit)
+        if batches_started == 2:
+            assert result.delivered_count == FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
+            if interruption == "failure":
+                raise RuntimeError("database went away")
+            second_batch_delivered.set()
+            await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(FlowRunAuditOutboxDeliveryService, "deliver_due", _deliver_due)
+
+    job = asyncio.create_task(flow_runtime_tasks.deliver_flow_audit_outbox())
+    if interruption == "failure":
+        with pytest.raises(RuntimeError, match="database went away"):
+            await job
+    else:
+        await asyncio.wait_for(second_batch_delivered.wait(), timeout=30)
+        job.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await job
+
+    assert batches_started == 2
+    assert await _delivery_statuses() == {
+        FlowOutboxDeliveryStatus.DELIVERED.value: FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+        FlowOutboxDeliveryStatus.PENDING.value: row_count
+        - FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+    }
+    assert await _audit_log_count() == FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
+
+    monkeypatch.setattr(
+        FlowRunAuditOutboxDeliveryService, "deliver_due", real_deliver_due
+    )
+    recovered = await flow_runtime_tasks.deliver_flow_audit_outbox()
+
+    assert recovered["delivered"] == row_count - FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
+    assert await _delivery_statuses() == {
+        FlowOutboxDeliveryStatus.DELIVERED.value: row_count
+    }
+    assert await _audit_log_count() == row_count

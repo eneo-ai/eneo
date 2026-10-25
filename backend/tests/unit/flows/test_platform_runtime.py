@@ -212,6 +212,45 @@ def test_retired_run_drain_runs_at_the_configured_cadence() -> None:
     )
 
 
+def test_audit_outbox_cron_runs_at_its_delivery_interval() -> None:
+    from eneo.flows.application import flow_run_audit_outbox_policy as policy
+
+    [audit] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DELIVER_AUDIT_OUTBOX_TASK
+    ]
+
+    assert audit.second == set(
+        range(0, 60, policy.FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS)
+    )
+
+
+@pytest.mark.parametrize(
+    ("maintenance_timeout_seconds", "drain_seconds"),
+    [(get_settings().task_maintenance_timeout_seconds, 30), (3600, 30), (20, 10)],
+)
+def test_audit_outbox_drain_ends_well_before_the_job_timeout_and_the_next_tick(
+    monkeypatch: pytest.MonkeyPatch,
+    maintenance_timeout_seconds: float,
+    drain_seconds: float,
+) -> None:
+    """Kills: a drain bounded only by the job timeout, which at the default
+    timeout runs a job under a backlog into the next tick, so two audit jobs
+    hold both maintenance slots and delay the other maintenance crons."""
+    from eneo.flows.application import flow_run_audit_outbox_policy as policy
+
+    monkeypatch.setattr(
+        policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_maintenance_timeout_seconds=maintenance_timeout_seconds
+        ),
+    )
+
+    assert policy.flow_audit_outbox_drain_seconds() == drain_seconds
+
+
 def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it() -> (
     None
 ):

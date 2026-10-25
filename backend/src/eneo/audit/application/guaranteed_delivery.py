@@ -59,6 +59,17 @@ class GuaranteedAuditDeliveryResult:
     retry_scheduled_count: int = 0
     dead_lettered_count: int = 0
 
+    def combine(
+        self, other: GuaranteedAuditDeliveryResult
+    ) -> GuaranteedAuditDeliveryResult:
+        return GuaranteedAuditDeliveryResult(
+            attempted_count=self.attempted_count + other.attempted_count,
+            delivered_count=self.delivered_count + other.delivered_count,
+            retry_scheduled_count=self.retry_scheduled_count
+            + other.retry_scheduled_count,
+            dead_lettered_count=self.dead_lettered_count + other.dead_lettered_count,
+        )
+
     def to_task_payload(self) -> dict[str, int | str]:
         return {
             "status": "ok",
