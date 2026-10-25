@@ -169,6 +169,53 @@ or wrong, the evidence names the step. Look for:
   otherwise a sign of retries.
 - A refusal or a cut-off answer. The step's error names the cause.
 
+## Let the suggestions point out waste
+
+The flow editor checks the draft for data that moves more than it needs to,
+and says so on the step it is about. A step card with suggestions ends in a
+line such as **2 suggestions · 1 can be fixed** (**2 förslag · 1 kan
+åtgärdas**); open it to see them, the most important first, each marked
+**High**, **Medium** or **Low** (**Hög**, **Medel**, **Låg**). A step you open
+for editing shows its suggestions at the top. Suggestions never block
+publishing, and nothing changes until you choose it.
+
+From the draft alone, the suggestions find:
+
+- **The same answer sent twice.** A step gets an earlier step's answer as its
+  input and reads it again in its instruction, so the model reads it twice on
+  every run.
+- **More than the step needs.** A step takes every earlier step's answer, or
+  a whole fixed-format answer when it uses a few of its fields.
+- **Data nobody reads.** Fields of a fixed-format answer that no later step
+  reads, a step whose answer nothing reads, or a form field no step uses.
+- **A step that only passes data on.** A copy or template step whose readers
+  could read its source directly.
+- **Repetition per section.** A step that reads its material section by
+  section and puts a whole earlier answer in its instruction: that answer is
+  sent once for every section.
+- **The same long material read twice.** Two steps that each read the same
+  long material section by section.
+
+What you can do with a suggestion:
+
+- **Fix** (**Åtgärda**) appears when Eneo can make the change itself, such as
+  removing the line that reads an answer a second time. **Fix all**
+  (**Åtgärda alla**), at the top of the step list, makes every such change
+  after a confirmation that lists them step by step. A fix is an ordinary
+  change to the draft, saved and recorded in the audit log like one made in
+  the editor; a fix that an earlier one made unnecessary is skipped. While
+  the step you are editing has unsaved changes, **Fix** waits until you save
+  or undo them.
+- **Ask the assistant** (**Fråga assistenten**) puts a prepared question
+  about the suggestion in the flow chat, without sending it. Use it for a
+  change that needs judgment, such as which fields a step really uses.
+- **Remove the step** (**Ta bort steget**) is offered for a step whose answer
+  nothing reads.
+
+The flow chat uses the same checks. Ask it to make the flow simpler or
+cheaper and it starts from the suggestions; when it adds or changes a step,
+it checks that step and fixes what its own change introduced.
+
 ## Failure modes to watch for
 
 **The answer is cut off by the model's output limit.** The model may write only

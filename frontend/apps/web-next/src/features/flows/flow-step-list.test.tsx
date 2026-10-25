@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { createRef } from "react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -16,22 +17,32 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 
 const prompts = vi.hoisted(() => ({
   byAssistant: {} as Record<string, string>,
-  suggestions: [] as unknown[]
+  suggestions: [] as unknown[],
+  // The answer measured over the latest runs (`?runs=`).
+  measured: { runs: null as unknown, items: [] as unknown[] }
 }));
 const api = vi.hoisted(() => ({
-  GET: vi.fn(async (path: string, init: { params: { path: { assistant_id: string } } }) => {
-    if (path === "/api/v1/flows/{id}/suggestions/") {
+  GET: vi.fn(
+    async (
+      path: string,
+      init: { params: { path: { assistant_id: string }; query?: { runs?: number } } }
+    ) => {
+      if (path === "/api/v1/flows/{id}/suggestions/") {
+        const runs = init.params.query?.runs;
+        return {
+          data: runs
+            ? { flow_id: "flow-1", draft_revision: 4, ...prompts.measured }
+            : { flow_id: "flow-1", draft_revision: 4, runs: null, items: prompts.suggestions },
+          response: new Response(null, { status: 200 })
+        };
+      }
+      const id = init.params.path.assistant_id;
       return {
-        data: { flow_id: "flow-1", draft_revision: 4, items: prompts.suggestions },
+        data: { id, prompt: { text: prompts.byAssistant[id] ?? "" } },
         response: new Response(null, { status: 200 })
       };
     }
-    const id = init.params.path.assistant_id;
-    return {
-      data: { id, prompt: { text: prompts.byAssistant[id] ?? "" } },
-      response: new Response(null, { status: 200 })
-    };
-  })
+  )
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
@@ -42,6 +53,7 @@ afterEach(() => {
   vi.clearAllMocks();
   prompts.byAssistant = {};
   prompts.suggestions = [];
+  prompts.measured = { runs: null, items: [] };
 });
 
 /** A `duplicate_read` about `stepId` (its first step): step 1 as its input and in its prompt. */
@@ -123,6 +135,54 @@ function renderList(
   );
   const view = renderInApp(ui(4));
   return { ...view, actions, ui };
+}
+
+/** The suggestion reads the list made, by the runs they measured (0 for none). */
+function suggestionReads(): number[] {
+  return api.GET.mock.calls
+    .filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    .map(([, init]) => init.params.query?.runs ?? 0);
+}
+
+/** `suggestionAbout`, measured over recent runs. */
+function measuredAbout(
+  stepId: string,
+  fingerprint: string,
+  impact: Record<string, unknown>,
+  level = "high"
+) {
+  return {
+    ...suggestionAbout(stepId, fingerprint, "assisted", level),
+    impact: { basis: "runs", level, run_count: 8, version: 3, step_changed_since: false, ...impact }
+  };
+}
+
+/**
+ * The list with "Räkna med de senaste körningarna", the choice held as the
+ * page holds it. `revision` is the draft revision on screen.
+ */
+function renderMeasured(revision = 4) {
+  function Measured({ draftRevision }: { draftRevision: number }) {
+    const [runs, setRuns] = useState(0);
+    return (
+      <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
+        <FlowStepList
+          flowId="flow-1"
+          draftRevision={draftRevision}
+          steps={steps}
+          canEdit
+          headingRef={createRef()}
+          measure={{ runs, onMeasure: () => setRuns(10), onPlain: () => setRuns(0) }}
+          onOpen={vi.fn()}
+          onMove={vi.fn()}
+          onRemove={vi.fn(async () => {})}
+          onAdd={vi.fn()}
+        />
+      </FlowReferences>
+    );
+  }
+  const view = renderInApp(<Measured draftRevision={revision} />);
+  return { ...view, ui: (next: number) => <Measured draftRevision={next} /> };
 }
 
 describe("FlowStepList", () => {
@@ -380,6 +440,201 @@ describe("FlowStepList", () => {
     const third = screen.getByRole("article", { name: "Steg 3 Granska" });
     fireEvent.click(within(third).getByRole("button", { name: "1 förslag" }));
     expect(within(third).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
+  });
+
+  it("offers no measuring where the page does not, and reads no runs", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64))];
+    renderList();
+    expect(await screen.findByText(/förslag kan göra flödet/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Räkna med de senaste körningarna" })).toBeNull();
+    expect(suggestionReads()).toEqual([0]);
+  });
+
+  it("measures over the latest runs only when asked, and says what the numbers are based on", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64))];
+    prompts.measured = {
+      runs: { requested: 10, counted: 8, left_out: 2 },
+      items: [
+        measuredAbout("step-2", "a".repeat(64), { tokens_per_run: 1840 }),
+        measuredAbout(
+          "step-3",
+          "c".repeat(64),
+          { tokens_per_run: null, step_changed_since: true },
+          "medium"
+        )
+      ]
+    };
+    const { container } = renderMeasured();
+    const measure = await screen.findByRole("button", { name: "Räkna med de senaste körningarna" });
+    // Nothing is measured until the person asks.
+    expect(suggestionReads()).toEqual([0]);
+
+    fireEvent.click(measure);
+    expect(
+      await screen.findByText(
+        "Baserat på 8 körningar. 2 körningar räknades inte med eftersom du inte har behörighet att se dem."
+      )
+    ).toBeTruthy();
+    expect(suggestionReads()).toEqual([0, 10]);
+    // The same button offers the way back, so focus stays on it.
+    expect(measure.textContent).toContain("Visa utan körningarna");
+    expect(screen.getByRole("button", { name: "Visa utan körningarna" })).toBe(measure);
+
+    // A measured row says what it costs without being opened.
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(within(second).getByRole("button", { name: "1 förslag" }));
+    expect(
+      within(second).getByText(
+        "Kostar cirka 1 800 tokens per körning, mätt i 8 körningar av version 3."
+      )
+    ).toBeTruthy();
+    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    fireEvent.click(within(third).getByRole("button", { name: "1 förslag" }));
+    expect(
+      within(third).getByText("Mätt i 8 körningar. Steget har ändrats sedan dess.")
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    // Back to the definition alone: no runs are read, and no row is measured.
+    fireEvent.click(measure);
+    await waitFor(() => expect(screen.queryByText(/Baserat på/)).toBeNull());
+    expect(within(second).queryByText(/Kostar cirka/)).toBeNull();
+    expect(measure.textContent).toContain("Räkna med de senaste körningarna");
+    expect(suggestionReads()).toEqual([0, 10]);
+  });
+
+  it("reads the measured answer again for a new revision, and never by itself", async () => {
+    prompts.measured = {
+      runs: { requested: 10, counted: 8, left_out: 0 },
+      items: [measuredAbout("step-2", "a".repeat(64), { tokens_per_run: 400 })]
+    };
+    const { rerender, ui, unmount } = renderMeasured();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    expect(await screen.findByText("Baserat på 8 körningar.")).toBeTruthy();
+    expect(suggestionReads()).toEqual([0, 10]);
+
+    // A window focus reads nothing again.
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    expect(suggestionReads()).toEqual([0, 10]);
+    // A new revision is a new read, of that revision; the last answer stays meanwhile.
+    rerender(ui(5));
+    expect(screen.getByText("Baserat på 8 körningar.")).toBeTruthy();
+    await waitFor(() => expect(suggestionReads()).toEqual([0, 10, 10]));
+    expect(api.GET.mock.calls.at(-1)?.[1].params.query).toEqual({ runs: 10 });
+    unmount();
+  });
+
+  it("says when there are no finished runs to count, and keeps the way back with no suggestion", async () => {
+    prompts.measured = { runs: { requested: 10, counted: 0, left_out: 0 }, items: [] };
+    const { container } = renderMeasured();
+    // No suggestion from the definition: only the action, no summary.
+    const measure = await screen.findByRole("button", { name: "Räkna med de senaste körningarna" });
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+
+    fireEvent.click(measure);
+    expect(
+      await screen.findByText("Inga förslag. Det finns inga avslutade körningar att räkna med än.")
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Visa utan körningarna" })).toBe(measure);
+    await expectNoAxeViolations(container);
+  });
+
+  it("puts a measured overlap on its duplicate's row, and a forwarding finding's steps as pills", async () => {
+    const duplicate = measuredAbout("step-2", "a".repeat(64), { tokens_per_run: 1840 });
+    prompts.measured = {
+      runs: { requested: 10, counted: 8, left_out: 0 },
+      items: [
+        {
+          ...duplicate,
+          params: {
+            ...duplicate.params,
+            measured_overlaps: [
+              { shared_share: 0.62, shared_bytes: 3100, run_count: 5, held_runs: 4 }
+            ]
+          }
+        },
+        {
+          code: "model_relay",
+          fingerprint: "b".repeat(64),
+          steps: ["step-2", "step-1", "step-3"],
+          params: {
+            producer_step_order: 1,
+            producer_step_id: "step-1",
+            reads: [{ channel: "input", site: "input_source", selector: [] }],
+            readers: [{ step_order: 3, step_id: "step-3", sites: ["input_bindings.question"] }],
+            copied_share: 0.83,
+            input_share: 0.9,
+            copied_bytes: 5400,
+            run_count: 5,
+            held_runs: 4
+          },
+          message: "Step 2 copies step 1.",
+          impact: {
+            basis: "runs",
+            level: "high",
+            tokens_per_run: 600,
+            run_count: 5,
+            version: 3,
+            step_changed_since: false
+          },
+          fix: { kind: "assisted" }
+        }
+      ]
+    };
+    const { container } = renderMeasured();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(second).findByRole("button", { name: "2 förslag" }));
+
+    // One row per suggestion: the overlap is a line on the duplicate's row.
+    const rows = within(second).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(
+      within(rows[0]!).getByText(
+        "Kostar cirka 1 800 tokens per körning, mätt i 8 körningar av version 3. " +
+          "I 4 av de 5 senaste körningarna delade underlagen 62 % av texten."
+      )
+    ).toBeTruthy();
+    expect(within(rows[1]!).getByText(/^Modellen skriver av svaret från/)).toBeTruthy();
+    expect(within(rows[1]!).getByRole("button", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: /^Mer om/ }));
+    expect(within(rows[1]!).getByRole("button", { name: "Steg 3: Granska" })).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("lists a step's measured suggestions by their cost, then by level", async () => {
+    prompts.measured = {
+      runs: { requested: 10, counted: 8, left_out: 0 },
+      items: [
+        measuredAbout("step-2", "a".repeat(64), { tokens_per_run: null }, "high"),
+        measuredAbout("step-2", "b".repeat(64), { tokens_per_run: 300 }, "low"),
+        measuredAbout("step-2", "c".repeat(64), { tokens_per_run: 2500 }, "medium")
+      ]
+    };
+    renderMeasured();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(second).findByRole("button", { name: "3 förslag" }));
+    expect(
+      within(second)
+        .getAllByRole("listitem")
+        .map((row) => within(row).getByText(/^(Kostar|Mätt)/).textContent)
+    ).toEqual([
+      // The locale groups the digits (a no-break space in Swedish).
+      "Kostar cirka 2\u00a0500 tokens per körning, mätt i 8 körningar av version 3.",
+      "Kostar cirka 300 tokens per körning, mätt i 8 körningar av version 3.",
+      "Mätt i 8 körningar."
+    ]);
   });
 
   it("only shows the steps to someone who cannot change them", () => {
