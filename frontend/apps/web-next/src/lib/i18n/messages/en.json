@@ -6852,5 +6852,6 @@
   "admin_area_usage": "{tokens} tokens, 30 days · {count, plural, one {# model} other {# models}}",
   "admin_area_crawler": "{ongoing} ongoing · {queued} queued",
   "admin_area_audit": "Latest: {event}, <time></time>",
-  "admin_username_read_only": "The username cannot be changed."
+  "admin_username_read_only": "The username cannot be changed.",
+  "audit_event": "Event"
 }
