@@ -9,6 +9,7 @@ import {
   inSuggestionOrder,
   measuredBasisText,
   measuredImpactText,
+  measuredSuggestionText,
   shownSuggestions,
   suggestionRequest,
   suggestionsByStep,
@@ -197,6 +198,39 @@ describe("measuredImpactText", () => {
 
   it("says nothing for an impact judged from the definition", () => {
     expect(measuredImpactText({ basis: "definition", level: "high" }, t)).toBeNull();
+  });
+});
+
+describe("measuredSuggestionText", () => {
+  const overlaps = [
+    { shared_share: 0.4, shared_bytes: 900, run_count: 5, held_runs: 3 },
+    { shared_share: 0.62, shared_bytes: 3100, run_count: 5, held_runs: 4 }
+  ];
+
+  it("adds how much a duplicate's reads shared in the runs, the largest share only", () => {
+    const item = {
+      ...duplicateRead([INPUT, PROMPT]),
+      params: { ...duplicateRead([INPUT, PROMPT]).params, measured_overlaps: overlaps },
+      impact: measured({})
+    };
+    expect(measuredSuggestionText(item, t)).toBe(
+      "Kostar cirka 1\u00a0800 tokens per körning, mätt i 8 körningar av version 3. " +
+        "I 4 av de 5 senaste körningarna delade underlagen 62\u00a0% av texten."
+    );
+    expect(measuredSuggestionText(item, tEn)).toContain(
+      "In 4 of the latest 5 runs, the inputs shared 62% of their text."
+    );
+  });
+
+  it("says the overlap alone when the cost was not measured, and nothing without either", () => {
+    const plain = duplicateRead([INPUT, PROMPT]);
+    expect(
+      measuredSuggestionText(
+        { ...plain, params: { ...plain.params, measured_overlaps: [overlaps[0]] } },
+        t
+      )
+    ).toBe("I 3 av de 5 senaste körningarna delade underlagen 40\u00a0% av texten.");
+    expect(measuredSuggestionText(plain, t)).toBeNull();
   });
 });
 
@@ -408,6 +442,52 @@ describe("suggestionText with the draft's steps", () => {
       suggestion("format_fallback", ["step-2"], { fallback_runs: 5, step_runs: 8 }),
       "Steget behöver ofta två anrop till modellen",
       "I 5 av de 8 senaste körningarna klarade modellen inte att svara i fast format"
+    ],
+    [
+      suggestion("model_relay", ["step-2", "step-1", "step-3"], {
+        producer_step_order: 1,
+        producer_step_id: "step-1",
+        reads: [{ channel: "input", site: "input_source", selector: [] }],
+        readers: [{ step_order: 3, step_id: "step-3", sites: ["input_source"] }],
+        copied_share: 0.83,
+        input_share: 0.9,
+        copied_bytes: 5400,
+        run_count: 5,
+        held_runs: 4
+      }),
+      "Modellen skriver av svaret från @[Sammanfatta](step:step-1) ord för ord",
+      "I 4 av de 5 senaste körningarna var 83\u00a0% av stegets svar texten från " +
+        "@[Sammanfatta](step:step-1), avskriven ord för ord. Kopian läses av " +
+        "@[Granska](step:step-3), som kan läsa @[Sammanfatta](step:step-1) direkt i stället."
+    ],
+    [
+      suggestion("overlapping_inputs", ["step-3", "step-1", "step-2"], {
+        inputs: [
+          { step_order: 1, step_id: "step-1", sites: ["assistant_prompt:step_1.output.text"] },
+          { step_order: 2, step_id: "step-2", sites: ["input_source"] }
+        ],
+        shared_bytes: 3100,
+        shared_share: 0.62,
+        run_count: 5,
+        held_runs: 5
+      }),
+      "Svaren från @[Sammanfatta](step:step-1) och @[Skriv svar](step:step-2) har mycket text gemensamt",
+      "I 5 av de 5 senaste körningarna hade svaret från @[Sammanfatta](step:step-1) i prompten " +
+        "({{step_1.output.text}}) och svaret från @[Skriv svar](step:step-2) som indata " +
+        "(föregående steg) 62\u00a0% av texten gemensamt"
+    ],
+    [
+      suggestion("deterministic_candidate", ["step-2"], {
+        output_verbatim_ratio: 0.96,
+        own_bytes: 180,
+        input_share: 0.97,
+        run_count: 4,
+        held_runs: 3
+      }),
+      "Modellen sätter bara ihop texten som steget får",
+      "I 3 av de 4 senaste körningarna var 96\u00a0% av stegets svar hämtat ord för ord ur " +
+        "underlaget, med bara lite egen text. Ett steg av typen ”Sätt ihop text utan AI” kan " +
+        "göra samma sak utan modell"
     ]
   ])("renders %#: %s", (item, title, explanation) => {
     const step = STEPS.find((candidate) => candidate.id === item.steps[0]);

@@ -545,6 +545,71 @@ describe("FlowStepList", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("puts a measured overlap on its duplicate's row, and a forwarding finding's steps as pills", async () => {
+    const duplicate = measuredAbout("step-2", "a".repeat(64), { tokens_per_run: 1840 });
+    prompts.measured = {
+      runs: { requested: 10, counted: 8, left_out: 0 },
+      items: [
+        {
+          ...duplicate,
+          params: {
+            ...duplicate.params,
+            measured_overlaps: [
+              { shared_share: 0.62, shared_bytes: 3100, run_count: 5, held_runs: 4 }
+            ]
+          }
+        },
+        {
+          code: "model_relay",
+          fingerprint: "b".repeat(64),
+          steps: ["step-2", "step-1", "step-3"],
+          params: {
+            producer_step_order: 1,
+            producer_step_id: "step-1",
+            reads: [{ channel: "input", site: "input_source", selector: [] }],
+            readers: [{ step_order: 3, step_id: "step-3", sites: ["input_bindings.question"] }],
+            copied_share: 0.83,
+            input_share: 0.9,
+            copied_bytes: 5400,
+            run_count: 5,
+            held_runs: 4
+          },
+          message: "Step 2 copies step 1.",
+          impact: {
+            basis: "runs",
+            level: "high",
+            tokens_per_run: 600,
+            run_count: 5,
+            version: 3,
+            step_changed_since: false
+          },
+          fix: { kind: "assisted" }
+        }
+      ]
+    };
+    const { container } = renderMeasured();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    );
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(second).findByRole("button", { name: "2 förslag" }));
+
+    // One row per suggestion: the overlap is a line on the duplicate's row.
+    const rows = within(second).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(
+      within(rows[0]!).getByText(
+        "Kostar cirka 1 800 tokens per körning, mätt i 8 körningar av version 3. " +
+          "I 4 av de 5 senaste körningarna delade underlagen 62 % av texten."
+      )
+    ).toBeTruthy();
+    expect(within(rows[1]!).getByText(/^Modellen skriver av svaret från/)).toBeTruthy();
+    expect(within(rows[1]!).getByRole("button", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: /^Mer om/ }));
+    expect(within(rows[1]!).getByRole("button", { name: "Steg 3: Granska" })).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("lists a step's measured suggestions by their cost, then by level", async () => {
     prompts.measured = {
       runs: { requested: 10, counted: 8, left_out: 0 },

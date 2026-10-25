@@ -3802,5 +3802,13 @@
   "flow_suggestion_context_headroom_duplicated": "About {share, number, percent} of that is text the step gets twice.",
   "flow_suggestion_context_headroom_advice": "Send less to the step, or let it read long material in parts, and longer material fits.",
   "flow_suggestion_format_fallback_title": "The step often needs two calls to its model",
-  "flow_suggestion_format_fallback_explanation": "{runs, plural, one {In the latest run} other {In {fallbacks} of the latest # runs}}, the model could not answer in a fixed format, so the step had to ask once more. Each such run costs two calls. Choose a model that can answer in a fixed format, or let the step answer with text."
+  "flow_suggestion_format_fallback_explanation": "{runs, plural, one {In the latest run} other {In {fallbacks} of the latest # runs}}, the model could not answer in a fixed format, so the step had to ask once more. Each such run costs two calls. Choose a model that can answer in a fixed format, or let the step answer with text.",
+  "flow_suggestion_measured_overlap": "{runs, plural, one {In the latest run} other {In {held} of the latest # runs}}, the inputs shared {share, number, percent} of their text.",
+  "flow_suggestion_model_relay_title": "The model copies the answer of {producer} word for word",
+  "flow_suggestion_model_relay_explanation": "{runs, plural, one {In the latest run} other {In {held} of the latest # runs}}, {share, number, percent} of the step's answer was the text of {producer}, copied word for word. The copy is read by {readers}, which could read {producer} directly instead. Then the model need not copy the text, and no quote can change on the way.",
+  "flow_suggestion_overlapping_inputs_title": "The answers of {first} and {second} have much text in common",
+  "flow_suggestion_overlapping_inputs_read": "the answer of {step} {reads}",
+  "flow_suggestion_overlapping_inputs_explanation": "{runs, plural, one {In the latest run} other {In {held} of the latest # runs}}, {reads} had {share, number, percent} of their text in common, counted on the shorter one, so the model read that part twice. If the step does not need both, let it read one of them, and the text is sent only once.",
+  "flow_suggestion_deterministic_candidate_title": "The model only puts together the text the step gets",
+  "flow_suggestion_deterministic_candidate_explanation": "{runs, plural, one {In the latest run} other {In {held} of the latest # runs}}, {share, number, percent} of the step's answer was taken word for word from its material, with little text of its own. A step of the kind “{kind}” can do the same without a model, and then costs no tokens."
 }

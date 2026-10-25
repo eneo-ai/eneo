@@ -215,6 +215,12 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+/** "I 4 av de 5 senaste körningarna": the runs a forwarding finding held in, of those that measured it. */
+function heldRuns(params: Record<string, unknown>): { runs: number; held: number } {
+  const runs = numberOr(params.run_count, 0);
+  return { runs, held: numberOr(params.held_runs, runs) };
+}
+
 /**
  * `context_headroom`: how close the step's model came to the most text it
  * takes in, how often the step failed on too much material, and how much
@@ -401,6 +407,58 @@ export function suggestionText(
         })
       };
     }
+    // Measured from what the runs forwarded, only with `runs`.
+    case "model_relay": {
+      const producer = ref(params.producer_step_order, params.producer_step_id);
+      const readers = joinReads(
+        records(params.readers).map((reader) => ref(reader.step_order, reader.step_id)),
+        t
+      );
+      return {
+        title: t("flow_suggestion_model_relay_title", { producer }),
+        explanation: t("flow_suggestion_model_relay_explanation", {
+          ...heldRuns(params),
+          share: numberOr(params.copied_share, 0),
+          producer,
+          readers
+        })
+      };
+    }
+    case "overlapping_inputs": {
+      const inputs = records(params.inputs);
+      const reads = joinReads(
+        inputs.map((input) =>
+          t("flow_suggestion_overlapping_inputs_read", {
+            step: ref(input.step_order, input.step_id),
+            reads: joinReads(
+              strings(input.sites).map((site) => readText({ site }, t, step)),
+              t
+            )
+          })
+        ),
+        t
+      );
+      return {
+        title: t("flow_suggestion_overlapping_inputs_title", {
+          first: ref(inputs[0]?.step_order, inputs[0]?.step_id),
+          second: ref(inputs[1]?.step_order, inputs[1]?.step_id)
+        }),
+        explanation: t("flow_suggestion_overlapping_inputs_explanation", {
+          ...heldRuns(params),
+          share: numberOr(params.shared_share, 0),
+          reads
+        })
+      };
+    }
+    case "deterministic_candidate":
+      return {
+        title: t("flow_suggestion_deterministic_candidate_title"),
+        explanation: t("flow_suggestion_deterministic_candidate_explanation", {
+          ...heldRuns(params),
+          share: numberOr(params.output_verbatim_ratio, 0),
+          kind: t("flow_step_editor_kind_compose")
+        })
+      };
     default:
       return {
         title: t("flow_suggestion_unknown_title"),
@@ -441,6 +499,33 @@ export function measuredImpactText(impact: FlowSuggestionImpact, t: Translate): 
   return impact.step_changed_since === true
     ? `${measured} ${t("flow_suggestion_measured_step_changed")}`
     : measured;
+}
+
+/**
+ * The measured line of a suggestion's row: its numbers
+ * (`measuredImpactText`) and, for a duplicate whose two reads the runs found
+ * sharing text (`params.measured_overlaps`), how much they shared, the
+ * largest share only. Null when nothing was measured.
+ */
+export function measuredSuggestionText(suggestion: FlowSuggestion, t: Translate): string | null {
+  const overlaps = records(suggestion.params.measured_overlaps);
+  const overlap =
+    overlaps.length > 0
+      ? overlaps.reduce((largest, item) =>
+          numberOr(item.shared_share, 0) > numberOr(largest.shared_share, 0) ? item : largest
+        )
+      : null;
+  const lines = [
+    measuredImpactText(suggestion.impact, t),
+    overlap
+      ? t("flow_suggestion_measured_overlap", {
+          ...heldRuns(overlap),
+          share: numberOr(overlap.shared_share, 0)
+        })
+      : null
+  ];
+  const text = lines.filter((line) => line !== null).join(" ");
+  return text || null;
 }
 
 /**

@@ -16,7 +16,7 @@ import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
   isPatchable,
-  measuredImpactText,
+  measuredSuggestionText,
   suggestionRequest,
   suggestionText,
   type FlowSuggestion
@@ -149,7 +149,7 @@ export function SuggestionRow({
   const panelId = useId();
   const label = step ? stepLabel(step, t) : null;
   const text = suggestionText(suggestion, t, step ?? undefined, steps);
-  const measured = measuredImpactText(suggestion.impact, t);
+  const measured = measuredSuggestionText(suggestion, t);
   // The title in words, each pill as it reads, for the buttons' names.
   const title = referencePlainText(text.title, refs?.flow ?? { steps: [...steps] }, t);
   const removable = onRemoveStep && step && label && suggestion.code === "unread_result";

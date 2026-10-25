@@ -9223,5 +9223,13 @@
   "flow_suggestion_context_headroom_duplicated": "Ungefär {share, number, percent} av det är text som steget får två gånger.",
   "flow_suggestion_context_headroom_advice": "Skicka mindre till steget, eller låt det läsa långt underlag i delar, så får längre underlag plats.",
   "flow_suggestion_format_fallback_title": "Steget behöver ofta två anrop till modellen",
-  "flow_suggestion_format_fallback_explanation": "{runs, plural, one {I den senaste körningen} other {I {fallbacks} av de # senaste körningarna}} klarade modellen inte att svara i fast format, så steget fick fråga en gång till. Varje sådan körning kostar två anrop. Välj en modell som klarar svar i fast format, eller låt steget svara med text."
+  "flow_suggestion_format_fallback_explanation": "{runs, plural, one {I den senaste körningen} other {I {fallbacks} av de # senaste körningarna}} klarade modellen inte att svara i fast format, så steget fick fråga en gång till. Varje sådan körning kostar två anrop. Välj en modell som klarar svar i fast format, eller låt steget svara med text.",
+  "flow_suggestion_measured_overlap": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} delade underlagen {share, number, percent} av texten.",
+  "flow_suggestion_model_relay_title": "Modellen skriver av svaret från {producer} ord för ord",
+  "flow_suggestion_model_relay_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} var {share, number, percent} av stegets svar texten från {producer}, avskriven ord för ord. Kopian läses av {readers}, som kan läsa {producer} direkt i stället. Då slipper modellen skriva av texten, och inget citat kan ändras på vägen.",
+  "flow_suggestion_overlapping_inputs_title": "Svaren från {first} och {second} har mycket text gemensamt",
+  "flow_suggestion_overlapping_inputs_read": "svaret från {step} {reads}",
+  "flow_suggestion_overlapping_inputs_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} hade {reads} {share, number, percent} av texten gemensamt, räknat på det kortare av dem, så modellen läste den delen två gånger. Behöver steget inte båda, låt det läsa det ena, så skickas texten bara en gång.",
+  "flow_suggestion_deterministic_candidate_title": "Modellen sätter bara ihop texten som steget får",
+  "flow_suggestion_deterministic_candidate_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} var {share, number, percent} av stegets svar hämtat ord för ord ur underlaget, med bara lite egen text. Ett steg av typen ”{kind}” kan göra samma sak utan modell, och kostar då inga tokens."
 }
