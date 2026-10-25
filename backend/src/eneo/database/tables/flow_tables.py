@@ -828,6 +828,47 @@ class FlowPackageImports(BasePublic):
     )
 
 
+class FlowSuggestionDismissals(BasePublic):
+    """Stores the suggestions a flow's editors chose to hide. Writer: FlowSuggestionDismissalRepository. Purpose: leave a dismissed suggestion out of the flow's suggestions for every editor until its premise changes (a changed premise is another fingerprint); deleted with the flow, never carried by a package."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    # The suggestion's code when it was dismissed, for the record; the
+    # fingerprint alone decides what is hidden.
+    code: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    dismissed_by: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    dismissed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_suggestion_dismissals_flow_tenant",
+        ),
+        # One dismissal per suggestion of a flow; its index serves the read of
+        # a flow's dismissals, the flow FK cascade and the tenant FK cascade.
+        UniqueConstraint(
+            "tenant_id",
+            "flow_id",
+            "fingerprint",
+            name="uq_flow_suggestion_dismissals_tenant_flow_fingerprint",
+        ),
+        CheckConstraint(
+            "fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_flow_suggestion_dismissals_fingerprint",
+        ),
+        _principal_fk_index("flow_suggestion_dismissals", "dismissed_by"),
+    )
+
+
 class FlowRuns(BasePublic):
     """Stores one execution of a published Flow version. Writer: FlowRunRepository. Purpose: persist principal, status, input, output, and lifecycle anchors."""
 
