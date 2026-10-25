@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator } from "@/components/composites/save-status";
+import type { SettingsPhoneIndex } from "@/components/composites/sectioned-settings";
 import { useSpaceDisplayName } from "./frame/space-header";
 import { spaceLandingHref, spaceSections, type SpaceSectionId } from "./frame/space-sections";
 import { useSpace } from "./use-space";
@@ -47,6 +48,33 @@ export function EditorHeader({
       className="py-3"
     />
   );
+}
+
+/**
+ * An editor's page bar on a phone (decision 21): back to the space tab the
+ * resource is listed under (the breadcrumb's parent), the name, the editor's
+ * actions. Right after "Skapa …" it opens on General, whose name field takes
+ * focus with the default name selected.
+ */
+export function useEditorPhoneIndex({
+  section,
+  name,
+  actions,
+  created
+}: {
+  section: Extract<SpaceSectionId, "assistants" | "apps">;
+  name: string;
+  actions?: React.ReactNode;
+  created: boolean;
+}): SettingsPhoneIndex {
+  const t = useTranslations();
+  const { routeId } = useSpace();
+  return {
+    parent: { label: t(section), href: `/spaces/${routeId}/${section}` },
+    title: name,
+    actions,
+    openFirst: created ? "general" : undefined
+  };
 }
 
 /**

@@ -42,7 +42,7 @@ import { SourceStateLabel, useWatchStates } from "../source-status";
 import { itemState, watchStateLabel, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
-import type { InPlaceLink } from "./in-place-link";
+import type { InPlaceLink } from "@/components/composites/in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
 const SEARCH_DEBOUNCE_MS = 300;

@@ -1,4 +1,20 @@
 import { useId } from "react";
+import { cn } from "@/lib/utils";
+
+/**
+ * In an editor's section on a phone (SectionedSettings' phone index): the page
+ * bar names the section, so the card does not repeat the title (it stays the
+ * section's heading for assistive technology, and where focus lands), and the
+ * card's frame and inset give way to the page's 16 px gutter. A description or
+ * header actions stay, above the rows.
+ */
+const IN_PHONE_SECTION = {
+  card: "max-md:in-[[data-editor-section]]:rounded-none max-md:in-[[data-editor-section]]:border-0 max-md:in-[[data-editor-section]]:bg-transparent",
+  header:
+    "max-md:in-[[data-editor-section]]:border-b-0 max-md:in-[[data-editor-section]]:p-0 max-md:in-[[data-editor-section]]:has-[p,[data-settings-group-end]]:pb-4",
+  title: "max-md:in-[[data-editor-section]]:sr-only",
+  body: "max-md:in-[[data-editor-section]]:p-0"
+};
 
 /**
  * A titled card grouping related settings rows. `id` is the scroll anchor used by
@@ -22,19 +38,27 @@ export function SettingsGroup({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} data-tour={tour} className="bg-card scroll-mt-32 rounded-xl border">
-      <div className="border-b px-5 py-4">
+    <section
+      id={id}
+      data-tour={tour}
+      className={cn("bg-card scroll-mt-32 rounded-xl border", IN_PHONE_SECTION.card)}
+    >
+      <div className={cn("border-b px-5 py-4", IN_PHONE_SECTION.header)}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold">{title}</h2>
+            <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
             {description ? (
               <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
             ) : null}
           </div>
-          {headerEnd ? <div className="flex shrink-0 flex-wrap gap-1.5">{headerEnd}</div> : null}
+          {headerEnd ? (
+            <div data-settings-group-end="" className="flex shrink-0 flex-wrap gap-1.5">
+              {headerEnd}
+            </div>
+          ) : null}
         </div>
       </div>
-      <div className="flex flex-col gap-6 px-5 py-5">{children}</div>
+      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>{children}</div>
     </section>
   );
 }

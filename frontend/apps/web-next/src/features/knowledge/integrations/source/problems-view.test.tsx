@@ -8,7 +8,7 @@ import { renderInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import type { SkipReasonCode } from "../skip-reasons";
-import { inPlaceLink } from "./in-place-link";
+import { inPlaceLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));

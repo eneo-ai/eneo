@@ -67,8 +67,17 @@ type IndicatorState = "error" | "saving" | "dirty" | "saved";
  * transitions to screen readers. When a save lands, the check mark pops in
  * once (tw-animate-css; the global reduced-motion rule turns it off), so the
  * flip from "Sparar…" to "Alla ändringar sparade" is seen, not just read.
+ * A second copy shown where the first is hidden (an editor's phone views
+ * beside its header) passes `isQuiet`, so each change is announced once;
+ * `isCompact` says it in a word or two, for a phone's page bar.
  */
-export function SaveStatusIndicator() {
+export function SaveStatusIndicator({
+  isQuiet = false,
+  isCompact = false
+}: {
+  isQuiet?: boolean;
+  isCompact?: boolean;
+}) {
   const t = useTranslations();
   const statuses = useContext(StatusMapContext);
   const keys = Object.keys(statuses);
@@ -101,21 +110,21 @@ export function SaveStatusIndicator() {
   // so "Sparar…" and the unsaved count never chatter.
   const announce = useAnnounce();
   useEffect(() => {
-    if (justSaved) announce(t("all_changes_saved"));
-  }, [justSaved, landings, announce, t]);
+    if (justSaved && !isQuiet) announce(t("all_changes_saved"));
+  }, [justSaved, landings, announce, t, isQuiet]);
   useEffect(() => {
-    if (errorKey) announce(t("save_failed"));
-  }, [errorKey, announce, t]);
+    if (errorKey && !isQuiet) announce(t("save_failed"));
+  }, [errorKey, announce, t, isQuiet]);
 
   let content: React.ReactNode;
   if (errorKey) {
     content = (
       <a
         href={`#${errorKey}`}
-        className="text-destructive inline-flex items-center gap-1.5 text-sm hover:underline"
+        className="text-destructive inline-flex items-center gap-1.5 text-sm hover:underline pointer-coarse:min-h-11"
       >
         <OctagonX aria-hidden="true" className="size-3.5" />
-        {t("save_failed")}
+        {t(isCompact ? "save_status_failed_short" : "save_failed")}
       </a>
     );
   } else if (saving) {
@@ -129,14 +138,14 @@ export function SaveStatusIndicator() {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
         <CircleAlert aria-hidden="true" className="size-3.5" />
-        {t("unsaved_changes", { count: dirtyCount })}
+        {isCompact ? t("save_status_unsaved_short") : t("unsaved_changes", { count: dirtyCount })}
       </span>
     );
   } else {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
         <SuccessMark size="sm" replayKey={justSaved ? landings : undefined} />
-        {t("all_changes_saved")}
+        {t(isCompact ? "save_status_saved_short" : "all_changes_saved")}
       </span>
     );
   }

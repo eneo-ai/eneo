@@ -177,6 +177,16 @@ through `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses
 the default name and announces the creation; `createWithUniqueName` numbers
 the default name on a backend name collision (9017).
 
+On a phone an editor opens on an index of its sections (decision 21): pass
+`phone` (`useEditorPhoneIndex`) and give each section a `group` and, where its
+data is loaded, a `summary` (`src/features/spaces/editor-summaries.ts`). The
+index and the sections are views of one mounted tree chosen by `?section=`,
+so a draft and its pending save outlive a trip to the index or a turn to the
+tablet layout; never render a section only in one view. A section's
+`SettingsGroup` drops its card frame and repeated title there by itself. A
+resource just created opens on General, so its name field is in view. Space
+settings uses the layout without `phone` and keeps one page on every width.
+
 ## How it is wired
 
 - **Packages** (beta, pinned exactly; upgrade together, then run

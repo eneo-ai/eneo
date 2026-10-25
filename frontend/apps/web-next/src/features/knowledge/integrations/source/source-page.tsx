@@ -39,7 +39,7 @@ import { ActivityView } from "./activity-view";
 import { FolderDocuments } from "./folder-documents";
 import { FolderNav } from "./folder-nav";
 import { FolderOverview } from "./folder-overview";
-import { inPlaceLink, SamePageLink } from "./in-place-link";
+import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 import { SyncProgressPanel } from "./progress-panel";
 
