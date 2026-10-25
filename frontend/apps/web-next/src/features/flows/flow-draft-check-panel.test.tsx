@@ -30,32 +30,10 @@ afterEach(() => {
 
 const reply = (data: unknown) => ({ data, response: new Response(null, { status: 200 }) });
 
-/** One `duplicate_read` on step 2, reading step 1 as its input and in its prompt. */
-const DUPLICATE_READ = {
-  code: "duplicate_read",
-  fingerprint: "f".repeat(64),
-  steps: ["step-2", "step-1"],
-  params: {
-    producer_step_order: 1,
-    producer_step_id: "step-1",
-    contained: false,
-    reads: [
-      { channel: "input", site: "input_source", selector: [] },
-      { channel: "prompt", site: "assistant_prompt:step_1.output.text", selector: [] }
-    ]
-  },
-  message: "Step 2 reads step 1 twice.",
-  impact: { basis: "definition", level: "high" },
-  fix: { kind: "patch" }
-};
-
-function route(assistants: Record<string, unknown>, suggestions: unknown[] = []) {
-  api.GET.mockImplementation((path: string, init: { params: { path: { assistant_id: string } } }) =>
-    Promise.resolve(
-      path === "/api/v1/flows/{id}/suggestions/"
-        ? reply({ flow_id: "flow-1", draft_revision: 4, items: suggestions })
-        : reply(assistants[init.params.path.assistant_id])
-    )
+function route(assistants: Record<string, unknown>) {
+  api.GET.mockImplementation(
+    (_path: string, init: { params: { path: { assistant_id: string } } }) =>
+      Promise.resolve(reply(assistants[init.params.path.assistant_id]))
   );
   api.POST.mockResolvedValue(reply({ steps: [] }));
 }
@@ -138,42 +116,7 @@ describe("FlowDraftCheck", () => {
     );
   });
 
-  it("shows the core's suggestions apart from the blockers and opens their step", async () => {
-    route(
-      {
-        "assistant-1": makeAssistant({ id: "assistant-1" }),
-        "assistant-2": makeAssistant({ id: "assistant-2" })
-      },
-      [DUPLICATE_READ]
-    );
-    const onOpenStep = vi.fn();
-    const flow = makeFlow();
-    const { container } = renderInApp(
-      <FlowDraftCheck flow={flow} speakerServices={[]} onOpenStep={onOpenStep} />
-    );
-
-    expect(await screen.findByRole("heading", { level: 3, name: "Förslag (1)" })).toBeTruthy();
-    expect(screen.getByText("Inget hindrar publicering just nu.")).toBeTruthy();
-    expect(screen.getByText("Svaret från steg 1 skickas två gånger")).toBeTruthy();
-    expect(api.GET).toHaveBeenCalledWith(
-      "/api/v1/flows/{id}/suggestions/",
-      expect.objectContaining({ params: { path: { id: "flow-1" } } })
-    );
-
-    const why = screen.getByRole("button", { name: /^Varför\?/ });
-    expect(why.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(why);
-    expect(why.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      screen.getByText(/Steget får samma text som indata \(föregående steg\) och i prompten/)
-    ).toBeTruthy();
-    await expectNoAxeViolations(container);
-
-    fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
-    expect(onOpenStep).toHaveBeenCalledWith(flow.steps[1]);
-  });
-
-  it("renders no suggestions section while the draft gives none", async () => {
+  it("lists no suggestions: they sit on the step cards", async () => {
     route({
       "assistant-1": makeAssistant({ id: "assistant-1" }),
       "assistant-2": makeAssistant({ id: "assistant-2" })
@@ -181,10 +124,6 @@ describe("FlowDraftCheck", () => {
     renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />);
 
     expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
-    await waitFor(() =>
-      expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything())
-    );
-    expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
-    expect(screen.queryByText(/Förslag/)).toBeNull();
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything());
   });
 });

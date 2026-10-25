@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { resetNavigation, setRoute } from "@/test/navigation";
 import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
@@ -30,7 +31,15 @@ const state = vi.hoisted(() => ({
   runs: null as unknown,
   unpublish: null as unknown,
   mode: null as unknown,
-  kinds: null as unknown
+  kinds: null as unknown,
+  suggestions: null as unknown,
+  dirty: false,
+  // What went into the chat's composer, text and pills (by the value they send) in order.
+  inserted: [] as string[],
+  composer: {
+    insertText: (text: string) => state.inserted.push(text),
+    insertToken: (token: { value: string }) => state.inserted.push(token.value)
+  }
 }));
 
 const api = vi.hoisted(() => ({
@@ -38,6 +47,7 @@ const api = vi.hoisted(() => ({
     if (path === "/api/v1/flows/{id}/") return state.flow;
     if (path === "/api/v1/flows/{id}/runs/") return state.runs;
     if (path === "/api/v1/flows/{id}/step-kinds/") return state.kinds;
+    if (path === "/api/v1/flows/{id}/suggestions/") return state.suggestions;
     if (path === "/api/v1/assistants/{id}/") {
       return {
         data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
@@ -71,35 +81,99 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 // The conversation itself is the chat feature's; the page only follows what it reports.
-vi.mock("@/features/chat/chat-view", () => ({
-  // The stub shows what the flow page puts in the composer's footer (the
-  // Fråga/Redigera picker) and its placeholder, and offers the callbacks.
-  ChatView: ({
-    onToolCallFinished,
-    onAnswerFinished,
-    footerActions,
-    placeholder
-  }: {
-    onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
-    onAnswerFinished: () => void;
-    footerActions?: React.ReactNode;
-    placeholder?: string;
-  }) => (
-    <div>
-      <button
-        type="button"
-        onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
-      >
-        Verktyg klart
-      </button>
-      <button type="button" onClick={onAnswerFinished}>
-        Svar klart
-      </button>
-      {footerActions}
-      <p>{placeholder}</p>
-    </div>
-  )
-}));
+vi.mock("@/features/chat/chat-view", async () => {
+  const { useEffect } = await import("react");
+  return {
+    // The stub shows what the flow page puts in the composer's footer (the
+    // Fråga/Redigera picker) and its placeholder, and offers the callbacks.
+    // It reports a composer that records what is put into it, as the real
+    // one does through `references.onComposer`.
+    ChatView: function ChatView({
+      onToolCallFinished,
+      onAnswerFinished,
+      footerActions,
+      placeholder,
+      references
+    }: {
+      onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
+      onAnswerFinished: () => void;
+      footerActions?: React.ReactNode;
+      placeholder?: string;
+      references?: { onComposer?: (input: unknown) => void };
+    }) {
+      useEffect(() => {
+        references?.onComposer?.(state.composer);
+        return () => references?.onComposer?.(null);
+      }, [references]);
+      return (
+        <div>
+          <button
+            type="button"
+            onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
+          >
+            Verktyg klart
+          </button>
+          <button type="button" onClick={onAnswerFinished}>
+            Svar klart
+          </button>
+          {footerActions}
+          <p>{placeholder}</p>
+        </div>
+      );
+    }
+  };
+});
+// The editor is its own tests'; the page owns where it is (?step=) and what
+// leaving it asks. The stub reports `state.dirty` as unsaved changes and asks
+// as the editor does, with "Lämna utan att spara" to go on.
+vi.mock("./editor/flow-step-editor", async () => {
+  const { useImperativeHandle, useState } = await import("react");
+  return {
+    FlowStepEditor: function FlowStepEditor({
+      stepId,
+      onCancel,
+      leaveRef,
+      navigation
+    }: {
+      stepId: string;
+      onCancel: () => void;
+      leaveRef: React.Ref<{ isDirty: () => boolean; requestLeave: (go: () => void) => void }>;
+      navigation: { next: { id: string } | null; onGo: (id: string) => void };
+    }) {
+      const [asking, setAsking] = useState<(() => void) | null>(null);
+      const leave = (go: () => void) => (state.dirty ? setAsking(() => go) : go());
+      useImperativeHandle(leaveRef, () => ({ isDirty: () => state.dirty, requestLeave: leave }));
+      const next = navigation.next;
+      return (
+        <div>
+          <p>Redigerar {stepId}</p>
+          <button type="button" onClick={() => leave(onCancel)}>
+            Alla steg
+          </button>
+          <button
+            type="button"
+            disabled={!next}
+            onClick={() => next && leave(() => navigation.onGo(next.id))}
+          >
+            Nästa
+          </button>
+          {asking ? (
+            <button
+              type="button"
+              onClick={() => {
+                state.dirty = false;
+                setAsking(null);
+                asking();
+              }}
+            >
+              Lämna utan att spara
+            </button>
+          ) : null}
+        </div>
+      );
+    }
+  };
+});
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
@@ -111,8 +185,45 @@ const steps = [
   makeStep(2, { user_description: "Skriv svar" })
 ];
 
+/** One `duplicate_read` on step 2, reading step 1 as its input and in its prompt. */
+const DUPLICATE_READ = {
+  code: "duplicate_read",
+  fingerprint: "f".repeat(64),
+  steps: ["step-2", "step-1"],
+  params: {
+    producer_step_order: 1,
+    producer_step_id: "step-1",
+    contained: false,
+    reads: [
+      { channel: "input", site: "input_source", selector: [] },
+      { channel: "prompt", site: "assistant_prompt:step_1.output.text", selector: [] }
+    ]
+  },
+  message: "Step 2 reads step 1 twice.",
+  impact: { basis: "definition", level: "high" },
+  fix: { kind: "patch" }
+};
+
+const suggestions = (revision: number, items: unknown[]) =>
+  ok({ flow_id: "flow-1", draft_revision: revision, items });
+
+/** The flow's chat, opened for someone who may edit. */
+const CHAT = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+
+/** Posts that open the chat and check the draft; anything else would be news. */
+const OPENING_POSTS = [
+  "/api/v1/flows/{id}/authoring-chat/",
+  "/api/v1/flows/{id}/security-classification/preview"
+];
+
+/** What the page posted, by path. */
+const posted = () => api.POST.mock.calls.map(([path]) => path);
+
 beforeEach(() => {
   state.flow = ok(makeFlow({ steps }));
+  state.suggestions = suggestions(4, []);
+  state.inserted = [];
+  state.dirty = false;
   // Without edit access the chat is not offered; most tests are about the definition.
   state.chat = refused(403, { code: "insufficient_space_permission", message: "No." });
 });
@@ -120,6 +231,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  resetNavigation();
+  window.history.replaceState(null, "", "/");
 });
 
 function renderPage(
@@ -534,5 +647,187 @@ describe("FlowPage", () => {
       })
     );
     expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
+  });
+
+  it("hands a suggestion to the chat, bringing the chat into view on a phone, unsent", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    setViewport("phone");
+    const { container } = renderPage();
+    const definition = screen.getByRole("region", { name: "Flödet" });
+    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+    expect(chat.className).toContain("max-lg:hidden");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
+      })
+    );
+    // Text as typed, each step a pill that carries its id (a pill brings its own space).
+    await waitFor(() =>
+      expect(state.inserted).toEqual([
+        "Förklara förslaget ”Svaret från ",
+        "@[Sammanfatta](step:step-1)",
+        "skickas två gånger” (duplicate_read) och föreslå hur flödet kan ändras. Steg: ",
+        "@[Skriv svar](step:step-2)",
+        "@[Sammanfatta](step:step-1)"
+      ])
+    );
+    expect(definition.className).toContain("max-lg:hidden");
+    expect(chat.className).not.toContain("max-lg:hidden");
+    // The chat was opened and the draft checked; nothing was sent, and the mode stayed.
+    expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+    expect(api.PATCH).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("offers no request to a chat that is not available", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    renderPage();
+    expect(await screen.findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Optimera flödet" })).toBeNull();
+  });
+
+  it("puts the review request in the chat from Optimera flödet, sending nothing", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Optimera flödet" }));
+    await waitFor(() =>
+      expect(state.inserted.join("")).toMatch(/^Granska flödet med read_flow_suggestions/)
+    );
+    // Once, however often the page renders afterwards.
+    expect(state.inserted).toHaveLength(1);
+    expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
+  it("asks for the suggestions again when the chat's tools change the draft", async () => {
+    state.chat = ok({ ...CHAT, editing: true });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    renderPage();
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    expect(await within(second).findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
+    expect(screen.getByText("1 förslag kan göra flödet enklare eller billigare")).toBeTruthy();
+
+    // The chat removed the duplicate: a new revision, and no suggestion on it.
+    state.flow = ok(makeFlow({ draft_revision: 5, steps }));
+    state.suggestions = suggestions(5, []);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+
+    await waitFor(() =>
+      expect(within(second).queryByRole("region", { name: "Förslag (1)" })).toBeNull()
+    );
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+    // One request per revision.
+    expect(
+      api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    ).toHaveLength(2);
+  });
+
+  it("opens one reference card for both sides, and inserts from the definition into the chat", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    setViewport("phone");
+    renderPage();
+    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+
+    const card = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(card).findByRole("button", { name: "1 Sammanfatta" }));
+    const dialog = await screen.findByRole("dialog", { name: "Referens" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Infoga i meddelandet" }));
+
+    expect(state.inserted).toEqual(["@[Sammanfatta](step:step-1)"]);
+    expect(chat.className).not.toContain("max-lg:hidden");
+    expect(screen.queryByRole("dialog", { name: "Referens" })).toBeNull();
+  });
+
+  it("opens a step in the address, and Back and Forward close and reopen it", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-2");
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "Inställningar för Steg 2: Skriv svar" })
+    );
+
+    window.history.back();
+    const open = await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
+    await waitFor(() => expect(document.activeElement).toBe(open));
+    expect(window.location.search).toBe("");
+
+    window.history.forward();
+    expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
+  });
+
+  it("goes back to the list from the editor, through the history it opened", async () => {
+    const { container } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    const open = await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
+    await waitFor(() => expect(document.activeElement).toBe(open));
+    expect(window.location.search).toBe("");
+    await expectNoAxeViolations(container);
+  });
+
+  it("walks Back through the steps visited before the list", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    window.history.back();
+    expect(await screen.findByText("Redigerar step-1")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-1");
+  });
+
+  it("opens the step a link names, and the list for a step the flow does not have", () => {
+    setRoute("/?step=step-2");
+    window.history.replaceState(null, "", "/?step=step-2");
+    renderPage();
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    cleanup();
+
+    setRoute("/?step=step-9");
+    renderPage();
+    expect(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" })).toBeTruthy();
+  });
+
+  it("asks before Back leaves unsaved changes, and stays on the step until told", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    state.dirty = true;
+
+    window.history.back();
+    const leave = await screen.findByRole("button", { name: "Lämna utan att spara" });
+    // The step went back into the address while the editor asks.
+    expect(screen.getByText("Redigerar step-1")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-1");
+
+    fireEvent.click(leave);
+    expect(
+      await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" })
+    ).toBeTruthy();
+    expect(window.location.search).toBe("");
+  });
+
+  it("asks before the back control or the next step leave unsaved changes", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    state.dirty = true;
+
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    expect(screen.getByText("Redigerar step-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+
+    state.dirty = true;
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
+    expect(await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" })).toBeTruthy();
   });
 });

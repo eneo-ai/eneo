@@ -11,7 +11,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Pencil } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
@@ -27,10 +27,13 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
-import { FlowReferences } from "./chat/reference-pill";
+import type { ComposerInsert } from "@/features/chat/chat-references";
 import { useFlowChatReferences } from "./chat/use-flow-chat-references";
-import { FlowChatModelPickers, NewConversationButton } from "./flow-chat-controls";
-import { showStepCard } from "./flow-step-list";
+import {
+  FlowChatModelPickers,
+  NewConversationButton,
+  OptimizeFlowButton
+} from "./flow-chat-controls";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -53,6 +56,18 @@ type ChatPanelProps = {
   onFlowMayHaveChanged: () => void;
   /** A refused mode change, shown with the page's other refusals. */
   onRefused: (error: unknown, title: string) => void;
+  /**
+   * The chat's composer while it is on screen, or null: the page's
+   * FlowReferences (the one reference card of the page, for the chat and
+   * the definition alike) and "Fråga assistenten" put things into it.
+   */
+  onComposer: (composer: ComposerInsert | null) => void;
+  /**
+   * Puts a prepared request ("Optimera flödet") into the composer at the
+   * caret, never sending it nor changing the mode; absent until the
+   * composer is on the page.
+   */
+  onAskChat?: (text: string) => void;
 };
 
 /**
@@ -160,8 +175,9 @@ function AuthoringConversation({
   flow,
   chat,
   onFlowMayHaveChanged,
-  onRefused
-}: {
+  onRefused,
+  onComposer
+}: Pick<ChatPanelProps, "onComposer"> & {
   flow: FlowPublic;
   chat: FlowAuthoringChat;
   onFlowMayHaveChanged: () => void;
@@ -169,6 +185,11 @@ function AuthoringConversation({
 }) {
   const t = useTranslations();
   const { references, composer } = useFlowChatReferences(flow);
+  // The page's references (pills, the card, "Fråga assistenten") reach the composer through it.
+  useEffect(() => {
+    onComposer(composer);
+  }, [composer, onComposer]);
+  useEffect(() => () => onComposer(null), [onComposer]);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -239,26 +260,24 @@ function AuthoringConversation({
   };
 
   return (
-    <FlowReferences flow={flow} onShowStep={showStepCard} composer={composer}>
-      <ChatView
-        key={chat.session_id}
-        partner={partner}
-        initialSessionId={chat.session_id}
-        initialMessages={initialMessages}
-        activity={activity}
-        onActivityChange={setActivity}
-        startHeadingLevel={3}
-        references={references}
-        footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
-        placeholder={
-          chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
-        }
-        onToolCallFinished={(call) => {
-          if (isFlowsToolCall(call)) onFlowMayHaveChanged();
-        }}
-        onAnswerFinished={onFlowMayHaveChanged}
-      />
-    </FlowReferences>
+    <ChatView
+      key={chat.session_id}
+      partner={partner}
+      initialSessionId={chat.session_id}
+      initialMessages={initialMessages}
+      activity={activity}
+      onActivityChange={setActivity}
+      startHeadingLevel={3}
+      references={references}
+      footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
+      placeholder={
+        chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
+      }
+      onToolCallFinished={(call) => {
+        if (isFlowsToolCall(call)) onFlowMayHaveChanged();
+      }}
+      onAnswerFinished={onFlowMayHaveChanged}
+    />
   );
 }
 
@@ -276,7 +295,13 @@ function unavailableMessage(error: unknown, t: ReturnType<typeof useTranslations
  * chat change the draft, and the page shows each change as the chat's tools
  * make it.
  */
-export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPanelProps) {
+export function FlowChatPanel({
+  flow,
+  onFlowMayHaveChanged,
+  onRefused,
+  onComposer,
+  onAskChat
+}: ChatPanelProps) {
   const t = useTranslations();
   // The chat needs edit access; without it the core would refuse it (a 403
   // still says so, should the flag be out of date).
@@ -302,7 +327,10 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
         {chat.data ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
-            <NewConversationButton chat={chat.data} onRefused={onRefused} />
+            <span className="flex flex-wrap items-center gap-1">
+              {onAskChat ? <OptimizeFlowButton onAskChat={onAskChat} /> : null}
+              <NewConversationButton chat={chat.data} onRefused={onRefused} />
+            </span>
           </div>
         ) : null}
       </div>
@@ -312,6 +340,7 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
           chat={chat.data}
           onFlowMayHaveChanged={onFlowMayHaveChanged}
           onRefused={onRefused}
+          onComposer={onComposer}
         />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
