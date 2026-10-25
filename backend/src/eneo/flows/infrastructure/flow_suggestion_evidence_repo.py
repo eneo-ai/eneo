@@ -7,9 +7,9 @@ hash), that attempt's completion calls (reason, tokens, edge indexes,
 mapped index) and the forwarding facts the worker recorded for it (shares,
 sizes and edge indexes). Never a prompt, an output or an input value: the
 edge aggregate holds hashes and sizes only, and it is projected here before
-anything leaves; the facts hold numbers only. A published version's steps leave as their
-``StepDefinitionFacts`` (a hash, a model id, an output type), never as the
-definition with its prompts.
+anything leaves; the facts hold numbers only. A published version's steps
+leave as their ``StepDefinitionFacts`` (a hash, a model id, an output
+type), never as the definition with its prompts.
 
 The caller decides which runs the user may see evidence for: it lists the
 candidates (``list_recent_runs``), filters them with the run access policy
