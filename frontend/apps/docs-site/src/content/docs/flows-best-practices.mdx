@@ -212,6 +212,35 @@ What you can do with a suggestion:
 - **Remove the step** (**Ta bort steget**) is offered for a step whose answer
   nothing reads.
 
+With the permission to view flow traces, **Include the latest runs**
+(**Räkna med de senaste körningarna**) measures the suggestions over the
+flow's ten latest finished runs. A measured suggestion then says what it
+costs, such as "Costs about 1,800 tokens per run, measured in 8 runs of
+version 3", and notes when the step has changed since those runs. The most
+expensive come first. The summary says how many runs were counted
+(**Based on 8 runs**), and how many were left out because you may not see
+them. Runs also show what the draft alone cannot:
+
+- **The same text through two steps.** Two inputs of a step carried
+  identical text, although they come from different steps.
+- **Close to the model's limit.** A step's input came near the most text its
+  model can take in, or was too large for it.
+- **Two calls instead of one.** The model often failed to answer in the
+  step's fixed format, so the step had to ask again.
+- **Copying forward.** A step's model wrote out an earlier step's answer word
+  for word, and later steps read the copy instead of the original.
+- **Inputs that overlap.** Two inputs of a step shared much of their text, so
+  the model read that part twice.
+- **A step that only assembles text.** Nearly all of a step's answer was its
+  input copied word for word; a step that puts text together without AI does
+  the same at no cost.
+
+Only numbers are read from the runs (sizes, token counts and how often
+something happened), never their content, and each measurement is recorded
+in the audit log. Nothing is measured until you press the button, and
+**Show without the runs** (**Visa utan körningarna**) goes back to the draft
+alone.
+
 The flow chat uses the same checks. Ask it to make the flow simpler or
 cheaper and it starts from the suggestions; when it adds or changes a step,
 it checks that step and fixes what its own change introduced.
