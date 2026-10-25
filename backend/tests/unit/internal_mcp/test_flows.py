@@ -255,6 +255,9 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
     assert page["flow_id"] == str(chat.flow_id)
     assert page["draft_revision"] == answer.draft_revision
     assert '"code":"duplicate_read"' in page["content"]
+    # Dismissed suggestions are left out, and the page says how many.
+    assert '"dismissed_count":1' in page["content"]
+    assert read.await_args.kwargs.get("include_dismissed", False) is False
     # A read: the tool asks for this chat's flow, judged from the definition
     # alone, and needs no edit mode.
     assert read.await_args.kwargs["id"] == chat.flow_id
