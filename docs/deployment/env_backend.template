@@ -26,6 +26,7 @@ REDIS_DB=0
 # runs outside this Compose file.
 # REDIS_PASSWORD=
 # REDIS_USERNAME=             # Only for a Redis ACL user; requires REDIS_PASSWORD
+# REDIS_POOL_WAIT_TIMEOUT=    # Seconds a command waits for a free connection when REDIS_MAX_CONNECTIONS is set; unset = REDIS_CONN_TIMEOUT
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)

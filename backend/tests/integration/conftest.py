@@ -134,6 +134,7 @@ from alembic.config import Config
 from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
+from eneo.redis.clients import redis_clients
 from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.database_reset import reset_populated_tables
@@ -324,9 +325,10 @@ async def _force_gc_before_loop_closes():
     This prevents "Event loop is closed" errors from Redis connections
     that get garbage collected after the event loop shuts down.
 
-    The Container creates singleton Redis clients via DI that outlive individual tests.
-    By forcing GC before the loop closes, we ensure __del__ methods run while
-    the loop can still process connection cleanup.
+    The app fixture never runs a full shutdown, so clients it starts (such as
+    the job manager's ARQ pool) outlive individual tests. By forcing GC before
+    the loop closes, we ensure __del__ methods run while the loop can still
+    process connection cleanup.
 
     This is a pragmatic solution that doesn't interfere with test behavior or DI lifecycle.
     """
@@ -340,6 +342,25 @@ async def _force_gc_before_loop_closes():
 
     # Force garbage collection while loop is alive
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+async def process_redis_clients(override_settings_for_session):
+    """Run every test inside the process's Redis client lifetime.
+
+    Production code builds containers only inside a lifespan that starts these
+    clients, and tests build containers directly too. The app fixture restarts
+    them through the production startup. Isolated migration modules, whose
+    settings override yields nothing, build no containers.
+    """
+    if override_settings_for_session is None:
+        yield
+        return
+    redis_clients.start()
+    try:
+        yield
+    finally:
+        await redis_clients.stop()
 
 
 @pytest.fixture(autouse=True)
@@ -402,11 +423,6 @@ def override_settings_for_session(test_settings: Settings):
 
     # Set test settings
     set_settings(test_settings)
-
-    from eneo.worker.redis import reset_redis_client
-
-    reset_redis_client()
-    Container.redis_client.reset()
 
     # CRITICAL: Mutate the existing API_KEY_HEADER object's internal model.name
     #
@@ -687,6 +703,9 @@ async def app(setup_database):
     from eneo.server.dependencies.lifespan import startup
 
     try:
+        # Startup starts the process's Redis clients itself; the ones every
+        # test runs inside make way, and process_redis_clients stops these.
+        await redis_clients.stop()
         await startup()
 
         # Verify app initialization

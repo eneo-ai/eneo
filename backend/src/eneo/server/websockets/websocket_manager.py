@@ -9,6 +9,7 @@ from fastapi import WebSocket
 
 from eneo.main.logging import get_logger
 from eneo.main.models import Channel, ChannelType, RedisMessage
+from eneo.redis.clients import redis_clients
 from eneo.server.websockets.websocket_models import (
     IncomingMessageType,
     OutGoingMessageType,
@@ -20,7 +21,6 @@ from eneo.server.websockets.websocket_models import (
     WsUnSubscribeMessage,
 )
 from eneo.users.user import UserInDB
-from eneo.worker.redis import r
 
 
 @dataclass
@@ -35,17 +35,16 @@ logger = get_logger(__name__)
 class WebSocketManager:
     def __init__(
         self,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis | None = None,
         channels: dict[str, SubscribedChannels] | None = None,
     ):
         super().__init__()
         self.redis = redis
         self.channels = channels or {}
         self.task_monitoring = None
-
-    @property
-    def tasks(self) -> list[asyncio.Task[Any]]:
-        return [self.channels[channel].redis_task for channel in self.channels]
+        # Every listener until it finishes, including one still leaving its
+        # subscription after unsubscribe removed its channel.
+        self._listeners: set[asyncio.Task[Any]] = set()
 
     def _check_exceptions(self, task: asyncio.Task[Any]) -> None:
         try:
@@ -62,7 +61,9 @@ class WebSocketManager:
             logger.debug(f"WebSocket not found in channel {channel}")
 
     async def _listen_to_redis(self, channel: str) -> None:
-        redis_client = cast(Any, self.redis)
+        # Without a client of its own, a listener holds a connection from the
+        # process's subscription pool for as long as it listens.
+        redis_client = cast(Any, self.redis or redis_clients.subscriptions())
         pubsub = redis_client.pubsub()
         async with pubsub:
             await pubsub.subscribe(channel)
@@ -178,6 +179,8 @@ class WebSocketManager:
         if channel not in self.channels:
             redis_task = asyncio.create_task(self._listen_to_redis(channel))
             redis_task.add_done_callback(self._check_exceptions)
+            self._listeners.add(redis_task)
+            redis_task.add_done_callback(self._listeners.discard)
             self.channels[channel] = SubscribedChannels(
                 websockets=set(), redis_task=redis_task
             )
@@ -217,10 +220,16 @@ class WebSocketManager:
                 await self._send_message(ws, message)
 
     async def shutdown(self) -> None:
-        for task in self.tasks:
-            task.cancel()
+        # Every listener leaves its subscription before shutdown returns, so
+        # the Redis pool behind them can close next. A cancelled listener is
+        # the expected outcome; listener errors are logged by _check_exceptions.
+        # Listeners already cancelled by unsubscribe are awaited, not cancelled
+        # again, so their cleanup runs to the end.
+        for subscribed in self.channels.values():
+            subscribed.redis_task.cancel()
+        self.channels = {}
 
-        await asyncio.gather(*self.tasks)
+        await asyncio.gather(*self._listeners, return_exceptions=True)
 
 
-websocket_manager = WebSocketManager(redis=r)
+websocket_manager = WebSocketManager()

@@ -319,6 +319,9 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # How long a command waits for a free connection when REDIS_MAX_CONNECTIONS
+    # bounds its pool. Unset waits up to REDIS_CONN_TIMEOUT.
+    redis_pool_wait_timeout: int | None = None
     # MCP tool approval configuration
     mcp_tool_approval_timeout_seconds: int = 300
     mcp_tool_approval_ttl_seconds: int = 305
@@ -1157,6 +1160,16 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if (
+            self.redis_pool_wait_timeout is not None
+            and self.redis_pool_wait_timeout <= 0
+        ):
+            logging.error(
+                "REDIS_POOL_WAIT_TIMEOUT must be greater than zero when set. Current value: %s",
+                self.redis_pool_wait_timeout,
             )
             sys.exit(1)
 

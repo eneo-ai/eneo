@@ -22,6 +22,7 @@ from eneo.database.database import AsyncSession
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_models import JobInDb, JobPublic
 from eneo.main.logging import get_logger
+from eneo.redis.clients import redis_clients
 from eneo.worker.redis import get_redis
 
 logger = get_logger(__name__)
@@ -77,8 +78,11 @@ async def stream_job_events(
     redis: aioredis.Redis | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     """Relay the user's job channel as ``event: job`` messages until the
-    browser disconnects."""
-    client: Any = redis or get_redis()
+    browser disconnects.
+
+    The subscription holds a connection for as long as the browser listens, so
+    it takes the process's subscription pool, never the command pool."""
+    client: Any = redis or redis_clients.subscriptions()
     pubsub = client.pubsub()
     async with pubsub:
         await pubsub.subscribe(job_updates_channel(user_id))

@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 
 from fastapi import FastAPI
 
@@ -16,6 +18,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
 )
 from eneo.object_content.runtime import object_content_runtime
+from eneo.redis.clients import redis_clients
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.settings.encryption_service import EncryptionService
@@ -24,18 +27,20 @@ from eneo.settings.encryption_service import EncryptionService
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup()
-    # The loopback internal-MCP servers are mounted sub-apps; Starlette does
-    # not run a mounted app's lifespan, so the parent must drive their session
-    # managers. Skip in OpenAPI-only mode (no startup deps, no requests served).
-    if get_settings().openapi_only_mode:
-        yield
-    else:
-        async with internal_mcp_lifespan():
+    try:
+        # The loopback internal-MCP servers are mounted sub-apps; Starlette does
+        # not run a mounted app's lifespan, so the parent must drive their session
+        # managers. Skip in OpenAPI-only mode (no startup deps, no requests served).
+        if get_settings().openapi_only_mode:
             yield
-    await shutdown()
+        else:
+            async with internal_mcp_lifespan():
+                yield
+    finally:
+        await shutdown()
 
 
-async def start_persistence() -> None:
+async def start_persistence() -> Callable[[], Awaitable[None]]:
     """Bring up what any process that reads or writes application data needs.
 
     The database session manager and the durable object-content runtime are
@@ -47,6 +52,9 @@ async def start_persistence() -> None:
     touched: the running owner keeps its engine and runtime. A failed start
     leaves nothing started that this call started: the caller never reaches its
     own stop, so whatever escapes (cancellation included) unwinds here first.
+
+    Returns the stop that undoes exactly this start, for a caller that must
+    unwind it before its own shutdown would run.
     """
     if object_content_runtime.enabled:
         raise RuntimeError("Persistence is already running in this process")
@@ -83,6 +91,7 @@ async def start_persistence() -> None:
     except BaseException:
         await _stop(close_database=opened_database)
         raise
+    return partial(_stop, close_database=opened_database)
 
 
 async def stop_persistence() -> None:
@@ -104,12 +113,21 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
-    await start_persistence()
-    aiohttp_client.start()
-    await job_manager.init()
+    # The caller of a failed startup never reaches shutdown, so whatever
+    # escapes (cancellation included) stops what this call started, last
+    # started first. Once everything is up, stopping it is shutdown's.
+    async with AsyncExitStack() as started:
+        started.push_async_callback(await start_persistence())
+        redis_clients.start()
+        started.push_async_callback(redis_clients.stop)
+        aiohttp_client.start()
+        started.push_async_callback(aiohttp_client.stop)
+        await job_manager.init()
+        started.push_async_callback(job_manager.close)
 
-    # init predefined roles
-    await init_predefined_roles()
+        # init predefined roles
+        await init_predefined_roles()
+        started.pop_all()
 
 
 async def shutdown():
@@ -118,7 +136,12 @@ async def shutdown():
     if settings.openapi_only_mode:
         return
 
-    await stop_persistence()
-    await aiohttp_client.stop()
-    await job_manager.close()
-    await websocket_manager.shutdown()
+    # Every step runs even when an earlier one fails. Callbacks run last pushed
+    # first: the websocket listeners leave their subscriptions before the Redis
+    # clients behind them close.
+    async with AsyncExitStack() as steps:
+        steps.push_async_callback(redis_clients.stop)
+        steps.push_async_callback(websocket_manager.shutdown)
+        steps.push_async_callback(job_manager.close)
+        steps.push_async_callback(aiohttp_client.stop)
+        steps.push_async_callback(stop_persistence)

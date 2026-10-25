@@ -606,10 +606,12 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
         report["restore_seconds"] = time.perf_counter() - restore_started
 
         from eneo.object_content.runtime import object_content_runtime
+        from eneo.redis.clients import redis_clients
         from eneo.server.dependencies.lifespan import startup
 
         await object_content_runtime.stop()
         await sessionmanager.close()
+        await redis_clients.stop()
         set_settings(test_settings.model_copy(update={"postgres_db": "after_restore"}))
         restart_started = time.perf_counter()
         await startup()
@@ -640,6 +642,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
 
         await object_content_runtime.stop()
         await sessionmanager.close()
+        await redis_clients.stop()
         engine = create_engine(after_url)
         try:
             with engine.begin() as connection:
@@ -680,6 +683,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
             assert response.status_code == 200 and response.content == payload
         await object_content_runtime.stop()
         await sessionmanager.close()
+        await redis_clients.stop()
         _dump(postgres_container, "after_restore", path / "cleaned.dump")
         _restore(postgres_container, path / "cleaned.dump", "cleaned_restore")
         set_settings(
