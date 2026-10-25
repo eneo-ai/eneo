@@ -27,12 +27,14 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.domain.forwarding_facts import ForwardingEdgeFacts, ForwardingFacts
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdges,
     FlowResolvedInputJsonPath,
     FlowResolvedInputStepResultSource,
     build_resolved_input_edge,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
@@ -622,12 +624,23 @@ _TRACE_AUTHOR = [
 ]
 
 
+_TRACER_READS = ("input_source", "assistant_prompt:step_1.output.text")
+
+
 async def _seed_run(
-    db_container, flow: Tracer, *, principal_user_id: UUID, tokens: int
+    db_container,
+    flow: Tracer,
+    *,
+    principal_user_id: UUID,
+    tokens: int,
+    binding_refs: tuple[str, ...] = _TRACER_READS,
+    output_tokens: int = 20,
+    facts: ForwardingFacts | None = None,
 ) -> UUID:
-    """A completed run of version 1 in which step 2 got step 1's text as its
-    input and again in its prompt, both edges sent in one call billed
-    ``tokens`` input tokens."""
+    """A completed run of version 1 in which step 2 got step 1's text at
+    each of ``binding_refs`` (by default as its input and again in its
+    prompt), all edges sent in one call billed ``tokens`` input tokens, and
+    with ``facts`` the forwarding facts the worker recorded for it."""
     now = datetime.now(timezone.utc)
     async with db_container() as container:
         session = container.session()
@@ -682,17 +695,11 @@ async def _seed_run(
         )
         edges = FlowResolvedInputEdges(
             schema_version=1,
-            edges=(
+            edges=tuple(
                 build_resolved_input_edge(
-                    binding_ref="input_source",
-                    source=source,
-                    selected_value=_INPUT_TEXT,
-                ),
-                build_resolved_input_edge(
-                    binding_ref="assistant_prompt:step_1.output.text",
-                    source=source,
-                    selected_value=_INPUT_TEXT,
-                ),
+                    binding_ref=binding_ref, source=source, selected_value=_INPUT_TEXT
+                )
+                for binding_ref in binding_refs
             ),
         )
         reader = attempts[1]
@@ -715,10 +722,10 @@ async def _seed_run(
                 requested_model="modell",
                 response_format="none",
                 requested_capabilities=[],
-                resolved_input_edge_indexes=[0, 1],
+                resolved_input_edge_indexes=list(range(len(binding_refs))),
                 call_reason="initial",
                 num_tokens_input=tokens,
-                num_tokens_output=20,
+                num_tokens_output=output_tokens,
                 input_source="provider",
                 output_source="provider",
                 requested_at=now,
@@ -726,6 +733,14 @@ async def _seed_run(
             )
         )
         await session.flush()
+        if facts is not None:
+            assert await FlowRunRepository(session=session).record_forwarding_facts(
+                run_id=run.id,
+                step_id=flow.step_ids[1],
+                attempt_no=1,
+                tenant_id=tenant_id,
+                facts=facts,
+            )
         return run.id
 
 
@@ -859,3 +874,142 @@ async def test_measuring_another_tenants_flow_is_not_found(
 
     assert response.status_code == 404, response.text
     assert await _evidence_audits(db_container, tracer.flow_id) == []
+
+
+# --- Measured from the forwarding facts ---------------------------------------
+
+_INPUT_BYTES = len(_INPUT_TEXT.encode("utf-8"))
+
+
+def _relay_facts(copied: float = 0.8) -> ForwardingFacts:
+    """Step 2's call: ``copied`` of its 1000-byte output was found in the
+    edge from step 1."""
+    return ForwardingFacts(
+        schema_version=1,
+        measured=True,
+        call_count=1,
+        edges=(
+            ForwardingEdgeFacts(
+                edge_index=0,
+                byte_size=_INPUT_BYTES,
+                shingle_count=193,
+                sample_every=1,
+                repeated_bytes=0,
+                copied_to_output_ratio=copied,
+            ),
+        ),
+        output_byte_size=1000,
+        output_shingle_count=150,
+        output_verbatim_ratio=copied,
+    )
+
+
+async def _relay_flow(client, db_container, admin_user) -> Tracer:
+    """Step 2 reads step 1 as its input; step 3 reads step 2."""
+    flow = await _seeded(client, db_container, admin_user, [StepSpec()] * 3)
+    await _publish(client, flow)
+    return flow
+
+
+async def _seed_relay_run(db_container, flow: Tracer, admin_user) -> UUID:
+    return await _seed_run(
+        db_container,
+        flow,
+        principal_user_id=admin_user.id,
+        tokens=400,
+        binding_refs=("input_source",),
+        output_tokens=300,
+        facts=_relay_facts(),
+    )
+
+
+async def test_a_step_that_copies_its_input_on_is_a_measured_relay(
+    client: AsyncClient, db_container, admin_user, patch_auth_service_jwt
+):
+    flow = await _relay_flow(client, db_container, admin_user)
+    run_id = await _seed_relay_run(db_container, flow, admin_user)
+    token = await _token_with(
+        db_container, admin_user.id, admin_user.tenant_id, _TRACE_AUTHOR
+    )
+
+    response = await _measured(
+        client, flow, {"Authorization": f"Bearer {token}"}, runs=1
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runs"] == {"requested": 1, "counted": 1, "left_out": 0}
+    (item,) = [item for item in body["items"] if item["code"] == "model_relay"]
+    second, first, third = flow.step_ids[1], flow.step_ids[0], flow.step_ids[2]
+    assert item["steps"] == [str(second), str(first), str(third)]
+    assert item["params"]["producer_step_id"] == str(flow.step_ids[0])
+    assert item["params"]["copied_share"] == 0.8
+    assert (item["params"]["run_count"], item["params"]["held_runs"]) == (1, 1)
+    # 80 % of the call's 300 output tokens.
+    assert item["impact"] == {
+        "basis": "runs",
+        "level": "high",
+        "tokens_per_run": 240,
+        "run_count": 1,
+        "version": 1,
+        "step_changed_since": False,
+    }
+    assert item["fix"] == {"kind": "assisted", "patch": None}
+    static = await _suggestions(client, flow)
+    assert [item for item in static["items"] if item["code"] == "model_relay"] == []
+    (audit,) = await _evidence_audits(db_container, flow.flow_id)
+    assert audit["extra"]["run_ids"] == [str(run_id)]
+    assert audit["extra"]["forwarding_facts_attempt_count"] == 1
+
+
+async def test_a_relay_is_not_measured_without_the_trace_permission(
+    client: AsyncClient, db_container, admin_user, patch_auth_service_jwt
+):
+    flow = await _relay_flow(client, db_container, admin_user)
+    await _seed_relay_run(db_container, flow, admin_user)
+
+    response = await _measured(client, flow, flow.headers, runs=1)
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "insufficient_tenant_permission"
+    assert await _evidence_audits(db_container, flow.flow_id) == []
+
+
+async def test_the_forwarding_facts_of_another_tenant_are_never_read(
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    user_factory,
+    tenant_factory,
+    patch_auth_service_jwt,
+):
+    flow = await _relay_flow(client, db_container, admin_user)
+    run_id = await _seed_relay_run(db_container, flow, admin_user)
+    async with db_container() as container:
+        tenant = await tenant_factory(container.session())
+        outsider = await user_factory(container.session(), tenant_id=tenant.id)
+        await container.session().flush()
+        outsider_id, tenant_id = outsider.id, tenant.id
+    token = await _token_with(db_container, outsider_id, tenant_id, _TRACE_AUTHOR)
+
+    response = await _measured(
+        client, flow, {"Authorization": f"Bearer {token}"}, runs=1
+    )
+
+    assert response.status_code == 404, response.text
+    assert await _evidence_audits(db_container, flow.flow_id) == []
+    # The evidence statement reads the facts with the attempt, in the tenant
+    # it is asked for and no other.
+    async with db_container() as container:
+        repo = container.flow_suggestion_evidence_repo()
+        own = await repo.read_attempts(
+            flow_id=flow.flow_id, run_ids=[run_id], tenant_id=admin_user.tenant_id
+        )
+        other = await repo.read_attempts(
+            flow_id=flow.flow_id, run_ids=[run_id], tenant_id=tenant_id
+        )
+    reader = next(
+        attempt for attempt in own[run_id] if attempt.step_id == flow.step_ids[1]
+    )
+    assert reader.forwarding == _relay_facts()
+    assert other == {}

@@ -1,5 +1,5 @@
 """Suggestions measured from recent runs: the cost of what the definition
-proves, and three findings only runs can show.
+proves, and the findings only runs can show.
 
 Pure functions over the draft's reads (``DraftReads``) and the content-free
 ``RunEvidence``. Measured facts map to draft steps by step id, and to a
@@ -20,6 +20,10 @@ from the step in the measured version says so (``step_changed_since``).
   the step failed the inline cap.
 - ``format_fallback``: the step often needed a second call because its
   model did not take the structured format.
+- The forwarding facts' findings (``flow_suggestion_forwarding``):
+  ``model_relay``, ``overlapping_inputs`` (folded into the static
+  suggestion about the same two reads where there is one) and
+  ``deterministic_candidate``.
 
 Tokens per run is an edge's ``byte_size`` times the tokens per byte of each
 call that sent it (``num_tokens_input`` over the bytes of the call's edges),
@@ -41,6 +45,7 @@ from eneo.flows.domain.flow_suggestion_evidence import (
     RunEvidence,
     average_over_runs,
 )
+from eneo.flows.domain.flow_suggestion_forwarding import forwarding_suggestions
 from eneo.flows.domain.flow_suggestion_model import (
     DraftReads,
     FlowSuggestion,
@@ -70,7 +75,11 @@ IDENTICAL_INPUTS_MIN_BYTES = 256
 FAILED_STEP_STATUS = "failed"
 
 _DUPLICATE_CODES = frozenset(
-    {FlowSuggestionCode.DUPLICATE_READ, FlowSuggestionCode.IDENTICAL_INPUTS}
+    {
+        FlowSuggestionCode.DUPLICATE_READ,
+        FlowSuggestionCode.IDENTICAL_INPUTS,
+        FlowSuggestionCode.OVERLAPPING_INPUTS,
+    }
 )
 
 
@@ -83,6 +92,7 @@ def measure_suggestions(
     followed by the measured rules' findings."""
     measured = [_with_measured_impact(item, evidence) for item in suggestions]
     measured.extend(identical_inputs(draft, evidence))
+    measured = forwarding_suggestions(draft, measured, evidence)
     measured.extend(context_headroom(draft, evidence, related=measured))
     measured.extend(format_fallback(draft, evidence))
     return measured
@@ -289,17 +299,8 @@ def _draft_read_of(
 ) -> StepRead | None:
     """The draft's model read that made ``edge``: the same site, read from
     the same step."""
-    if edge.source_step_id is None:
-        return None
-    producer = str(edge.source_step_id)
-    return next(
-        (
-            read
-            for read in reads
-            if read.site == edge.binding_ref
-            and draft.producer_key(read.step_order) == producer
-        ),
-        None,
+    return draft.edge_read(
+        reads, binding_ref=edge.binding_ref, source_step_id=edge.source_step_id
     )
 
 

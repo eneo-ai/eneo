@@ -6186,7 +6186,7 @@ export interface paths {
      * Get Flow Suggestions
      * @description What the draft could do cheaper or simpler. By default it is judged from the saved definition alone: where a step's model receives the same earlier result twice (`duplicate_read`), takes more of the earlier results than it needs, carries data no later step reads, or relays a result another step could read directly. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at.
      *
-     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and three findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts and call reasons), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted and how many it left out, and is refused with 503 when that entry cannot be written.
+     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and the findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`, and from the forwarding facts the worker records for each model call, `model_relay` (most of a model step's output is an earlier result copied word for word, which a later step reads from it), `overlapping_inputs` (two inputs of a call share half or more of their text; added to the `duplicate_read` or `broad_all_previous_steps` about the same two reads as `params.measured_overlaps` when there is one) and `deterministic_candidate` (a model step whose output is its inputs copied word for word, which a `compose_text` step does without a model). A finding from the forwarding facts holds in half or more of the runs that measured it. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts, call reasons and the shares the worker measured), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted, how many it left out and how many of their attempts had forwarding facts, and is refused with 503 when that entry cannot be written.
      *
      *     Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits and measurements, an `impact` and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
      */
@@ -27946,7 +27946,10 @@ export interface components {
       | "unused_form_field"
       | "identical_inputs"
       | "context_headroom"
-      | "format_fallback";
+      | "format_fallback"
+      | "model_relay"
+      | "overlapping_inputs"
+      | "deterministic_candidate";
     /** FlowSuggestionFixPublic */
     FlowSuggestionFixPublic: {
       /**
@@ -27989,7 +27992,7 @@ export interface components {
       basis: "definition" | "runs";
       /**
        * Level
-       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field). The measured codes: `high` for `identical_inputs` and `context_headroom`, `medium` for `format_fallback`.
+       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field). The measured codes: `high` for `identical_inputs`, `context_headroom` and `model_relay`, `medium` for `format_fallback`, `overlapping_inputs` and `deterministic_candidate`.
        * @example high
        * @enum {string}
        */
@@ -28008,7 +28011,7 @@ export interface components {
       step_changed_since?: boolean | null;
       /**
        * Tokens Per Run
-       * @description Measured: the tokens per run the duplicated or unused part cost, averaged over the runs that measured it. For a duplicate, the size of the redundant input times the tokens per byte of each call that sent it; for a step run once per item, the copies beyond the first item's; for an unread result, everything the step was billed. Null when the impact is from the definition, and for a measured finding without a token cost of its own (`context_headroom`, `format_fallback`).
+       * @description Measured: the tokens per run the duplicated or unused part cost, averaged over the runs that measured it. For a duplicate, the size of the redundant input times the tokens per byte of each call that sent it; for a step run once per item, the copies beyond the first item's; for an unread result, everything the step was billed. From the forwarding facts, averaged over the runs in which the finding held: for `model_relay`, the output tokens of the measured call times the share of its output that was copied; for `overlapping_inputs`, the shared bytes times the tokens per byte of each call that sent both inputs; for `deterministic_candidate`, everything the step was billed, which a step without a model does not cost. Null when the impact is from the definition, when the runs did not report the tokens, and for a measured finding without a token cost of its own (`context_headroom`, `format_fallback`).
        * @example 1840
        */
       tokens_per_run?: number | null;
@@ -28078,8 +28081,11 @@ export interface components {
      */
     FlowSuggestionPublic: {
       /**
-       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format.
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format. From the forwarding facts the worker records for each model call, also only with `runs`: `model_relay`, most of a model step's output was an earlier result copied word for word, which a later step reads from it (that step can read the original); `overlapping_inputs`, two inputs of a step shared half or more of the shorter one's text without being identical; `deterministic_candidate`, a model step's output was its inputs copied word for word with little of its own, which a `compose_text` step does without a model.
        * @example duplicate_read
+       * @example model_relay
+       * @example overlapping_inputs
+       * @example deterministic_candidate
        */
       code: components["schemas"]["FlowSuggestionCode"];
       /**
@@ -28097,14 +28103,14 @@ export interface components {
       message: string;
       /**
        * Params
-       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`. `identical_inputs`: `producer_step_ids`, `producer_step_orders`, `sites`, `byte_size`, `observed_runs`, `step_runs`. `context_headroom`: `peak_input_tokens`, `token_limit`, `limit_share`, `inline_cap_failures`, `duplicated_tokens_per_run` and `duplicated_share` (what the step's measured duplicates account for), `related_fingerprints` (those duplicates), `step_runs`. `format_fallback`: `fallback_runs`, `step_runs`. No param holds run content.
+       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`. `identical_inputs`: `producer_step_ids`, `producer_step_orders`, `sites`, `byte_size`, `observed_runs`, `step_runs`. `context_headroom`: `peak_input_tokens`, `token_limit`, `limit_share`, `inline_cap_failures`, `duplicated_tokens_per_run` and `duplicated_share` (what the step's measured duplicates account for), `related_fingerprints` (those duplicates), `step_runs`. `format_fallback`: `fallback_runs`, `step_runs`. `model_relay`: `producer_step_order`, `producer_step_id`, `reads` (the step's reads of that result), `readers` (`step_order`, `step_id`, `sites` of the later steps that read the step), `copied_share` (the share of the output found in that result), `input_share` (the share of that result the copy holds), `copied_bytes`. `overlapping_inputs`: `inputs` (two, each `step_order`, `step_id` and `sites`), `shared_bytes`, `shared_share` (of the shorter input). `deterministic_candidate`: `output_verbatim_ratio`, `own_bytes` (the output's bytes not found in its inputs), `input_share` (the share of the copied inputs the output holds). The three carry `run_count` (runs that measured the finding) and `held_runs` (runs in which it held), their shares and sizes averaged over the latter. A measured overlap of the two reads a `duplicate_read` or `broad_all_previous_steps` names is added to it as `measured_overlaps`: a list of the `overlapping_inputs` params, each with `tokens_per_run`, `version` and `step_changed_since`. No param holds run content.
        */
       params: {
         [key: string]: unknown;
       };
       /**
        * Steps
-       * @description The steps the suggestion is about; the first is the step it is shown on, the second, when there is one, the step it reads, copies or shares a source with. Empty for `unused_form_field`, which is about the run form.
+       * @description The steps the suggestion is about; the first is the step it is shown on, the second, when there is one, the step it reads, copies or shares a source with; for `model_relay` the later steps that read the step follow. Empty for `unused_form_field`, which is about the run form.
        */
       steps: string[];
     };
@@ -28270,6 +28276,57 @@ export interface components {
      *       "draft_revision": 4,
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "items": [
+     *         {
+     *           "code": "model_relay",
+     *           "fingerprint": "4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d",
+     *           "fix": {
+     *             "kind": "assisted"
+     *           },
+     *           "impact": {
+     *             "basis": "runs",
+     *             "level": "high",
+     *             "run_count": 8,
+     *             "step_changed_since": false,
+     *             "tokens_per_run": 5200,
+     *             "version": 3
+     *           },
+     *           "message": "In 7 of the last 8 runs, 82 % of step 2's output was step 1's result copied word for word, and step 3 reads it from step 2; reading step 1 directly spares the model writing the copy.",
+     *           "params": {
+     *             "copied_bytes": 24300,
+     *             "copied_share": 0.82,
+     *             "held_runs": 7,
+     *             "input_share": 0.91,
+     *             "producer_step_id": "00000000-0000-0000-0000-000000000101",
+     *             "producer_step_order": 1,
+     *             "readers": [
+     *               {
+     *                 "sites": [
+     *                   "input_source"
+     *                 ],
+     *                 "step_id": "00000000-0000-0000-0000-000000000103",
+     *                 "step_order": 3
+     *               }
+     *             ],
+     *             "reads": [
+     *               {
+     *                 "channel": "input",
+     *                 "selector": [],
+     *                 "site": "input_source"
+     *               },
+     *               {
+     *                 "channel": "prompt",
+     *                 "selector": [],
+     *                 "site": "assistant_prompt:step_1.output.text"
+     *               }
+     *             ],
+     *             "run_count": 8
+     *           },
+     *           "steps": [
+     *             "00000000-0000-0000-0000-000000000102",
+     *             "00000000-0000-0000-0000-000000000101",
+     *             "00000000-0000-0000-0000-000000000103"
+     *           ]
+     *         },
      *         {
      *           "code": "duplicate_read",
      *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
@@ -64680,6 +64737,57 @@ export interface operations {
            *       "draft_revision": 4,
            *       "flow_id": "00000000-0000-0000-0000-000000000001",
            *       "items": [
+           *         {
+           *           "code": "model_relay",
+           *           "fingerprint": "4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d4c7e0a5d",
+           *           "fix": {
+           *             "kind": "assisted"
+           *           },
+           *           "impact": {
+           *             "basis": "runs",
+           *             "level": "high",
+           *             "run_count": 8,
+           *             "step_changed_since": false,
+           *             "tokens_per_run": 5200,
+           *             "version": 3
+           *           },
+           *           "message": "In 7 of the last 8 runs, 82 % of step 2's output was step 1's result copied word for word, and step 3 reads it from step 2; reading step 1 directly spares the model writing the copy.",
+           *           "params": {
+           *             "copied_bytes": 24300,
+           *             "copied_share": 0.82,
+           *             "held_runs": 7,
+           *             "input_share": 0.91,
+           *             "producer_step_id": "00000000-0000-0000-0000-000000000101",
+           *             "producer_step_order": 1,
+           *             "readers": [
+           *               {
+           *                 "sites": [
+           *                   "input_source"
+           *                 ],
+           *                 "step_id": "00000000-0000-0000-0000-000000000103",
+           *                 "step_order": 3
+           *               }
+           *             ],
+           *             "reads": [
+           *               {
+           *                 "channel": "input",
+           *                 "selector": [],
+           *                 "site": "input_source"
+           *               },
+           *               {
+           *                 "channel": "prompt",
+           *                 "selector": [],
+           *                 "site": "assistant_prompt:step_1.output.text"
+           *               }
+           *             ],
+           *             "run_count": 8
+           *           },
+           *           "steps": [
+           *             "00000000-0000-0000-0000-000000000102",
+           *             "00000000-0000-0000-0000-000000000101",
+           *             "00000000-0000-0000-0000-000000000103"
+           *           ]
+           *         },
            *         {
            *           "code": "duplicate_read",
            *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
