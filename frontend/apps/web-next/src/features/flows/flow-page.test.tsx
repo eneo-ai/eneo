@@ -239,9 +239,10 @@ function applyBodies() {
 const suggestionReads = () =>
   api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/").length;
 
-/** The "Åtgärda" of the suggestion on step 2's card, by its role and name. */
+/** The "Åtgärda" of the suggestion on step 2's card, by its role and name, its list opened. */
 async function cardFix() {
   const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+  fireEvent.click(await within(second).findByRole("button", { name: /^\d+ förslag/ }));
   return within(second).findByRole("button", { name: /^Åtgärda ”/ });
 }
 
