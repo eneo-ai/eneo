@@ -167,6 +167,27 @@ describe("AppShellFrame on a phone", () => {
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
   });
 
+  it("opens Konto from the drawer's profile row, a link and not a menu on a menu (decision 22)", async () => {
+    setRoute("/account");
+    renderShell();
+    const menuButton = screen.getByRole("button", { name: "Öppna menyn" });
+    fireEvent.click(menuButton);
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+
+    const profile = within(drawer).getByRole("link", {
+      name: "Anna Lind, Sundsvalls kommun: konto och inställningar"
+    });
+    expect(profile.getAttribute("href")).toBe("/account");
+    expect(within(drawer).queryByRole("button", { name: /konto och inställningar/ })).toBeNull();
+    // Already on Konto, so no new path closes the drawer: the row does. (jsdom
+    // cannot follow the link itself.)
+    const stay = (event: Event) => event.preventDefault();
+    window.addEventListener("click", stay);
+    fireEvent.click(profile);
+    window.removeEventListener("click", stay);
+    await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+  });
+
   it("opens the drawer when the chat's header asks for it, with the bells in it", async () => {
     setRoute("/spaces/s1/chat");
     renderShell();

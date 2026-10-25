@@ -2,18 +2,19 @@ import { useId } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * In an editor's section on a phone (SectionedSettings' phone index): the page
- * bar names the section, so the card does not repeat the title (it stays the
- * section's heading for assistive technology, and where focus lands), and the
- * card's frame and inset give way to the page's 16 px gutter. A description or
- * header actions stay, above the rows.
+ * Where a page bar names the section, the card does not repeat the title (it
+ * stays the section's heading for assistive technology, and where focus
+ * lands), and the card's frame and inset give way to the page's gutter: an
+ * editor's section on a phone (SectionedSettings' phone index, below 768 px),
+ * and a page pushed from Konto (`data-pushed-section`, below 1024 px, as long
+ * as its PageBar shows). A description or header actions stay, above the rows.
  */
 const IN_PHONE_SECTION = {
-  card: "max-md:in-[[data-editor-section]]:rounded-none max-md:in-[[data-editor-section]]:border-0 max-md:in-[[data-editor-section]]:bg-transparent",
+  card: "max-md:in-[[data-editor-section]]:rounded-none max-md:in-[[data-editor-section]]:border-0 max-md:in-[[data-editor-section]]:bg-transparent max-lg:in-[[data-pushed-section]]:rounded-none max-lg:in-[[data-pushed-section]]:border-0 max-lg:in-[[data-pushed-section]]:bg-transparent",
   header:
-    "max-md:in-[[data-editor-section]]:border-b-0 max-md:in-[[data-editor-section]]:p-0 max-md:in-[[data-editor-section]]:has-[p,[data-settings-group-end]]:pb-4",
-  title: "max-md:in-[[data-editor-section]]:sr-only",
-  body: "max-md:in-[[data-editor-section]]:p-0"
+    "max-md:in-[[data-editor-section]]:border-b-0 max-md:in-[[data-editor-section]]:p-0 max-md:in-[[data-editor-section]]:has-[p,[data-settings-group-end]]:pb-4 max-lg:in-[[data-pushed-section]]:border-b-0 max-lg:in-[[data-pushed-section]]:p-0 max-lg:in-[[data-pushed-section]]:has-[p,[data-settings-group-end]]:pb-4",
+  title: "max-md:in-[[data-editor-section]]:sr-only max-lg:in-[[data-pushed-section]]:sr-only",
+  body: "max-md:in-[[data-editor-section]]:p-0 max-lg:in-[[data-pushed-section]]:p-0"
 };
 
 /**

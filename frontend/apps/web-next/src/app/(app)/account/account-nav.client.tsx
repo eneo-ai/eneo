@@ -4,6 +4,8 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+const PROFILE_PAGES = ["/account/appearance", "/account/copy-format", "/account/password"];
+
 /**
  * Account sub-pages as Astryx tabs in their navigation pattern: a named `nav`
  * landmark of links with the current page marked `aria-current`.
@@ -17,7 +19,10 @@ export function AccountNav() {
     { href: "/account/api-keys", label: t("api_keys") },
     { href: "/account/integrations", label: t("integrations") }
   ];
-  const current = items.find((item) => item.href === pathname)?.href ?? "";
+  // Konto's own pages below 1024 px hold what Profil holds: there, at this width too.
+  const current =
+    items.find((item) => item.href === pathname)?.href ??
+    (PROFILE_PAGES.includes(pathname) ? "/account" : "");
 
   return (
     <TabList

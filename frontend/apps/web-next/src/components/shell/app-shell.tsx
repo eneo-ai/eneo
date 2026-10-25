@@ -10,6 +10,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
+import { MOBILE_QUERY } from "@/lib/hooks/use-media-match";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
@@ -19,11 +20,8 @@ import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 // Loaded the first time the palette opens: nothing of it ships with page loads.
 const ShellCommandPalette = dynamic(() => import("./command-palette"), { ssr: false });
 
-/**
- * Below Tailwind's `lg` breakpoint (phones and an iPad held upright) the
- * SideNav becomes a drawer. The markup mirrors it with `lg:` variants.
- */
-const MOBILE_QUERY = "(width < 64rem)";
+// Below MOBILE_QUERY (Tailwind's `lg`: phones and an iPad held upright) the
+// SideNav becomes a drawer. The markup mirrors it with `lg:` variants.
 
 /**
  * The app frame: skip link (first tab stop), the SideNav (from 1024 px) or

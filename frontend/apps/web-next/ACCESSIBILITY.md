@@ -310,7 +310,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - Navigation, the profile menu and help (help center, support contact, the
   accessibility statement) sit in the same place and order on every page. The
-  shell owns them; screens don't add their own variants.
+  shell owns them; screens don't add their own variants. Below 1024 px the
+  drawer's profile row opens Konto, which holds what the profile menu holds
+  (decision 22): the same row, in the same place, on every page.
 - The same function has the same name and icon everywhere.
 
 ### 14. Dialogs, menus and popovers (1.4.13, 2.1.2, 2.4.3, 4.1.2)
@@ -485,5 +487,6 @@ that organisation's service.
 
 web-next links to it when `ACCESSIBILITY_STATEMENT_URL` is set (see
 [README](README.md#environment)): "Tillgänglighetsredogörelse" on the login
-page and in the profile menu. When the navigation changes, the link moves with
-it and stays in the same place on every page.
+page and in the profile menu, and below 1024 px on Konto, which the drawer's
+profile row opens. When the navigation changes, the link moves with it and
+stays in the same place on every page.

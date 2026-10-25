@@ -59,7 +59,7 @@ test("before hydration, a pushed screen or a chat shows only its own header", as
   );
   const open = (path: string) => page.mainFrame().goto(path);
 
-  for (const pushed of ["/admin/users", "/spaces/personal/chat"]) {
+  for (const pushed of ["/admin/users", "/account/appearance", "/spaces/personal/chat"]) {
     await open(pushed);
     // The dev server may compile the route first.
     await expect(page.locator("[data-own-mobile-header]")).toBeVisible({ timeout: 15_000 });
@@ -70,9 +70,12 @@ test("before hydration, a pushed screen or a chat shows only its own header", as
     page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ })
   ).toBeVisible();
 
-  for (const root of ["/admin", "/spaces/list"]) {
+  for (const root of ["/admin", "/account", "/spaces/list"]) {
     await open(root);
-    await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+    // Konto is rendered with "Mitt konto" until the width is known, CSS showing one.
+    await expect(page.locator("main h1").filter({ visible: true })).toBeVisible({
+      timeout: 15_000
+    });
     await expect(page.locator(TOP_BAR)).toBeVisible();
     await expect(page.locator("[data-own-mobile-header]")).toHaveCount(0);
   }

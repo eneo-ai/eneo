@@ -629,9 +629,31 @@ for (const colorScheme of ["light", "dark"] as const) {
             await expect(
               drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })
             ).toBeVisible();
+            // The profile opens Konto, not a menu on the drawer (decision 22).
+            await expect(
+              drawer.getByRole("link", {
+                name: /: (konto och inställningar|account and settings)$/
+              })
+            ).toHaveAttribute("href", "/account");
             await expectNoAxeViolations(page);
           });
         }
+
+        test("account", async ({ page }) => {
+          // Where the drawer is, Konto is a page (decision 22); sideways,
+          // "Mitt konto" and its tabs.
+          await scan(page, "/account", async () => {
+            await expect(
+              page.getByRole("heading", {
+                level: 1,
+                name: layout.drawer ? /^(Konto|Account)$/ : /^(Mitt konto|My account)$/
+              })
+            ).toBeVisible();
+          });
+          await scan(page, "/account/appearance", async () => {
+            await expect(page.getByRole("radiogroup", { name: /^(Tema|Theme)$/ })).toBeVisible();
+          });
+        });
 
         test("the command palette open", async ({ page }) => {
           await spacesList(page);

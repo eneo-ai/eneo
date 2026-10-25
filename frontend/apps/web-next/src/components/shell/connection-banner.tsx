@@ -34,6 +34,8 @@ export function ConnectionBanner({ className }: { className?: string }) {
 /** Says once, politely, that the connection was lost or is back. Rendered once, by the shell. */
 export function ConnectionAnnouncer() {
   const t = useTranslations();
-  useAnnounceChange(useOnline() ? t("offline_restored") : t("offline_banner_title"));
+  const online = useOnline();
+  // Keyed on the state: a switch of language is not a reconnection.
+  useAnnounceChange(online ? t("offline_restored") : t("offline_banner_title"), online);
   return null;
 }

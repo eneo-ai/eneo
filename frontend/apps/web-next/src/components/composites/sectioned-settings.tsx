@@ -1,8 +1,7 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { ChevronRight, type LucideIcon } from "lucide-react";
-import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   useEffect,
@@ -15,6 +14,7 @@ import {
 import { PageBar } from "@/components/shell/page-bar";
 import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
+import { IndexGroup, IndexRow } from "./index-rows";
 import { inPlaceLink } from "./in-place-link";
 import { SaveStatusIndicator } from "./save-status";
 
@@ -404,43 +404,19 @@ function PhoneIndex({
       className={cn("flex flex-col gap-6 pt-2 pb-8", className)}
     >
       {groups.map((group, index) => (
-        <div key={group.label ?? index} className="flex flex-col">
-          {group.label ? (
-            <h2 className="text-ax-text-secondary px-4 pb-1.5 text-[0.8125rem] font-semibold">
-              {group.label}
-            </h2>
-          ) : null}
-          <ul className="border-ax-border divide-ax-border divide-y border-y">
-            {group.sections.map((section) => (
-              <li key={section.id}>
-                <Link
-                  {...inPlaceLink(href(section.id), () => open(section.id))}
-                  prefetch={false}
-                  data-editor-row={section.id}
-                  className="hover:bg-ax-hover active:bg-ax-pressed focus-visible:outline-ring flex min-h-14 items-center gap-3 px-4 py-2 focus-visible:outline-2 focus-visible:-outline-offset-2"
-                >
-                  <section.icon
-                    aria-hidden="true"
-                    className="text-ax-text-secondary size-5 shrink-0"
-                  />
-                  <span className="min-w-0 flex-1 break-words">{section.label}</span>
-                  {section.summary ? (
-                    <>
-                      <span className="sr-only">, </span>
-                      <span className="text-ax-text-secondary max-w-[45%] truncate text-sm">
-                        {section.summary}
-                      </span>
-                    </>
-                  ) : null}
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="text-ax-text-secondary size-4 shrink-0"
-                  />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <IndexGroup key={group.label ?? index} title={group.label}>
+          {group.sections.map((section) => (
+            <IndexRow
+              key={section.id}
+              {...inPlaceLink(href(section.id), () => open(section.id))}
+              prefetch={false}
+              data-editor-row={section.id}
+              icon={section.icon}
+              label={section.label}
+              summary={section.summary}
+            />
+          ))}
+        </IndexGroup>
       ))}
     </nav>
   );

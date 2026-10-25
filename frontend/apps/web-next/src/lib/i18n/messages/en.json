@@ -6853,5 +6853,12 @@
   "admin_area_crawler": "{ongoing} ongoing · {queued} queued",
   "admin_area_audit": "Latest: {event}, <time></time>",
   "admin_username_read_only": "The username cannot be changed.",
-  "audit_event": "Event"
+  "audit_event": "Event",
+  "account_security_group": "Security and access",
+  "account_appearance_language": "Appearance and language",
+  "account_copy_format": "Copy format",
+  "account_theme_system_hint": "System follows the setting on your device.",
+  "account_choice_announced": "{setting}: {value}",
+  "account_appearance_summary": "{theme} · {language}",
+  "account_identity_line": "{organisation} · {roles}"
 }
