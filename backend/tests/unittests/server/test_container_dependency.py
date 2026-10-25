@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Annotated
 from unittest.mock import AsyncMock
@@ -15,6 +16,7 @@ from eneo.main.exceptions import AuthenticationException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.server.dependencies import container as container_dependency
+from eneo.users.user_service import UserService
 
 
 def _record_response_start(app: ASGIApp, events: list[str]) -> ASGIApp:
@@ -311,6 +313,36 @@ async def test_default_transaction_scope_stays_open_through_streaming_response(
         "stream",
         "session_closed",
     ]
+
+
+async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session()
+    user = SimpleNamespace()
+    seen: list[tuple[bool, bool, str]] = []
+
+    @asynccontextmanager
+    async def _own_session() -> AsyncIterator[_Session]:
+        yield session
+
+    async def _authenticate(service: UserService, token: str) -> object:
+        seen.append((service.repo.session is session, session.in_transaction(), token))
+        return user
+
+    monkeypatch.setattr(container_dependency.sessionmanager, "session", _own_session)
+    monkeypatch.setattr(UserService, "authenticate", _authenticate)
+
+    resolved = await container_dependency.get_user_from_websocket(
+        websocket=SimpleNamespace(scope={}),
+        token="token",
+        session=object(),
+    )
+
+    assert resolved is user
+    assert seen == [(True, True, "token")]
+    assert session.begin_calls == 1
+    assert not session.in_transaction()
 
 
 def test_function_transaction_scope_requires_transaction() -> None:

@@ -3712,10 +3712,10 @@ class AssistantService:
         from dependency_injector import providers
 
         from eneo.flows.application.flow_authoring_chat import load_authoring_chat
-        from eneo.main.container.container import Container
         from eneo.main.container.container_overrides import override_user
+        from eneo.main.container.request_container import request_container
 
-        container = Container(session=providers.Object(self.repo.session))
+        container = request_container(session=providers.Object(self.repo.session))
         override_user(container=container, user=self.user)
         chat = await load_authoring_chat(
             container, session_id=session_id, assistant_id=assistant_id

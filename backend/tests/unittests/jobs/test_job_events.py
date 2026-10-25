@@ -18,6 +18,7 @@ from eneo.database.database import get_session_with_transaction
 from eneo.jobs import job_events, job_router
 from eneo.jobs.job_models import JobInDb
 from eneo.main.container.container import Container
+from eneo.main.container.request_container import request_container
 from eneo.main.models import Status
 from eneo.server.dependencies import container as container_dependency
 from eneo.tenants.tenant import TenantInDB
@@ -173,7 +174,7 @@ async def test_job_route_releases_auth_database_session_before_streaming(
             lifecycle.append("session-closed")
 
     def authenticated_container(*, session: providers.Object) -> Container:
-        container = Container(session=session)
+        container = request_container(session=session)
         container.user_service.override(
             providers.Object(SimpleNamespace(authenticate=AsyncMock(return_value=user)))
         )
@@ -184,7 +185,9 @@ async def test_job_route_releases_auth_database_session_before_streaming(
         lifecycle.append("stream")
         yield ServerSentEvent(event="job", data='{"status":"complete"}')
 
-    monkeypatch.setattr(container_dependency, "Container", authenticated_container)
+    monkeypatch.setattr(
+        container_dependency, "request_container", authenticated_container
+    )
     monkeypatch.setattr(job_router, "stream_job_events", stream)
     app = FastAPI()
     app.include_router(job_router.router, prefix="/jobs")

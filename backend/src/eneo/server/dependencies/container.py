@@ -20,6 +20,7 @@ from eneo.database.database import (
 )
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
+from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import AuthenticationException, NotFoundException
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
@@ -101,7 +102,7 @@ def get_container(
             ),
         ],
     ) -> Container:
-        return Container(
+        return request_container(
             session=providers.Object(session),
         )
 
@@ -258,7 +259,7 @@ def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:
     async def _get_container_for_sysadmin(
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Container:
-        return Container(
+        return request_container(
             session=providers.Object(session),
         )
 
@@ -273,7 +274,7 @@ async def get_user_from_websocket(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> UserInDB:
     async with sessionmanager.session() as session, session.begin():
-        container = Container(session=providers.Object(session))
+        container = request_container(session=providers.Object(session))
 
         try:
             user = await container.user_service().authenticate(token=token)

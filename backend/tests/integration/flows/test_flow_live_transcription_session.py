@@ -618,6 +618,25 @@ async def test_realtime_switched_off_after_admission_ends_the_session(
     assert live_stack.model_server.received == []
 
 
+async def test_flows_switched_off_after_admission_ends_the_session(
+    live_stack: LiveStack, db_container, admin_user
+):
+    session = await live_stack.open_session()
+    async with db_container() as container:
+        flag = await container.feature_flag_repo().one(name="flows_core")
+        await container.feature_flag_service().disable_tenant(
+            flag.feature_id, admin_user.tenant_id
+        )
+
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        events = [json.loads(message) async for message in socket]
+
+    assert [event["code"] for event in events] == ["model_unavailable"]
+    assert live_stack.model_server.received == []
+
+
 async def test_a_model_without_realtime_support_is_refused_with_its_reason(
     client, flow_process_auth_headers, db_container
 ):
