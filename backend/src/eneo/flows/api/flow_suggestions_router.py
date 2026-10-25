@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Path, Request, status
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, status
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -24,17 +25,31 @@ from eneo.flows.api.flow_suggestion_apply_models import (
 )
 from eneo.flows.api.flow_suggestions_models import (
     FLOW_SUGGESTIONS_EXAMPLE,
+    FlowSuggestionRunsPublic,
     FlowSuggestionsPublic,
 )
 from eneo.flows.application import flow_authoring_operations as authoring_operations
 from eneo.flows.application import flow_suggestion_apply
-from eneo.flows.application.flow_suggestion_service import list_flow_suggestions
-from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_suggestion_service import (
+    list_flow_suggestions,
+    list_measured_flow_suggestions,
+)
+from eneo.flows.application.flow_trace_audit import (
+    raise_flow_evidence_read_audit_unavailable,
+)
+from eneo.flows.domain.flow_suggestion_evidence import MAX_MEASURED_RUNS
+from eneo.flows.flow_access_policy import (
+    FlowApiAction,
+    flow_action_access_reason,
+    require_flow_action,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
 from eneo.server.dependencies.container import (
-    get_container,
     get_container_for_explicit_transaction,
 )
 
@@ -44,6 +59,11 @@ router = APIRouter()
 # (`authoring_transaction`), so its audit entries are logged after the commit
 # and a refused change logs none.
 _AUTHORING_CONTAINER = get_container_for_explicit_transaction(
+    with_user=True, with_module_user=True
+)
+# Reading suggestions owns its transaction too: a measured read commits its
+# audit entry before the answer is sent.
+_READ_CONTAINER = get_container_for_explicit_transaction(
     with_user=True, with_module_user=True
 )
 
@@ -79,30 +99,47 @@ _SUGGESTION_NOT_PATCHABLE_EXAMPLE: dict[str, object] = {
 }
 
 
+_SUGGESTIONS_DESCRIPTION = (
+    "What the draft could do cheaper or simpler. By default it is judged from "
+    "the saved definition alone: where a step's model receives the same "
+    "earlier result twice (`duplicate_read`), takes more of the earlier "
+    "results than it needs, carries data no later step reads, or relays a "
+    "result another step could read directly. The reads are the ones publish "
+    "and the runtime resolve, so a suggestion states what the definition "
+    "proves and nothing it does not: no prompt is judged by a model and a "
+    "read of a field next to a read of the whole result is reported as "
+    "`contained` rather than guessed at.\n\n"
+    f"With `runs` (1 to {MAX_MEASURED_RUNS}) the newest finished runs in which "
+    "a step ran (completed, failed or cancelled) are measured as well: what a "
+    "duplicate or an unused result cost in tokens per run (`impact.basis` "
+    "`runs`, with the run count and the published version measured, and "
+    "whether the step changed since), and three findings only runs show: "
+    "`identical_inputs`, `context_headroom` and `format_fallback`. Measured "
+    "suggestions come first, most tokens first. Only numbers are read from "
+    "the runs (sizes, hashes, token counts and call reasons), never their "
+    "content. Measuring needs the permission to view flow traces on top of "
+    "editing the flow; runs whose evidence the caller may not see (another "
+    "member's run, without the space role that shows it) are left out and "
+    "counted in `runs.left_out`. A measured read writes one audit entry on "
+    "the flow (`flow_evidence_viewed`) naming the runs it counted and how "
+    "many it left out, and is refused with 503 when that entry cannot be "
+    "written.\n\n"
+    "Each suggestion names its steps, a `fingerprint` that is stable across "
+    "unrelated edits and measurements, an `impact` and how it is acted on "
+    "(`fix.kind`). Suggestions never block publishing and never change the "
+    "flow: acting on one is a separate, explicit editor update. The answer "
+    "judges `draft_revision`; read again after a save. It reads the prompts "
+    "of the flow's assistants, so it needs the permission to edit the flow."
+)
+
+
 @router.get(
     "/{id}/suggestions/",
     response_model=FlowSuggestionsPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_suggestions",
     summary="Get Flow Suggestions",
-    description=(
-        "What the draft could do cheaper or simpler, judged from the saved "
-        "definition: where a step's model receives the same earlier result "
-        "twice (`duplicate_read`), through its input (`previous_step`, "
-        "`all_previous_steps`, a question or source references) and a read of "
-        "the same step in its assistant's prompt, or twice in one of them. The "
-        "reads are the ones publish and the runtime resolve, so a suggestion "
-        "states what the definition proves and nothing it does not: no prompt "
-        "is judged by a model, no run content is read, and a read of a field "
-        "next to a read of the whole result is reported as `contained` rather "
-        "than guessed at. Each suggestion names its steps, a `fingerprint` "
-        "that is stable across unrelated edits, an `impact` level and how it "
-        "is acted on (`fix.kind`). Suggestions never block publishing and "
-        "never change the flow: acting on one is a separate, explicit editor "
-        "update. The answer judges `draft_revision`; read again after a save. "
-        "It reads the prompts of the flow's assistants, so it needs the "
-        "permission to edit the flow."
-    ),
+    description=_SUGGESTIONS_DESCRIPTION,
     responses={
         200: {
             "description": "The draft's suggestions, possibly none.",
@@ -113,8 +150,10 @@ _SUGGESTION_NOT_PATCHABLE_EXAMPLE: dict[str, object] = {
                 "Forbidden. Machine-readable codes include `insufficient_scope` "
                 "when the API key space scope does not match the flow, "
                 "`insufficient_space_permission` when the caller may not edit "
-                "flows in the space, and `flow_owner_required` when another "
-                "member owns the draft."
+                "flows in the space, `flow_owner_required` when another "
+                "member owns the draft, and `insufficient_tenant_permission` "
+                "when `runs` is above 0 and the caller may not view flow "
+                "traces."
             ),
             message="You do not have permission to edit flows in this space.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
@@ -126,6 +165,16 @@ _SUGGESTION_NOT_PATCHABLE_EXAMPLE: dict[str, object] = {
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
         ),
+        503: error_response(
+            description=(
+                "The audit entry of a measured read could not be written; "
+                "nothing is returned."
+            ),
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
     },
 )
 @endpoint_access(
@@ -136,17 +185,69 @@ _SUGGESTION_NOT_PATCHABLE_EXAMPLE: dict[str, object] = {
 async def get_flow_suggestions(
     id: Annotated[UUID, Path(description="Identifier of the draft flow.")],
     request: Request,
-    container: Container = Depends(
-        get_container(with_user=True, with_module_user=True)
-    ),
-):
+    runs: Annotated[
+        int,
+        Query(
+            ge=0,
+            le=MAX_MEASURED_RUNS,
+            description=(
+                "How many of the newest finished runs to measure; 0, the "
+                "default, judges the definition alone. Above 0 it needs the "
+                "permission to view flow traces."
+            ),
+        ),
+    ] = 0,
+    container: Container = Depends(_READ_CONTAINER),
+) -> FlowSuggestionsPublic:
+    # The audit entry of a measured read commits with the read, before the
+    # answer is sent, as for the evidence routes.
+    audited_flow: UUID | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            answer = await read_flow_suggestions_answer(
+                id=id, request=request, runs=runs, container=container
+            )
+            audited_flow = id if answer.runs is not None else None
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if audited_flow is not None:
+            raise_flow_evidence_read_audit_unavailable(
+                user=container.user(),
+                flow_id=audited_flow,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return answer
+
+
+async def read_flow_suggestions_answer(
+    *, id: UUID, request: Request, runs: int, container: Container
+) -> FlowSuggestionsPublic:
+    """The answer of ``GET .../suggestions/`` in the caller's transaction:
+    edit access to the flow, and with ``runs`` above 0 the trace permission,
+    then the suggestions, measured over ``runs`` runs when asked."""
     access = await require_flow_edit_access(request, container, flow_id=id)
     flow = access.flow
-    suggestions = await list_flow_suggestions(container=container, flow=flow)
+    if runs <= 0:
+        suggestions = await list_flow_suggestions(container=container, flow=flow)
+        measured_runs = None
+    else:
+        require_flow_action(container.user(), FlowApiAction.TRACE_VIEW)
+        suggestions, measured = await list_measured_flow_suggestions(
+            container=container, flow=flow, runs=runs
+        )
+        measured_runs = FlowSuggestionRunsPublic(
+            requested=measured.requested,
+            counted=len(measured.counted_run_ids),
+            left_out=measured.left_out,
+        )
     return FlowSuggestionsPublic.from_suggestions(
         flow_id=flow.require_persisted_id(),
         draft_revision=flow.draft_revision,
         suggestions=suggestions,
+        runs=measured_runs,
     )
 
 
@@ -244,4 +345,4 @@ async def apply_flow_suggestions(
     )
 
 
-__all__ = ["router"]
+__all__ = ["read_flow_suggestions_answer", "router"]

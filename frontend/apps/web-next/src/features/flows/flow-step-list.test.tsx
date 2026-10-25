@@ -258,17 +258,17 @@ describe("FlowStepList", () => {
     expect(within(second).queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
 
     const more = within(rows[0]!).getByRole("button", {
-      name: "Mer om ”Svaret från 1 Sammanfatta skickas två gånger”"
+      name: "Mer om ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
     });
     fireEvent.click(more);
     expect(more.getAttribute("aria-expanded")).toBe("true");
     expect(within(rows[0]!).getByText(/Modellen läser den två gånger/)).toBeTruthy();
     // Steps and values are the chat's pills; a pill opens the reference card.
-    fireEvent.click(within(rows[0]!).getByRole("button", { name: "1 Sammanfatta › text" }));
+    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Steg 1: Sammanfatta › text" }));
     expect(await screen.findByRole("dialog", { name: "Referens" })).toBeTruthy();
     fireEvent.click(
       within(rows[0]!).getByRole("button", {
-        name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
+        name: "Fråga assistenten om ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
       })
     );
     expect(onAskChat).toHaveBeenCalledWith(
@@ -351,7 +351,7 @@ describe("FlowStepList", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Åtgärda 2 förslag?" });
     expect(within(dialog).getByText("Steg 2: Skriv svar")).toBeTruthy();
     expect(within(dialog).getByText("Körningens formulär")).toBeTruthy();
-    expect(within(dialog).getByText("1 Sammanfatta")).toBeTruthy();
+    expect(within(dialog).getByText("Steg 1: Sammanfatta")).toBeTruthy();
     expect(within(dialog).queryByText("Steg 3: Granska")).toBeNull();
     await expectNoAxeViolations(document.body);
 
@@ -371,7 +371,7 @@ describe("FlowStepList", () => {
     );
     fireEvent.click(
       within(second).getByRole("button", {
-        name: "Åtgärda ”Svaret från 1 Sammanfatta skickas två gånger”"
+        name: "Åtgärda ”Svaret från Steg 1: Sammanfatta skickas två gånger”"
       })
     );
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["a".repeat(64)]));

@@ -53,6 +53,11 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.forwarding_facts import (
+    ForwardingEdgeFacts,
+    ForwardingFacts,
+    not_measured_forwarding_facts,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
@@ -3446,6 +3451,95 @@ async def test_resolved_input_edges_batch_reader_projects_every_admitted_attempt
         assert lineages[tracked_attempt.id].status == "tracked"
         assert lineages[tracked_attempt.id].aggregate == aggregate
         assert lineages[untracked_attempt.id].status == "not_tracked"
+
+
+async def test_forwarding_facts_are_written_once_and_read_per_tenant(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    facts = ForwardingFacts(
+        schema_version=1,
+        measured=True,
+        call_count=2,
+        edges=(
+            ForwardingEdgeFacts(
+                edge_index=0,
+                byte_size=12,
+                shingle_count=1,
+                sample_every=1,
+                repeated_bytes=0,
+                copied_to_output_ratio=1.0,
+            ),
+        ),
+        output_byte_size=12,
+        output_shingle_count=1,
+        output_verbatim_ratio=1.0,
+    )
+    later = not_measured_forwarding_facts(reason="cpu_budget_exceeded")
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="forwarding-facts",
+        )
+        record = {
+            "run_id": context.run_id,
+            "step_id": context.step_id,
+            "attempt_no": 1,
+        }
+
+        # No resolved inputs yet: nothing to attach the facts to.
+        assert not await repo.record_forwarding_facts(
+            **record, tenant_id=context.tenant_id, facts=facts
+        )
+        await _activate_test_attempt(
+            repo=repo,
+            context=context,
+            aggregate=_resolved_input_aggregate(binding_ref="question"),
+        )
+        assert not await repo.record_forwarding_facts(
+            **record, tenant_id=uuid4(), facts=facts
+        )
+        assert await repo.record_forwarding_facts(
+            **record, tenant_id=context.tenant_id, facts=facts
+        )
+        # Written once: a later write changes nothing.
+        assert not await repo.record_forwarding_facts(
+            **record, tenant_id=context.tenant_id, facts=later
+        )
+
+        assert await repo.list_forwarding_facts_by_attempt_id(
+            tenant_id=context.tenant_id, attempt_ids=(attempt.id, uuid4())
+        ) == {attempt.id: facts}
+        assert (
+            await repo.list_forwarding_facts_by_attempt_id(
+                tenant_id=uuid4(), attempt_ids=(attempt.id,)
+            )
+            == {}
+        )
+        assert (
+            await repo.list_forwarding_facts_by_attempt_id(
+                tenant_id=context.tenant_id, attempt_ids=()
+            )
+            == {}
+        )
+
+        await session.execute(
+            sa.update(FlowStepAttemptResolvedInputs)
+            .where(FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id)
+            .values(forwarding_facts_jsonb={"schema_version": 99})
+        )
+        assert (
+            await repo.list_forwarding_facts_by_attempt_id(
+                tenant_id=context.tenant_id, attempt_ids=(attempt.id,)
+            )
+            == {}
+        )
 
 
 @pytest.mark.asyncio

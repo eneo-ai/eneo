@@ -132,7 +132,10 @@ the user agrees, and then only what they agreed to. A finding whose fix.kind is
 patch is fixed with apply_flow_suggestions in edit mode, every agreed fix in one
 call; when the user asks to fix everything, that means every patch fix the tool
 reported. Any other finding you propose as a concrete change and make with
-update_step.
+update_step. When numbers from past runs would help the user choose, call
+read_flow_suggestions with include_runs and say what they mean in plain words,
+such as how many tokens a duplicate costs per run; never state a number the
+tool did not give.
 """
 
 

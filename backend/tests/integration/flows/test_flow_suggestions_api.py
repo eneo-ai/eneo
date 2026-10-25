@@ -4,6 +4,7 @@ who may edit the flow, inside their tenant."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -14,9 +15,24 @@ from httpx import AsyncClient
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowRuns,
+    Flows,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+    FlowStepResults,
+)
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdges,
+    FlowResolvedInputJsonPath,
+    FlowResolvedInputStepResultSource,
+    build_resolved_input_edge,
+)
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
@@ -110,7 +126,15 @@ async def test_a_prompt_read_of_the_input_step_is_one_suggestion(
         "input_source",
         "assistant_prompt:step_1.output.text",
     ]
-    assert item["impact"] == {"basis": "definition", "level": "high"}
+    assert item["impact"] == {
+        "basis": "definition",
+        "level": "high",
+        "tokens_per_run": None,
+        "run_count": None,
+        "version": None,
+        "step_changed_since": None,
+    }
+    assert body["runs"] is None
     assert item["fix"]["kind"] == "patch"
     assert item["message"].startswith("Step 2 reads step 1 twice")
 
@@ -557,3 +581,281 @@ async def test_a_published_flow_must_be_unpublished_first(
 
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "flow_unpublish_required"
+
+
+# --- Measured from recent runs ----------------------------------------------
+
+_INPUT_TEXT = "Brevet i sin helhet. " * 50
+
+
+async def _publish(client: AsyncClient, flow: Tracer) -> None:
+    response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/publish/", headers=flow.headers
+    )
+    assert response.status_code == 200, response.text
+
+
+async def _token_with(
+    db_container, user_id: UUID, tenant_id: UUID, permissions: list[Permission]
+) -> str:
+    async with db_container() as container:
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"flow-trace-{uuid4().hex[:8]}",
+                permissions=permissions,
+                tenant_id=tenant_id,
+            )
+        )
+        updated = await container.user_repo().update(
+            UserUpdate(id=user_id, roles=[ModelId(id=role.id)])
+        )
+        assert updated is not None
+        return container.auth_service().create_access_token_for_user(updated)
+
+
+_TRACE_AUTHOR = [
+    Permission.ASSISTANTS,
+    Permission.SHARED_SPACES,
+    Permission.FLOWS_VIEW,
+    Permission.FLOWS_MANAGE,
+    Permission.FLOWS_TRACE,
+]
+
+
+async def _seed_run(
+    db_container, flow: Tracer, *, principal_user_id: UUID, tokens: int
+) -> UUID:
+    """A completed run of version 1 in which step 2 got step 1's text as its
+    input and again in its prompt, both edges sent in one call billed
+    ``tokens`` input tokens."""
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = container.user().tenant_id
+        run = FlowRuns(
+            flow_id=flow.flow_id,
+            flow_version=1,
+            principal_type="user",
+            principal_user_id=principal_user_id,
+            tenant_id=tenant_id,
+            trace_id=uuid4(),
+            status="completed",
+            input_payload_json={"text": "Ett brev."},
+            evidence_classification_level=0,
+        )
+        session.add(run)
+        await session.flush()
+        attempts: list[FlowStepAttempts] = []
+        for order, step_id in enumerate(flow.step_ids, start=1):
+            session.add(
+                FlowStepResults(
+                    flow_run_id=run.id,
+                    flow_id=flow.flow_id,
+                    tenant_id=tenant_id,
+                    step_id=step_id,
+                    step_order=order,
+                    current_attempt_no=1,
+                    status="completed",
+                )
+            )
+            attempt = FlowStepAttempts(
+                flow_run_id=run.id,
+                flow_id=flow.flow_id,
+                tenant_id=tenant_id,
+                step_id=step_id,
+                step_order=order,
+                attempt_no=1,
+                status="completed",
+                started_at=now,
+                finished_at=now,
+            )
+            session.add(attempt)
+            attempts.append(attempt)
+        await session.flush()
+        source = FlowResolvedInputStepResultSource(
+            kind="step_result",
+            source_step_id=flow.step_ids[0],
+            source_attempt_no=1,
+            selector=FlowResolvedInputJsonPath(
+                kind="json_path", path=("output", "text")
+            ),
+        )
+        edges = FlowResolvedInputEdges(
+            schema_version=1,
+            edges=(
+                build_resolved_input_edge(
+                    binding_ref="input_source",
+                    source=source,
+                    selected_value=_INPUT_TEXT,
+                ),
+                build_resolved_input_edge(
+                    binding_ref="assistant_prompt:step_1.output.text",
+                    source=source,
+                    selected_value=_INPUT_TEXT,
+                ),
+            ),
+        )
+        reader = attempts[1]
+        session.add(
+            FlowStepAttemptResolvedInputs(
+                flow_step_attempt_id=reader.id,
+                resolved_input_edges_jsonb=edges.model_dump(mode="json"),
+            )
+        )
+        await session.flush()
+        session.add(
+            FlowProviderCalls(
+                flow_step_attempt_id=reader.id,
+                resolved_inputs_attempt_id=reader.id,
+                ordinal=1,
+                call_kind="completion",
+                status="completed",
+                request_schema_version=2,
+                provider_request_hash="0" * 64,
+                requested_model="modell",
+                response_format="none",
+                requested_capabilities=[],
+                resolved_input_edge_indexes=[0, 1],
+                call_reason="initial",
+                num_tokens_input=tokens,
+                num_tokens_output=20,
+                input_source="provider",
+                output_source="provider",
+                requested_at=now,
+                finished_at=now,
+            )
+        )
+        await session.flush()
+        return run.id
+
+
+async def _measured(client: AsyncClient, flow: Tracer, headers, runs: int = 5):
+    return await client.get(
+        f"/api/v1/flows/{flow.flow_id}/suggestions/",
+        params={"runs": runs},
+        headers=headers,
+    )
+
+
+async def _evidence_audits(db_container, flow_id: UUID) -> list[dict[str, Any]]:
+    async with db_container() as container:
+        rows = await container.session().scalars(
+            sa.select(AuditLog.log_metadata)
+            .where(AuditLog.entity_id == flow_id)
+            .where(AuditLog.action == ActionType.FLOW_EVIDENCE_VIEWED.value)
+        )
+        return [dict(row) for row in rows]
+
+
+async def test_measured_runs_give_the_duplicate_its_tokens_and_one_audit_entry(
+    client: AsyncClient, db_container, admin_user, tracer: Tracer
+):
+    await _publish(client, tracer)
+    token = await _token_with(
+        db_container, admin_user.id, admin_user.tenant_id, _TRACE_AUTHOR
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    run_ids = [
+        await _seed_run(
+            db_container, tracer, principal_user_id=admin_user.id, tokens=tokens
+        )
+        for tokens in (600, 800)
+    ]
+
+    response = await _measured(client, tracer, headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runs"] == {"requested": 5, "counted": 2, "left_out": 0}
+    (item,) = body["items"]
+    assert item["code"] == "duplicate_read"
+    # The prompt read is half of each call's input bytes: 300 and 400 tokens.
+    assert item["impact"] == {
+        "basis": "runs",
+        "level": "high",
+        "tokens_per_run": 350,
+        "run_count": 2,
+        "version": 1,
+        "step_changed_since": False,
+    }
+    static = await _suggestions(client, tracer)
+    assert static["runs"] is None
+    assert static["items"][0]["fingerprint"] == item["fingerprint"]
+    (audit,) = await _evidence_audits(db_container, tracer.flow_id)
+    extra = audit["extra"]
+    assert extra["evidence_detail"] == "suggestion_measurements"
+    assert extra["flow_id"] == str(tracer.flow_id)
+    assert sorted(extra["run_ids"]) == sorted(str(run_id) for run_id in run_ids)
+    assert extra["left_out_run_count"] == 0
+    assert extra["requested_runs"] == 5
+
+
+async def test_measuring_runs_needs_the_trace_permission(
+    client: AsyncClient, db_container, tracer: Tracer
+):
+    response = await _measured(client, tracer, tracer.headers)
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "insufficient_tenant_permission"
+    assert await _evidence_audits(db_container, tracer.flow_id) == []
+
+
+async def test_a_run_the_caller_may_not_see_is_left_out_and_counted(
+    client: AsyncClient, db_container, admin_user, user_factory, tracer: Tracer
+):
+    await _publish(client, tracer)
+    # An editor of the space who owns the draft sees the evidence of their
+    # own runs, not of the space owner's.
+    async with db_container() as container:
+        session = container.session()
+        editor = await user_factory(session)
+        session.add(
+            SpacesUsers(space_id=tracer.space_id, user_id=editor.id, role="editor")
+        )
+        await session.execute(
+            sa.update(Flows)
+            .where(Flows.id == tracer.flow_id)
+            .values(owner_user_id=editor.id)
+        )
+        await session.flush()
+        editor_id = editor.id
+    token = await _token_with(
+        db_container, editor_id, admin_user.tenant_id, _TRACE_AUTHOR
+    )
+    own = await _seed_run(db_container, tracer, principal_user_id=editor_id, tokens=600)
+    await _seed_run(db_container, tracer, principal_user_id=admin_user.id, tokens=800)
+
+    response = await _measured(client, tracer, {"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runs"] == {"requested": 5, "counted": 1, "left_out": 1}
+    (item,) = body["items"]
+    assert item["impact"]["tokens_per_run"] == 300
+    assert item["impact"]["run_count"] == 1
+    (audit,) = await _evidence_audits(db_container, tracer.flow_id)
+    assert audit["extra"]["run_ids"] == [str(own)]
+    assert audit["extra"]["left_out_run_count"] == 1
+
+
+async def test_measuring_another_tenants_flow_is_not_found(
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    user_factory,
+    tenant_factory,
+    tracer: Tracer,
+):
+    await _publish(client, tracer)
+    await _seed_run(db_container, tracer, principal_user_id=admin_user.id, tokens=600)
+    async with db_container() as container:
+        tenant = await tenant_factory(container.session())
+        outsider = await user_factory(container.session(), tenant_id=tenant.id)
+        await container.session().flush()
+        outsider_id, tenant_id = outsider.id, tenant.id
+    token = await _token_with(db_container, outsider_id, tenant_id, _TRACE_AUTHOR)
+
+    response = await _measured(client, tracer, {"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 404, response.text
+    assert await _evidence_audits(db_container, tracer.flow_id) == []

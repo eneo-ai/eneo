@@ -736,32 +736,66 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
 
 
 @mcp.tool()
-async def read_flow_suggestions(ctx: Context, offset: int = 0) -> CallToolResult:
+async def read_flow_suggestions(
+    ctx: Context, include_runs: bool = False, offset: int = 0
+) -> CallToolResult:
     """Read what the saved draft could do cheaper or simpler, with pagination:
     where a step's model receives the same earlier result twice
-    (duplicate_read), through its input and a read of the same step in its
-    prompt, or twice in one of them. Each item names its steps, the reads,
-    an impact level and how it is acted on (fix.kind). It reports only what
-    the definition proves: the reads publish and the runtime resolve, no
-    judgement of prompt text, no run content. Suggestions never block
-    publishing and the tool changes nothing: a fix the user agrees to is
-    made with apply_flow_suggestions when its fix.kind is patch, otherwise
-    with update_step, both in edit mode. Works in view mode."""
+    (duplicate_read), takes more than it needs, carries data no step reads,
+    or relays a result. Each item names its steps, the reads, an impact and
+    how it is acted on (fix.kind). By default it reports only what the
+    definition proves: the reads publish and the runtime resolve, no
+    judgement of prompt text, no run content. With include_runs it also
+    measures the last 10 finished runs the user may see (impact.basis runs:
+    tokens_per_run, run_count, version, step_changed_since) and reports three
+    findings only runs show (identical_inputs, context_headroom,
+    format_fallback); runs.counted and runs.left_out say how many runs were
+    measured. Only numbers come from the runs, never their content, and
+    the read is audited. It needs the permission to view flow traces: without
+    it the result is the definition alone and its note says why. Suggestions
+    never block publishing and the tool changes nothing: a fix the user
+    agrees to is made with apply_flow_suggestions when its fix.kind is patch,
+    otherwise with update_step, both in edit mode. Works in view mode."""
 
     async def operation(container, chat, request):
-        from eneo.flows.api.flow_suggestions_router import get_flow_suggestions
-
-        suggestions = await get_flow_suggestions(
-            id=chat.flow_id, request=request, container=container
+        from eneo.flows.api.flow_suggestions_router import (
+            read_flow_suggestions_answer,
         )
+        from eneo.flows.flow_access_policy import (
+            FlowApiAction,
+            user_can_perform_flow_action,
+        )
+
+        runs = 0
+        note = None
+        if include_runs:
+            if user_can_perform_flow_action(container.user(), FlowApiAction.TRACE_VIEW):
+                runs = MCP_MEASURED_RUNS
+            else:
+                note = _NO_TRACE_NOTE
+        suggestions = await read_flow_suggestions_answer(
+            id=chat.flow_id, request=request, runs=runs, container=container
+        )
+        value = suggestions.model_dump(mode="json")
+        if note is not None:
+            value["note"] = note
         return page_result(
-            suggestions.model_dump(mode="json"),
+            value,
             flow_id=chat.flow_id,
             offset=offset,
             revision=suggestions.draft_revision,
         )
 
     return await _call(ctx, operation)
+
+
+# How many runs ``read_flow_suggestions`` measures with ``include_runs``.
+MCP_MEASURED_RUNS = 10
+_NO_TRACE_NOTE = (
+    "Numbers from past runs were not read: they need the permission to view "
+    "flow traces, which this user does not have. These suggestions are from "
+    "the definition alone."
+)
 
 
 @mcp.tool()

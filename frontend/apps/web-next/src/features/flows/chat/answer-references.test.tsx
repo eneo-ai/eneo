@@ -42,9 +42,9 @@ describe("references in an answer", () => {
     const { onShowStep, container } = renderAnswer(
       "Steget @[Bedömning](step:step-3) läser nu {{step_1.output.structured.atgard}} i stället för {{step_2.output.text}}."
     );
-    const step = screen.getByRole("button", { name: "3 Bedömning" });
-    expect(screen.getByRole("button", { name: "1 Extrahera › atgard" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "2 Hämta register › text" })).toBeTruthy();
+    const step = screen.getByRole("button", { name: "Steg 3: Bedömning" });
+    expect(screen.getByRole("button", { name: "Steg 1: Extrahera › atgard" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Steg 2: Hämta register › text" })).toBeTruthy();
     // The references are not left in the text as written.
     expect(container.textContent).not.toContain("{{");
     expect(container.textContent).not.toContain("@[");
@@ -58,7 +58,7 @@ describe("references in an answer", () => {
 
   it("puts the reference into the composer as a pill from its card", async () => {
     const { composer } = renderAnswer("Se {{step_2.output.text}}.");
-    fireEvent.click(screen.getByRole("button", { name: "2 Hämta register › text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Steg 2: Hämta register › text" }));
     const card = await screen.findByRole("dialog", { name: "Referens" });
     fireEvent.click(within(card).getByRole("button", { name: "Infoga i meddelandet" }));
     expect(composer.insertToken).toHaveBeenCalledWith(
@@ -73,7 +73,7 @@ describe("references in an answer", () => {
     const card = await screen.findByRole("dialog", { name: "Referens" });
     expect(within(card).getByText("Flödet kan inte läsa step_1....")).toBeTruthy();
     expect(within(card).getByText("Steg 1: Extrahera ger i stället:")).toBeTruthy();
-    fireEvent.click(within(card).getByRole("button", { name: "1 Extrahera › atgard" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Steg 1: Extrahera › atgard" }));
     expect(composer.insertToken).toHaveBeenCalledWith(
       expect.objectContaining({ value: "{{step_1.output.structured.atgard}}" })
     );
@@ -85,12 +85,16 @@ describe("references in an answer", () => {
     const card = await screen.findByRole("dialog", { name: "Referens" });
     expect(within(card).getByText("Steget finns inte längre i flödet.")).toBeTruthy();
     expect(within(card).queryByRole("button", { name: "Visa steget" })).toBeNull();
-    expect(screen.getByRole("button", { name: "2 Hämta register › fast format" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Steg 2: Hämta register › fält, men steget svarar inte i fast format"
+      })
+    ).toBeTruthy();
   });
 
   it("draws a reference the answer put in backticks, spaces and all", () => {
     renderAnswer("Läser `{{ step_1.output.structured.atgard }}` och `step_1`.");
-    expect(screen.getByRole("button", { name: "1 Extrahera › atgard" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Steg 1: Extrahera › atgard" })).toBeTruthy();
     expect(screen.getByText("step_1").tagName).toBe("CODE");
   });
 

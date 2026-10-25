@@ -16,12 +16,14 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 
+from eneo.flows.domain.flow_suggestion_evidence import RunEvidence
 from eneo.flows.domain.flow_suggestion_input_rules import (
     broad_all_previous_steps,
     per_item_prompt_reads,
     repeated_long_material,
     whole_structured_reads,
 )
+from eneo.flows.domain.flow_suggestion_measured import measure_suggestions
 from eneo.flows.domain.flow_suggestion_model import (
     FLOW_SUGGESTION_AUTHORING_RULES,
     LEVEL_RANK,
@@ -78,23 +80,34 @@ _RULES: tuple[Callable[[DraftReads], list[FlowSuggestion]], ...] = (
 _NO_STEP_ORDER = 1 << 30
 
 
-def analyze_flow(flow: SuggestionFlow) -> tuple[FlowSuggestion, ...]:
-    """Every suggestion the draft proves, ordered by impact level (high,
-    medium, low), then the order of the step it is about, then fingerprint,
-    at most ``MAX_FLOW_SUGGESTIONS``."""
+def analyze_flow(
+    flow: SuggestionFlow, evidence: RunEvidence | None = None
+) -> tuple[FlowSuggestion, ...]:
+    """Every suggestion the draft proves, and with ``evidence`` what recent
+    runs measured (``flow_suggestion_measured``), at most
+    ``MAX_FLOW_SUGGESTIONS``: those with measured tokens per run first,
+    most tokens first; then by impact level (high, medium, low), the order
+    of the step it is about, and fingerprint."""
 
     draft = DraftReads.of(flow)
     order_by_id = {step.id: step.step_order for step in draft.steps}
     suggestions = [suggestion for rule in _RULES for suggestion in rule(draft)]
-    suggestions.sort(
-        key=lambda suggestion: (
+    if evidence is not None:
+        suggestions = measure_suggestions(draft, suggestions, evidence)
+
+    def rank(suggestion: FlowSuggestion) -> tuple[int, int, int, int, str]:
+        tokens = suggestion.impact.tokens_per_run
+        return (
+            0 if tokens is not None else 1,
+            -(tokens or 0),
             LEVEL_RANK[suggestion.impact.level],
             order_by_id.get(suggestion.steps[0], _NO_STEP_ORDER)
             if suggestion.steps
             else _NO_STEP_ORDER,
             suggestion.fingerprint,
         )
-    )
+
+    suggestions.sort(key=rank)
     return tuple(suggestions[:MAX_FLOW_SUGGESTIONS])
 
 
