@@ -373,7 +373,7 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   selecting websites for bulk actions stays on tablets and desktop. A
   collection's files stay a table. On touch, sortable headers are 44 px targets with their arrows shown,
   and long header labels wrap (`globals.css` section 9b). A pinned column takes
-  its container's colour from `--table-sticky-background`: `SpaceTableFrame`
+  its container's colour from `--table-sticky-background`: `TableFrame`
   sets it (and runs edge to edge on a phone); a table on the page sets
   `[--table-sticky-background:var(--color-ax-surface)]`.
 - Every table is named: `aria-labelledby` its visible heading, or a translated

@@ -144,7 +144,8 @@ describe("AdminUsersPage", () => {
     ).toBeTruthy();
     // Without a username the email is the name.
     expect(within(per!).getByText("per.berg@kommun.se")).toBeTruthy();
-    expect(within(per!).getByText("Inbjuden")).toBeTruthy();
+    // In the status column, and on a phone under the name too.
+    expect(within(per!).getAllByText("Inbjuden")).toHaveLength(2);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användare" })).toBeTruthy();
     // The breadcrumb names the section as the admin navigation does.
@@ -152,6 +153,20 @@ describe("AdminUsersPage", () => {
     expect(screen.getByRole("textbox", { name: "Sök användare på e-post" })).toBeTruthy();
     expect(screen.getByText("2 användare")).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("holds each user's name in view where the table scrolls sideways (decision 9)", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    const table = await screen.findByRole("table", { name: "Aktiva användare" });
+    // Every column stays; the name is pinned, so a phone scrolls the rest.
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.map((cell) => cell.textContent)).toEqual(["Användare"]);
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
+    // Its scroll region is named after the table.
+    expect(screen.getByRole("group", { name: "Aktiva användare" })).toBeTruthy();
   });
 
   it("switches between active and inactive users with the tabs", async () => {

@@ -20,11 +20,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!hasPermission(user)("admin")) redirect("/");
 
   // The page panel (main) scrolls; the PageBar sticks to its top below
-  // 1024px, outside the admin pages' padding.
+  // 1024px, outside the admin pages' padding: a phone's 16 px gutter, as in
+  // a space, so a table frame runs edge to edge over it (TableFrame).
   return (
     <>
       <AdminPageBar />
-      <div className="flex min-w-0 flex-1 flex-col p-4 sm:p-6">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col p-4 md:p-6">{children}</div>
     </>
   );
 }

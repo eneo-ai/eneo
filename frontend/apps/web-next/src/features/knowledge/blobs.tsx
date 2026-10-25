@@ -50,7 +50,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/features/spaces/resource-filter";
 import type { InfoBlob } from "./knowledge";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 
 const PAGE_SIZE = 100;
 
@@ -352,7 +352,7 @@ export function BlobTable({
       {filtered.length === 0 ? (
         <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           <Table
             data={paginateData(sortedData, currentPage, PAGE_SIZE)}
             columns={columns}
@@ -361,7 +361,7 @@ export function BlobTable({
             pinnedColumn="name"
             plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
     </div>
   );

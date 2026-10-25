@@ -39,7 +39,7 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { RowsOrTable } from "./knowledge-list";
 import { websiteRow } from "./knowledge-rows";
 import { useSpace } from "@/features/spaces/use-space";
@@ -323,7 +323,7 @@ function WebsitesTable({
 
   return (
     <>
-      <SpaceTableFrame>
+      <TableFrame>
         <Table
           data={websites}
           columns={columns}
@@ -334,7 +334,7 @@ function WebsitesTable({
             selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
           }
         />
-      </SpaceTableFrame>
+      </TableFrame>
       {failures ? (
         <CrawlRunDetailsDialog
           run={failures.run}

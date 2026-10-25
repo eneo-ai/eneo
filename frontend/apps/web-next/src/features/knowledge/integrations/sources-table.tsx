@@ -18,7 +18,7 @@ import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Table, type TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -276,7 +276,7 @@ function SourcesTable({
   ];
 
   return (
-    <SpaceTableFrame>
+    <TableFrame>
       <Table
         data={sortedData}
         columns={columns}
@@ -286,7 +286,7 @@ function SourcesTable({
         plugins={{ sort: sortPlugin }}
         emptyState={empty}
       />
-    </SpaceTableFrame>
+    </TableFrame>
   );
 }
 

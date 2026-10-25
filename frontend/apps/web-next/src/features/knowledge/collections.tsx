@@ -50,7 +50,7 @@ import {
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
 import { DockedActions } from "@/components/shell/docked-actions";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { RowsOrTable } from "./knowledge-list";
 import { collectionRow } from "./knowledge-rows";
 import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
@@ -334,7 +334,7 @@ function CollectionsTable({
   ];
 
   return (
-    <SpaceTableFrame>
+    <TableFrame>
       <Table
         data={collections}
         columns={columns}
@@ -343,7 +343,7 @@ function CollectionsTable({
         pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
       />
-    </SpaceTableFrame>
+    </TableFrame>
   );
 }
 

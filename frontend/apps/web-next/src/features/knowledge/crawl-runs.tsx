@@ -15,7 +15,7 @@ import { useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { crawlRunState, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
@@ -182,7 +182,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
           isCompact
         />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           {/* No heading above it: the table fills the website page's
               "Indexeringar" tab, so it takes the tab's name. */}
           <Table
@@ -193,7 +193,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
             pinnedColumn="started"
             plugins={{ sort: sortPlugin }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
       {selection ? (
         <CrawlRunDetailsDialog

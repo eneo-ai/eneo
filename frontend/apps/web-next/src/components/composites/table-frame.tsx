@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Bordered container for the tables on space pages (knowledge, files, skills,
- * the overview) with a sunken header row. The Astryx Table inside scrolls
+ * Bordered container for the tables on space and admin pages (knowledge,
+ * files, skills, users) with a sunken header row. The Astryx Table inside scrolls
  * sideways in its own keyboard-reachable region on narrow screens; a pinned
  * column (Table `pinnedColumn`) takes the colours of the rows it covers.
  *
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  * gutters, on the page's own surface, with a rule above and below. Astryx's
  * container inset keeps its first and last cells on the 16 px content line.
  */
-export function SpaceTableFrame({
+export function TableFrame({
   children,
   className
 }: {
