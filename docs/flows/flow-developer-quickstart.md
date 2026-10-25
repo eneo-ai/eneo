@@ -346,9 +346,9 @@ ends over one core path, not separate engines.
   (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
   `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
   `move_step`, `remove_step`, `publish_flow`, `unpublish_flow`,
-  `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`, and
-  the run tools `run_flow`, `read_run`, `cancel_run`, `read_review` and
-  `review_run`. The chat starts in view mode; tools that
+  `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`,
+  `dismiss_flow_suggestion`, and the run tools `run_flow`, `read_run`,
+  `cancel_run`, `read_review` and `review_run`. The chat starts in view mode; tools that
   change the Flow are refused until the user turns on edit mode
   (`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/`).
 - Both save through `flows/application/flow_authoring_operations.py`. The
@@ -399,8 +399,13 @@ changes the flow by itself.
   written. Measured impact adds `tokens_per_run`, `run_count`, `version` and
   `step_changed_since` where the runs support an honest number, and the
   measured codes are `identical_inputs`, `context_headroom`,
-  `format_fallback`, `model_relay`, `overlapping_inputs` and
-  `deterministic_candidate`.
+  `format_fallback`, `model_relay`, `overlapping_inputs`,
+  `deterministic_candidate` and `oversized_reasoning`. `identical_inputs`
+  and `context_headroom` fire on what any counted run showed;
+  `format_fallback`, the forwarding rules and `oversized_reasoning` need it
+  in at least half of the counted runs. The thresholds are named constants
+  in `flow_suggestion_measured.py`, `flow_suggestion_forwarding.py` and
+  `flow_suggestion_model_fit.py`.
 - **Forwarding facts.** After the first model call of each step attempt, the
   worker measures how much of each input recurs in another input of the call
   and how much of the output was copied from each input (8-word shingles after
@@ -423,9 +428,22 @@ changes the flow by itself.
   `409 flow_suggestion_stale`, a fix that is not a patch
   `409 flow_suggestion_not_patchable`, and a stale revision the editor's own
   conflict. The audit entries carry `origin: "suggestion"`.
+- **Dismissals.** `POST /api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/`
+  with `{code}` hides a suggestion for every editor of the flow, and `DELETE`
+  on the same path shows it again; both need edit access, the `POST` refuses
+  service keys (`service_key_cannot_create_resources`), and each writes a
+  required audit entry (`flow_suggestion_dismissed`,
+  `flow_suggestion_restored`). Rows live in `flow_suggestion_dismissals`,
+  one per flow and fingerprint, and go with the flow; packages do not carry
+  them. Reads leave dismissed suggestions out and report `dismissed_count`;
+  `include_dismissed=true` returns them marked. A dismissal does not change
+  `draft_revision`. A static fingerprint must still be among the draft's
+  suggestions (`409 flow_suggestion_stale` otherwise); a measured one is
+  stored as given, since checking it would read run evidence.
 - **The chat.** `read_flow_suggestions` reads them (with `include_runs`, only
-  for users with the trace permission) and `apply_flow_suggestions` applies
-  patches in edit mode. The chat's writing tools report the suggestions their
+  for users with the trace permission), `apply_flow_suggestions` applies
+  patches and `dismiss_flow_suggestion` hides one when the user asks, both in
+  edit mode. The chat's writing tools report the suggestions their
   change introduced, and the chat's guidance is built from
   `FLOW_SUGGESTION_AUTHORING_RULES`, so a step the chat writes avoids the
   patterns from the start.

@@ -27,6 +27,7 @@ than editing an applied one.
 | Review                      | `flow_run_review_checkpoints`                                                                                      | Revisioned review state, actor attribution, edited payloads, and resume idempotency.                             |
 | Delivery                    | `flow_run_audit_outbox`, `flow_run_webhook_deliveries`                                                             | Transactional intents are written with lifecycle state and delivered asynchronously.                             |
 | Portability                 | `flow_package_imports`                                                                                             | Import state for validated `.eneopkg` archives. Imported definitions remain drafts.                              |
+| Suggestions                 | `flow_suggestion_dismissals`                                                                                       | Which of a flow's suggestions its editors hid, by fingerprint; deleted with the flow.                            |
 | Shared platform integration | `service_principals`, `provider_token_usages`                                                                      | Principal and token-usage records shared with non-Flow consumers.                                                |
 
 There are no partial-rerun operation or invalidation tables, no
