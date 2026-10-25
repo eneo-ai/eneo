@@ -141,7 +141,7 @@ class FlowSuggestionImpactPublic(BaseModel):
             "relay, an unused form field). The measured codes: `high` for "
             "`identical_inputs`, `context_headroom` and `model_relay`, `medium` "
             "for `format_fallback`, `overlapping_inputs` and "
-            "`deterministic_candidate`."
+            "`deterministic_candidate`, `low` for `oversized_reasoning`."
         ),
         examples=["high"],
     )
@@ -162,7 +162,7 @@ class FlowSuggestionImpactPublic(BaseModel):
             "step without a model does not cost. Null when the impact is from "
             "the definition, when the runs did not report the tokens, and for a "
             "measured finding without a token cost of its own "
-            "(`context_headroom`, `format_fallback`)."
+            "(`context_headroom`, `format_fallback`, `oversized_reasoning`)."
         ),
         examples=[1840],
     )
@@ -244,13 +244,18 @@ class FlowSuggestionPublic(BaseModel):
             "two inputs of a step shared half or more of the shorter one's "
             "text without being identical; `deterministic_candidate`, a model "
             "step's output was its inputs copied word for word with little of "
-            "its own, which a `compose_text` step does without a model."
+            "its own, which a `compose_text` step does without a model. "
+            "Measured against what the model catalogue knows, also only with "
+            "`runs`: `oversized_reasoning`, a step asks its reasoning-capable "
+            "model for high reasoning effort while its calls were a small "
+            "extraction into a JSON result."
         ),
         examples=[
             "duplicate_read",
             "model_relay",
             "overlapping_inputs",
             "deterministic_candidate",
+            "oversized_reasoning",
         ],
     )
     fingerprint: str = Field(
@@ -316,7 +321,11 @@ class FlowSuggestionPublic(BaseModel):
             "`input_share` (the share of the copied inputs the output holds). "
             "The three carry `run_count` (runs that measured the finding) and "
             "`held_runs` (runs in which it held), their shares and sizes "
-            "averaged over the latter. A measured overlap of the two reads a "
+            "averaged over the latter. `oversized_reasoning`: "
+            "`reasoning_effort`, `peak_input_tokens` and `peak_output_tokens` "
+            "(the largest call of the runs in which it held, the output with "
+            "the model's reasoning), `token_limit`, `limit_share`, "
+            "`run_count`, `held_runs`. A measured overlap of the two reads a "
             "`duplicate_read` or `broad_all_previous_steps` names is added to "
             "it as `measured_overlaps`: a list of the `overlapping_inputs` "
             "params, each with `tokens_per_run`, `version` and "

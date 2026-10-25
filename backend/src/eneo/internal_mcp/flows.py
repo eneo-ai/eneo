@@ -756,8 +756,9 @@ async def read_flow_suggestions(
     a duplicate_read or broad_all_previous_steps names the same two reads,
     the overlap is in its params.measured_overlaps instead) and
     deterministic_candidate (a model step only copies its inputs, which a
-    compose_text step does without a model); runs.counted and runs.left_out
-    say how many runs were measured. Only numbers come from the runs, never
+    compose_text step does without a model), and oversized_reasoning (a step
+    asks for high reasoning effort for a small extraction into JSON);
+    runs.counted and runs.left_out say how many runs were measured. Only numbers come from the runs, never
     their content, and the read is audited. It needs the permission to view flow traces: without
     it the result is the definition alone and its note says why. Suggestions
     never block publishing and the tool changes nothing: a fix the user

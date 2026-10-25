@@ -9,7 +9,7 @@ sizes and edge indexes). Never a prompt, an output or an input value: the
 edge aggregate holds hashes and sizes only, and it is projected here before
 anything leaves; the facts hold numbers only. A published version's steps
 leave as their ``StepDefinitionFacts`` (a hash, a model id, an output
-type), never as the definition with its prompts.
+type, a reasoning effort), never as the definition with its prompts.
 
 The caller decides which runs the user may see evidence for: it lists the
 candidates (``list_recent_runs``), filters them with the run access policy
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
@@ -216,32 +217,48 @@ class FlowSuggestionEvidenceRepository:
                     facts[(version, parsed[0])] = parsed[1]
         return facts
 
-    async def assistant_completion_models(
+    async def assistant_model_settings(
         self, *, assistant_ids: Collection[UUID], tenant_id: UUID
-    ) -> dict[UUID, UUID | None]:
-        """The completion model each assistant uses now, tenant-scoped."""
+    ) -> dict[UUID, AssistantModelSettings]:
+        """The completion model each assistant uses now and the reasoning
+        effort it asks for, tenant-scoped."""
         if not assistant_ids:
             return {}
         rows = (
             await self.session.execute(
-                sa.select(Assistants.id, Assistants.completion_model_id)
+                sa.select(
+                    Assistants.id,
+                    Assistants.completion_model_id,
+                    Assistants.completion_model_kwargs,
+                )
                 .join(Users, Users.id == Assistants.user_id)
                 .where(Assistants.id.in_(tuple(assistant_ids)))
                 .where(Users.tenant_id == tenant_id)
             )
         ).all()
-        return {row.id: row.completion_model_id for row in rows}
+        return {
+            row.id: AssistantModelSettings(
+                completion_model_id=row.completion_model_id,
+                reasoning_effort=_reasoning_effort(row.completion_model_kwargs),
+            )
+            for row in rows
+        }
 
-    async def model_input_limits(
+    async def model_catalogue(
         self, *, model_ids: Collection[UUID], tenant_id: UUID
-    ) -> dict[UUID, int]:
-        """The input token limit (``CompletionModel.token_limit``) of each
-        model the tenant may use that the catalogue knows one for."""
+    ) -> ModelCatalogueFacts:
+        """What the catalogue knows of each model the tenant may use: its
+        input token limit (``CompletionModel.token_limit``), where it knows
+        one, and whether it marks the model as reasoning-capable."""
         if not model_ids:
-            return {}
+            return ModelCatalogueFacts(input_limits={}, reasoning_models=frozenset())
         rows = (
             await self.session.execute(
-                sa.select(CompletionModels.id, CompletionModels.max_input_tokens)
+                sa.select(
+                    CompletionModels.id,
+                    CompletionModels.max_input_tokens,
+                    CompletionModels.reasoning,
+                )
                 .where(CompletionModels.id.in_(tuple(model_ids)))
                 .where(CompletionModels.deleted_at.is_(None))
                 .where(
@@ -252,11 +269,38 @@ class FlowSuggestionEvidenceRepository:
                 )
             )
         ).all()
-        return {
-            row.id: int(row.max_input_tokens)
-            for row in rows
-            if row.max_input_tokens is not None
-        }
+        return ModelCatalogueFacts(
+            input_limits={
+                row.id: int(row.max_input_tokens)
+                for row in rows
+                if row.max_input_tokens is not None
+            },
+            reasoning_models=frozenset(row.id for row in rows if row.reasoning),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AssistantModelSettings:
+    """The completion model an assistant uses and the reasoning effort it
+    asks for (None for none)."""
+
+    completion_model_id: UUID | None
+    reasoning_effort: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCatalogueFacts:
+    """The input token limits the catalogue knows, by model id, and the
+    models it marks as reasoning-capable."""
+
+    input_limits: dict[UUID, int]
+    reasoning_models: frozenset[UUID]
+
+
+def _reasoning_effort(kwargs: object) -> str | None:
+    """The reasoning effort a model's settings ask for; None for none."""
+    effort = _mapping(kwargs).get("reasoning_effort")
+    return effort if isinstance(effort, str) and effort else None
 
 
 def _edges(raw: object) -> tuple[EvidenceEdge, ...]:
@@ -369,6 +413,7 @@ def _published_step(item: object) -> tuple[UUID, StepDefinitionFacts] | None:
         output_config=_mapping_or_none(step.get("output_config")),
         prompt_text=instructions if isinstance(instructions, str) else None,
         completion_model_id=model_id,
+        reasoning_effort=_reasoning_effort(snapshot.get("completion_model_kwargs")),
     )
 
 
@@ -380,4 +425,8 @@ def _mapping_or_none(value: object) -> Mapping[str, object] | None:
     return cast(Mapping[str, object], value) if isinstance(value, dict) else None
 
 
-__all__ = ["FlowSuggestionEvidenceRepository"]
+__all__ = [
+    "AssistantModelSettings",
+    "FlowSuggestionEvidenceRepository",
+    "ModelCatalogueFacts",
+]

@@ -65,6 +65,24 @@ class FlowSuggestionCode(str, Enum):
     MODEL_RELAY = "model_relay"
     OVERLAPPING_INPUTS = "overlapping_inputs"
     DETERMINISTIC_CANDIDATE = "deterministic_candidate"
+    # Measured against the model catalogue's facts
+    # (``flow_suggestion_model_fit``).
+    OVERSIZED_REASONING = "oversized_reasoning"
+
+
+# The codes only recent runs prove; the static rules prove the others from
+# the draft alone.
+MEASURED_SUGGESTION_CODES: frozenset[FlowSuggestionCode] = frozenset(
+    {
+        FlowSuggestionCode.IDENTICAL_INPUTS,
+        FlowSuggestionCode.CONTEXT_HEADROOM,
+        FlowSuggestionCode.FORMAT_FALLBACK,
+        FlowSuggestionCode.MODEL_RELAY,
+        FlowSuggestionCode.OVERLAPPING_INPUTS,
+        FlowSuggestionCode.DETERMINISTIC_CANDIDATE,
+        FlowSuggestionCode.OVERSIZED_REASONING,
+    }
+)
 
 
 # What to do so a flow never earns the suggestion: one rule per code, for
@@ -128,6 +146,10 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
     FlowSuggestionCode.DETERMINISTIC_CANDIDATE: (
         "Use a compose_text step, not a model, for a step that only puts "
         "earlier results together with a little fixed text."
+    ),
+    FlowSuggestionCode.OVERSIZED_REASONING: (
+        "Ask for high reasoning effort only for a step that has to reason, "
+        "not for a small extraction into a JSON result."
     ),
 }
 
@@ -514,6 +536,7 @@ def join_descriptions(described: Sequence[str]) -> str:
 __all__ = [
     "LEVEL_RANK",
     "MAX_FLOW_SUGGESTIONS",
+    "MEASURED_SUGGESTION_CODES",
     "DraftReads",
     "FlowSuggestion",
     "FlowSuggestionCode",

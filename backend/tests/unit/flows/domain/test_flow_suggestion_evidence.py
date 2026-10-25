@@ -166,6 +166,24 @@ def test_a_step_is_changed_since_a_version_unless_its_facts_are_equal() -> None:
     assert evidence.same_model_and_output(_STEP, 3) is False
 
 
+def test_the_reasoning_effort_changes_no_facts_but_another_model_setup() -> None:
+    evidence = RunEvidence(
+        runs=(),
+        published_steps={
+            (1, _STEP): _facts(reasoning_effort="high"),
+            (2, _STEP): _facts(reasoning_effort="low"),
+        },
+        draft_steps={_STEP: _facts(reasoning_effort="high")},
+    )
+
+    # What reaches the model is the same, so the step is unchanged since
+    # either version; what its model writes depends on the effort.
+    assert evidence.step_changed_since(_STEP, 2) is False
+    assert evidence.same_model_setup(_STEP, 1) is True
+    assert evidence.same_model_setup(_STEP, 2) is False
+    assert _facts(reasoning_effort="").reasoning_effort is None
+
+
 def test_an_average_names_its_run_count_and_newest_version() -> None:
     measurement = average_over_runs([(100.0, 2), (300.0, 3)])
 
