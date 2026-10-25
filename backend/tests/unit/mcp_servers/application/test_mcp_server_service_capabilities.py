@@ -62,6 +62,8 @@ async def test_connection_logs_name_the_server_without_its_path_or_query(
     service, _, _, user = _make_service()
     monkeypatch.setattr(mcp_client_module.logger, "handlers", [caplog.handler])
     monkeypatch.setattr(mcp_client_module.logger, "level", logging.DEBUG)
+    # Setting level directly leaves an earlier test's cached DEBUG answer.
+    monkeypatch.setattr(mcp_client_module.logger, "_cache", {})
     app = one_tool_app(lambda _: None)
     async with serve_test_app(app) as url:
         server = _make_server(user.tenant_id)
