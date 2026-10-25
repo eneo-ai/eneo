@@ -536,3 +536,13 @@ def test_at_most_fifty_suggestions_are_returned() -> None:
     assert [s.steps[0] for s in suggestions] == [
         _IDS[order] for order in range(2, MAX_FLOW_SUGGESTIONS + 2)
     ]
+
+
+def test_every_suggestion_code_has_one_plain_authoring_rule() -> None:
+    from eneo.flows.domain.flow_suggestions import FLOW_SUGGESTION_AUTHORING_RULES
+
+    assert set(FLOW_SUGGESTION_AUTHORING_RULES) == set(FlowSuggestionCode)
+    for rule in FLOW_SUGGESTION_AUTHORING_RULES.values():
+        assert rule.endswith(".")
+        assert "\n" not in rule
+        assert chr(0x2014) not in rule

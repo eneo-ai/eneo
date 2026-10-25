@@ -58,6 +58,48 @@ class FlowSuggestionCode(str, Enum):
     UNUSED_FORM_FIELD = "unused_form_field"
 
 
+# What to do so a flow never earns the suggestion: one rule per code, for
+# whoever designs a flow (the authoring chat's instructions are built from
+# these). Each is one plain sentence.
+FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
+    FlowSuggestionCode.DUPLICATE_READ: (
+        "Read an earlier result once: no {{ step_N.output.text }} in the "
+        "prompt of a step that already gets step N as its input, and no "
+        "second read of the same result in one step."
+    ),
+    FlowSuggestionCode.BROAD_ALL_PREVIOUS_STEPS: (
+        "Prefer source_refs or field paths to all_previous_steps when a step "
+        "needs specific earlier results."
+    ),
+    FlowSuggestionCode.WHOLE_STRUCTURED_READ: (
+        "Read the fields a step needs by field path rather than a whole JSON "
+        "result with many fields."
+    ),
+    FlowSuggestionCode.UNREAD_CONTRACT_FIELDS: (
+        "Declare only the output fields that later steps read."
+    ),
+    FlowSuggestionCode.UNREAD_RESULT: (
+        "Add an intermediate step only when a later step reads its result."
+    ),
+    FlowSuggestionCode.RELAY_STEP: (
+        "Add no step that only passes data along: let the later steps read "
+        "its source directly."
+    ),
+    FlowSuggestionCode.PER_ITEM_PROMPT_READ: (
+        "Put no whole earlier result in the prompt of a step that runs once "
+        "per item: read a field, or extract what each item needs in a step "
+        "before."
+    ),
+    FlowSuggestionCode.REPEATED_LONG_MATERIAL: (
+        "Digest the same long material once, in one step the others read, "
+        "rather than in several steps."
+    ),
+    FlowSuggestionCode.UNUSED_FORM_FIELD: (
+        "Declare only the run form fields that a step reads."
+    ),
+}
+
+
 FlowSuggestionFixKind = Literal["patch", "assisted", "advice"]
 FlowSuggestionLevel = Literal["high", "medium", "low"]
 FlowSuggestionImpactBasis = Literal["definition"]

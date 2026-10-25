@@ -9,7 +9,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -23,7 +23,7 @@ import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { AddStepDialog } from "./editor/add-step-dialog";
 import { insertionKindsQueryOptions } from "./editor/editor-api";
-import { FlowStepEditor } from "./editor/flow-step-editor";
+import { FlowStepEditor, type EditorLeave } from "./editor/flow-step-editor";
 import type { StepKindOption } from "./editor/step-kinds";
 import {
   flowKeys,
@@ -39,6 +39,8 @@ import {
   type FlowStep
 } from "./flows-api";
 import { describeChanges, diffFlowSteps, hasChanges, type StepChange } from "./flow-changes";
+import type { ComposerInsert } from "@/features/chat/chat-references";
+import { FlowReferences, insertMessage } from "./chat/reference-pill";
 import { FlowChatPanel } from "./flow-chat-panel";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
@@ -46,8 +48,8 @@ import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
-import { FlowStepList, stepControlId } from "./flow-step-list";
-import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
+import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
@@ -65,6 +67,14 @@ const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
 /** How long a card the chat touched stays marked. */
 const CHAT_CHANGE_MARK_MS = 8000;
 
+/** The page's address with ?step= set to `stepId`, or without it; other parameters stay. */
+function stepUrl(stepId: string | null): URL {
+  const url = new URL(window.location.href);
+  if (stepId) url.searchParams.set("step", stepId);
+  else url.searchParams.delete("step");
+  return url;
+}
+
 /** After a move the moved step's button keeps focus; at an end, where it is disabled, its twin. */
 function focusMoveControl(stepId: string, delta: -1 | 1) {
   requestAnimationFrame(() => {
@@ -81,7 +91,9 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * revision-fenced edit each; a refusal is shown above both columns with how
  * to fix it, and a stale draft is reloaded. Publishing freezes the
  * definition until it is unpublished. On a phone the two columns are one
- * view at a time.
+ * view at a time. A suggestion's "Fråga assistenten" and the chat's
+ * "Optimera flödet" put a prepared request in the chat's composer (showing
+ * the chat first, on a phone); the person sends it.
  */
 export function FlowPage({ flowId }: { flowId: string }) {
   const t = useTranslations();
@@ -107,6 +119,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
+  // The open editor: whether leaving it loses edits, and leaving after asking.
+  const editorLeave = useRef<EditorLeave>(null);
+  // How many history entries this page pushed for steps since the list.
+  const stepDepth = useRef(0);
+  // The next popstate leaves the editor without asking (the person agreed).
+  const leaving = useRef(false);
   const noticeKey = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [view, setView] = useState<View>("definition");
@@ -123,13 +141,17 @@ export function FlowPage({ flowId }: { flowId: string }) {
     maxSize: "60%",
     autoSaveId: CHAT_WIDTH_STORAGE_KEY
   });
-  const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // The chat's composer while it is on screen (the chat panel reports it).
+  const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  // The open step lives in ?step=, so a refresh or a shared link opens it
+  // again (an id the flow does not have shows the list).
+  const [openStepId, setOpenStepId] = useState<string | null>(() => searchParams.get("step"));
   const [chosenTab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
   );
@@ -162,6 +184,42 @@ export function FlowPage({ flowId }: { flowId: string }) {
     },
     [flowId, queryClient, t]
   );
+
+  // One FlowReferences for the page: a pill in the chat or in the definition
+  // opens the same card, "Visa steget" brings the step's card into view and
+  // "Infoga i meddelandet" puts the reference in the chat's composer. On a
+  // phone, where one side shows at a time, each first shows its side.
+  const composer = useMemo<ComposerInsert | null>(() => {
+    if (!chatComposer) return null;
+    const showChat = () => {
+      if (!beside) flushSync(() => setView("chat"));
+    };
+    return {
+      insertText: (text) => {
+        showChat();
+        chatComposer.insertText(text);
+      },
+      insertToken: (token) => {
+        showChat();
+        chatComposer.insertToken(token);
+      }
+    };
+  }, [beside, chatComposer]);
+  const showStep = useCallback(
+    (stepId: string) => {
+      if (!beside) flushSync(() => setView("definition"));
+      return showStepCard(stepId);
+    },
+    [beside]
+  );
+
+  /**
+   * "Fråga assistenten" and "Optimera flödet": a prepared request goes into
+   * the chat's composer at the caret, steps as pills, the way "Infoga i
+   * meddelandet" puts a pill there. It is never sent, and the mode stays.
+   * Offered only while the composer is on the page.
+   */
+  const askChat = composer ? (text: string) => insertMessage(composer, text, flow) : undefined;
 
   const saved = (updated: FlowPublic) => {
     storeFlow(queryClient, updated);
@@ -262,18 +320,40 @@ export function FlowPage({ flowId }: { flowId: string }) {
     publish.mutate();
   }
 
-  function openStep(step: FlowStep) {
-    if (!step.id) return;
-    // Rendered before focus moves, so the editor is there to take it.
-    flushSync(() => setOpenStepId(step.id ?? null));
+  /** Shows the step's editor and puts focus on it; rendered first, so it is there to take it. */
+  function showEditor(id: string) {
+    flushSync(() => setOpenStepId(id));
     editorRef.current?.focus();
   }
 
-  function closeStep() {
-    const id = openStepId;
+  /** Shows the list again, with focus on the open button of the step that was open. */
+  function showList(id: string | null) {
     setOpenStepId(null);
     if (id)
       requestAnimationFrame(() => document.getElementById(stepControlId(id, "open"))?.focus());
+  }
+
+  /** Opens a step (from the list, or the editor's previous and next) as a new history entry. */
+  function openStep(step: Pick<FlowStep, "id">) {
+    if (!step.id) return;
+    stepDepth.current += 1;
+    window.history.pushState({ flowStepDepth: stepDepth.current }, "", stepUrl(step.id));
+    showEditor(step.id);
+  }
+
+  /**
+   * Back to the list, once the editor has agreed: through the history when
+   * the steps were opened here (so Back does not reopen them), else by
+   * taking ?step= out of the address.
+   */
+  function closeStep() {
+    if (stepDepth.current > 0) {
+      leaving.current = true;
+      window.history.go(-stepDepth.current);
+      return;
+    }
+    window.history.replaceState(window.history.state, "", stepUrl(null));
+    showList(openStepId);
   }
 
   function moveStep(step: FlowStep, delta: -1 | 1) {
@@ -358,6 +438,43 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
+  const openedIndex = openedStep ? steps.indexOf(openedStep) : -1;
+  const neighbour = (step: FlowStep | undefined) =>
+    step?.id
+      ? {
+          id: step.id,
+          name: stepName(step) ?? t("flows_step_label_unnamed", { order: step.step_order })
+        }
+      : null;
+
+  // Browser Back and Forward move between the list and the steps opened
+  // here. A popstate cannot be cancelled: with unsaved edits the step goes
+  // back into the address while the editor asks, and leaving goes Back again.
+  const popState = useEffectEvent((event: PopStateEvent) => {
+    const target = new URL(window.location.href).searchParams.get("step");
+    const state = event.state as { flowStepDepth?: unknown } | null;
+    const depth = typeof state?.flowStepDepth === "number" ? state.flowStepDepth : 0;
+    const current = openStepId;
+    if (target !== current && !leaving.current && current && editorLeave.current?.isDirty()) {
+      stepDepth.current = depth + 1;
+      window.history.pushState({ flowStepDepth: stepDepth.current }, "", stepUrl(current));
+      editorLeave.current.requestLeave(() => {
+        leaving.current = true;
+        window.history.back();
+      });
+      return;
+    }
+    leaving.current = false;
+    stepDepth.current = depth;
+    if (target === current) return;
+    if (target && steps.some((step) => step.id === target)) showEditor(target);
+    else showList(current);
+  });
+  useEffect(() => {
+    const listener = (event: PopStateEvent) => popState(event);
+    window.addEventListener("popstate", listener);
+    return () => window.removeEventListener("popstate", listener);
+  }, []);
   const speakerCandidate = canEdit
     ? speakerStepCandidate(flow, space.transcription_services ?? [])
     : null;
@@ -409,247 +526,262 @@ export function FlowPage({ flowId }: { flowId: string }) {
     ) : undefined;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
-      <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
-        <PageHeader
-          title={flow.name}
-          description={flow.description?.trim() || undefined}
-          breadcrumbs={[
-            { label: spaceName, href: spaceLandingHref(sections, routeId) },
-            { label: t("flows"), href: `/spaces/${routeId}/flows` },
-            { label: flow.name, current: true }
-          ]}
-          actions={
-            <>
-              <FlowStatusBadge publishedVersion={flow.published_version} />
-              {actions}
-            </>
-          }
-        />
-        {notice ? (
-          <Banner
-            role={notice.status === "error" || notice.status === "warning" ? "alert" : "status"}
-            key={notice.key}
-            status={notice.status}
-            title={notice.title}
-            description={notice.description}
-            isDismissable
-            dismissLabel={t("flows_notice_dismiss")}
-            onDismiss={() => setNotice(null)}
+    <FlowReferences flow={flow} onShowStep={showStep} composer={composer}>
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
+          <PageHeader
+            title={flow.name}
+            description={flow.description?.trim() || undefined}
+            breadcrumbs={[
+              { label: spaceName, href: spaceLandingHref(sections, routeId) },
+              { label: t("flows"), href: `/spaces/${routeId}/flows` },
+              { label: flow.name, current: true }
+            ]}
+            actions={
+              <>
+                <FlowStatusBadge publishedVersion={flow.published_version} />
+                {actions}
+              </>
+            }
+          />
+          {notice ? (
+            <Banner
+              role={notice.status === "error" || notice.status === "warning" ? "alert" : "status"}
+              key={notice.key}
+              status={notice.status}
+              title={notice.title}
+              description={notice.description}
+              isDismissable
+              dismissLabel={t("flows_notice_dismiss")}
+              onDismiss={() => setNotice(null)}
+            />
+          ) : null}
+          <div className="lg:hidden">
+            <SegmentedControl
+              label={t("flows_view_label")}
+              value={view}
+              onChange={(next) => setView(next as View)}
+              layout="fill"
+            >
+              <SegmentedControlItem value="definition" label={t("flows_view_definition")} />
+              <SegmentedControlItem value="chat" label={t("flows_view_chat")} />
+            </SegmentedControl>
+          </div>
+        </div>
+
+        <div
+          ref={beside ? row : null}
+          className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:flex-row"
+        >
+          <section
+            aria-label={t("flows_view_definition")}
+            className={cn(
+              "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto",
+              view !== "definition" && "max-lg:hidden"
+            )}
+          >
+            {canViewRuns ? (
+              <TabList
+                role="tablist"
+                aria-label={t("flow_runs_tabs_label")}
+                value={tab}
+                onChange={(value) => selectTab(value as PageTab)}
+                hasDivider
+              >
+                <Tab
+                  id={tabId("definition")}
+                  value="definition"
+                  label={t("flow_runs_tab_definition")}
+                  panelId={panelId}
+                />
+                <Tab
+                  id={tabId("runs")}
+                  value="runs"
+                  label={t("flow_runs_tab_runs")}
+                  panelId={panelId}
+                />
+              </TabList>
+            ) : null}
+            <div
+              role={canViewRuns ? "tabpanel" : undefined}
+              id={panelId}
+              aria-labelledby={canViewRuns ? tabId(tab) : undefined}
+              className="flex min-w-0 flex-col gap-6"
+            >
+              {tab === "runs" ? (
+                <FlowRunsList
+                  flowId={flow.id}
+                  spaceRouteId={routeId}
+                  publishedVersion={flow.published_version ?? null}
+                />
+              ) : openedStep?.id ? (
+                <section
+                  ref={editorRef}
+                  tabIndex={-1}
+                  aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
+                  className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  <FlowStepEditor
+                    flow={flow}
+                    stepId={openedStep.id}
+                    readOnly={!canEdit}
+                    onAskChat={askChat}
+                    onSaved={(updated) => {
+                      saved(updated);
+                      announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
+                    }}
+                    onCancel={closeStep}
+                    leaveRef={editorLeave}
+                    navigation={{
+                      position: openedIndex + 1,
+                      count: steps.length,
+                      previous: neighbour(steps[openedIndex - 1]),
+                      next: neighbour(steps[openedIndex + 1]),
+                      onGo: (id) => openStep({ id })
+                    }}
+                  />
+                </section>
+              ) : (
+                <>
+                  {isPublished ? (
+                    <Banner
+                      status="info"
+                      title={t("flows_published_title", { version: flow.published_version ?? "" })}
+                      description={
+                        canUnpublishToEdit
+                          ? t("flows_published_description")
+                          : t("flows_published_read_only")
+                      }
+                      collapsible={false}
+                      endContent={
+                        canUnpublishToEdit ? (
+                          <Button
+                            label={t("flows_unpublish_to_edit")}
+                            size="sm"
+                            onClick={() => setConfirmUnpublish(true)}
+                          />
+                        ) : undefined
+                      }
+                    />
+                  ) : null}
+                  {canEdit ? (
+                    <FlowDraftCheck
+                      flow={flow}
+                      speakerServices={space.transcription_services ?? []}
+                      onOpenStep={openStep}
+                      onRepair={repairReference}
+                    />
+                  ) : null}
+                  <FlowStepList
+                    flowId={flow.id}
+                    draftRevision={flow.draft_revision}
+                    steps={steps}
+                    canEdit={canEdit}
+                    changes={chatChanges}
+                    onAskChat={askChat}
+                    headingRef={stepsHeadingRef}
+                    onOpen={openStep}
+                    onMove={moveStep}
+                    onRemove={removeStep}
+                    onAdd={(position) => setAddAt(position)}
+                    speakerOffer={
+                      speakerCandidate?.id && speakerOption
+                        ? {
+                            stepId: speakerCandidate.id,
+                            pending: edit.isPending,
+                            onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
+                          }
+                        : null
+                    }
+                  />
+                  <FlowSettings
+                    flow={flow}
+                    canEdit={canEdit}
+                    transcription={{
+                      models: space.transcription_models,
+                      services: space.transcription_services ?? []
+                    }}
+                    onSave={saveSettings}
+                  />
+                </>
+              )}
+            </div>
+          </section>
+
+          {beside && (
+            // The chat sits at the end of the row: dragging the handle left widens it.
+            <ResizeHandle
+              isReversed
+              hasDivider
+              label={t("flows_chat_resize_handle")}
+              resizable={chat.props}
+            />
+          )}
+          <section
+            aria-label={t("flows_chat_heading")}
+            style={beside ? { width: chat.size } : undefined}
+            className={cn(
+              "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
+              view !== "chat" && "max-lg:hidden"
+            )}
+          >
+            <FlowChatPanel
+              flow={flow}
+              onFlowMayHaveChanged={() => void refreshFromChat()}
+              onRefused={(error, title) => refused(error, title, steps)}
+              onComposer={setChatComposer}
+              onAskChat={askChat}
+            />
+          </section>
+        </div>
+
+        {canEdit ? (
+          <AddStepDialog
+            flow={flow}
+            position={addAt ?? steps.length + 1}
+            open={addAt !== null}
+            onOpenChange={(open) => {
+              if (!open) setAddAt(null);
+            }}
+            onSaved={(updated) => {
+              saved(updated);
+              setAddAt(null);
+              announce(t("flows_step_added"));
+            }}
           />
         ) : null}
-        <div className="lg:hidden">
-          <SegmentedControl
-            label={t("flows_view_label")}
-            value={view}
-            onChange={(next) => setView(next as View)}
-            layout="fill"
-          >
-            <SegmentedControlItem value="definition" label={t("flows_view_definition")} />
-            <SegmentedControlItem value="chat" label={t("flows_view_chat")} />
-          </SegmentedControl>
-        </div>
-      </div>
-
-      <div
-        ref={beside ? row : null}
-        className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:flex-row"
-      >
-        <section
-          aria-label={t("flows_view_definition")}
-          className={cn(
-            "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto",
-            view !== "definition" && "max-lg:hidden"
-          )}
-        >
-          {canViewRuns ? (
-            <TabList
-              role="tablist"
-              aria-label={t("flow_runs_tabs_label")}
-              value={tab}
-              onChange={(value) => selectTab(value as PageTab)}
-              hasDivider
-            >
-              <Tab
-                id={tabId("definition")}
-                value="definition"
-                label={t("flow_runs_tab_definition")}
-                panelId={panelId}
-              />
-              <Tab
-                id={tabId("runs")}
-                value="runs"
-                label={t("flow_runs_tab_runs")}
-                panelId={panelId}
-              />
-            </TabList>
-          ) : null}
-          <div
-            role={canViewRuns ? "tabpanel" : undefined}
-            id={panelId}
-            aria-labelledby={canViewRuns ? tabId(tab) : undefined}
-            className="flex min-w-0 flex-col gap-6"
-          >
-            {tab === "runs" ? (
-              <FlowRunsList
-                flowId={flow.id}
-                spaceRouteId={routeId}
-                publishedVersion={flow.published_version ?? null}
-              />
-            ) : openedStep?.id ? (
-              <section
-                ref={editorRef}
-                tabIndex={-1}
-                aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
-                className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
-              >
-                <FlowStepEditor
-                  flow={flow}
-                  stepId={openedStep.id}
-                  readOnly={!canEdit}
-                  onSaved={(updated) => {
-                    saved(updated);
-                    announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
-                  }}
-                  onCancel={closeStep}
-                />
-              </section>
-            ) : (
-              <>
-                {isPublished ? (
-                  <Banner
-                    status="info"
-                    title={t("flows_published_title", { version: flow.published_version ?? "" })}
-                    description={
-                      canUnpublishToEdit
-                        ? t("flows_published_description")
-                        : t("flows_published_read_only")
-                    }
-                    collapsible={false}
-                    endContent={
-                      canUnpublishToEdit ? (
-                        <Button
-                          label={t("flows_unpublish_to_edit")}
-                          size="sm"
-                          onClick={() => setConfirmUnpublish(true)}
-                        />
-                      ) : undefined
-                    }
-                  />
-                ) : null}
-                {canEdit ? (
-                  <FlowDraftCheck
-                    flow={flow}
-                    speakerServices={space.transcription_services ?? []}
-                    onOpenStep={openStep}
-                    onRepair={repairReference}
-                  />
-                ) : null}
-                <FlowStepList
-                  flowId={flow.id}
-                  steps={steps}
-                  canEdit={canEdit}
-                  changes={chatChanges}
-                  headingRef={stepsHeadingRef}
-                  onOpen={openStep}
-                  onMove={moveStep}
-                  onRemove={removeStep}
-                  onAdd={(position) => setAddAt(position)}
-                  speakerOffer={
-                    speakerCandidate?.id && speakerOption
-                      ? {
-                          stepId: speakerCandidate.id,
-                          pending: edit.isPending,
-                          onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
-                        }
-                      : null
-                  }
-                />
-                <FlowSettings
-                  flow={flow}
-                  canEdit={canEdit}
-                  transcription={{
-                    models: space.transcription_models,
-                    services: space.transcription_services ?? []
-                  }}
-                  onSave={saveSettings}
-                />
-              </>
-            )}
-          </div>
-        </section>
-
-        {beside && (
-          // The chat sits at the end of the row: dragging the handle left widens it.
-          <ResizeHandle
-            isReversed
-            hasDivider
-            label={t("flows_chat_resize_handle")}
-            resizable={chat.props}
-          />
-        )}
-        <section
-          aria-label={t("flows_chat_heading")}
-          style={beside ? { width: chat.size } : undefined}
-          className={cn(
-            "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
-            view !== "chat" && "max-lg:hidden"
-          )}
-        >
-          <FlowChatPanel
+        {canRun ? (
+          <StartRunDialog
             flow={flow}
-            onFlowMayHaveChanged={() => void refreshFromChat()}
-            onRefused={(error, title) => refused(error, title, steps)}
+            open={starting}
+            onOpenChange={setStarting}
+            onStarted={(run) => {
+              setStarting(false);
+              // The runs list shows the run at once, before it is read again.
+              rememberStartedRun(queryClient, flow.id, run);
+              void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
+              announce(t("flow_runs_started"));
+              // The run's own page follows it while it moves.
+              router.push(runHref(routeId, flow.id, run.id));
+            }}
           />
-        </section>
-      </div>
-
-      {canEdit ? (
-        <AddStepDialog
-          flow={flow}
-          position={addAt ?? steps.length + 1}
-          open={addAt !== null}
+        ) : null}
+        {mayEdit ? (
+          <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
+        ) : null}
+        <ConfirmDialogControlled
+          open={confirmUnpublish}
           onOpenChange={(open) => {
-            if (!open) setAddAt(null);
+            if (!unpublish.isPending) setConfirmUnpublish(open);
           }}
-          onSaved={(updated) => {
-            saved(updated);
-            setAddAt(null);
-            announce(t("flows_step_added"));
-          }}
+          title={t("flows_unpublish_title")}
+          description={t("flows_unpublish_description")}
+          confirmLabel={t("unpublish")}
+          variant="default"
+          pending={unpublish.isPending}
+          onConfirm={() => unpublish.mutate()}
         />
-      ) : null}
-      {canRun ? (
-        <StartRunDialog
-          flow={flow}
-          open={starting}
-          onOpenChange={setStarting}
-          onStarted={(run) => {
-            setStarting(false);
-            // The runs list shows the run at once, before it is read again.
-            rememberStartedRun(queryClient, flow.id, run);
-            void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
-            announce(t("flow_runs_started"));
-            // The run's own page follows it while it moves.
-            router.push(runHref(routeId, flow.id, run.id));
-          }}
-        />
-      ) : null}
-      {mayEdit ? (
-        <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
-      ) : null}
-      <ConfirmDialogControlled
-        open={confirmUnpublish}
-        onOpenChange={(open) => {
-          if (!unpublish.isPending) setConfirmUnpublish(open);
-        }}
-        title={t("flows_unpublish_title")}
-        description={t("flows_unpublish_description")}
-        confirmLabel={t("unpublish")}
-        variant="default"
-        pending={unpublish.isPending}
-        onConfirm={() => unpublish.mutate()}
-      />
-    </div>
+      </div>
+    </FlowReferences>
   );
 }

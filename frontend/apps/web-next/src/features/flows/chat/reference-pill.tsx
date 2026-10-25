@@ -21,6 +21,7 @@ import type { FlowPublic } from "../editor/step-types";
 import { stepLabel } from "../flow-labels";
 import {
   referenceHint,
+  referenceParts,
   referenceStep,
   referenceTone,
   valueOf,
@@ -112,17 +113,40 @@ function SuggestedPill({ token }: { token: string }) {
   return (
     <button
       type="button"
-      onClick={() =>
-        composer.insertToken({
-          value: reference.raw,
-          render: () => <ReferencePill reference={reference} />
-        })
-      }
+      onClick={() => insertReference(composer, reference)}
       className="focus-visible:outline-ring rounded-ax-inner inline-block focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <ReferencePill reference={reference} />
     </button>
   );
+}
+
+/** Puts a reference into the composer as a pill at the caret, focus with it. */
+export function insertReference(composer: ComposerInsert, reference: Reference) {
+  composer.insertToken({
+    value: reference.raw,
+    render: () => <ReferencePill reference={reference} />
+  });
+}
+
+/**
+ * Puts a prepared message into the composer at the caret, as if the person
+ * had written it: its text as typed, each step mention and value reference
+ * as the pill a pick from the reference menu makes. Nothing is sent.
+ */
+export function insertMessage(composer: ComposerInsert, text: string, flow: Flow) {
+  let afterPill = false;
+  for (const part of referenceParts(text, flow)) {
+    if (part.kind === "text") {
+      // A pill brings the space after it, as a pick from the menu does.
+      const typed = afterPill && part.text.startsWith(" ") ? part.text.slice(1) : part.text;
+      if (typed) composer.insertText(typed);
+      afterPill = false;
+    } else {
+      insertReference(composer, part);
+      afterPill = true;
+    }
+  }
 }
 
 /**
@@ -278,10 +302,7 @@ function ReferenceCard({
                   label={t("flows_chat_reference_insert")}
                   onClick={() => {
                     // The pill goes to the caret and focus with it.
-                    refs.composer?.insertToken({
-                      value: reference.raw,
-                      render: () => <ReferencePill reference={reference} />
-                    });
+                    if (refs.composer) insertReference(refs.composer, reference);
                     onClose({ refocus: false });
                   }}
                 />

@@ -46,7 +46,6 @@ import {
   type FlowProblem,
   type StepProblem
 } from "./flow-draft-check";
-import { FlowSuggestionsSection } from "./flow-suggestions-section";
 import type { SpeakerServiceLink } from "./flow-transcription";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -203,7 +202,8 @@ function RemovedReadRepair({
  * step, worked out again whenever the draft changes. Each step's problems
  * link to the step in the editor; the flow's own (no steps, no transcription
  * model) say where they are fixed. A read of a removed step in a step's
- * underlag can be replaced here in one choice (`onRepair` saves it).
+ * underlag can be replaced here in one choice (`onRepair` saves it). The
+ * core's suggestions are not listed here: they sit on the step cards.
  */
 export function FlowDraftCheck({
   flow,
@@ -363,7 +363,6 @@ export function FlowDraftCheck({
           </ul>
         </Banner>
       )}
-      <FlowSuggestionsSection flow={flow} onOpenStep={onOpenStep} />
     </section>
   );
 }
