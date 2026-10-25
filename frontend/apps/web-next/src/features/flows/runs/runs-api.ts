@@ -453,10 +453,20 @@ export function newIdempotencyKey(): string {
 export type TranscriptSourcePage = Schema<"PresentTranscriptSourcePage">;
 export type TranscriptSpeakerReview = Schema<"TranscriptSpeakerReviewPublic">;
 
+/** How many transcript source pages are read at once after the first. */
+const TRANSCRIPT_SOURCE_PAGE_CONCURRENCY = 3;
+
 /**
  * The transcript source of one transcription attempt, all pages read in
  * order: its raw lines, the hash corrections are anchored to, and its
  * speaker review. `omitted` and `unavailable` sources carry no lines.
+ *
+ * Pages are addressed by line index, so the first page's size and line count
+ * say where the others start: they are requested a few at a time, then read
+ * in order by `next_segment_index`, which still decides where the next page
+ * starts (a page not requested in advance is requested then). One failed page
+ * fails the read, starts no other and stops the requests still out, as
+ * cancelling does.
  */
 export async function getTranscriptSource(
   flowId: string,
@@ -473,43 +483,90 @@ export async function getTranscriptSource(
   | { status: "omitted"; tooLarge: boolean }
   | { status: "unavailable" }
 > {
-  const segments: TranscriptSourceSegment[] = [];
-  let sourceHash: string | null = null;
-  let speakerReview: TranscriptSpeakerReview | null = null;
-  let start = 0;
-  for (;;) {
-    const page = await unwrap(
-      browserApi.GET(
-        "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
-        {
-          params: {
-            path: {
-              flow_id: flowId,
-              run_id: runId,
-              step_id: target.stepId,
-              attempt_no: target.attemptNo
-            },
-            query: { start_segment_index: start }
-          },
-          signal
-        }
-      )
-    );
-    // A source too large to page; the other reasons have no lines to page.
-    if (page.status === "omitted") {
-      return { status: "omitted", tooLarge: page.reason === OMISSION_REASON.TOO_LARGE };
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal?.reason);
+  if (signal?.aborted) cancel();
+  signal?.addEventListener("abort", cancel);
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const fetchPage = async (start: number) => {
+    while (active >= TRANSCRIPT_SOURCE_PAGE_CONCURRENCY) {
+      await new Promise<void>((resume) => waiting.push(resume));
     }
-    if (page.status !== "present") return { status: "unavailable" };
-    sourceHash ??= page.source_hash;
-    // The speaker review comes with the first page only.
-    speakerReview ??= page.speaker_review ?? null;
-    segments.push(...page.segments);
-    if (page.next_segment_index === null) break;
-    if (page.next_segment_index <= start)
-      throw new Error("Transcript source paging did not advance");
-    start = page.next_segment_index;
+    active += 1;
+    try {
+      controller.signal.throwIfAborted();
+      return await unwrap(
+        browserApi.GET(
+          "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+          {
+            params: {
+              path: {
+                flow_id: flowId,
+                run_id: runId,
+                step_id: target.stepId,
+                attempt_no: target.attemptNo
+              },
+              query: { start_segment_index: start }
+            },
+            signal: controller.signal
+          }
+        )
+      );
+    } catch (error) {
+      // A failed page fails the read with its own error, before its slot goes
+      // to a page queued behind it: that page and the ones still out stop. A
+      // page stopped that way may reject with a bare AbortError, so every page
+      // rethrows the first reason: the read fails with the error that ended it.
+      controller.abort(error);
+      throw controller.signal.reason;
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+  try {
+    const segments: TranscriptSourceSegment[] = [];
+    let sourceHash: string | null = null;
+    let speakerReview: TranscriptSpeakerReview | null = null;
+    let start = 0;
+    let page = await fetchPage(start);
+    const requested = new Map<number, ReturnType<typeof fetchPage>>();
+    for (;;) {
+      // A source too large to page; the other reasons have no lines to page.
+      if (page.status === "omitted") {
+        return { status: "omitted", tooLarge: page.reason === OMISSION_REASON.TOO_LARGE };
+      }
+      if (page.status !== "present") return { status: "unavailable" };
+      sourceHash ??= page.source_hash;
+      // The speaker review comes with the first page only.
+      speakerReview ??= page.speaker_review ?? null;
+      segments.push(...page.segments);
+      if (page.next_segment_index === null) break;
+      if (page.next_segment_index <= start)
+        throw new Error("Transcript source paging did not advance");
+      if (start === 0 && page.page_size > 0) {
+        for (
+          let next = page.next_segment_index;
+          next < page.bounds.segments_count;
+          next += page.page_size
+        ) {
+          const request = fetchPage(next);
+          // Not left unhandled: its failure ends the read through the
+          // controller, whether or not the read reaches it.
+          request.catch(() => undefined);
+          requested.set(next, request);
+        }
+      }
+      start = page.next_segment_index;
+      page = await (requested.get(start) ?? fetchPage(start));
+    }
+    return { status: "present", segments, sourceHash: sourceHash ?? "", speakerReview };
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    // Stops pages requested in advance that the read did not reach.
+    controller.abort();
   }
-  return { status: "present", segments, sourceHash: sourceHash ?? "", speakerReview };
 }
 
 export function transcriptQueryOptions(
