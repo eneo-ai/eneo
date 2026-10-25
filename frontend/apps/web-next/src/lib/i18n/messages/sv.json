@@ -6839,5 +6839,17 @@
   "editor_summary_none": "Inga",
   "editor_summary_retention": "{count, plural, one {Sparas # dag} other {Sparas # dagar}}",
   "editor_summary_space_retention": "Ytans gallring",
-  "editor_summary_no_assistants": "Inga assistenter"
+  "editor_summary_no_assistants": "Inga assistenter",
+  "admin_attention_title": "Behöver åtgärd",
+  "admin_attention_error": "Fel",
+  "admin_attention_warning": "Varning",
+  "admin_attention_crawler_issues": "{count, plural, one {# fel eller varning} other {# fel och varningar}}",
+  "admin_attention_crawler_scheduler": "Crawlerns schemaläggare",
+  "admin_areas_title": "Läget just nu",
+  "admin_area_users": "{active, plural, one {# aktiv} other {# aktiva}} · {inactive, plural, =0 {inga inaktiva konton} one {# inaktivt konto} other {# inaktiva konton}}",
+  "admin_area_users_active": "{active, plural, one {# aktiv} other {# aktiva}}",
+  "admin_area_models": "{active} av {total} aktiva",
+  "admin_area_usage": "{tokens} tokens, 30 dagar · {count, plural, one {# modell} other {# modeller}}",
+  "admin_area_crawler": "{ongoing} pågående · {queued} i kö",
+  "admin_area_audit": "Senast: {event}, <time></time>"
 }

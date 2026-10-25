@@ -31,7 +31,7 @@ export type PageHeaderProps = {
    */
   headingRef?: React.Ref<HTMLHeadingElement>;
   /** One-line summary under the title. */
-  description?: string;
+  description?: React.ReactNode;
   /**
    * Ancestor trail above the title, root first. Crumbs with `href` are links,
    * crumbs without one are plain labels; only a crumb with `current` is

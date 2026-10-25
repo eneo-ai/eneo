@@ -6839,5 +6839,17 @@
   "editor_summary_none": "None",
   "editor_summary_retention": "{count, plural, one {Kept # day} other {Kept # days}}",
   "editor_summary_space_retention": "Space retention",
-  "editor_summary_no_assistants": "No assistants"
+  "editor_summary_no_assistants": "No assistants",
+  "admin_attention_title": "Needs attention",
+  "admin_attention_error": "Error",
+  "admin_attention_warning": "Warning",
+  "admin_attention_crawler_issues": "{count, plural, one {# error or warning} other {# errors and warnings}}",
+  "admin_attention_crawler_scheduler": "The crawler's scheduler",
+  "admin_areas_title": "Right now",
+  "admin_area_users": "{active} active · {inactive, plural, =0 {no inactive accounts} one {# inactive account} other {# inactive accounts}}",
+  "admin_area_users_active": "{active} active",
+  "admin_area_models": "{active} of {total} active",
+  "admin_area_usage": "{tokens} tokens, 30 days · {count, plural, one {# model} other {# models}}",
+  "admin_area_crawler": "{ongoing} ongoing · {queued} queued",
+  "admin_area_audit": "Latest: {event}, <time></time>"
 }
