@@ -543,6 +543,28 @@ def test_the_whole_run_input_reads_every_form_field(shape: dict[str, Any]) -> No
     assert {read.field for read in _field_reads(**shape)} == set(_FIELDS)
 
 
+def test_speaker_mapping_reads_the_form_fields_its_configuration_names() -> None:
+    reads = _field_reads(
+        input_source=FlowInputSource.PREVIOUS_STEP,
+        output_mode=FlowOutputMode.SPEAKER_MAPPING,
+        output_config={
+            "speaker_mapping": {
+                "participants_field": "kommun",
+                "speaker_count_field": "arende",
+            }
+        },
+    )
+
+    assert reads == (
+        FormFieldRead(
+            "config", "kommun", "output_config.speaker_mapping.participants_field"
+        ),
+        FormFieldRead(
+            "config", "arende", "output_config.speaker_mapping.speaker_count_field"
+        ),
+    )
+
+
 def test_no_form_field_is_read_by_a_step_reading_only_steps() -> None:
     assert (
         _field_reads(
