@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { ThemeProvider } from "next-themes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -32,17 +32,24 @@ function renderHome(appContext = testAppContext()) {
 
 const row = (name: RegExp | string) => screen.getByRole("link", { name });
 
+/**
+ * Konto itself: the profile and password cards stay mounted beside it (CSS,
+ * which jsdom does not apply, hides them below 1024 px).
+ */
+const konto = () =>
+  screen.getByRole("heading", { level: 1, name: "Konto" }).closest<HTMLElement>(".lg\\:hidden")!;
+
 describe("Konto on a phone (decision 22)", () => {
   it("is one page: who you are, the settings in groups, Logga ut last", async () => {
     setViewport("phone");
     const { container } = renderHome();
 
-    expect(screen.getByRole("heading", { level: 1, name: "Konto" })).toBeTruthy();
-    expect(screen.getByText("Anna Lind")).toBeTruthy();
-    expect(screen.getByText("anna.lind@example.se")).toBeTruthy();
-    expect(screen.getByText("Sundsvalls kommun · Medarbetare")).toBeTruthy();
+    const page = within(konto());
+    expect(page.getByText("Anna Lind")).toBeTruthy();
+    expect(page.getByText("anna.lind@example.se")).toBeTruthy();
+    expect(page.getByText("Sundsvalls kommun · Medarbetare")).toBeTruthy();
     expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)
+      page.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)
     ).toEqual(["Inställningar", "Säkerhet och åtkomst", "Eneo"]);
 
     // Each row is a link with what it holds now in its name.
@@ -60,10 +67,10 @@ describe("Konto on a phone (decision 22)", () => {
     // Administration is for admins.
     expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
 
-    const logout = screen.getByRole("button", { name: "Logga ut" });
-    const controls = [...container.querySelectorAll("a[href], button")];
+    const logout = page.getByRole("button", { name: "Logga ut" });
+    const controls = [...konto().querySelectorAll("a[href], button")];
     expect(controls.at(-1)).toBe(logout);
-    expect(screen.getByText("Frontend 0.1.0 · Backend 1.2.3")).toBeTruthy();
+    expect(page.getByText("Frontend 0.1.0 · Backend 1.2.3")).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -86,7 +93,7 @@ describe("Konto on a phone (decision 22)", () => {
     renderHome();
     expect(screen.queryByRole("link", { name: /Nyheter/ })).toBeNull();
     // Nothing in Eneo applies, so the group is not there either.
-    expect(screen.queryByRole("heading", { level: 2, name: "Eneo" })).toBeNull();
+    expect(within(konto()).queryByRole("heading", { level: 2, name: "Eneo" })).toBeNull();
   });
 
   it("keeps the accessibility statement, the old app and the organisation switch where configured", () => {
@@ -119,6 +126,32 @@ describe("Konto on a phone (decision 22)", () => {
 });
 
 describe("Konto from 1024 px", () => {
+  it("keeps a half-typed password across a turn to the drawer's width and back", () => {
+    setViewport("tablet-landscape");
+    renderHome(
+      testAppContext({
+        user: {
+          password_change: {
+            source: "eneo",
+            policy: {
+              min_length: 12,
+              max_bytes: 72,
+              requires_uppercase: false,
+              requires_lowercase: false,
+              requires_number: false,
+              requires_symbol: false
+            }
+          }
+        } as never
+      })
+    );
+    const current = () => screen.getByLabelText(/^Nuvarande lösenord/) as HTMLInputElement;
+    fireEvent.change(current(), { target: { value: "gammalt-lösenord" } });
+    act(() => setViewport("tablet-portrait"));
+    act(() => setViewport("tablet-landscape"));
+    expect(current().value).toBe("gammalt-lösenord");
+  });
+
   it("keeps the profile and the password form", () => {
     setViewport("tablet-landscape");
     renderHome();

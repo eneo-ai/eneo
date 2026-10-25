@@ -202,6 +202,66 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
     if (rootRef.current) focusIn(rootRef.current, { element });
   };
 
+  // The editor's control that had focus last (focusin: an element that CSS
+  // hides fires nothing on its way out).
+  const lastFocus = useRef<HTMLElement | null>(null);
+  const idsRef = useRef(ids);
+  useEffect(() => {
+    idsRef.current = ids;
+  });
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      lastFocus.current =
+        target instanceof HTMLElement && rootRef.current?.contains(target) ? target : null;
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+  // Turned across 768 px, CSS hides what the other layout showed: a tablet's
+  // strip and the sections a phone does not show, or a phone's index and bar.
+  // Focus that was there goes somewhere logical (ACCESSIBILITY.md): a field
+  // in a section the phone does not show opens that section, the field kept;
+  // an index row goes to its section's heading; anything else to the section
+  // in view, else to the index row or the first section.
+  useEffect(() => {
+    const list = window.matchMedia(PHONE_QUERY);
+    const turned = () => {
+      const element = lastFocus.current;
+      const root = rootRef.current;
+      if (!element || !root) return;
+      const active = document.activeElement;
+      if (active !== element && active !== document.body) return;
+      if (active === element && element.getClientRects().length > 0) return;
+      const inView = shownRef.current;
+      const section = element.closest<HTMLElement>("[data-editor-section]")?.dataset.editorSection;
+      if (list.matches) {
+        if (section && section !== inView) {
+          window.history.replaceState(null, "", `${window.location.pathname}?section=${section}`);
+          addressRef.current = window.location.pathname + window.location.search;
+          focusNext.current = { element };
+          setChosen(section);
+          return;
+        }
+        // The tablet's strip names the section it marks.
+        const tab = element.closest("a[href^='#']")?.getAttribute("href")?.slice(1);
+        focusIn(
+          root,
+          inView
+            ? { section: inView }
+            : { row: tab && idsRef.current.includes(tab) ? tab : (idsRef.current[0] ?? "") }
+        );
+        return;
+      }
+      const row = element.closest<HTMLElement>("[data-editor-row]")?.dataset.editorRow;
+      const target = row ?? inView ?? idsRef.current[0];
+      if (target) focusIn(root, { section: target });
+    };
+    list.addEventListener("change", turned);
+    return () => list.removeEventListener("change", turned);
+  }, []);
+
   // A view opened from a control takes focus to what it shows: a section to
   // its heading, the index to the row it was opened from. Not on arrival: a
   // resource just created focuses its name field itself.

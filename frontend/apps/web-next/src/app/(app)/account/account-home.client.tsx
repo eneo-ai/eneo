@@ -24,19 +24,19 @@ import { useCopyFormatLabel } from "./copy-format.client";
 /**
  * /account: below 1024 px, where the drawer is, Konto as one page (decision
  * 22); from there the profile and the password form under "Mitt konto" and
- * its tabs. Both until the width is known, CSS showing one.
+ * its tabs. CSS shows one. Konto holds no state and comes and goes with the
+ * width; the profile and the password form stay mounted, so what was typed
+ * outlives a turn of an iPad across 1024 px.
  */
 export function AccountHome() {
   const mobile = useMediaMatch(MOBILE_QUERY);
   return (
     <>
       {mobile !== false ? <Konto /> : null}
-      {mobile !== true ? (
-        <div className="flex flex-col gap-6 max-lg:hidden">
-          <AccountProfile />
-          <ChangePasswordCard />
-        </div>
-      ) : null}
+      <div className="flex flex-col gap-6 max-lg:hidden">
+        <AccountProfile />
+        <ChangePasswordCard />
+      </div>
     </>
   );
 }

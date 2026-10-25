@@ -142,3 +142,38 @@ test.describe("an editor on a tablet", () => {
     }
   });
 });
+
+test.describe("an editor turned across 768 px", () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("keeps focus on what it was on, or on its counterpart, both ways", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(editor);
+    // A tablet, typing in Instruktioner; narrowed to a phone, the field's
+    // section opens in place with the field still focused.
+    const prompt = page.locator("#assistant-prompt");
+    await prompt.fill("Svara kort.");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page).toHaveURL(/\?section=instructions$/);
+    await expect(prompt).toBeVisible();
+    await expect(prompt).toBeFocused();
+    await expect(prompt).toHaveValue("Svara kort.");
+
+    // A phone's index row, widened to a tablet: its section's heading.
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    const row = page.getByRole("navigation", { name: "Avsnitt" }).getByRole("link", {
+      name: /^Instruktioner/
+    });
+    await expect(row).toBeFocused();
+    await page.setViewportSize({ width: 820, height: 1180 });
+    const heading = page
+      .locator('[data-editor-section="instructions"]')
+      .getByRole("heading")
+      .first();
+    await expect(heading).toBeVisible();
+    await expect(heading).toBeFocused();
+  });
+});
