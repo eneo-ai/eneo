@@ -60,6 +60,11 @@ class FlowSuggestionCode(str, Enum):
     IDENTICAL_INPUTS = "identical_inputs"
     CONTEXT_HEADROOM = "context_headroom"
     FORMAT_FALLBACK = "format_fallback"
+    # Measured from the forwarding facts the worker records for each model
+    # call (``flow_suggestion_forwarding``).
+    MODEL_RELAY = "model_relay"
+    OVERLAPPING_INPUTS = "overlapping_inputs"
+    DETERMINISTIC_CANDIDATE = "deterministic_candidate"
 
 
 # What to do so a flow never earns the suggestion: one rule per code, for
@@ -112,6 +117,17 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
     FlowSuggestionCode.FORMAT_FALLBACK: (
         "Ask for structured output only from a model that supports it, or "
         "let the step write text."
+    ),
+    FlowSuggestionCode.MODEL_RELAY: (
+        "Have no model step copy an earlier text forward: let the later steps "
+        "read the original."
+    ),
+    FlowSuggestionCode.OVERLAPPING_INPUTS: (
+        "Give a step a text or a result that quotes it at length, not both."
+    ),
+    FlowSuggestionCode.DETERMINISTIC_CANDIDATE: (
+        "Use a compose_text step, not a model, for a step that only puts "
+        "earlier results together with a little fixed text."
     ),
 }
 
@@ -386,6 +402,30 @@ class DraftReads:
             read
             for read in self.reads[step.step_order]
             if read.channel in ("input", "prompt")
+        )
+
+    def edge_read(
+        self,
+        reads: Sequence[StepRead],
+        *,
+        binding_ref: str,
+        source_step_id: UUID | None,
+    ) -> StepRead | None:
+        """The read among ``reads`` that made a measured edge: written where
+        the edge was (its ``binding_ref`` is the read's site) and read from
+        the same step. None for an edge of no earlier step (the run input) and
+        for one the draft no longer makes."""
+        if source_step_id is None:
+            return None
+        producer = str(source_step_id)
+        return next(
+            (
+                read
+                for read in reads
+                if read.site == binding_ref
+                and self.producer_key(read.step_order) == producer
+            ),
+            None,
         )
 
     def readers_of(self, order: int) -> list[tuple[SuggestionStep, StepRead]]:
