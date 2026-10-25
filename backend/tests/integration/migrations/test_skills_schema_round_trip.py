@@ -25,6 +25,7 @@ from sqlalchemy.exc import DBAPIError
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -71,11 +72,6 @@ def seed_default_models():
 def pre_skills_database(test_settings) -> Iterator[MigrationDatabase]:
     config = _alembic_config(test_settings.sync_database_url)
 
-    try:
-        command.downgrade(config, PRE_SKILLS_REVISION)
-    except Exception:
-        command.upgrade(config, PRE_SKILLS_REVISION)
-
     connection = psycopg2.connect(
         host=test_settings.postgres_host,
         port=test_settings.postgres_port,
@@ -85,10 +81,11 @@ def pre_skills_database(test_settings) -> Iterator[MigrationDatabase]:
     )
     connection.autocommit = True
 
-    try:
-        yield MigrationDatabase(connection=connection, alembic_config=config)
-    finally:
-        connection.close()
+    with at_revision(config, PRE_SKILLS_REVISION):
+        try:
+            yield MigrationDatabase(connection=connection, alembic_config=config)
+        finally:
+            connection.close()
 
 
 def _insert_tenant(connection: PgConnection, label: str) -> str:

@@ -28,7 +28,6 @@ from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow, FlowSparse
-    from eneo.spaces.space import Space
 
 
 SERVICE_KEY_ADMIN_REQUIRED_MESSAGE = (
@@ -43,7 +42,7 @@ _FLOW_READ_PERMISSION_MESSAGE = "You do not have permission to access this flow.
 class PublishedFlowRuntimeAccess:
     flow: Flow
     published_version: int
-    space: Space
+    actor: SpaceActor
 
 
 def _raise_service_key_admin_required() -> NoReturn:
@@ -174,13 +173,10 @@ async def require_flow_published_runtime_access(
     if published_version is None:
         raise NotFoundException("Flow not found.")
 
-    _require_flow_reader_actor(access_context)
-    space = access_context.space
-    assert space is not None, "a resolved flow access context carries its space"
     return PublishedFlowRuntimeAccess(
         flow=access_context.flow,
         published_version=published_version,
-        space=space,
+        actor=_require_flow_reader_actor(access_context),
     )
 
 

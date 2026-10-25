@@ -7,7 +7,7 @@ from uuid import UUID
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.flows.domain.flow import Flow, FlowRun
+from eneo.flows.domain.flow import Flow, FlowRunStatusSnapshot
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuditLoggingUnavailableException
@@ -21,7 +21,7 @@ async def log_flow_trace_audit_or_raise(
     *,
     container: Container,
     user: UserInDB,
-    run: FlowRun,
+    run: FlowRunStatusSnapshot,
     action: ActionType,
     description: str,
     extra: Mapping[str, object] | None = None,
@@ -58,7 +58,7 @@ async def log_flow_trace_audit_or_raise(
 def raise_flow_trace_audit_unavailable(
     *,
     user: UserInDB,
-    run: FlowRun,
+    run: FlowRunStatusSnapshot,
     action: ActionType,
     cause: BaseException,
 ) -> NoReturn:

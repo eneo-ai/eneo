@@ -19,6 +19,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.flows.api.flow_models import (
     FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE,
+    FlowCreateRequest,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
     FlowStepCreateRequest,
@@ -65,16 +66,15 @@ def test_create_run_documents_live_transcript_binding_conflict(openapi_spec):
 
 def test_text_processing_contract_fields_are_typed(openapi_spec):
     schemas = openapi_spec["components"]["schemas"]
-    for name in ("FlowStepCreateRequest", "FlowStepUpdateRequest"):
-        config = schemas[name]["properties"]["input_config"]["anyOf"][0]
-        config_schema = schemas[config["$ref"].split("/")[-1]]
-        processing = config_schema["properties"]["text_processing"]["anyOf"][0]
-        processing_schema = schemas[processing["$ref"].split("/")[-1]]
-        mode = processing_schema["properties"]["mode"]
-        assert schemas[mode["$ref"].split("/")[-1]]["enum"] == [
-            "process_each_section",
-            "summarize",
-        ]
+    config = schemas["FlowStepUpdateRequest"]["properties"]["input_config"]["anyOf"][0]
+    config_schema = schemas[config["$ref"].split("/")[-1]]
+    processing = config_schema["properties"]["text_processing"]["anyOf"][0]
+    processing_schema = schemas[processing["$ref"].split("/")[-1]]
+    mode = processing_schema["properties"]["mode"]
+    assert schemas[mode["$ref"].split("/")[-1]]["enum"] == [
+        "process_each_section",
+        "summarize",
+    ]
     projection = schemas["FlowRunContractPublic"]["properties"]["text_processing_steps"]
     assert projection["type"] == "array"
     item = schemas[projection["items"]["$ref"].split("/")[-1]]
@@ -2045,18 +2045,18 @@ def test_openapi_flow_step_review_policy_documents_authoring_contract(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-    create_schema = schemas.get("FlowStepCreateRequest", {}).get("properties", {})
+    request_schema = schemas.get("FlowStepUpdateRequest", {}).get("properties", {})
     public_schema = schemas.get("FlowStepPublic", {}).get("properties", {})
     review_policy_schema = schemas.get("FlowStepReviewPolicy", {}).get("properties", {})
 
-    create_description = str(create_schema["review_policy"].get("description", ""))
+    request_description = str(request_schema["review_policy"].get("description", ""))
     public_description = str(public_schema["review_policy"].get("description", ""))
     mode_description = str(review_policy_schema["mode"].get("description", ""))
     expiry_description = str(
         review_policy_schema["expires_after_seconds"].get("description", "")
     )
 
-    for description in (create_description, public_description):
+    for description in (request_description, public_description):
         assert "human-in-the-loop checkpoint" in description
         assert "`view`" in description
         assert "`edit`" in description
@@ -2090,33 +2090,47 @@ def test_flow_step_retrieval_policy_is_typed_at_request_and_openapi_boundary(
     assert any(error["loc"] == ("output_config",) for error in exc_info.value.errors())
 
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-    for request_schema_name in ("FlowStepCreateRequest", "FlowStepUpdateRequest"):
-        output_config = schemas[request_schema_name]["properties"]["output_config"]
-        object_schema = next(
-            option
-            for option in output_config["anyOf"]
-            if isinstance(option, dict) and option.get("type") == "object"
+    output_config = schemas["FlowStepUpdateRequest"]["properties"]["output_config"]
+    object_schema = next(
+        option
+        for option in output_config["anyOf"]
+        if isinstance(option, dict) and option.get("type") == "object"
+    )
+    assert object_schema["additionalProperties"] is True
+    retrieval_policy = object_schema["properties"]["retrieval_policy"]
+    assert retrieval_policy["additionalProperties"] is False
+    assert set(retrieval_policy["required"]) == {"version", "mode"}
+    assert retrieval_policy["properties"]["version"]["const"] == 1
+    assert set(retrieval_policy["properties"]["mode"]["enum"]) == {
+        "best_effort",
+        "fail_closed",
+    }
+
+
+def test_openapi_flow_create_takes_no_steps(openapi_spec: dict) -> None:
+    # Each step runs an assistant the flow owns, which exists only once the
+    # flow does: a new flow is created empty and its steps set by an update.
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    create_schema = schemas["FlowCreateRequest"]
+    assert "steps" not in create_schema["properties"]
+    assert create_schema["additionalProperties"] is False
+    with pytest.raises(ValidationError):
+        FlowCreateRequest.model_validate(
+            {
+                "space_id": "00000000-0000-0000-0000-000000000001",
+                "name": "x",
+                "steps": [],
+            }
         )
-        assert object_schema["additionalProperties"] is True
-        retrieval_policy = object_schema["properties"]["retrieval_policy"]
-        assert retrieval_policy["additionalProperties"] is False
-        assert set(retrieval_policy["required"]) == {"version", "mode"}
-        assert retrieval_policy["properties"]["version"]["const"] == 1
-        assert set(retrieval_policy["properties"]["mode"]["enum"]) == {
-            "best_effort",
-            "fail_closed",
-        }
 
 
 def test_openapi_flow_step_update_uses_step_update_request_schema(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-    create_schema = schemas.get("FlowStepCreateRequest", {})
     update_schema = schemas.get("FlowStepUpdateRequest", {})
     partial_update_schema = schemas.get("PartialFlowUpdateRequest", {})
 
-    assert "id" not in create_schema.get("properties", {})
     update_id = update_schema.get("properties", {}).get("id", {})
     assert any(
         isinstance(option, dict) and option.get("format") == "uuid"
@@ -3032,6 +3046,27 @@ def test_openapi_flow_pagination_response_shape_is_current(
     assert "PaginatedResponse_FlowRunSummaryPublic_" not in schemas
 
 
+def test_openapi_flow_run_list_counts_by_default_and_says_null_when_asked_not_to(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "get")
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+    option = parameters["include_status_counts"]
+    assert option["in"] == "query"
+    assert option.get("required", False) is False
+    assert option["schema"]["type"] == "boolean"
+    assert option["schema"]["default"] is True
+
+    component = openapi_spec["components"]["schemas"]["FlowRunListPublic"]
+    # Still always present, so a client reads the key without guessing; null
+    # only for a caller that asked not to count.
+    assert "status_counts" in component["required"]
+    assert component["properties"]["status_counts"]["anyOf"] == [
+        {"$ref": "#/components/schemas/FlowRunStatusCountsPublic"},
+        {"type": "null"},
+    ]
+
+
 def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) -> None:
     schema = (
         openapi_spec.get("components", {})
@@ -3253,7 +3288,6 @@ def test_openapi_flow_runtime_mutation_requests_reject_unknown_fields(
     strict_request_schemas = {
         "FlowAssistantCreateRequest",
         "FlowCreateRequest",
-        "FlowStepCreateRequest",
         "FlowStepUpdateRequest",
         "HttpTestRequest",
         "PartialFlowUpdateRequest",
@@ -3410,13 +3444,13 @@ def test_openapi_create_flow_run_documents_concurrency_limit(
     assert retry_after.get("schema", {}).get("example") == 60
 
 
-def test_openapi_flow_step_create_schema_exposes_enum_constraints(
+def test_openapi_flow_step_request_schema_exposes_enum_constraints(
     openapi_spec: dict,
 ) -> None:
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
-        .get("FlowStepCreateRequest", {})
+        .get("FlowStepUpdateRequest", {})
     )
     properties = schema.get("properties", {})
     for field in (
@@ -3430,13 +3464,13 @@ def test_openapi_flow_step_create_schema_exposes_enum_constraints(
         assert enum_values, f"{field} must include enum-constrained OpenAPI values"
 
 
-def test_openapi_flow_step_create_enum_values_match_contract(
+def test_openapi_flow_step_request_enum_values_match_contract(
     openapi_spec: dict,
 ) -> None:
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
-        .get("FlowStepCreateRequest", {})
+        .get("FlowStepUpdateRequest", {})
     )
     properties = schema.get("properties", {})
     expected = {
@@ -3468,7 +3502,6 @@ def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(
     schemas = openapi_spec.get("components", {}).get("schemas", {})
 
     for schema_name in (
-        "FlowStepCreateRequest",
         "FlowStepUpdateRequest",
         "FlowStepPublic",
         "FlowAssistantPublic",
@@ -3535,7 +3568,7 @@ def test_openapi_excludes_http_post_input_and_retains_http_post_output(
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
-        .get("FlowStepCreateRequest", {})
+        .get("FlowStepUpdateRequest", {})
     )
     properties = schema.get("properties", {})
 

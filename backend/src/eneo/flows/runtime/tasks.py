@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
+import time
+from collections.abc import AsyncGenerator, Callable, Generator
+from contextlib import asynccontextmanager, contextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, assert_never
@@ -11,6 +13,7 @@ from uuid import UUID
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.application.guaranteed_delivery import GuaranteedAuditDeliveryResult
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
 from eneo.flows.application.flow_dispatch import (
@@ -19,6 +22,7 @@ from eneo.flows.application.flow_dispatch import (
 )
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+    flow_audit_outbox_drain_seconds,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
@@ -30,6 +34,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
+    FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS,
     FlowRunRecoveryKind,
 )
 from eneo.flows.domain.mapped_execution_policy import (
@@ -53,7 +58,11 @@ from eneo.flows.flow_run_error import (
     FlowRunRecoveryFacts,
 )
 from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
-from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRecoveryCandidate,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
@@ -293,6 +302,9 @@ async def _execute_flow_run_async_traced(
             run_trace_id=run.trace_id,
             task_id=task_id,
         ):
+            # Read before the claim stamps the lease, so its commit counts
+            # against the lease the heartbeats then keep.
+            leased_at = time.monotonic()
             can_run = await flow_run_repo.mark_running_if_claimable(
                 run_id=run_id,
                 tenant_id=tenant_id,
@@ -313,7 +325,8 @@ async def _execute_flow_run_async_traced(
                 return result
 
             async with execution_heartbeats().track(
-                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision),
+                leased_at=leased_at,
             ):
                 try:
                     run_actor = await _resolve_flow_run_actor(
@@ -397,6 +410,7 @@ async def _execute_flow_run_async_traced(
                     template_asset_repo=runtime_container.flow_template_asset_repo(),
                     encryption_service=runtime_container.encryption_service(),
                     audit_service=runtime_container.audit_service(),
+                    task_enqueuer=runtime_container.platform_task_enqueuer(),
                     read_audit_service=partial(
                         audit_service_on_own_session,
                         Container(session=providers.Object(SessionProxy())),
@@ -441,52 +455,96 @@ async def _execute_flow_run_async_traced(
                 return {key: str(value) for key, value in result.items()}
 
 
+# Bounds the terminal write a job timeout or a task failure makes.
+FLOW_TASK_FAILURE_WRITE_TIMEOUT_SECONDS = 10
+
+
 async def terminalize_flow_run_failure(
     *,
-    run_id: UUID,
-    tenant_id: UUID,
+    owner: FlowRunExecutionOwner,
     source: FlowRunLifecycleSource,
     error: FlowRunError,
 ) -> None:
-    async with sessionmanager.session() as session:
-        async with session.begin():
+    """Fail the run this task stopped executing, behind its execution-owner
+    fence: a run another worker or a redispatch took over, a user or a review
+    holds, or one waiting on an outbound delivery, is left as it is.
+
+    The owner is the run this task claimed (``claimed_run``): the heartbeat
+    context reset it on the way out. As the heartbeat reaper does, a provider call the task started has no
+    known outcome once the run ends here, so none is presented as finished."""
+    # Ownership loss is a CancelledError: caught here, it cannot read as the
+    # write itself being cancelled.
+    with suppress(FlowExecutionOwnershipLost):
+        async with sessionmanager.session() as session, session.begin():
             container = Container(session=providers.Object(session))
             terminalizer = container.flow_run_terminalizer()
-            await terminalizer.terminalize_run(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                target_status=FlowRunStatus.FAILED,
-                source=source,
-                error=error,
+            result = await terminalizer.terminalize_interrupted_running_run(
+                owner=owner, source=source, error=error
             )
+            if result.did_transition:
+                provider_calls = container.flow_provider_call_repo()
+                await provider_calls.mark_started_calls_outcome_unknown_for_run(
+                    run_id=owner.run_id,
+                    tenant_id=owner.tenant_id,
+                    reason=ProviderCallUnknownReason.WORKER_INTERRUPTED,
+                )
 
 
 async def _terminalize_flow_run_failure_from_task(
     *,
-    run_id: UUID,
-    tenant_id: UUID,
+    owner: FlowRunExecutionOwner,
     task_id: str | None,
     source: FlowRunLifecycleSource,
     error: FlowRunError,
+    timeout_seconds: float = FLOW_TASK_FAILURE_WRITE_TIMEOUT_SECONDS,
 ) -> None:
     try:
-        async with asyncio.timeout(10):
-            await terminalize_flow_run_failure(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                source=source,
-                error=error,
-            )
+        async with asyncio.timeout(timeout_seconds):
+            await terminalize_flow_run_failure(owner=owner, source=source, error=error)
     except Exception:
         logger.exception(
             "Flow run task terminalization failed",
             extra={
-                "run_id": str(run_id),
-                "tenant_id": str(tenant_id),
+                "run_id": str(owner.run_id),
+                "tenant_id": str(owner.tenant_id),
                 "task_id": task_id,
                 "source": source.value,
+                "error_code": error.code,
             },
         )
+
+
+async def _fail_run_stopped_by_worker_shutdown(
+    *, owner: FlowRunExecutionOwner, task_id: str | None
+) -> None:
+    """End at once a run whose task the worker shutdown cancelled, instead of
+    leaving it running until the heartbeat reaper calls it stalled.
+
+    The write is bounded so a slow database cannot hold the shutdown, and it
+    is the execution heartbeats' task, so a second cancellation cannot cut it
+    short and the worker waits for it before closing its database; a job that
+    only gets here after the worker stopped waiting starts none, and the
+    heartbeat reaper ends the run. The run is not requeued: a step that was
+    executing may have had effects, and repeating it needs idempotency the
+    steps do not promise; the user retries or reruns.
+    """
+    write = execution_heartbeats().run_shutdown_write(
+        _terminalize_flow_run_failure_from_task(
+            owner=owner,
+            task_id=task_id,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_FAILURE,
+                code=FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
+                message=(
+                    "flow_worker_shutdown: The worker shut down before run completion."
+                ),
+            ),
+            timeout_seconds=FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS,
+        )
+    )
+    if write is not None:
+        await asyncio.shield(write)
 
 
 async def execute_flow_run_task(
@@ -501,6 +559,9 @@ async def execute_flow_run_task(
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
+    # Before anything can be cancelled: the worker's shutdown waits for this
+    # job, wherever a cancellation finds it, before closing its database.
+    execution_heartbeats().hold_job()
     logger.info(
         "Received flow execution task",
         extra={
@@ -578,6 +639,14 @@ async def execute_flow_run_task(
             )
     except FlowExecutionOwnershipLost:
         return {"status": "skipped", "reason": "execution_ownership_lost"}
+    except asyncio.CancelledError:
+        # Each terminal write below ends only the run this job claimed: a job
+        # that never did (a duplicate delivery, or one still claiming) leaves
+        # it to its claimer, the redispatch or the heartbeat reaper.
+        claimed = execution_heartbeats().claimed_run()
+        if claimed is not None and execution_heartbeats().worker_is_shutting_down():
+            await _fail_run_stopped_by_worker_shutdown(owner=claimed, task_id=task_id)
+        raise
     except TimeoutError:
         error_message = (
             "flow_task_timeout: Flow execution timed out before task completion."
@@ -586,17 +655,17 @@ async def execute_flow_run_task(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        await _terminalize_flow_run_failure_from_task(
-            run_id=run_id_uuid,
-            tenant_id=tenant_id_uuid,
-            task_id=task_id,
-            source=FlowRunLifecycleSource.TASK_TIMEOUT,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.TASK_TIMEOUT,
-                code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
-                message=error_message,
-            ),
-        )
+        if (claimed := execution_heartbeats().claimed_run()) is not None:
+            await _terminalize_flow_run_failure_from_task(
+                owner=claimed,
+                task_id=task_id,
+                source=FlowRunLifecycleSource.TASK_TIMEOUT,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_TIMEOUT,
+                    code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
+                    message=error_message,
+                ),
+            )
         return {"status": "failed", "reason": "timeout"}
     except Exception:
         error_message = (
@@ -606,17 +675,17 @@ async def execute_flow_run_task(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        await _terminalize_flow_run_failure_from_task(
-            run_id=run_id_uuid,
-            tenant_id=tenant_id_uuid,
-            task_id=task_id,
-            source=FlowRunLifecycleSource.TASK_FAILURE,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.TASK_FAILURE,
-                code=FlowApiErrorCode.RUN_TASK_FAILURE,
-                message=error_message,
-            ),
-        )
+        if (claimed := execution_heartbeats().claimed_run()) is not None:
+            await _terminalize_flow_run_failure_from_task(
+                owner=claimed,
+                task_id=task_id,
+                source=FlowRunLifecycleSource.TASK_FAILURE,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_FAILURE,
+                    code=FlowApiErrorCode.RUN_TASK_FAILURE,
+                    message=error_message,
+                ),
+            )
         return {"status": "failed", "reason": "task_failure"}
 
 
@@ -650,14 +719,53 @@ def _fail_task_if_tenants_were_skipped(
     )
 
 
-_stale_running_cursor: tuple[datetime, UUID] | None = None
-_stale_running_window_end: tuple[datetime, UUID] | None = None
+# Review checkpoint inspection pages every awaiting-review run, healthy ones too.
+_REVIEW_RECOVERY_KINDS = frozenset({FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION})
+# Expired heartbeats and exhausted dispatches page apart, so a backlog of healthy
+# reviews anywhere in the deployment cannot delay their recovery.
+_ACTIONABLE_RECOVERY_KINDS = frozenset(
+    {
+        FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED,
+        FlowRunRecoveryKind.EXHAUSTED_DISPATCH,
+    }
+)
+
+
+@dataclass
+class _RecoveryWindow:
+    """A finite window of recovery candidates of some kinds, paged in order and
+    then wrapped, so newer arrivals cannot starve older ones."""
+
+    kinds: frozenset[FlowRunRecoveryKind]
+    cursor: tuple[datetime, UUID] | None = None
+    end: tuple[datetime, UUID] | None = None
+
+    async def next_page(
+        self, run_repo: FlowRunRepository, *, limit: int
+    ) -> list[FlowRunRecoveryCandidate]:
+        if self.cursor is None or (self.end is not None and self.cursor >= self.end):
+            self.cursor = self.end = None
+        if self.end is None:
+            self.end = await run_repo.recovery_sweep_boundary(kinds=self.kinds)
+        page = (
+            await run_repo.list_recovery_candidates(
+                limit=limit, after=self.cursor, through=self.end, kinds=self.kinds
+            )
+            if self.end is not None
+            else []
+        )
+        if not page:
+            self.cursor = self.end = None
+        return page
+
+
+_actionable_recovery = _RecoveryWindow(_ACTIONABLE_RECOVERY_KINDS)
+_review_recovery = _RecoveryWindow(_REVIEW_RECOVERY_KINDS)
 
 
 async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
-    global _stale_running_cursor, _stale_running_window_end
     reconciled = 0
     abandoned = 0
     review_checkpoint_invariant_violations = 0
@@ -669,27 +777,12 @@ async def _reconcile_stale_running_runs_all_tenants(
         provider_call_repo = container.flow_provider_call_repo()
         terminalizer = container.flow_run_terminalizer()
         async with session.begin():
-            if _stale_running_cursor is None or (
-                _stale_running_window_end is not None
-                and _stale_running_cursor >= _stale_running_window_end
-            ):
-                _stale_running_cursor = None
-                _stale_running_window_end = None
-            if _stale_running_window_end is None:
-                _stale_running_window_end = await run_repo.recovery_sweep_boundary()
-            stale_runs = (
-                await run_repo.list_recovery_candidates(
-                    limit=limit,
-                    after=_stale_running_cursor,
-                    through=_stale_running_window_end,
-                )
-                if _stale_running_window_end is not None
-                else []
-            )
-            if not stale_runs:
-                _stale_running_cursor = None
-                _stale_running_window_end = None
-        for run in stale_runs:
+            candidates = [
+                (window, run)
+                for window in (_actionable_recovery, _review_recovery)
+                for run in await window.next_page(run_repo, limit=limit)
+            ]
+        for window, run in candidates:
             try:
                 if run.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION:
                     continue
@@ -749,7 +842,7 @@ async def _reconcile_stale_running_runs_all_tenants(
                 )
             finally:
                 # Advance even after failure so one old run cannot starve other tenants.
-                _stale_running_cursor = run.cursor
+                window.cursor = run.cursor
     _fail_task_if_tenants_were_skipped(
         task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
     )
@@ -893,25 +986,39 @@ async def _redispatch_stale_queued_runs_all_tenants(
 async def _deliver_flow_audit_outbox(
     *, limit: int = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
 ) -> dict[str, int | str]:
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            service = container.flow_run_audit_outbox_delivery_service()
-            result = await service.deliver_due(
-                now=datetime.now(timezone.utc),
-                limit=limit,
-            )
-            return result.to_task_payload()
+    """Deliver due rows in batches of ``limit``, each in its own transaction,
+    until a batch attempts fewer rows than that or the drain time has passed.
+    A batch that fails or is cancelled rolls back and leaves its rows due; the
+    batches before it stay committed."""
+    loop = asyncio.get_running_loop()
+    drain_ends_at = loop.time() + flow_audit_outbox_drain_seconds()
+    result = GuaranteedAuditDeliveryResult()
+    batches = 0
+    while True:
+        async with sessionmanager.session() as session:
+            enable_autobegin_for_flow_task_session(session)
+            async with session.begin():
+                container = Container(session=providers.Object(session))
+                service = container.flow_run_audit_outbox_delivery_service()
+                batch = await service.deliver_due(
+                    now=datetime.now(timezone.utc),
+                    limit=limit,
+                )
+        result = result.combine(batch)
+        batches += 1
+        if batch.attempted_count < limit or loop.time() >= drain_ends_at:
+            return {**result.to_task_payload(), "batches": batches}
 
 
 async def _deliver_flow_webhook_outbox(
     *,
     budget: FlowWebhookDeliveryBudget,
     limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> dict[str, int | str]:
     """Claim and deliver due webhooks in waves of the concurrency until a wave
     claims nothing or the job deadline no longer covers a whole delivery.
+    ``clock`` is what the claims call "now"; only tests replace it.
 
     Claims, deliveries and their recording are all cut at the budget's hard
     stop. A delivery cut there keeps its claim; the job then returns its counts
@@ -933,7 +1040,7 @@ async def _deliver_flow_webhook_outbox(
                         container = Container(session=providers.Object(session))
                         service = container.flow_run_webhook_delivery_service()
                         batch = await service.claim_due_batch(
-                            now=datetime.now(timezone.utc),
+                            now=clock(),
                             limit=min(FLOW_WEBHOOK_DELIVERY_CONCURRENCY, remaining),
                             deadline=deadline,
                         )

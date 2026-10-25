@@ -335,8 +335,16 @@ async def test_shared_recovery_bounds_checkpoint_inspection_and_advances_healthy
             tasks, "enable_autobegin_for_flow_task_session", lambda _: None
         )
         monkeypatch.setattr(tasks, "Container", lambda **_: container)
-        monkeypatch.setattr(tasks, "_stale_running_cursor", None)
-        monkeypatch.setattr(tasks, "_stale_running_window_end", boundary)
+        monkeypatch.setattr(
+            tasks,
+            "_actionable_recovery",
+            tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+        )
+        monkeypatch.setattr(
+            tasks,
+            "_review_recovery",
+            tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS, end=boundary),
+        )
         for page in range(2):
             inspected.clear()
             result = await tasks._reconcile_stale_running_runs_all_tenants(
@@ -347,7 +355,7 @@ async def test_shared_recovery_bounds_checkpoint_inspection_and_advances_healthy
                 for i in range(page * page_size + 1, (page + 1) * page_size + 1)
             }
             last = (page + 1) * page_size
-            assert tasks._stale_running_cursor == (
+            assert tasks._review_recovery.cursor == (
                 anchor + timedelta(seconds=last),
                 UUID(int=last),
             )
@@ -439,7 +447,9 @@ async def test_shared_sweep_reports_missing_checkpoint_without_inventing_deadlin
     assert candidate.abandonment is None
     repo, terminalizer = AsyncMock(), AsyncMock()
     repo.recovery_sweep_boundary.return_value = (candidate.anchor_at, candidate.id)
-    repo.list_recovery_candidates.return_value = [candidate]
+    repo.list_recovery_candidates.side_effect = lambda *, kinds, **_: (
+        [] if kinds == tasks._ACTIONABLE_RECOVERY_KINDS else [candidate]
+    )
     container = SimpleNamespace(
         flow_run_repo=lambda: repo,
         flow_run_terminalizer=lambda: terminalizer,
@@ -453,14 +463,20 @@ async def test_shared_sweep_reports_missing_checkpoint_without_inventing_deadlin
     monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
     monkeypatch.setattr(tasks, "enable_autobegin_for_flow_task_session", lambda _: None)
     monkeypatch.setattr(tasks, "Container", lambda **_: container)
-    monkeypatch.setattr(tasks, "_stale_running_cursor", None)
-    monkeypatch.setattr(tasks, "_stale_running_window_end", None)
+    monkeypatch.setattr(
+        tasks,
+        "_actionable_recovery",
+        tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+    )
+    monkeypatch.setattr(
+        tasks, "_review_recovery", tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS)
+    )
     result = await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
     assert result["review_checkpoint_invariant_violations"] == 1
     assert result["abandoned"] == 0
     terminalizer.terminalize_abandoned_run.assert_not_awaited()
     terminalizer.terminalize_stale_running_run.assert_not_awaited()
-    assert tasks._stale_running_cursor == (candidate.anchor_at, candidate.id)
+    assert tasks._review_recovery.cursor == (candidate.anchor_at, candidate.id)
 
 
 async def test_exhausted_dispatch_past_deadline_cannot_reset_its_epoch():

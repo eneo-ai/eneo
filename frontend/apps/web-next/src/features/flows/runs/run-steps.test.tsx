@@ -8,7 +8,7 @@ import { makeRunGraph, makeRunStep } from "./run-fixtures";
 import { RunLiveProgress } from "./run-live-progress";
 import { runStepViews } from "./run-progress";
 import { RunSteps } from "./run-steps";
-import { runKeys, transcriptCorrectionsQueryOptions, type RunEvidence } from "./runs-api";
+import { runKeys, type RunEvidence } from "./runs-api";
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: {} }));
 
@@ -158,6 +158,30 @@ describe("RunSteps copying", () => {
         JSON.stringify({ text: "Ärendet gäller bygglov." }, null, 2)
       )
     );
+  });
+
+  it("renders what a step was sent only while it is open", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: { text: "Ärendet gäller bygglov." } })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    const trigger = within(card).getByRole("button", { name: messages.flow_runs_step_input });
+    expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
+    expect(
+      within(card).queryByRole("button", { name: messages.flow_run_more_copy_input })
+    ).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(card.textContent).toContain("Ärendet gäller bygglov.");
+    fireEvent.click(trigger);
+    expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
+    fireEvent.click(trigger);
+    expect(card.textContent).toContain("Ärendet gäller bygglov.");
+    expect(
+      within(card).getByRole("button", { name: messages.flow_run_more_copy_input })
+    ).toBeTruthy();
   });
 });
 
@@ -319,7 +343,7 @@ describe("RunSteps transcription and speakers", () => {
 
   it("shows whom a speaker-mapping step named, with the names given in the transcript since", async () => {
     const queryClient = testQueryClient();
-    queryClient.setQueryData(transcriptCorrectionsQueryOptions("flow-1", "run-1").queryKey, [
+    queryClient.setQueryData(runKeys.corrections("flow-1", "run-1"), [
       {
         flow_run_id: "run-1",
         step_id: "step-1",
@@ -381,7 +405,7 @@ describe("RunSteps transcription and speakers", () => {
 describe("RunSteps attempts", () => {
   it("lists a step's attempts in its card when opened, for a caller who may read the evidence", async () => {
     const queryClient = testQueryClient();
-    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1"), {
+    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1", false), {
       step_attempts: [
         {
           id: "a-1",

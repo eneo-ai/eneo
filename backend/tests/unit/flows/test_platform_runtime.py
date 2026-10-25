@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -17,6 +17,8 @@ from eneo.flows.flow_run_dispatch_request import (
     FlowRunUserDispatchRequest,
     flow_run_dispatch_task_kwargs,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+from eneo.flows.runtime.execution_heartbeat import FlowExecutionHeartbeats
 from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotReadyException
@@ -31,6 +33,7 @@ from eneo.tasks.routing import (
     FLOW_DELIVER_AUDIT_OUTBOX_TASK,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     FLOW_DRAIN_RETIRED_RUNS_TASK,
+    FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
     FLOW_EXECUTE_TASK,
     FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
     FLOW_RECONCILE_RUNNING_TASK,
@@ -173,10 +176,14 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
         function.name for function in PlatformExecutionWorkerSettings.functions
     ] == [FLOW_EXECUTE_TASK]
     assert PlatformExecutionWorkerSettings.cron_jobs == []
-    assert PlatformMaintenanceWorkerSettings.functions == []
-    # Every recovery and delivery job is scheduled on the maintenance worker:
-    # stale running runs, expired reviews, lost queued deliveries, retired
-    # runs, and the audit and webhook outboxes.
+    # The maintenance worker runs the webhook outbox job a request asks for,
+    # and schedules every recovery and delivery job: stale running runs,
+    # expired reviews, lost queued deliveries, retired runs, and the audit and
+    # webhook outboxes.
+    maintenance_functions = [
+        function.name for function in PlatformMaintenanceWorkerSettings.functions
+    ]
+    assert maintenance_functions == [FLOW_DRAIN_WEBHOOK_OUTBOX_TASK]
     maintenance_jobs = [job.name for job in PlatformMaintenanceWorkerSettings.cron_jobs]
     assert sorted(maintenance_jobs) == sorted(
         [
@@ -188,7 +195,7 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
             FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
         ]
     )
-    for name in maintenance_jobs:
+    for name in [*maintenance_functions, *maintenance_jobs]:
         assert TASK_CAPACITY_BY_NAME[name] is TaskCapacityClass.MAINTENANCE, name
     assert PlatformExecutionWorkerSettings.queue_name != (
         PlatformMaintenanceWorkerSettings.queue_name
@@ -210,15 +217,69 @@ def test_retired_run_drain_runs_at_the_configured_cadence() -> None:
     )
 
 
-def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it() -> (
+def test_audit_outbox_cron_runs_at_its_delivery_interval() -> None:
+    from eneo.flows.application import flow_run_audit_outbox_policy as policy
+
+    [audit] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DELIVER_AUDIT_OUTBOX_TASK
+    ]
+
+    assert audit.second == set(
+        range(0, 60, policy.FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS)
+    )
+
+
+@pytest.mark.parametrize(
+    ("maintenance_timeout_seconds", "drain_seconds"),
+    [(get_settings().task_maintenance_timeout_seconds, 30), (3600, 30), (20, 10)],
+)
+def test_audit_outbox_drain_ends_well_before_the_job_timeout_and_the_next_tick(
+    monkeypatch: pytest.MonkeyPatch,
+    maintenance_timeout_seconds: float,
+    drain_seconds: float,
+) -> None:
+    """Kills: a drain bounded only by the job timeout, which at the default
+    timeout runs a job under a backlog into the next tick, so two audit jobs
+    hold both maintenance slots and delay the other maintenance crons."""
+    from eneo.flows.application import flow_run_audit_outbox_policy as policy
+
+    monkeypatch.setattr(
+        policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_maintenance_timeout_seconds=maintenance_timeout_seconds
+        ),
+    )
+
+    assert policy.flow_audit_outbox_drain_seconds() == drain_seconds
+
+
+def test_webhook_outbox_job_stops_itself_before_arq_cancels_it_and_keeps_nothing() -> (
     None
 ):
-    """Kills: the webhook cron left on the maintenance default timeout, which
-    cancels the job before its deadline with unsent rows still charged; and
-    the cron without its fixed job id or with a kept result, so ticks queue
-    overlapping jobs or are skipped after a job ended; and the maintenance
-    worker keeping a failed job's result (an hour by default), which skips
-    every webhook tick once a job killed mid-run is recorded as failed."""
+    """Kills: the outbox job left on the maintenance default timeout, which
+    cancels it before its deadline with unsent rows still charged; and a result
+    kept under its fixed key, by the job or by the worker for a job killed
+    mid-run, which refuses every request for the job until it expires (an hour
+    by default)."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+
+    [outbox_job] = PlatformMaintenanceWorkerSettings.functions
+    budget = policy.flow_webhook_delivery_budget()
+
+    assert outbox_job.timeout_s == budget.job_timeout_seconds
+    # The override matters: the job outlasts the maintenance default.
+    assert outbox_job.timeout_s > PlatformMaintenanceWorkerSettings.job_timeout
+    assert outbox_job.keep_result_s == 0
+    assert not outbox_job.keep_result_forever
+    assert PlatformMaintenanceWorkerSettings.keep_result == 0
+
+
+def test_webhook_outbox_cron_ticks_at_its_interval_under_its_own_job_ids() -> None:
+    """Kills: the cron under one fixed job id, whose ended tick keeps ARQ's
+    60-second in-progress marker and so holds back the ticks after it."""
     from eneo.flows.application import flow_webhook_delivery_policy as policy
 
     [webhook] = [
@@ -226,16 +287,111 @@ def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it(
         for job in PlatformMaintenanceWorkerSettings.cron_jobs
         if job.name == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
     ]
-    budget = policy.flow_webhook_delivery_budget()
 
-    assert webhook.timeout_s == budget.job_timeout_seconds
     assert webhook.second == set(
         range(0, 60, policy.FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS)
     )
-    assert webhook.job_id == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
-    assert webhook.keep_result_s == 0
-    assert not webhook.keep_result_forever
-    assert PlatformMaintenanceWorkerSettings.keep_result == 0
+    assert webhook.job_id is None
+    assert webhook.unique
+
+
+async def test_webhook_outbox_request_reaches_the_registered_job_under_one_key() -> (
+    None
+):
+    """Kills: a request the adapter refuses (a name or capacity it does not
+    route), one that names a job the maintenance worker does not register, and
+    one without the fixed key that keeps a single outbox job running."""
+    from eneo.flows.application.flow_webhook_delivery_policy import (
+        flow_webhook_delivery_request,
+    )
+
+    manager = AsyncMock()
+    manager.enqueue_named.return_value = SimpleNamespace(
+        job_id=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    )
+    adapter = ArqTaskEnqueuer(
+        job_manager=manager,
+        routing=task_queue_routing(
+            SimpleNamespace(
+                task_execution_queue="tasks:execution",
+                task_maintenance_queue="tasks:maintenance",
+            )
+        ),
+    )
+
+    result = await adapter.enqueue(flow_webhook_delivery_request())
+
+    assert result.status is TaskEnqueueStatus.ACCEPTED
+    assert manager.enqueue_named.await_args.kwargs == {
+        "task_name": FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        "payload": {},
+        "job_id": FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        "queue_name": "tasks:maintenance",
+    }
+
+
+@pytest.fixture
+def webhook_cron_enqueuer(monkeypatch: pytest.MonkeyPatch):
+    """The enqueuer the webhook cron's container hands out; the cron's session
+    is never used."""
+    from contextlib import asynccontextmanager
+
+    from dependency_injector import providers
+
+    from eneo.main.container.container import Container
+    from eneo.worker import worker as worker_module
+
+    @asynccontextmanager
+    async def session():
+        yield MagicMock()
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+    enqueuer = AsyncMock()
+    Container.platform_task_enqueuer.override(providers.Object(enqueuer))
+    try:
+        yield enqueuer
+    finally:
+        Container.platform_task_enqueuer.reset_last_overriding()
+
+
+def _webhook_cron():
+    [webhook] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
+    ]
+    return webhook
+
+
+async def test_webhook_outbox_cron_requests_the_outbox_job(
+    webhook_cron_enqueuer: AsyncMock,
+) -> None:
+    webhook_cron_enqueuer.enqueue.return_value = TaskEnqueueResult(
+        status=TaskEnqueueStatus.ACCEPTED, task_id=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    )
+
+    result = await _webhook_cron().coroutine({"job_id": "tick"})
+
+    assert result == {"status": "accepted"}
+    [request] = [call.args[0] for call in webhook_cron_enqueuer.enqueue.await_args_list]
+    assert request.task_name == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+    assert request.capacity_class is TaskCapacityClass.MAINTENANCE
+    assert request.idempotency_key == FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
+
+
+@pytest.mark.parametrize(
+    "status", [TaskEnqueueStatus.REFUSED, TaskEnqueueStatus.OUTCOME_UNKNOWN]
+)
+async def test_webhook_outbox_cron_fails_when_its_request_is_not_accepted(
+    webhook_cron_enqueuer: AsyncMock, status: TaskEnqueueStatus
+) -> None:
+    """Kills: a recovery tick that reports success while nothing will deliver."""
+    webhook_cron_enqueuer.enqueue.return_value = TaskEnqueueResult(status=status)
+
+    with pytest.raises(RuntimeError, match=status.value):
+        await _webhook_cron().coroutine({"job_id": "tick"})
 
 
 @pytest.mark.parametrize("max_request_timeout_seconds", [1, 120, 600])
@@ -291,18 +447,33 @@ def test_flow_layers_are_transport_neutral_and_celery_is_not_a_dependency() -> N
     assert not any(dependency.startswith("celery") for dependency in dependencies)
 
 
+def _job_heartbeats(monkeypatch, tasks) -> FlowExecutionHeartbeats:
+    """The job's own heartbeats: a job ends only the run it claimed and
+    tracks, so a stand-in for a running job tracks its run here too."""
+    heartbeats = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(tasks, "execution_heartbeats", lambda: heartbeats)
+    return heartbeats
+
+
 async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) -> None:
     from eneo.flows.runtime import tasks
 
     ordering: list[str] = []
     errors = []
+    heartbeats = _job_heartbeats(monkeypatch, tasks)
 
-    async def execute(**_kwargs: object) -> dict[str, str]:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            ordering.append("execution_cancelled")
-            raise
+    async def execute(
+        *, run_id: UUID, tenant_id: UUID, run_revision: int, **_kwargs: object
+    ) -> dict[str, str]:
+        async with heartbeats.track(
+            FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+        ):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                ordering.append("execution_cancelled")
+                raise
+        return {"status": "completed"}
 
     async def terminalize(**kwargs: object) -> None:
         ordering.append(f"terminalize:{kwargs['source']}")
@@ -335,6 +506,7 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
     assert errors[0].code.value == "flow_task_timeout"
     assert errors[0].details is None
     assert errors[0].retryable is False
+    await heartbeats.stop()
 
 
 async def test_execute_task_passes_its_existing_invocation_deadline(monkeypatch):
@@ -387,8 +559,15 @@ async def test_registered_worker_leaves_time_to_persist_execution_timeout(
         lambda: SimpleNamespace(task_execution_timeout_seconds=execution_timeout),
     )
 
-    async def execute(**_kwargs: object) -> dict[str, str]:
-        await asyncio.Event().wait()
+    heartbeats = _job_heartbeats(monkeypatch, tasks)
+
+    async def execute(
+        *, run_id: UUID, tenant_id: UUID, run_revision: int, **_kwargs: object
+    ) -> dict[str, str]:
+        async with heartbeats.track(
+            FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+        ):
+            await asyncio.Event().wait()
         return {"status": "completed"}
 
     monkeypatch.setattr(tasks, "_execute_flow_run_async", execute)
@@ -408,6 +587,7 @@ async def test_registered_worker_leaves_time_to_persist_execution_timeout(
     assert (
         terminalize.await_args.kwargs["source"] is FlowRunLifecycleSource.TASK_TIMEOUT
     )
+    await heartbeats.stop()
 
 
 async def test_execute_task_rejects_malformed_payload_without_terminalizing(
@@ -488,16 +668,23 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
         "get_settings",
         lambda: SimpleNamespace(task_execution_timeout_seconds=14400),
     )
-    monkeypatch.setattr(tasks, "_stale_running_cursor", None, raising=False)
-    monkeypatch.setattr(tasks, "_stale_running_window_end", None)
+    monkeypatch.setattr(
+        tasks,
+        "_actionable_recovery",
+        tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+    )
+    monkeypatch.setattr(
+        tasks, "_review_recovery", tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS)
+    )
     with pytest.raises(tasks.FlowTenantSweepPartialFailure):
         await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
-    assert repo.list_recovery_candidates.await_args.kwargs == {
+    assert repo.list_recovery_candidates.await_args_list[0].kwargs == {
         "limit": 1,
         "after": None,
         "through": (run.anchor_at, run.id),
+        "kinds": tasks._ACTIONABLE_RECOVERY_KINDS,
     }
-    assert tasks._stale_running_cursor == (run.anchor_at, run.id)
+    assert tasks._actionable_recovery.cursor == (run.anchor_at, run.id)
     assert (
         terminalizer.terminalize_stale_running_run.await_args.kwargs[
             "expected_revision"
@@ -549,10 +736,18 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
     append_run(2)
     discovered = []
 
-    async def discover(*, limit, after=None, through=None):
-        candidates = [
+    def of_kinds(kinds):
+        actionable = kinds == tasks._ACTIONABLE_RECOVERY_KINDS
+        return [
             row
             for row in rows
+            if (row.kind in tasks._ACTIONABLE_RECOVERY_KINDS) == actionable
+        ]
+
+    async def discover(*, limit, after=None, through=None, kinds):
+        candidates = [
+            row
+            for row in of_kinds(kinds)
             if (after is None or key(row) > after)
             and (through is None or key(row) <= through)
         ][:limit]
@@ -561,7 +756,9 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
 
     repo = AsyncMock()
     repo.list_recovery_candidates.side_effect = discover
-    repo.recovery_sweep_boundary.side_effect = lambda: max(map(key, rows))
+    repo.recovery_sweep_boundary.side_effect = lambda *, kinds: max(
+        map(key, of_kinds(kinds)), default=None
+    )
     attempts = []
 
     async def terminalize(**kwargs):
@@ -588,8 +785,14 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
     monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
     monkeypatch.setattr(tasks, "enable_autobegin_for_flow_task_session", lambda _: None)
     monkeypatch.setattr(tasks, "Container", lambda **_: container)
-    monkeypatch.setattr(tasks, "_stale_running_cursor", None)
-    monkeypatch.setattr(tasks, "_stale_running_window_end", None, raising=False)
+    monkeypatch.setattr(
+        tasks,
+        "_actionable_recovery",
+        tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+    )
+    monkeypatch.setattr(
+        tasks, "_review_recovery", tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS)
+    )
     for number in range(3, 9):
         try:
             await tasks._reconcile_stale_running_runs_all_tenants(limit=1)

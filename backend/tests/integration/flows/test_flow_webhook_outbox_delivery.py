@@ -4,7 +4,8 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import cast
+from types import SimpleNamespace
+from typing import NamedTuple, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -15,6 +16,10 @@ from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
 
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -32,8 +37,10 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
+from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow import (
     Flow,
+    FlowRun,
     FlowRunStatus,
     FlowStep,
     FlowStepResultStatus,
@@ -62,13 +69,23 @@ from eneo.flows.published_definition import (
     build_published_definition_json,
     published_definition_checksum,
 )
-from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
+from eneo.flows.runtime import tasks as tasks_module
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
-from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ConflictException, TypedIOValidationException
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tasks.contracts import TaskEnqueueStatus
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.integration.flows.maintenance_worker_support import (
+    clear_webhook_outbox_jobs,
+    eventually,
+    outbox_job_key_is_free,
+    platform_task_enqueuer,
+    running_maintenance_worker,
+    tick_webhook_cron,
+    webhook_cron_scheduler,
+)
 from tests.unittests.flows.egress.egress_test_support import recording_server
 
 
@@ -148,7 +165,22 @@ def _build_flow(
     )
 
 
-async def _create_running_webhook_run(
+def _pinned_assistant_snapshot(assistant_id: UUID, model) -> dict[str, object]:
+    """The assistant as publishing pins it, bound to the model it runs on."""
+    snapshot = {
+        **assistant_snapshot(assistant_id),
+        "completion_model": {
+            "model_id": str(model.id),
+            "provider_id": str(model.provider_id),
+            "provider_type": "openai",
+            "resolved_route": f"openai/{model.name}",
+        },
+    }
+    snapshot["execution_surface_hash"] = assistant_execution_surface_hash(snapshot)
+    return snapshot
+
+
+async def _create_queued_webhook_run(
     *,
     session,
     admin_user,
@@ -156,9 +188,10 @@ async def _create_running_webhook_run(
     space_factory,
     assistant_factory,
     output_config: dict[str, object] | None = None,
-    prior_output_payload: dict[str, object] | None = None,
+    include_prior_step: bool = False,
     model_name: str = "gpt-4o-mini",
 ):
+    """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
     space = await space_factory(session, "Webhook outbox delivery space", [model.id])
     assistant = await assistant_factory(
@@ -176,7 +209,7 @@ async def _create_running_webhook_run(
             user_id=admin_user.id,
             assistant_id=assistant.id,
             output_config=output_config,
-            include_prior_step=prior_output_payload is not None,
+            include_prior_step=include_prior_step,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -195,8 +228,8 @@ async def _create_running_webhook_run(
                 {
                     "step_id": str(published_step.id),
                     "assistant_id": str(published_step.assistant_id),
-                    "assistant_snapshot": assistant_snapshot(
-                        published_step.assistant_id
+                    "assistant_snapshot": _pinned_assistant_snapshot(
+                        published_step.assistant_id, model
                     ),
                     "step_order": published_step.step_order,
                     "user_description": published_step.user_description,
@@ -232,6 +265,31 @@ async def _create_running_webhook_run(
             for published_step in flow.steps
         ],
     )
+    return flow, run, step
+
+
+async def _create_running_webhook_run(
+    *,
+    session,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    output_config: dict[str, object] | None = None,
+    prior_output_payload: dict[str, object] | None = None,
+    model_name: str = "gpt-4o-mini",
+):
+    flow, run, step = await _create_queued_webhook_run(
+        session=session,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        output_config=output_config,
+        include_prior_step=prior_output_payload is not None,
+        model_name=model_name,
+    )
+    run_repo = FlowRunRepository(session=session)
     await session.execute(
         sa.update(FlowRuns)
         .where(FlowRuns.id == run.id)
@@ -335,89 +393,135 @@ def _intent_for_attempt(
     )
 
 
-class _TestEncryptionService:
-    _PREFIX = "enc:fernet:v1:"
-
-    def is_encrypted(self, value: str) -> bool:
-        return value.startswith(self._PREFIX)
-
-    def can_decrypt(self, value: str) -> bool:
-        return value.startswith(self._PREFIX)
-
-    def decrypt(self, ciphertext: str) -> str:
-        if not ciphertext.startswith(self._PREFIX):
-            return ciphertext
-        return ciphertext[len(self._PREFIX) :]
+_FAKE_CIPHERTEXT_PREFIX = "enc:fernet:v1:"
 
 
-class _CasFailingWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
-    async def mark_delivery_succeeded(self, **kwargs):
-        return False
+def _fake_decrypt(_self, ciphertext: str) -> str:
+    return ciphertext.removeprefix(_FAKE_CIPHERTEXT_PREFIX)
 
 
-class _FailureCasFailingWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
-    async def record_delivery_failure(self, **kwargs):
-        return False
+def _fake_can_decrypt(_self, value: str) -> bool:
+    return value.startswith(_FAKE_CIPHERTEXT_PREFIX)
 
 
-class _FailureCasFailingOnceWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
-    fail_next_failure = False
+def _lose_next_outcome(monkeypatch, method: str):
+    """Make the next ``FlowRunWebhookDeliveryRepository.<method>`` report that
+    its claim was lost, once the returned ``arm()`` is called."""
+    armed = False
+    real = getattr(FlowRunWebhookDeliveryRepository, method)
 
-    async def record_delivery_failure(self, **kwargs):
-        if self.fail_next_failure:
-            self.fail_next_failure = False
+    async def _maybe_lost(self, **kwargs):
+        nonlocal armed
+        if armed:
+            armed = False
             return False
-        return await super().record_delivery_failure(**kwargs)
+        return await real(self, **kwargs)
+
+    def arm() -> None:
+        nonlocal armed
+        armed = True
+
+    monkeypatch.setattr(FlowRunWebhookDeliveryRepository, method, _maybe_lost)
+    return arm
 
 
-class _SuccessCasFailingOnceWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
-    fail_next_success = False
+def _spy_on_audit(monkeypatch) -> AsyncMock:
+    """Record every audit write while the real audit service still runs."""
+    from eneo.audit.application.audit_service import AuditService
 
-    async def mark_delivery_succeeded(self, **kwargs):
-        if self.fail_next_success:
-            self.fail_next_success = False
-            return False
-        return await super().mark_delivery_succeeded(**kwargs)
+    audit_log = AsyncMock()
+    real = AuditService.log_async
+
+    async def _log_async(self, **kwargs):
+        await audit_log(**kwargs)
+        return await real(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", _log_async)
+    return audit_log
 
 
-def _delivery_service(
-    *,
-    session,
-    container: Container,
-    webhook_repo: FlowRunWebhookDeliveryRepository,
-    audit_service=None,
-    encryption_service=None,
-) -> FlowRunWebhookDeliveryService:
-    flow_run_repo = FlowRunRepository(session=session)
-    audit_outbox_repo = FlowRunAuditOutboxRepository(session=session)
-    review_checkpoint_repo = FlowRunReviewCheckpointRepository(
-        session=session,
-        audit_outbox_repo=audit_outbox_repo,
+def _response(status_code: int) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        request=httpx.Request("POST", "https://example.org/hook/case-123"),
     )
-    return FlowRunWebhookDeliveryService(
-        webhook_delivery_repo=webhook_repo,
-        flow_repo=FlowRepository(session=session),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=FlowVersionRepository(
-            session=session,
-        ),
-        flow_run_terminalizer=FlowRunTerminalizer(
-            flow_run_repo,
-            audit_outbox_repo,
-            review_checkpoint_repo,
-        ),
-        encryption_service=encryption_service or container.encryption_service(),
-        audit_service=audit_service,
-        user_repo=container.user_repo(),
-        api_key_repo=container.api_key_v2_repo(),
-        tenant_repo=container.tenant_repo(),
-        http_runtime=FlowHttpRuntimeHelper(
-            variable_resolver=FlowVariableResolver(),
-            request_timeout_seconds=5.0,
-            max_timeout_seconds=5.0,
-            allow_private_networks=False,
-        ),
+
+
+async def _run_outbox(
+    *, now: datetime | None = None, limit: int = 1
+) -> dict[str, int | str]:
+    """One outbox job, as a worker runs it. ``now`` is the time its claims see.
+    One row per job unless ``limit`` says otherwise: a row retried within the
+    job's own wave loop would otherwise be claimed again at a later ``now``."""
+    return await tasks_module._deliver_flow_webhook_outbox(
+        budget=webhook_policy.flow_webhook_delivery_budget(),
+        limit=limit,
+        **({} if now is None else {"clock": lambda: now}),
     )
+
+
+async def _read(statement) -> list[sa.Row]:
+    async with sessionmanager.session() as session, session.begin():
+        return list((await session.execute(statement)).all())
+
+
+async def _read_one(statement) -> sa.Row:
+    [row] = await _read(statement)
+    return row
+
+
+async def _read_scalar(statement):
+    return (await _read_one(statement))[0]
+
+
+async def _write(statement) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(statement)
+
+
+class _Seeded(NamedTuple):
+    flow: Flow
+    run: FlowRun
+    step: FlowStep
+    delivery_id: UUID
+
+
+@pytest.fixture
+def seed_delivery(
+    admin_user, completion_model_factory, space_factory, assistant_factory
+):
+    """Commit one running webhook run with its due outbox row."""
+
+    async def seed(
+        *,
+        output_config: dict[str, object] | None = None,
+        prior_output_payload: dict[str, object] | None = None,
+    ) -> _Seeded:
+        async with sessionmanager.session() as session:
+            enable_autobegin_for_flow_task_session(session)
+            flow, run, step = await _create_running_webhook_run(
+                session=session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                output_config=output_config,
+                prior_output_payload=prior_output_payload,
+            )
+            assert flow.id is not None and step.id is not None
+            delivery_id = await FlowRunWebhookDeliveryRepository(
+                session=session
+            ).insert_pending_delivery(
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                intent=_intent(
+                    run_id=run.id, step_id=step.id, step_order=step.step_order
+                ),
+            )
+            await session.commit()
+        return _Seeded(flow=flow, run=run, step=step, delivery_id=delivery_id)
+
+    return seed
 
 
 @pytest.mark.asyncio
@@ -682,67 +786,39 @@ async def test_flow_webhook_delivery_batch_claim_is_distinct_across_competing_se
 @pytest.mark.integration
 async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
+    seeded = await seed_delivery()
+    now = datetime.now(timezone.utc)
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
+        [first_claim] = await FlowRunWebhookDeliveryRepository(
+            session=session
+        ).claim_due_delivery_rows(
+            now=now,
+            limit=1,
+            claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
         )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        now = datetime.now(timezone.utc)
-
-        first_claim = (
-            await webhook_repo.claim_due_delivery_rows(
-                now=now,
-                limit=1,
-                claim_ttl_seconds=120,
-                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
-            )
-        )[0]
         await session.commit()
+    send_http_request = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
 
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
-        service.http_runtime.send_request = send_http_request
-
-        recovered = await service.deliver_due(now=now + timedelta(seconds=121))
-        recorded_by = datetime.now(timezone.utc)
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.idempotency_key,
-                    FlowRunWebhookDeliveries.delivered_at,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
+    recovered = await _run_outbox(now=now + timedelta(seconds=121))
+    recorded_by = datetime.now(timezone.utc)
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.idempotency_key,
+            FlowRunWebhookDeliveries.delivered_at,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
     assert first_claim.delivery_attempts == 1
-    assert recovered.attempted_count == 1
-    assert recovered.delivered_count == 1
+    assert recovered["attempted"] == 1
+    assert recovered["delivered"] == 1
     assert send_http_request.await_count == 1
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert delivery_state.delivery_attempts == 2
@@ -755,67 +831,38 @@ async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash
 @pytest.mark.integration
 async def test_flow_webhook_delivery_reposts_after_expired_success_claim_with_stable_key(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = _SuccessCasFailingOnceWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        webhook_repo.fail_next_success = True
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        sent_idempotency_keys: list[str] = []
+    seeded = await seed_delivery()
+    _lose_next_outcome(monkeypatch, "mark_delivery_succeeded")()
+    sent_idempotency_keys: list[str] = []
 
-        async def _send_http_request(**kwargs):
-            sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
-            return httpx.Response(200, request=request)
+    async def _send_http_request(_self, **kwargs):
+        sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
+        return _response(200)
 
-        service.http_runtime.send_request = _send_http_request
-        now = datetime.now(timezone.utc)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
+    now = datetime.now(timezone.utc)
 
-        outcome_commit_lost = await service.deliver_due(now=now)
-        recovered = await service.deliver_due(
-            now=now
-            + timedelta(
-                seconds=webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds
-                + 1
-            )
+    outcome_commit_lost = await _run_outbox(now=now)
+    recovered = await _run_outbox(
+        now=now
+        + timedelta(
+            seconds=webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds + 1
         )
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
+    )
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
-    assert outcome_commit_lost.attempted_count == 1
-    assert outcome_commit_lost.delivered_count == 0
-    assert recovered.attempted_count == 1
-    assert recovered.delivered_count == 1
+    assert outcome_commit_lost["attempted"] == 1
+    assert outcome_commit_lost["delivered"] == 0
+    assert recovered["attempted"] == 1
+    assert recovered["delivered"] == 1
     assert len(sent_idempotency_keys) == 2
     assert sent_idempotency_keys[0] == sent_idempotency_keys[1]
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
@@ -895,102 +942,69 @@ async def test_flow_webhook_delivery_blocks_attempt_deletion(
 @pytest.mark.integration
 async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
+    seeded = await seed_delivery()
+    audit_log = _spy_on_audit(monkeypatch)
 
-        async def _log_audit(**_kwargs: object) -> UUID:
-            await session.execute(sa.select(1))
-            return uuid4()
-
-        audit_log = AsyncMock(side_effect=_log_audit)
-        audit_service = type(
-            "AuditServiceStub",
-            (),
-            {"log_async": audit_log},
+    async def _send_http_request(_self, **kwargs):
+        # The claim is committed, and no connection of the job holds a
+        # transaction open across the request.
+        committed_claim = await _read_one(
+            sa.select(
+                FlowRunWebhookDeliveries.claim_token,
+                FlowRunWebhookDeliveries.delivery_attempts,
+            ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
         )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-            audit_service=audit_service,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-
-        async def _send_http_request(**kwargs):
-            assert not session.in_transaction()
-            async with sessionmanager.session() as check_session:
-                enable_autobegin_for_flow_task_session(check_session)
-                committed_claim = (
-                    await check_session.execute(
-                        sa.select(
-                            FlowRunWebhookDeliveries.claim_token,
-                            FlowRunWebhookDeliveries.delivery_attempts,
-                        ).where(FlowRunWebhookDeliveries.id == delivery_id)
-                    )
-                ).one()
-            assert committed_claim.claim_token is not None
-            assert committed_claim.delivery_attempts == 1
-            assert kwargs["url"] == "https://example.org/hook/case-123"
-            assert kwargs["body_bytes"] == b"done"
-            assert len(kwargs["headers"]["Idempotency-Key"]) == 64
-            return httpx.Response(200, request=request)
-
-        service.http_runtime.send_request = _send_http_request
-
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.delivered_at,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+        open_transactions = await _read_scalar(
+            sa.text(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() "
+                "AND pid <> pg_backend_pid() "
+                "AND state LIKE 'idle in transaction%'"
             )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-            )
-        ).scalar_one()
-        result_payload = (
-            await session.execute(
-                sa.select(FlowStepResults.output_payload_json).where(
-                    FlowStepResults.flow_run_id == run.id,
-                    FlowStepResults.step_id == step.id,
-                )
-            )
-        ).scalar_one()
+        )
+        assert committed_claim.claim_token is not None
+        assert committed_claim.delivery_attempts == 1
+        assert open_transactions == 0
+        assert kwargs["url"] == "https://example.org/hook/case-123"
+        assert kwargs["body_bytes"] == b"done"
+        assert len(kwargs["headers"]["Idempotency-Key"]) == 64
+        return _response(200)
 
-    assert result.delivered_count == 1, delivery_state.delivery_last_error
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 0
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
+
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.delivered_at,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.output_payload_json).where(
+            FlowRuns.id == seeded.run.id
+        )
+    )
+    result_payload = await _read_scalar(
+        sa.select(FlowStepResults.output_payload_json).where(
+            FlowStepResults.flow_run_id == seeded.run.id,
+            FlowStepResults.step_id == seeded.step.id,
+        )
+    )
+
+    assert result["delivered"] == 1, delivery_state.delivery_last_error
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 0
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert delivery_state.delivery_attempts == 1
     assert delivery_state.delivered_at is not None
-    assert run_state == FlowRunStatus.COMPLETED.value
+    assert run_state.status == FlowRunStatus.COMPLETED.value
+    # The completed run returns its last completed step's output.
+    assert run_state.output_payload_json == {"text": "done"}
     assert result_payload == {"text": "done"}
     audit_log.assert_awaited_once()
     audit_args = audit_log.await_args
@@ -1002,66 +1016,39 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
 @pytest.mark.integration
 async def test_flow_webhook_delivery_rejects_file_backed_preview_without_http(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
+    seeded = await seed_delivery()
+    await _write(
+        sa.update(FlowStepResults)
+        .where(
+            FlowStepResults.flow_run_id == seeded.run.id,
+            FlowStepResults.step_id == seeded.step.id,
         )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
+        .values(
+            output_payload_json={
+                "text": "preview",
+                "text_overflow": {
+                    "generated_file_ids": [str(uuid4())],
+                    "inline_text_bytes": 7,
+                    "full_text_bytes": 20,
+                },
+            }
         )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        await session.execute(
-            sa.update(FlowStepResults)
-            .where(
-                FlowStepResults.flow_run_id == run.id,
-                FlowStepResults.step_id == step.id,
-            )
-            .values(
-                output_payload_json={
-                    "text": "preview",
-                    "text_overflow": {
-                        "generated_file_ids": [str(uuid4())],
-                        "inline_text_bytes": 7,
-                        "full_text_bytes": 20,
-                    },
-                }
-            )
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock()
-        service.http_runtime.send_request = send_http_request
+    )
+    send_http_request = AsyncMock()
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
-    assert result.dead_lettered_count == 1
+    assert result["dead_lettered"] == 1
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1126,66 +1113,36 @@ async def test_flow_webhook_delivery_rejects_file_backed_preview_without_http(
 )
 async def test_flow_webhook_delivery_dead_letters_a_config_the_runtime_rejects_without_retry(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
     output_config,
     expected_in_error,
 ):
     # A version published before the config was validated. Compiling the
     # request never changes between attempts, so retrying it five times only
     # delays the run's failure.
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            output_config=output_config,
-            prior_output_payload={"text": "classified-text"},
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(
-                run_id=run.id,
-                step_id=step.id,
-                step_order=step.step_order,
-            ),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock()
-        service.http_runtime.send_request = send_http_request
-        now = datetime.now(timezone.utc)
+    seeded = await seed_delivery(
+        output_config=output_config,
+        prior_output_payload={"text": "classified-text"},
+    )
+    send_http_request = AsyncMock()
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    now = datetime.now(timezone.utc)
 
-        result = await service.deliver_due(now=now)
-        repeated = await service.deliver_due(now=now + timedelta(hours=1))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
+    result = await _run_outbox(now=now)
+    repeated = await _run_outbox(now=now + timedelta(hours=1))
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
-    assert result.attempted_count == 1
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 1
-    assert repeated.attempted_count == 0
+    assert result["attempted"] == 1
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 1
+    assert repeated["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1200,73 +1157,43 @@ async def test_flow_webhook_delivery_dead_letters_a_config_the_runtime_rejects_w
 @pytest.mark.integration
 async def test_flow_webhook_delivery_dead_letters_file_backed_template_reference_once(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
     file_id = uuid4()
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            output_config={
-                "url": "https://example.org/hook/{{step_1.output.text}}",
-                "auth": {"mode": "none"},
-                "timeout_seconds": 5,
+    seeded = await seed_delivery(
+        output_config={
+            "url": "https://example.org/hook/{{step_1.output.text}}",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 5,
+        },
+        prior_output_payload={
+            "text": "preview",
+            "text_overflow": {
+                "generated_file_ids": [str(file_id)],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 20,
             },
-            prior_output_payload={
-                "text": "preview",
-                "text_overflow": {
-                    "generated_file_ids": [str(file_id)],
-                    "inline_text_bytes": 7,
-                    "full_text_bytes": 20,
-                },
-            },
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(
-                run_id=run.id,
-                step_id=step.id,
-                step_order=step.step_order,
-            ),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock()
-        service.http_runtime.send_request = send_http_request
-        now = datetime.now(timezone.utc)
+        },
+    )
+    send_http_request = AsyncMock()
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    now = datetime.now(timezone.utc)
 
-        result = await service.deliver_due(now=now)
-        repeated = await service.deliver_due(now=now)
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
+    result = await _run_outbox(now=now)
+    repeated = await _run_outbox(now=now)
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
-    assert result.attempted_count == 1
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 1
-    assert repeated.attempted_count == 0
+    assert result["attempted"] == 1
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 1
+    assert repeated["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1281,69 +1208,29 @@ async def test_flow_webhook_delivery_dead_letters_file_backed_template_reference
 @pytest.mark.integration
 async def test_flow_webhook_delivery_audits_failed_http_response(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
+    seeded = await seed_delivery()
+    audit_log = _spy_on_audit(monkeypatch)
 
-        async def _log_audit(**_kwargs: object) -> UUID:
-            await session.execute(sa.select(1))
-            return uuid4()
+    async def _send_http_request(_self, **_kwargs):
+        return _response(503)
 
-        audit_log = AsyncMock(side_effect=_log_audit)
-        audit_service = type(
-            "AuditServiceStub",
-            (),
-            {"log_async": audit_log},
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-            audit_service=audit_service,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
 
-        async def _send_http_request(**kwargs):
-            assert not session.in_transaction()
-            return httpx.Response(503, request=request)
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
 
-        service.http_runtime.send_request = _send_http_request
-
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 1
-    assert result.dead_lettered_count == 0
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 1
+    assert result["dead_lettered"] == 0
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.delivery_attempts == 1
     assert "status 503" in delivery_state.delivery_last_error
@@ -1357,124 +1244,73 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
 @pytest.mark.integration
 async def test_flow_webhook_delivery_decrypts_encrypted_headers(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            output_config={
-                "url": "https://example.org/hook/{{flow_input.case_id}}",
-                "auth": {"mode": "none"},
-                "timeout_seconds": 5,
-                "custom_headers": [
-                    {
-                        "name": "Authorization",
-                        "value": "enc:fernet:v1:Bearer top-secret",
-                        "secret": True,
-                    },
-                    {"name": "X-Plain", "value": "visible", "secret": False},
-                ],
-            },
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-            encryption_service=_TestEncryptionService(),
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
+    await seed_delivery(
+        output_config={
+            "url": "https://example.org/hook/{{flow_input.case_id}}",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 5,
+            "custom_headers": [
+                {
+                    "name": "Authorization",
+                    "value": "enc:fernet:v1:Bearer top-secret",
+                    "secret": True,
+                },
+                {"name": "X-Plain", "value": "visible", "secret": False},
+            ],
+        },
+    )
+    monkeypatch.setattr(EncryptionService, "decrypt", _fake_decrypt)
+    monkeypatch.setattr(EncryptionService, "can_decrypt", _fake_can_decrypt)
 
-        async def _send_http_request(**kwargs):
-            assert kwargs["headers"]["Authorization"] == "Bearer top-secret"
-            assert kwargs["headers"]["X-Plain"] == "visible"
-            return httpx.Response(200, request=request)
+    async def _send_http_request(_self, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer top-secret"
+        assert kwargs["headers"]["X-Plain"] == "visible"
+        return _response(200)
 
-        service.http_runtime.send_request = _send_http_request
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
+    result = await _run_outbox()
 
-    assert result.delivered_count == 1
+    assert result["delivered"] == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_webhook_delivery_rolls_back_step_result_when_success_claim_lost(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = _CasFailingWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
+    seeded = await seed_delivery()
 
-        async def _send_http_request(**kwargs):
-            return httpx.Response(200, request=request)
+    async def _claim_lost(_self, **_kwargs):
+        return False
 
-        service.http_runtime.send_request = _send_http_request
+    monkeypatch.setattr(
+        FlowRunWebhookDeliveryRepository, "mark_delivery_succeeded", _claim_lost
+    )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _answer_200)
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.claim_token,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        result_payload = (
-            await session.execute(
-                sa.select(FlowStepResults.output_payload_json).where(
-                    FlowStepResults.flow_run_id == run.id,
-                    FlowStepResults.step_id == step.id,
-                )
-            )
-        ).scalar_one()
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.claim_token,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    result_payload = await _read_scalar(
+        sa.select(FlowStepResults.output_payload_json).where(
+            FlowStepResults.flow_run_id == seeded.run.id,
+            FlowStepResults.step_id == seeded.step.id,
+        )
+    )
 
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 0
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 0
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
     assert result_payload == {"text": "done"}
@@ -1484,64 +1320,35 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_success_claim_l
 @pytest.mark.integration
 async def test_flow_webhook_delivery_dead_letters_cancelled_run_without_http(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        await session.execute(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == run.id)
-            .values(status=FlowRunStatus.CANCELLED.value)
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock()
-        service.http_runtime.send_request = send_http_request
+    seeded = await seed_delivery()
+    await _write(
+        sa.update(FlowRuns)
+        .where(FlowRuns.id == seeded.run.id)
+        .values(status=FlowRunStatus.CANCELLED.value)
+    )
+    send_http_request = AsyncMock()
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.dead_lettered_at,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-            )
-        ).scalar_one()
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.dead_lettered_at,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_scalar(
+        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    )
 
-    assert result.attempted_count == 1
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 1
+    assert result["attempted"] == 1
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 1
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1556,80 +1363,49 @@ async def test_flow_webhook_delivery_dead_letters_cancelled_run_without_http(
 @pytest.mark.integration
 async def test_flow_webhook_delivery_dead_letters_checksum_drift_without_http(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        definition_json = await session.scalar(
-            sa.select(FlowVersions.definition_json).where(
-                FlowVersions.flow_id == flow.id,
-                FlowVersions.version == run.flow_version,
-            )
-        )
-        assert isinstance(definition_json, dict)
-        await session.execute(
-            sa.update(FlowVersions)
-            .where(
-                FlowVersions.flow_id == flow.id,
-                FlowVersions.version == run.flow_version,
-            )
-            .values(definition_json={**definition_json, "name": "Corrupt snapshot"})
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock(
-            side_effect=AssertionError("checksum drift must fail before HTTP")
-        )
-        service.http_runtime.send_request = send_http_request
-        now = datetime.now(timezone.utc)
+    seeded = await seed_delivery()
+    version_row = sa.and_(
+        FlowVersions.flow_id == seeded.flow.id,
+        FlowVersions.version == seeded.run.flow_version,
+    )
+    definition_json = await _read_scalar(
+        sa.select(FlowVersions.definition_json).where(version_row)
+    )
+    assert isinstance(definition_json, dict)
+    await _write(
+        sa.update(FlowVersions)
+        .where(version_row)
+        .values(definition_json={**definition_json, "name": "Corrupt snapshot"})
+    )
+    send_http_request = AsyncMock(
+        side_effect=AssertionError("checksum drift must fail before HTTP")
+    )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    now = datetime.now(timezone.utc)
 
-        result = await service.deliver_due(now=now)
-        second_result = await service.deliver_due(now=now)
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.dead_lettered_at,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status, FlowRuns.error_json).where(
-                    FlowRuns.id == run.id
-                )
-            )
-        ).one()
+    result = await _run_outbox(now=now)
+    second_result = await _run_outbox(now=now)
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.dead_lettered_at,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.error_json).where(
+            FlowRuns.id == seeded.run.id
+        )
+    )
 
-    assert result.attempted_count == 1
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 1
-    assert second_result.attempted_count == 0
+    assert result["attempted"] == 1
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 1
+    assert second_result["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1646,84 +1422,53 @@ async def test_flow_webhook_delivery_dead_letters_checksum_drift_without_http(
 @pytest.mark.integration
 async def test_flow_webhook_delivery_dead_letters_malformed_definition_without_http(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
+    seeded = await seed_delivery()
+    version_row = sa.and_(
+        FlowVersions.flow_id == seeded.flow.id,
+        FlowVersions.version == seeded.run.flow_version,
+    )
+    definition_json = await _read_scalar(
+        sa.select(FlowVersions.definition_json).where(version_row)
+    )
+    assert isinstance(definition_json, dict)
+    malformed_definition = {**definition_json, "steps": "not-an-array"}
+    await _write(
+        sa.update(FlowVersions)
+        .where(version_row)
+        .values(
+            definition_json=malformed_definition,
+            definition_checksum=published_definition_checksum(malformed_definition),
         )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        definition_json = await session.scalar(
-            sa.select(FlowVersions.definition_json).where(
-                FlowVersions.flow_id == flow.id,
-                FlowVersions.version == run.flow_version,
-            )
-        )
-        assert isinstance(definition_json, dict)
-        malformed_definition = {**definition_json, "steps": "not-an-array"}
-        await session.execute(
-            sa.update(FlowVersions)
-            .where(
-                FlowVersions.flow_id == flow.id,
-                FlowVersions.version == run.flow_version,
-            )
-            .values(
-                definition_json=malformed_definition,
-                definition_checksum=published_definition_checksum(malformed_definition),
-            )
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        send_http_request = AsyncMock(
-            side_effect=AssertionError("malformed definition must fail before HTTP")
-        )
-        service.http_runtime.send_request = send_http_request
-        now = datetime.now(timezone.utc)
+    )
+    send_http_request = AsyncMock(
+        side_effect=AssertionError("malformed definition must fail before HTTP")
+    )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    now = datetime.now(timezone.utc)
 
-        result = await service.deliver_due(now=now)
-        second_result = await service.deliver_due(now=now)
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.dead_lettered_at,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status, FlowRuns.error_json).where(
-                    FlowRuns.id == run.id
-                )
-            )
-        ).one()
+    result = await _run_outbox(now=now)
+    second_result = await _run_outbox(now=now)
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.dead_lettered_at,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.error_json).where(
+            FlowRuns.id == seeded.run.id
+        )
+    )
 
-    assert result.attempted_count == 1
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 1
-    assert second_result.attempted_count == 0
+    assert result["attempted"] == 1
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 1
+    assert second_result["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -1740,74 +1485,48 @@ async def test_flow_webhook_delivery_dead_letters_malformed_definition_without_h
 @pytest.mark.integration
 async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_lost(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = _FailureCasFailingWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        await session.execute(
-            sa.update(FlowRunWebhookDeliveries)
-            .where(FlowRunWebhookDeliveries.id == delivery_id)
-            .values(delivery_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS - 1)
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
+    seeded = await seed_delivery()
+    await _write(
+        sa.update(FlowRunWebhookDeliveries)
+        .where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+        .values(delivery_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS - 1)
+    )
 
-        async def _send_http_request(**kwargs):
-            return httpx.Response(503, request=request)
+    async def _claim_lost(_self, **_kwargs):
+        return False
 
-        service.http_runtime.send_request = _send_http_request
+    async def _send_http_request(_self, **_kwargs):
+        return _response(503)
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.claim_token,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-            )
-        ).scalar_one()
-        result_payload = (
-            await session.execute(
-                sa.select(FlowStepResults.output_payload_json).where(
-                    FlowStepResults.flow_run_id == run.id,
-                    FlowStepResults.step_id == step.id,
-                )
-            )
-        ).scalar_one()
+    monkeypatch.setattr(
+        FlowRunWebhookDeliveryRepository, "record_delivery_failure", _claim_lost
+    )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
 
-    assert result.attempted_count == 1
-    assert result.delivered_count == 0
-    assert result.retry_scheduled_count == 0
-    assert result.dead_lettered_count == 0
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.claim_token,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_scalar(
+        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    )
+    result_payload = await _read_scalar(
+        sa.select(FlowStepResults.output_payload_json).where(
+            FlowStepResults.flow_run_id == seeded.run.id,
+            FlowStepResults.step_id == seeded.step.id,
+        )
+    )
+
+    assert result["attempted"] == 1
+    assert result["delivered"] == 0
+    assert result["retry_scheduled"] == 0
+    assert result["dead_lettered"] == 0
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
     assert run_state == FlowRunStatus.RUNNING.value
@@ -1831,10 +1550,8 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
 @pytest.mark.integration
 async def test_flow_webhook_delivery_does_not_retry_a_destination_the_sender_refuses(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
     error_code: str,
     message: str,
     expected_retry: int,
@@ -1843,54 +1560,31 @@ async def test_flow_webhook_delivery_does_not_retry_a_destination_the_sender_ref
     # A refused destination (policy or URL) is refused the same way on every
     # attempt, so it is dead-lettered on the first; a name that did not resolve
     # may resolve later and is retried.
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        service.http_runtime.send_request = AsyncMock(
-            side_effect=TypedIOValidationException(message, code=error_code)
-        )
+    seeded = await seed_delivery()
+    monkeypatch.setattr(
+        FlowHttpRuntimeHelper,
+        "send_request",
+        AsyncMock(side_effect=TypedIOValidationException(message, code=error_code)),
+    )
 
-        now = datetime.now(timezone.utc)
-        result = await service.deliver_due(now=now)
-        repeated = await service.deliver_due(now=now + timedelta(seconds=1))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_status = await session.scalar(
-            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-        )
+    now = datetime.now(timezone.utc)
+    result = await _run_outbox(now=now)
+    repeated = await _run_outbox(now=now + timedelta(seconds=1))
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_status = await _read_scalar(
+        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    )
 
-    assert result.attempted_count == 1
-    assert result.retry_scheduled_count == expected_retry
-    assert result.dead_lettered_count == expected_dead_letter
+    assert result["attempted"] == 1
+    assert result["retry_scheduled"] == expected_retry
+    assert result["dead_lettered"] == expected_dead_letter
     if expected_dead_letter:
-        assert repeated.attempted_count == 0
+        assert repeated["attempted"] == 0
         assert delivery_state.delivery_attempts == 1
         assert (
             delivery_state.delivery_status
@@ -1911,58 +1605,32 @@ async def test_flow_webhook_delivery_does_not_retry_a_destination_the_sender_ref
 @pytest.mark.integration
 async def test_flow_webhook_delivery_applies_http_status_retry_policy(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
     status_code: int,
     expected_retry: int,
     expected_dead_letter: int,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        service.http_runtime.send_request = AsyncMock(
-            return_value=httpx.Response(status_code, request=request)
-        )
+    seeded = await seed_delivery()
+    monkeypatch.setattr(
+        FlowHttpRuntimeHelper,
+        "send_request",
+        AsyncMock(return_value=_response(status_code)),
+    )
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_status = await session.scalar(
-            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-        )
+    result = await _run_outbox()
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_status = await _read_scalar(
+        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    )
 
-    assert result.retry_scheduled_count == expected_retry
-    assert result.dead_lettered_count == expected_dead_letter
+    assert result["retry_scheduled"] == expected_retry
+    assert result["dead_lettered"] == expected_dead_letter
     assert delivery_state.delivery_attempts == 1
     if expected_dead_letter:
         assert (
@@ -1979,76 +1647,47 @@ async def test_flow_webhook_delivery_applies_http_status_retry_policy(
 @pytest.mark.integration
 async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_post(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = _FailureCasFailingOnceWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        send_http_request = AsyncMock(return_value=httpx.Response(503, request=request))
-        service.http_runtime.send_request = send_http_request
-        now = datetime.now(timezone.utc)
+    seeded = await seed_delivery()
+    lose_next_failure = _lose_next_outcome(monkeypatch, "record_delivery_failure")
+    send_http_request = AsyncMock(return_value=_response(503))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    now = datetime.now(timezone.utc)
 
-        for delivery_attempt in range(1, FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
-            if delivery_attempt == FLOW_WEBHOOK_MAX_ATTEMPTS:
-                webhook_repo.fail_next_failure = True
-            result = await service.deliver_due(now=now)
-            assert result.attempted_count == 1
-            now += timedelta(seconds=2_000)
+    for delivery_attempt in range(1, FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
+        if delivery_attempt == FLOW_WEBHOOK_MAX_ATTEMPTS:
+            lose_next_failure()
+        result = await _run_outbox(now=now)
+        assert result["attempted"] == 1
+        now += timedelta(seconds=2_000)
 
-        attempts_after_lost_outcome = await session.scalar(
-            sa.select(FlowRunWebhookDeliveries.delivery_attempts).where(
-                FlowRunWebhookDeliveries.id == delivery_id
-            )
+    attempts_after_lost_outcome = await _read_scalar(
+        sa.select(FlowRunWebhookDeliveries.delivery_attempts).where(
+            FlowRunWebhookDeliveries.id == seeded.delivery_id
         )
-        converged = await service.deliver_due(now=now)
-        recorded_by = datetime.now(timezone.utc)
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.delivery_last_error,
-                    FlowRunWebhookDeliveries.dead_lettered_at,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status, FlowRuns.error_json).where(
-                    FlowRuns.id == run.id
-                )
-            )
-        ).one()
+    )
+    converged = await _run_outbox(now=now)
+    recorded_by = datetime.now(timezone.utc)
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.delivery_last_error,
+            FlowRunWebhookDeliveries.dead_lettered_at,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.error_json).where(
+            FlowRuns.id == seeded.run.id
+        )
+    )
 
     assert attempts_after_lost_outcome == FLOW_WEBHOOK_MAX_ATTEMPTS
     assert send_http_request.await_count == FLOW_WEBHOOK_MAX_ATTEMPTS
-    assert converged.attempted_count == 0
-    assert converged.dead_lettered_count == 1
+    assert converged["attempted"] == 0
+    assert converged["dead_lettered"] == 1
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -2066,52 +1705,31 @@ async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_po
 @pytest.mark.integration
 async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
+    monkeypatch,
 ):
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        service.http_runtime.send_request = AsyncMock(
+    seeded = await seed_delivery()
+    request = httpx.Request("POST", "https://example.org/hook/case-123")
+    monkeypatch.setattr(
+        FlowHttpRuntimeHelper,
+        "send_request",
+        AsyncMock(
             side_effect=httpx.ConnectError(
                 "POST https://user:pass@example.org/hook?token=secret-value failed; "
                 "X-Partner-Proof: dummy-credential-outside-url",
                 request=request,
             )
-        )
+        ),
+    )
 
-        result = await service.deliver_due(now=datetime.now(timezone.utc))
-        persisted_error = await session.scalar(
-            sa.select(FlowRunWebhookDeliveries.delivery_last_error).where(
-                FlowRunWebhookDeliveries.id == delivery_id
-            )
+    result = await _run_outbox()
+    persisted_error = await _read_scalar(
+        sa.select(FlowRunWebhookDeliveries.delivery_last_error).where(
+            FlowRunWebhookDeliveries.id == seeded.delivery_id
         )
+    )
 
-    assert result.retry_scheduled_count == 1
+    assert result["retry_scheduled"] == 1
     assert persisted_error is not None
     assert "user:pass" not in persisted_error
     assert "secret-value" not in persisted_error
@@ -2130,10 +1748,10 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
 ):
     """One task invocation runs at most FLOW_WEBHOOK_DELIVERY_CONCURRENCY sends.
 
-    The cron's fixed job id runs one invocation at a time, so this is the
-    ceiling a webhook receiver sees; it has to be observed rather than assumed.
-    Claiming more rows than the ceiling is what makes the observation
-    meaningful.
+    Every request for the job carries one fixed task key, so one invocation
+    runs at a time and this is the ceiling a webhook receiver sees; it has to
+    be observed rather than assumed. Claiming more rows than the ceiling is
+    what makes the observation meaningful.
     """
     from eneo.flows.runtime import tasks as tasks_module
 
@@ -2641,6 +2259,179 @@ async def test_flow_webhook_outbox_job_claims_only_what_its_deadline_can_send(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_row_committed_behind_a_slow_wave_is_delivered_by_the_cron(
+    setup_database,
+    seed_delivery,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    redis_client,
+    monkeypatch,
+):
+    """The best-effort request and its recovery, through ARQ.
+
+    A run commits its row while the outbox job is out on a slow wave: the
+    run's request joins the running job, which ends without claiming the row
+    because its claim window has passed. A later cron tick requests a new job,
+    which delivers the row. Nothing here bounds how long recovery takes."""
+    from eneo.flows.runtime import tasks as tasks_module
+
+    # The slow send has seconds to spare before its send deadline; the claim
+    # window closes 0.2 s after the job starts.
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=5.0,
+        preparation_margin_seconds=1.0,
+        persistence_margin_seconds=1.0,
+        finish_margin_seconds=1.0,
+        claim_window_seconds=0.2,
+    )
+    monkeypatch.setattr(tasks_module, "flow_webhook_delivery_budget", lambda: budget)
+    slow = await seed_delivery()
+    slow_send_started = asyncio.Event()
+    release_slow_send = asyncio.Event()
+
+    async def _send(_self, **_kwargs):
+        if not slow_send_started.is_set():
+            slow_send_started.set()
+            await release_slow_send.wait()
+        return _response(200)
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send)
+
+    async def delivered(delivery_id: UUID) -> bool:
+        state = (await _delivery_states([delivery_id]))[delivery_id]
+        return state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+
+    await clear_webhook_outbox_jobs(redis_client)
+    try:
+        async with (
+            platform_task_enqueuer() as enqueuer,
+            webhook_cron_scheduler() as scheduler,
+            running_maintenance_worker(),
+        ):
+            await enqueuer.enqueue(webhook_policy.flow_webhook_delivery_request())
+            async with asyncio.timeout(10):
+                await slow_send_started.wait()
+            [late_id] = await _insert_due_webhook_rows(
+                row_count=1,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+            )
+            late_request = await enqueuer.enqueue(
+                webhook_policy.flow_webhook_delivery_request()
+            )
+            assert late_request.status is TaskEnqueueStatus.ACCEPTED
+            await asyncio.sleep(budget.claim_window_seconds)
+            release_slow_send.set()
+            await eventually(lambda: outbox_job_key_is_free(redis_client))
+
+            assert await delivered(slow.delivery_id)
+            late = (await _delivery_states([late_id]))[late_id]
+            assert late.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+            assert late.delivery_attempts == 0
+
+            await tick_webhook_cron(
+                scheduler, at=datetime.now(timezone.utc) - timedelta(seconds=1)
+            )
+            await eventually(lambda: delivered(late_id))
+    finally:
+        await clear_webhook_outbox_jobs(redis_client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_worker_run_ending_in_a_webhook_requests_its_delivery_at_commit(
+    setup_database,
+    object_content_runtime_ready,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    redis_client,
+    monkeypatch,
+):
+    """The executor the worker assembles requests delivery once it commits.
+
+    The run goes through the worker's own execution task, on ARQ. No cron tick
+    is scheduled, so only the run's request can deliver its row. That request
+    is sent once, after the row and the running run are committed."""
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        _, run, _ = await _create_queued_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.commit()
+
+    async def _answer(_self, **_kwargs):
+        return SimpleNamespace(completion="done", total_token_count=1)
+
+    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _answer_200)
+
+    async def committed_state() -> tuple[str, list[str]]:
+        run_status = await _read_scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+        )
+        rows = await _read(
+            sa.select(FlowRunWebhookDeliveries.delivery_status).where(
+                FlowRunWebhookDeliveries.flow_run_id == run.id
+            )
+        )
+        return run_status, [row.delivery_status for row in rows]
+
+    async def completed() -> bool:
+        return await committed_state() == (
+            FlowRunStatus.COMPLETED.value,
+            [FlowOutboxDeliveryStatus.DELIVERED.value],
+        )
+
+    requests: list[tuple[object, tuple[str, list[str]]]] = []
+    await clear_webhook_outbox_jobs(redis_client)
+    try:
+        async with platform_task_enqueuer() as enqueuer, running_maintenance_worker():
+            enqueue = enqueuer.enqueue
+
+            async def recording_enqueue(request):
+                requests.append((request, await committed_state()))
+                return await enqueue(request)
+
+            monkeypatch.setattr(enqueuer, "enqueue", recording_enqueue)
+            result = await tasks_module.execute_flow_run_task(
+                run_id=str(run.id),
+                flow_id=str(run.flow_id),
+                tenant_id=str(run.tenant_id),
+                run_revision=run.revision,
+                principal_type=PrincipalType.USER.value,
+                principal_user_id=str(admin_user.id),
+                task_id=None,
+                retry_count=0,
+            )
+
+            assert result == {"status": FlowRunStatus.RUNNING.value}
+            assert requests == [
+                (
+                    webhook_policy.flow_webhook_delivery_request(),
+                    (
+                        FlowRunStatus.RUNNING.value,
+                        [FlowOutboxDeliveryStatus.PENDING.value],
+                    ),
+                )
+            ]
+            await eventually(completed)
+    finally:
+        await tasks_module.execution_heartbeats().stop()
+        await clear_webhook_outbox_jobs(redis_client)
+
+
 def _capture_logs(monkeypatch, caplog, logger: logging.Logger) -> None:
     monkeypatch.setattr(logger, "disabled", False)
     monkeypatch.setattr(logger, "propagate", False)
@@ -2717,6 +2508,7 @@ async def test_flow_webhook_outbox_records_a_200_whose_audit_never_returns(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize("row_count", [1, 2], ids=["single_row", "mixed_wave"])
 async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_hard_stop(
     setup_database,
     completion_model_factory,
@@ -2725,21 +2517,23 @@ async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_
     admin_user,
     monkeypatch,
     caplog,
+    row_count: int,
 ):
     """A 200 whose outcome cannot be recorded: another session holds the
-    delivery row's lock.
+    delivery row's lock. In a mixed wave only that row is cut; its sibling
+    records normally.
 
-    Kills: recording with no bound (the job runs on until ARQ cancels it), and
-    a cut delivery or a cut job that is not logged."""
-    from eneo.flows.runtime import tasks as tasks_module
-
-    [delivery_id] = await _insert_due_webhook_rows(
-        row_count=1,
+    Kills: recording with no bound (the job runs on until ARQ cancels it), a
+    cut delivery or a cut job that is not logged, and a hard stop that counts
+    the whole wave as unfinished, or none of it."""
+    delivery_ids = await _insert_due_webhook_rows(
+        row_count=row_count,
         admin_user=admin_user,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
     )
+    [delivery_id, *recorded_ids] = delivery_ids
     send_started = asyncio.Event()
     lock_held = asyncio.Event()
     release_lock = asyncio.Event()
@@ -2790,16 +2584,20 @@ async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_
             lock_holder.cancel()
         await asyncio.gather(lock_holder, return_exceptions=True)
 
-    state = (await _delivery_states([delivery_id]))[delivery_id]
+    states = await _delivery_states(delivery_ids)
+    state = states[delivery_id]
     assert budget.hard_stop_seconds <= returned_after < budget.job_timeout_seconds
     assert (result["status"], result["unfinished"], result["delivered"]) == (
         "hard_stopped",
         1,
-        0,
+        row_count - 1,
     )
     assert state.claim_token is not None
     assert state.delivery_attempts == 1
     assert state.delivery_status != FlowOutboxDeliveryStatus.DELIVERED.value
+    assert {states[recorded_id].delivery_status for recorded_id in recorded_ids} <= {
+        FlowOutboxDeliveryStatus.DELIVERED.value
+    }
     errors = [record for record in caplog.records if record.levelno == logging.ERROR]
     assert [
         (getattr(record, "delivery_id", None), getattr(record, "flow_run_id", None))
@@ -2863,71 +2661,42 @@ async def test_flow_webhook_outbox_cuts_a_blocked_claim_session_at_the_hard_stop
 )
 async def test_flow_webhook_delivery_refuses_internal_destinations_without_connecting(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
+    seed_delivery,
     url_template: str,
 ):
     # The real sender, with its destination policy, is the one the outbox job
     # uses: a loopback, metadata or IPv4-mapped destination in any spelling is
     # refused before a connection exists, and refused once, not retried.
     async with recording_server() as internal:
-        async with sessionmanager.session() as session:
-            enable_autobegin_for_flow_task_session(session)
-            container = Container(
-                session=providers.Object(session),
-                user=providers.Object(admin_user),
-            )
-            flow, run, step = await _create_running_webhook_run(
-                session=session,
-                admin_user=admin_user,
-                completion_model_factory=completion_model_factory,
-                space_factory=space_factory,
-                assistant_factory=assistant_factory,
-                output_config={
-                    "url": url_template.format(port=internal.port),
-                    "auth": {"mode": "none"},
-                    "timeout_seconds": 5,
-                },
-            )
-            webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-            delivery_id = await webhook_repo.insert_pending_delivery(
-                flow_id=flow.id,
-                tenant_id=admin_user.tenant_id,
-                intent=_intent(run_id=run.id, step_id=step.id),
-            )
-            service = _delivery_service(
-                session=session,
-                container=container,
-                webhook_repo=webhook_repo,
-            )
+        seeded = await seed_delivery(
+            output_config={
+                "url": url_template.format(port=internal.port),
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+            },
+        )
 
-            now = datetime.now(timezone.utc)
-            result = await service.deliver_due(now=now)
-            repeated = await service.deliver_due(now=now + timedelta(hours=1))
-            delivery_state = (
-                await session.execute(
-                    sa.select(
-                        FlowRunWebhookDeliveries.delivery_status,
-                        FlowRunWebhookDeliveries.delivery_attempts,
-                    ).where(FlowRunWebhookDeliveries.id == delivery_id)
-                )
-            ).one()
-            run_state = (
-                await session.execute(
-                    sa.select(FlowRuns.status, FlowRuns.error_json).where(
-                        FlowRuns.id == run.id
-                    )
-                )
-            ).one()
+        now = datetime.now(timezone.utc)
+        result = await _run_outbox(now=now)
+        repeated = await _run_outbox(now=now + timedelta(hours=1))
+        delivery_state = await _read_one(
+            sa.select(
+                FlowRunWebhookDeliveries.delivery_status,
+                FlowRunWebhookDeliveries.delivery_attempts,
+            ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+        )
+        run_state = await _read_one(
+            sa.select(FlowRuns.status, FlowRuns.error_json).where(
+                FlowRuns.id == seeded.run.id
+            )
+        )
 
         assert internal.connections == 0
         assert bytes(internal.received) == b""
 
-    assert (result.attempted_count, result.dead_lettered_count) == (1, 1)
-    assert result.retry_scheduled_count == 0
-    assert repeated.attempted_count == 0
+    assert (result["attempted"], result["dead_lettered"]) == (1, 1)
+    assert result["retry_scheduled"] == 0
+    assert repeated["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
@@ -2954,12 +2723,11 @@ class _RunServiceARefusedRetryNeverUses:
 )
 async def test_a_webhook_whose_outcome_stays_unknown_is_reposted_only_under_its_key(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
+    seed_delivery,
     admin_user,
     test_tenant,
     object_content_runtime_ready,
+    monkeypatch,
     lost_answer: httpx.HTTPError,
 ):
     # A request that went out and lost its answer may have been received. The
@@ -2967,6 +2735,48 @@ async def test_a_webhook_whose_outcome_stays_unknown_is_reposted_only_under_its_
     # budget, and then stops. The failed run cannot be retried from its last
     # step: the delivering step completed, so a retry would only repeat the
     # same POST under a new key that the receiver cannot match.
+    seeded = await seed_delivery()
+    flow, run, step = seeded.flow, seeded.run, seeded.step
+    assert flow.id is not None
+    sent_idempotency_keys: list[str] = []
+
+    async def _send_http_request(_self, **kwargs):
+        sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
+        raise lost_answer
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
+    now = datetime.now(timezone.utc)
+    results = []
+    for _ in range(FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
+        results.append(await _run_outbox(now=now))
+        now += timedelta(seconds=2_000)
+
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.error_json).where(FlowRuns.id == run.id)
+    )
+    step_state = await _read_one(
+        sa.select(
+            FlowStepResults.status,
+            FlowStepResults.current_attempt_no,
+            FlowStepResults.output_payload_json,
+        ).where(
+            FlowStepResults.flow_run_id == run.id,
+            FlowStepResults.step_id == step.id,
+        )
+    )
+    attempt_states = await _read(
+        sa.select(FlowStepAttempts.attempt_no, FlowStepAttempts.status).where(
+            FlowStepAttempts.flow_run_id == run.id,
+            FlowStepAttempts.step_id == step.id,
+        )
+    )
+
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         container = Container(
@@ -2974,74 +2784,6 @@ async def test_a_webhook_whose_outcome_stays_unknown_is_reposted_only_under_its_
             user=providers.Object(admin_user),
             tenant=providers.Object(test_tenant),
         )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        sent_idempotency_keys: list[str] = []
-
-        async def _send_http_request(**kwargs):
-            sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
-            raise lost_answer
-
-        service.http_runtime.send_request = _send_http_request
-        now = datetime.now(timezone.utc)
-        results = []
-        for _ in range(FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
-            results.append(await service.deliver_due(now=now))
-            now += timedelta(seconds=2_000)
-
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_state = (
-            await session.execute(
-                sa.select(FlowRuns.status, FlowRuns.error_json).where(
-                    FlowRuns.id == run.id
-                )
-            )
-        ).one()
-        step_state = (
-            await session.execute(
-                sa.select(
-                    FlowStepResults.status,
-                    FlowStepResults.current_attempt_no,
-                    FlowStepResults.output_payload_json,
-                ).where(
-                    FlowStepResults.flow_run_id == run.id,
-                    FlowStepResults.step_id == step.id,
-                )
-            )
-        ).one()
-        attempt_states = (
-            await session.execute(
-                sa.select(FlowStepAttempts.attempt_no, FlowStepAttempts.status).where(
-                    FlowStepAttempts.flow_run_id == run.id,
-                    FlowStepAttempts.step_id == step.id,
-                )
-            )
-        ).all()
-        await session.commit()
-
         retry_service = FlowRunRetryService(
             user=admin_user,
             run_service=cast(FlowRunService, _RunServiceARefusedRetryNeverUses()),
@@ -3068,9 +2810,9 @@ async def test_a_webhook_whose_outcome_stays_unknown_is_reposted_only_under_its_
             .where(FlowRunWebhookDeliveries.flow_id == flow.id)
         )
 
-    assert [result.attempted_count for result in results] == [1] * 5 + [0]
-    assert [result.retry_scheduled_count for result in results] == [1] * 4 + [0, 0]
-    assert results[FLOW_WEBHOOK_MAX_ATTEMPTS - 1].dead_lettered_count == 1
+    assert [result["attempted"] for result in results] == [1] * 5 + [0]
+    assert [result["retry_scheduled"] for result in results] == [1] * 4 + [0, 0]
+    assert results[FLOW_WEBHOOK_MAX_ATTEMPTS - 1]["dead_lettered"] == 1
     assert len(sent_idempotency_keys) == FLOW_WEBHOOK_MAX_ATTEMPTS
     assert set(sent_idempotency_keys) == {
         hashlib.sha256(f"{run.id}:{step.id}:1:webhook".encode()).hexdigest()
@@ -3097,95 +2839,67 @@ async def test_a_webhook_whose_outcome_stays_unknown_is_reposted_only_under_its_
 
 async def test_a_run_cancelled_while_its_webhook_is_in_flight_is_not_reposted(
     setup_database,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
+    seed_delivery,
     admin_user,
+    monkeypatch,
 ):
     # The POST that was in flight when the run was cancelled is not recorded
     # as delivered, and the expired claim it leaves behind ends the delivery
     # without a second request.
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-        )
-        flow, run, step = await _create_running_webhook_run(
-            session=session,
-            admin_user=admin_user,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-        )
-        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
-        delivery_id = await webhook_repo.insert_pending_delivery(
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            intent=_intent(run_id=run.id, step_id=step.id),
-        )
-        service = _delivery_service(
-            session=session,
-            container=container,
-            webhook_repo=webhook_repo,
-        )
-        request = httpx.Request("POST", "https://example.org/hook/case-123")
-        sends = 0
+    seeded = await seed_delivery()
+    sends = 0
 
-        async def _cancel_during_send(**_kwargs):
-            nonlocal sends
-            sends += 1
-            async with sessionmanager.session() as other, other.begin():
-                other_run_repo = FlowRunRepository(session=other)
-                audit_outbox_repo = FlowRunAuditOutboxRepository(session=other)
-                cancelled = await FlowRunTerminalizer(
-                    other_run_repo,
-                    audit_outbox_repo,
-                    FlowRunReviewCheckpointRepository(
-                        session=other, audit_outbox_repo=audit_outbox_repo
-                    ),
-                ).terminalize_run(
-                    run_id=run.id,
-                    tenant_id=admin_user.tenant_id,
-                    target_status=FlowRunStatus.CANCELLED,
-                    source=FlowRunLifecycleSource.USER_CANCEL,
-                    error=FlowRunError.from_source(
-                        FlowRunLifecycleSource.USER_CANCEL,
-                        code=FlowApiErrorCode.RUN_USER_CANCELLED,
-                        message="Run cancelled by user.",
-                    ),
-                    cancelled_at=datetime.now(timezone.utc),
-                )
-                assert cancelled.did_transition
-            return httpx.Response(200, request=request)
+    async def _cancel_during_send(_self, **_kwargs):
+        nonlocal sends
+        sends += 1
+        async with sessionmanager.session() as other, other.begin():
+            other_run_repo = FlowRunRepository(session=other)
+            audit_outbox_repo = FlowRunAuditOutboxRepository(session=other)
+            cancelled = await FlowRunTerminalizer(
+                other_run_repo,
+                audit_outbox_repo,
+                FlowRunReviewCheckpointRepository(
+                    session=other, audit_outbox_repo=audit_outbox_repo
+                ),
+            ).terminalize_run(
+                run_id=seeded.run.id,
+                tenant_id=admin_user.tenant_id,
+                target_status=FlowRunStatus.CANCELLED,
+                source=FlowRunLifecycleSource.USER_CANCEL,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.USER_CANCEL,
+                    code=FlowApiErrorCode.RUN_USER_CANCELLED,
+                    message="Run cancelled by user.",
+                ),
+                cancelled_at=datetime.now(timezone.utc),
+            )
+            assert cancelled.did_transition
+        return _response(200)
 
-        service.http_runtime.send_request = _cancel_during_send
-        now = datetime.now(timezone.utc)
-        in_flight = await service.deliver_due(now=now)
-        after_claim_expiry = await service.deliver_due(
-            now=now
-            + timedelta(
-                seconds=webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds
-                + 1
-            )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _cancel_during_send)
+    now = datetime.now(timezone.utc)
+    in_flight = await _run_outbox(now=now)
+    after_claim_expiry = await _run_outbox(
+        now=now
+        + timedelta(
+            seconds=webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds + 1
         )
-        later = await service.deliver_due(now=now + timedelta(hours=2))
-        delivery_state = (
-            await session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivered_at,
-                ).where(FlowRunWebhookDeliveries.id == delivery_id)
-            )
-        ).one()
-        run_status = await session.scalar(
-            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
-        )
+    )
+    later = await _run_outbox(now=now + timedelta(hours=2))
+    delivery_state = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivered_at,
+        ).where(FlowRunWebhookDeliveries.id == seeded.delivery_id)
+    )
+    run_status = await _read_scalar(
+        sa.select(FlowRuns.status).where(FlowRuns.id == seeded.run.id)
+    )
 
     assert sends == 1
-    assert (in_flight.attempted_count, in_flight.delivered_count) == (1, 0)
-    assert after_claim_expiry.dead_lettered_count == 1
-    assert later.attempted_count == 0
+    assert (in_flight["attempted"], in_flight["delivered"]) == (1, 0)
+    assert after_claim_expiry["dead_lettered"] == 1
+    assert later["attempted"] == 0
     assert (
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )

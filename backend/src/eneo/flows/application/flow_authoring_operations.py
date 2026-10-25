@@ -77,9 +77,7 @@ def _flow_name_taken_conflict() -> ConflictException:
     )
 
 
-def _classification_override_step_orders(
-    flow_data: FlowCreateRequest | FlowUpdateRequest,
-) -> list[int]:
+def _classification_override_step_orders(flow_data: FlowUpdateRequest) -> list[int]:
     steps = flow_data.steps
     if not steps:
         return []
@@ -108,17 +106,18 @@ def _evidence_export_change(
 async def create_flow(
     request: Request, flow_in: FlowCreateRequest, container: Container
 ) -> FlowPublic:
-    access_context = await flow_access_context.resolve_space_access_context(
+    scope_filter = flow_access_context.get_scope_filter(request)
+    actor = await flow_access_context.resolve_space_actor(
         request,
         container,
         space_id=flow_in.space_id,
         required_access=FlowApiAction.EDIT,
         scope_mismatch_message=(
-            f"API key is scoped to space '{flow_access_context.get_scope_filter(request).space_id}'. "
+            f"API key is scoped to space '{scope_filter.space_id}'. "
             f"Cannot create flow in space '{flow_in.space_id}'."
         ),
     )
-    if not access_context.actor.can_create_flows():
+    if not actor.can_create_flows():
         raise FlowUnauthorizedException(
             "You do not have permission to create flows in this space.",
             code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
@@ -134,7 +133,6 @@ async def create_flow(
             space_id=flow_in.space_id,
             name=flow_in.name,
             description=flow_in.description,
-            steps=[assembler.to_domain_step(step) for step in flow_in.steps],
             metadata_json=flow_in.metadata_json,
         )
     except FlowNameTakenError as exc:
@@ -155,21 +153,6 @@ async def create_flow(
             changes=_evidence_export_change(before=None, after=created.metadata_json),
         ),
     )
-    overrides = _classification_override_step_orders(flow_in)
-    if overrides:
-        audit.add(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
-            entity_type=EntityType.FLOW,
-            entity_id=created_flow_id,
-            description="Configured output classification overrides for flow steps.",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=created,
-                changes={"step_orders": overrides},
-            ),
-        )
     if owns_audit:
         await audit.log()
 
@@ -178,8 +161,8 @@ async def create_flow(
         permissions=flow_permissions(
             container,
             flow=created,
-            actor=access_context.actor,
-            scope_filter=access_context.scope_filter,
+            actor=actor,
+            scope_filter=scope_filter,
         ),
     )
 

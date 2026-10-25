@@ -587,3 +587,246 @@ def test_flow_version_reference_backfill_refuses_offline_and_never_stamps():
     emitted = output.getvalue().lower()
     assert "update alembic_version" not in emitted
     assert "insert into alembic_version" not in emitted
+
+
+_LISTING_INDEXES = (
+    "ix_flow_runs_flow_listing",
+    "ix_flow_runs_flow_user_listing",
+    "ix_flow_runs_flow_service_listing",
+)
+_REPLACED_FLOW_ID_INDEX = "ix_flow_runs_flow_id"
+
+
+_LISTING_MIGRATION = "202610241000_flow_run_listing_indexes.py"
+_STATUS_COUNT_MIGRATION = "202610241100_flow_run_status_count_indexes.py"
+_STATUS_COUNT_INDEXES = (
+    "ix_flow_runs_flow_user_status",
+    "ix_flow_runs_flow_service_status",
+)
+
+
+def _index_migration(filename: str = _LISTING_MIGRATION):
+    return runpy.run_path(
+        str(Path(__file__).parents[2] / "alembic" / "versions" / filename)
+    )
+
+
+def _run_index_migration(
+    monkeypatch,
+    direction: str,
+    *,
+    valid: bool | None,
+    filename: str = _LISTING_MIGRATION,
+):
+    """Run one direction over a mocked ``op``; ``valid`` is what pg_index
+    reports for every index the revision looks up (None: no such index)."""
+    migration = _index_migration(filename)
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar.return_value = valid
+    monkeypatch.setitem(migration[direction].__globals__, "op", operations)
+    migration[direction]()
+    return operations
+
+
+def _executed(operations) -> list[str]:
+    return [" ".join(str(c.args[0]).split()) for c in operations.execute.call_args_list]
+
+
+def _declared_index_ddl(name: str) -> str:
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateIndex
+
+    from eneo.database.tables.flow_tables import FlowRuns
+
+    index = next(i for i in FlowRuns.__table__.indexes if i.name == name)
+    return " ".join(
+        str(CreateIndex(index).compile(dialect=postgresql.dialect())).split()
+    )
+
+
+def test_listing_index_migration_follows_the_outbox_revision():
+    migration = _index_migration()
+    assert migration["revision"] == "202610241000"
+    assert migration["down_revision"] == "202610231100"
+
+
+def test_listing_indexes_are_built_concurrently_before_the_flow_id_index_goes(
+    monkeypatch,
+):
+    operations = _run_index_migration(monkeypatch, "upgrade", valid=None)
+
+    statements = _executed(operations)
+    assert statements[0] == "SET lock_timeout = '5s'"
+    assert statements[-1] == "RESET lock_timeout"
+    assert [s.split(" ON ")[0] for s in statements[1:-1]] == [
+        *(
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name}"
+            for name in _LISTING_INDEXES
+        ),
+        f"DROP INDEX CONCURRENTLY IF EXISTS {_REPLACED_FLOW_ID_INDEX}",
+    ]
+    operations.get_context.return_value.autocommit_block.assert_called_once()
+    calls = operations.mock_calls
+    assert calls.index(call.get_context().autocommit_block().__enter__()) < calls.index(
+        call.execute("SET lock_timeout = '5s'")
+    )
+    assert calls.index(call.execute("RESET lock_timeout")) < calls.index(
+        call.get_context().autocommit_block().__exit__(None, None, None)
+    )
+
+
+def test_listing_index_migration_matches_the_model(monkeypatch):
+    from eneo.database.tables.flow_tables import FlowRuns
+
+    operations = _run_index_migration(monkeypatch, "upgrade", valid=None)
+
+    created = [
+        s.replace(" CONCURRENTLY IF NOT EXISTS ", " ")
+        for s in _executed(operations)
+        if s.startswith("CREATE INDEX")
+    ]
+    assert created == [_declared_index_ddl(name) for name in _LISTING_INDEXES]
+    indexes = {index.name: index for index in FlowRuns.__table__.indexes}
+    assert _REPLACED_FLOW_ID_INDEX not in indexes
+    # The dropped (flow_id) index is a strict prefix of this one.
+    assert [c.name for c in indexes["ix_flow_runs_flow_id_status"].columns] == [
+        "flow_id",
+        "status",
+    ]
+
+
+def test_listing_index_migration_rebuilds_only_an_invalid_leftover(monkeypatch):
+    rebuilt = _executed(_run_index_migration(monkeypatch, "upgrade", valid=False))
+    kept = _executed(_run_index_migration(monkeypatch, "upgrade", valid=True))
+
+    for name in _LISTING_INDEXES:
+        create = next(i for i, s in enumerate(rebuilt) if f"EXISTS {name} ON" in s)
+        assert rebuilt[create - 1] == f"DROP INDEX CONCURRENTLY {name}"
+        assert f"DROP INDEX CONCURRENTLY {name}" not in kept
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+def test_listing_index_build_failure_resets_lock_timeout_and_keeps_the_old_index(
+    monkeypatch, direction
+):
+    migration = _index_migration()
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar.return_value = None
+
+    def execute(sql):
+        if str(sql).lstrip().startswith("CREATE INDEX"):
+            raise RuntimeError("lock unavailable")
+
+    operations.execute.side_effect = execute
+    monkeypatch.setitem(migration[direction].__globals__, "op", operations)
+    with pytest.raises(RuntimeError, match="lock unavailable"):
+        migration[direction]()
+    operations.execute.assert_called_with("RESET lock_timeout")
+    assert not any(s.startswith("DROP INDEX") for s in _executed(operations))
+
+
+@pytest.mark.parametrize("valid", [None, False])
+def test_listing_index_downgrade_restores_the_flow_id_index_first(monkeypatch, valid):
+    operations = _run_index_migration(monkeypatch, "downgrade", valid=valid)
+
+    restore = [
+        f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {_REPLACED_FLOW_ID_INDEX} "
+        "ON flow_runs (flow_id)"
+    ]
+    if valid is False:
+        restore.insert(0, f"DROP INDEX CONCURRENTLY {_REPLACED_FLOW_ID_INDEX}")
+    assert _executed(operations) == [
+        "SET lock_timeout = '5s'",
+        *restore,
+        *(
+            f"DROP INDEX CONCURRENTLY IF EXISTS {name}"
+            for name in reversed(_LISTING_INDEXES)
+        ),
+        "RESET lock_timeout",
+    ]
+    operations.get_context.return_value.autocommit_block.assert_called_once()
+
+
+def test_status_count_index_migration_follows_the_listing_revision():
+    migration = _index_migration(_STATUS_COUNT_MIGRATION)
+    assert migration["revision"] == "202610241100"
+    assert migration["down_revision"] == "202610241000"
+
+
+def test_status_count_indexes_are_built_concurrently_as_the_model_declares(
+    monkeypatch,
+):
+    operations = _run_index_migration(
+        monkeypatch, "upgrade", valid=None, filename=_STATUS_COUNT_MIGRATION
+    )
+
+    assert _executed(operations) == [
+        "SET lock_timeout = '5s'",
+        *(
+            _declared_index_ddl(name).replace(
+                "CREATE INDEX ", "CREATE INDEX CONCURRENTLY IF NOT EXISTS ", 1
+            )
+            for name in _STATUS_COUNT_INDEXES
+        ),
+        "RESET lock_timeout",
+    ]
+    operations.get_context.return_value.autocommit_block.assert_called_once()
+    calls = operations.mock_calls
+    assert calls.index(call.get_context().autocommit_block().__enter__()) < calls.index(
+        call.execute("SET lock_timeout = '5s'")
+    )
+    assert calls.index(call.execute("RESET lock_timeout")) < calls.index(
+        call.get_context().autocommit_block().__exit__(None, None, None)
+    )
+
+
+def test_status_count_index_migration_rebuilds_only_an_invalid_leftover(
+    monkeypatch,
+):
+    rebuilt = _executed(
+        _run_index_migration(
+            monkeypatch, "upgrade", valid=False, filename=_STATUS_COUNT_MIGRATION
+        )
+    )
+    kept = _executed(
+        _run_index_migration(
+            monkeypatch, "upgrade", valid=True, filename=_STATUS_COUNT_MIGRATION
+        )
+    )
+
+    for name in _STATUS_COUNT_INDEXES:
+        create = next(i for i, s in enumerate(rebuilt) if f"EXISTS {name} ON" in s)
+        assert rebuilt[create - 1] == f"DROP INDEX CONCURRENTLY {name}"
+        assert f"DROP INDEX CONCURRENTLY {name}" not in kept
+
+
+def test_status_count_index_build_failure_resets_lock_timeout(monkeypatch):
+    migration = _index_migration(_STATUS_COUNT_MIGRATION)
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar.return_value = None
+
+    def execute(sql):
+        if str(sql).startswith("CREATE INDEX"):
+            raise RuntimeError("lock unavailable")
+
+    operations.execute.side_effect = execute
+    monkeypatch.setitem(migration["upgrade"].__globals__, "op", operations)
+    with pytest.raises(RuntimeError, match="lock unavailable"):
+        migration["upgrade"]()
+    operations.execute.assert_called_with("RESET lock_timeout")
+
+
+def test_status_count_index_downgrade_drops_them_concurrently(monkeypatch):
+    operations = _run_index_migration(
+        monkeypatch, "downgrade", valid=None, filename=_STATUS_COUNT_MIGRATION
+    )
+
+    assert _executed(operations) == [
+        "SET lock_timeout = '5s'",
+        *(
+            f"DROP INDEX CONCURRENTLY IF EXISTS {name}"
+            for name in reversed(_STATUS_COUNT_INDEXES)
+        ),
+        "RESET lock_timeout",
+    ]
+    operations.get_context.return_value.autocommit_block.assert_called_once()

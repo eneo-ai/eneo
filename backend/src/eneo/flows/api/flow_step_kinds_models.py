@@ -366,14 +366,14 @@ class FlowStepKindsPublic(BaseModel):
     )
     insertions: list[FlowStepKindPlacePublic] = Field(
         description=(
-            "Each place a step can be added, first to after the last step, or "
-            "the ones `position` names."
+            "The place a step can be added that `position` names; empty "
+            "when it names none."
         ),
     )
     steps: list[FlowStepKindPlacePublic] = Field(
         description=(
-            "Each saved step in order, turned to each kind where it stands, or "
-            "the one `step_id` names."
+            "The saved step `step_id` names, turned to each kind where it "
+            "stands; empty when it names none."
         ),
     )
 

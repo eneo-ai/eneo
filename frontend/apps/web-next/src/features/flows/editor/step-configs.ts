@@ -477,6 +477,12 @@ export type ToolArgumentSpec = {
   required: boolean;
   type: string | null;
   description: string | null;
+  /** What the approved schema says about the value; shown to the author, never enforced here. */
+  items: string | null;
+  format: string | null;
+  minimum: number | null;
+  maximum: number | null;
+  default: unknown;
 };
 
 /** The arguments a tool's approved input schema declares, required first. */
@@ -495,7 +501,15 @@ export function toolArguments(inputSchema: unknown): ToolArgumentSpec[] {
         name,
         required: required.has(name),
         type: typeof spec.type === "string" ? spec.type : null,
-        description: typeof spec.description === "string" ? spec.description : null
+        description: typeof spec.description === "string" ? spec.description : null,
+        items:
+          typeof objectOf(spec.items).type === "string"
+            ? (objectOf(spec.items).type as string)
+            : null,
+        format: typeof spec.format === "string" ? spec.format : null,
+        minimum: typeof spec.minimum === "number" ? spec.minimum : null,
+        maximum: typeof spec.maximum === "number" ? spec.maximum : null,
+        default: spec.default
       };
     })
     .sort((left, right) => Number(right.required) - Number(left.required));

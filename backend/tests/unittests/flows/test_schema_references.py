@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import urllib.request
+from collections import OrderedDict
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -307,7 +308,7 @@ async def test_executor_output_contract_never_opens_sockets_or_urls(
     assert requests == []
 
 
-@pytest.mark.parametrize("operation", ["create", "update", "publish"])
+@pytest.mark.parametrize("operation", ["update", "publish"])
 @pytest.mark.parametrize("field", ["input_contract", "output_contract"])
 @pytest.mark.asyncio
 async def test_authoring_services_reject_remote_contracts(
@@ -339,11 +340,7 @@ async def test_authoring_services_reject_remote_contracts(
     )
     flow_repo.get.return_value = stored if operation == "update" else flow
     with pytest.raises(FlowStepValidationError) as exc_info:
-        if operation == "create":
-            await service.create_flow(
-                space_id=flow.space_id, name=flow.name, steps=steps
-            )
-        elif operation == "update":
+        if operation == "update":
             await service.update_flow(flow_id=flow.id, steps=steps)
         else:
             await service.publish_flow(flow_id=flow.id)
@@ -351,7 +348,6 @@ async def test_authoring_services_reject_remote_contracts(
     assert exc_info.value.step_order == 2
     assert "/properties/value/$ref" in str(exc_info.value)
     assert exc_info.value.context["json_pointer"] == "/properties/value/$ref"
-    flow_repo.create.assert_not_awaited()
     flow_repo.update.assert_not_awaited()
     version_repo.create.assert_not_awaited()
     assert requests == []
@@ -715,6 +711,8 @@ _ReferenceEnginePanic.__module__ = "pyo3_runtime"
 
 
 def _metaschema_check_panics(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only a schema the check has not accepted before is checked.
+    monkeypatch.setattr(schema_engine, "_metaschema_verdicts", OrderedDict())
     build = schema_engine.build_schema_validator
 
     class Panicking:
@@ -1047,6 +1045,50 @@ def test_admitting_many_references_to_one_anchor_crawls_the_contract_once(
         return len(crawls), len(visits)
 
     assert work(1000) == work(1)
+
+
+def test_admitting_a_contract_without_references_never_crawls_it(monkeypatch):
+    from referencing import Registry
+
+    crawls: list[int] = []
+    crawl = Registry.crawl
+    monkeypatch.setattr(
+        Registry, "crawl", lambda self: (crawls.append(1), crawl(self))[1]
+    )
+    validate_schema_syntax(
+        {
+            "type": "object",
+            "properties": {
+                "$ref": {"type": "string"},
+                "items": {"type": "array", "items": True},
+            },
+            "$defs": {"unused": {"$anchor": "unused", "type": "string"}},
+            "default": {"$ref": "#/$defs/unused"},
+            "examples": [{"$dynamicRef": "#unused"}],
+        },
+        label="Step 2 output_contract",
+    )
+    assert crawls == []
+
+
+@pytest.mark.parametrize(
+    ("data", "target"),
+    [
+        ({"default": True}, "#/default"),
+        ({"const": True}, "#/const"),
+        ({"enum": [True]}, "#/enum/0"),
+        ({"examples": [True]}, "#/examples/0"),
+    ],
+)
+def test_a_root_reference_to_boolean_data_beside_a_boolean_schema_is_refused(
+    data, target
+):
+    error = _refused({"items": True, **data, "$ref": target})
+    assert error.context == {"json_pointer": "/$ref", "schema_rule": "$ref"}
+    assert str(error) == (
+        "Step 2 output_contract at /$ref: $ref must point to a schema inside this "
+        "contract."
+    )
 
 
 def test_a_stored_contract_may_reference_a_bundled_metaschema_offline(monkeypatch):

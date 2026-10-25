@@ -62,7 +62,6 @@ async def enabled_flow(db_container, admin_user, client, flow_process_auth_heade
         json={
             "space_id": space_response.json()["id"],
             "name": "Adopted flow",
-            "steps": [],
         },
     )
     assert flow_response.status_code == 201, flow_response.text
@@ -998,7 +997,7 @@ async def test_a_model_below_the_spaces_classification_is_refused(
     flow = await client.post(
         "/api/v1/flows/",
         headers=headers,
-        json={"space_id": space_id, "name": "Classified flow", "steps": []},
+        json={"space_id": space_id, "name": "Classified flow"},
     )
     assert flow.status_code == 201, flow.text
     url = f"/api/v1/flows/{flow.json()['id']}/authoring-chat/"
@@ -1074,7 +1073,7 @@ async def test_a_new_chat_starts_on_the_organisation_default(
     flow = await client.post(
         "/api/v1/flows/",
         headers=setup.headers,
-        json={"space_id": setup.flow["space_id"], "name": "Second flow", "steps": []},
+        json={"space_id": setup.flow["space_id"], "name": "Second flow"},
     )
     assert flow.status_code == 201, flow.text
 
@@ -1268,7 +1267,7 @@ async def test_a_new_conversation_on_request_leaves_other_peoples_chats_alone(
     their_flow = await client.post(
         "/api/v1/flows/",
         headers=other,
-        json={"space_id": setup.flow["space_id"], "name": "Their flow", "steps": []},
+        json={"space_id": setup.flow["space_id"], "name": "Their flow"},
     )
     assert their_flow.status_code == 201, their_flow.text
     their_url = f"/api/v1/flows/{their_flow.json()['id']}/authoring-chat/"

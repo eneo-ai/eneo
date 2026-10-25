@@ -67,7 +67,7 @@ from eneo.flows.flow_run_contract_service import (
     build_final_output_contract,
     settle_max_speakers,
     speaker_labels_option,
-    speaker_service_gap_in_space,
+    speaker_service_gap,
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
@@ -79,7 +79,6 @@ from eneo.flows.flow_run_input_envelope import (
     read_live_transcript_ids,
     read_semantic_flow_input_payload,
     read_single_recording_steps,
-    read_speaker_labels_choice,
     with_admitted_audio_seconds,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
@@ -130,7 +129,6 @@ from eneo.flows.runtime.live_transcription.repository import (
     LiveTranscriptScope,
 )
 from eneo.flows.transcription_config import (
-    FlowTranscriptionConfigError,
     SpeakerServiceGap,
     parse_transcription_config,
 )
@@ -479,7 +477,7 @@ class FlowRunService:
             steps = published.definition.runtime_steps()
             wizard = published.definition.metadata().wizard
             service_gap = await self._speaker_service_gap(
-                flow=published.flow, wizard_metadata=wizard
+                flow_id=flow_id, wizard_metadata=wizard
             )
             option = speaker_labels_option(
                 steps,
@@ -574,20 +572,20 @@ class FlowRunService:
         return CreateRunResult(run=created_run, created=True)
 
     async def _speaker_service_gap(
-        self, *, flow: Flow, wizard_metadata: FlowPersistedJsonObject | None
+        self, *, flow_id: UUID, wizard_metadata: FlowPersistedJsonObject | None
     ) -> SpeakerServiceGap | None:
         """Why no connected service would label the flow's speakers in its
-        space, None when one would; only a flow that transcribes loads the
-        space to ask, and any other reads as having chosen no service."""
-        try:
-            if not parse_transcription_config({"wizard": wizard_metadata}).enabled:
-                return SpeakerServiceGap.NOT_CHOSEN
-        except FlowTranscriptionConfigError:
-            return SpeakerServiceGap.NOT_CHOSEN
-        space_service = self.access_policy.space_service
-        assert space_service is not None, "run admission reads the flow's space"
-        space = await space_service.get_space(flow.space_id)
-        return speaker_service_gap_in_space(wizard_metadata, space)
+        space, None when one would (``speaker_service_gap``)."""
+
+        async def flow_space():
+            space_service = self.access_policy.space_service
+            assert space_service is not None, "run admission reads the flow's space"
+            # The actor the flow gate built for this request, from its memo.
+            actor, _level = await self.access_policy.load_space_access(flow_id=flow_id)
+            assert actor is not None, "the container wires the policy's actor manager"
+            return await space_service.get_transcription_space(actor)
+
+        return await speaker_service_gap(wizard_metadata, load_space=flow_space)
 
     async def _load_published_run_definition(
         self,
@@ -727,6 +725,10 @@ class FlowRunService:
             live_transcript_ids=live_transcript_ids,
             single_recording_steps=single_recording_steps,
         )
+        ensure_inline_payload_size_allowed(
+            flow_id=flow_id,
+            input_payload_json=prepared_payload,
+        )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
             principal=principal,
@@ -736,11 +738,6 @@ class FlowRunService:
             run_label=run_label,
             step_input_files=step_input_file_projections,
             purpose=purpose,
-        )
-
-        ensure_inline_payload_size_allowed(
-            flow_id=flow_id,
-            input_payload_json=prepared_payload,
         )
         return _PreparedRunCreation(
             input_payload_json=prepared_payload,
@@ -1021,7 +1018,12 @@ class FlowRunService:
         run_id: UUID,
         history: bool = False,
     ) -> FlowRunVersionedView:
-        run = await self.get_run(
+        # The status projection and the one payload key the graph shows: a
+        # poll never loads the run's input payload, a transcript included.
+        (
+            run,
+            speaker_labels,
+        ) = await self.access_policy.load_run_status_with_speaker_labels(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
@@ -1042,7 +1044,7 @@ class FlowRunService:
         return FlowRunVersionedView(
             published_definition=published_definition,
             step_results=tuple(step_results),
-            speaker_labels=read_speaker_labels_choice(run.input_payload_json),
+            speaker_labels=speaker_labels,
         )
 
     async def get_run_with_result_files_and_usage(

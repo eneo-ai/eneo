@@ -45,7 +45,9 @@ async def _flow_with_assistant(client, db_container, admin_user):
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Att radera", description=None, steps=[]
+            space_id=space_id,
+            name="Att radera",
+            description=None,
         )
         assistant, _ = await service.create_flow_assistant(
             flow_id=flow.id, name="hjälpare"

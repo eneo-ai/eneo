@@ -21,6 +21,7 @@ from eneo.flows.runtime.live_transcription.relay import (
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 from eneo.flows.runtime.live_transcription.upstream import realtime_websocket_url
 from tests.unittests.flows.live_transcription_test_support import (
+    AnyAddress,
     FakeRealtimeServer,
     fake_realtime_server,
 )
@@ -147,7 +148,10 @@ async def test_a_model_server_error_reaches_the_browser_with_its_retry_hint(
     }
 
 
-async def test_an_unreachable_model_server_is_reported_as_retryable():
+async def test_an_unreachable_model_server_is_reported_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(relay, "UPSTREAM_DESTINATION_POLICY", AnyAddress())
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -164,6 +168,123 @@ async def test_an_unreachable_model_server_is_reported_as_retryable():
             "retryable": True,
         }
     ]
+
+
+async def test_a_redirecting_model_server_is_reported_as_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The real client, pinned to the vetted address, refuses a cross-origin
+    # redirect with a ValueError; the relay follows no redirect at all, as the
+    # flow egress does not, so the session ends as for any non-101 answer.
+    monkeypatch.setattr(relay, "UPSTREAM_DESTINATION_POLICY", AnyAddress())
+
+    async def redirect(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(
+            b"HTTP/1.1 307 Temporary Redirect\r\n"
+            b"Location: ws://elsewhere.example/v1/realtime\r\n"
+            b"Content-Length: 0\r\n\r\n"
+        )
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(redirect, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    browser = FakeBrowser()
+    async with server:
+        outcome, _ = await run_relay(browser, f"ws://127.0.0.1:{port}/v1/realtime")
+
+    assert outcome == "upstream_unavailable"
+    assert [event["code"] for event in browser.events] == ["upstream_unavailable"]
+
+
+class ConnectSpy:
+    """Stands in for the websocket connect: records what it was asked to open."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def __call__(self, uri: str, **kwargs: object) -> object:
+        self.calls.append((uri, kwargs))
+        raise OSError("no network in this test")
+
+
+def resolving_to(*addresses: str):
+    async def resolve(host: str, port: int) -> list[str]:
+        return list(addresses)
+
+    return lambda: resolve
+
+
+@pytest.mark.parametrize(
+    "upstream_url",
+    [
+        "ws://127.0.0.1:8000/v1/realtime",
+        "ws://localhost:8000/v1/realtime",
+        "ws://169.254.169.254/v1/realtime",
+        "ws://[fe80::1]:8000/v1/realtime",
+        "wss://[::1]/v1/realtime",
+    ],
+)
+async def test_a_loopback_link_local_or_metadata_upstream_is_refused_unopened(
+    upstream_url: str, monkeypatch: pytest.MonkeyPatch
+):
+    spy = ConnectSpy()
+    monkeypatch.setattr(relay, "UpstreamConnect", spy)
+    browser = FakeBrowser()
+
+    outcome, _ = await run_relay(browser, upstream_url)
+
+    assert spy.calls == []
+    assert outcome == "model_unavailable"
+    assert browser.events == [
+        {
+            "type": "error",
+            "code": "model_unavailable",
+            "message": "The transcription server's address is not allowed.",
+            "retryable": False,
+        }
+    ]
+
+
+async def test_a_name_that_resolves_to_loopback_is_refused_unopened(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spy = ConnectSpy()
+    monkeypatch.setattr(relay, "UpstreamConnect", spy)
+    monkeypatch.setattr(relay, "flow_name_resolver", resolving_to("127.0.0.1"))
+
+    outcome, _ = await run_relay(FakeBrowser(), "wss://asr.example.org/v1/realtime")
+
+    assert spy.calls == []
+    assert outcome == "model_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("upstream_url", "answer", "address", "port"),
+    [
+        ("ws://10.1.2.3:8000/v1/realtime", (), "10.1.2.3", 8000),
+        ("wss://asr.intranet.example/v1/realtime", ("10.0.0.5",), "10.0.0.5", 443),
+    ],
+)
+async def test_a_private_upstream_is_opened_at_its_vetted_address_without_a_proxy(
+    upstream_url: str,
+    answer: tuple[str, ...],
+    address: str,
+    port: int,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spy = ConnectSpy()
+    monkeypatch.setattr(relay, "UpstreamConnect", spy)
+    monkeypatch.setattr(relay, "flow_name_resolver", resolving_to(*answer))
+
+    outcome, _ = await run_relay(FakeBrowser(), upstream_url)
+
+    assert outcome == "upstream_unavailable"
+    [(uri, kwargs)] = spy.calls
+    # The URL is kept, so the Host header and TLS name stay the server's name.
+    assert uri == upstream_url
+    assert (kwargs["host"], kwargs["port"], kwargs["proxy"]) == (address, port, None)
 
 
 async def test_a_model_server_that_hangs_up_mid_session_is_retryable():

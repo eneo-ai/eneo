@@ -18,11 +18,7 @@ from eneo.flows.api.flow_api_common import (
     RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
-from eneo.flows.api.flow_models import (
-    FlowTranscriptWordsPublic,
-    TranscriptSegmentWordsPublic,
-    TranscriptWordPublic,
-)
+from eneo.flows.api.flow_models import FlowTranscriptWordsPublic
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
@@ -34,7 +30,7 @@ from eneo.flows.application.flow_trace_audit import (
 from eneo.flows.application.flow_transcript_words_service import (
     FlowTranscriptWordsView,
 )
-from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.flow import FlowRunStatusSnapshot
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
@@ -70,26 +66,28 @@ be committed, the endpoint returns 503 and exposes no transcript words.
 def _present_transcript_words(
     view: FlowTranscriptWordsView,
 ) -> FlowTranscriptWordsPublic:
-    return FlowTranscriptWordsPublic(
-        flow_run_id=view.words.flow_run_id,
-        step_id=view.words.step_id,
-        segments_hash=view.words.segments_hash,
-        alignment=view.words.alignment,
-        stale=view.stale,
-        segments=[
-            TranscriptSegmentWordsPublic(
-                segment_index=int(entry["segment_index"]),
-                speaker_attribution=entry.get("speaker_attribution"),
-                overlap_ids=entry.get("overlap_ids", []),
-                words=[
-                    TranscriptWordPublic.model_validate(word)
-                    for word in entry.get("words", [])
-                ],
-            )
-            for entry in view.words.words_json
-        ],
-        created_at=view.words.created_at,
-        updated_at=view.words.updated_at,
+    # Each stored segment is normalized as it always was (index coerced, its
+    # other keys dropped, absent words empty); its words are then validated
+    # with the response in one pass instead of one call per word.
+    return FlowTranscriptWordsPublic.model_validate(
+        {
+            "flow_run_id": view.words.flow_run_id,
+            "step_id": view.words.step_id,
+            "segments_hash": view.words.segments_hash,
+            "alignment": view.words.alignment,
+            "stale": view.stale,
+            "segments": [
+                {
+                    "segment_index": int(entry["segment_index"]),
+                    "speaker_attribution": entry.get("speaker_attribution"),
+                    "overlap_ids": entry.get("overlap_ids", []),
+                    "words": entry.get("words", []),
+                }
+                for entry in view.words.words_json
+            ],
+            "created_at": view.words.created_at,
+            "updated_at": view.words.updated_at,
+        }
     )
 
 
@@ -143,7 +141,7 @@ async def get_flow_run_transcript_words(
         get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
-    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    committed_audit_context: tuple[UserInDB, FlowRunStatusSnapshot] | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
@@ -154,14 +152,11 @@ async def get_flow_run_transcript_words(
                 allow_service_key_principals=True,
                 history=True,
             )
-            run = await container.flow_run_service().get_run(
+            run = await container.flow_run_access_policy().load_run_status(
                 run_id=run_id, flow_id=id, access_kind="content", history=True
             )
             view = await container.flow_transcript_words_service().get_for_step(
-                flow_id=id,
-                run_id=run_id,
-                step_id=step_id,
-                history=True,
+                run=run, step_id=step_id
             )
             response = _present_transcript_words(view)
             user = container.user()

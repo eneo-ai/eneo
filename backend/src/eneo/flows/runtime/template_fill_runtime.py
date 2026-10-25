@@ -26,10 +26,7 @@ from eneo.flows.flow_run_provenance import (
     merge_resolved_input_edges,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
-from eneo.flows.runtime.docx_template_runtime import (
-    extract_docx_text,
-    render_docx_template,
-)
+from eneo.flows.runtime.docx_template_runtime import render_docx_template
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import save_generated_flow_file
 from eneo.flows.variable_resolver import FlowVariableResolver, decimal_number
@@ -182,7 +179,7 @@ async def complete_template_fill_step(
 ) -> StepExecutionOutput:
     current_stage = "rendering the DOCX template"
     try:
-        blob, mimetype = await render_docx_template(
+        blob, mimetype, rendered_text = await render_docx_template(
             template_bytes=prepared.template_blob,
             template_name=prepared.template_file_name,
             context=prepared.resolved_bindings,
@@ -237,20 +234,6 @@ async def complete_template_fill_step(
         )
         raise _template_fill_runtime_error(
             stage="saving the generated DOCX", exc=exc
-        ) from exc
-
-    try:
-        rendered_text = extract_docx_text(blob)
-    except Exception as exc:
-        deps.logger.exception(
-            "flow_executor.template_fill.stage_failed run_id=%s step_order=%d stage=read_generated_docx template_file_id=%s generated_file_id=%s",
-            run.id,
-            step.step_order,
-            prepared.template_file_id,
-            stored_file.id,
-        )
-        raise _template_fill_runtime_error(
-            stage="reading the generated DOCX", exc=exc
         ) from exc
 
     bindings_text = json.dumps(

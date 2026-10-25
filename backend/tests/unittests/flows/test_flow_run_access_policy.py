@@ -21,7 +21,7 @@ from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
 )
-from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowRunStatusSnapshot
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.flow_evidence_policy import (
     FlowEvidencePolicy,
@@ -107,7 +107,7 @@ def _policy_with_space(
     )
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: role
     )
     flow_repo.get.return_value = flow
@@ -120,7 +120,7 @@ def _policy_with_space(
         evidence_export_allowed=evidence_export_allowed,
         classification_level=security_level,
     )
-    space_service.get_space.return_value = space
+    space_service.get_space_access_facts.return_value = space
     return FlowRunAccessPolicy(
         user=user,
         flow_repo=flow_repo,
@@ -748,7 +748,7 @@ async def test_disclosure_never_reads_the_space_through_the_membership_check(
 
     await policy.passage_disclosure_for_run(run, access_kind="evidence_view")
 
-    cast(AsyncMock, space_service).get_space.assert_not_awaited()
+    cast(AsyncMock, space_service).get_space_access_facts.assert_not_awaited()
     cast(AsyncMock, policy.flow_repo).get.assert_not_awaited()
 
 
@@ -1058,19 +1058,20 @@ async def test_space_and_flow_context_lookups_are_cached_per_flow(user) -> None:
 
     for _ in range(2):
         assert await policy.load_space_access(flow_id=context.flow_id) == (
-            policy.actor_manager.get_space_actor_from_space.return_value,
+            policy.actor_manager.get_space_actor.return_value,
             2,
         )
         assert (
-            await policy._load_flow_context(flow_id=context.flow_id, history=False)
+            await policy.load_flow_context(flow_id=context.flow_id, history=False)
             == context
         )
 
-    # The space and the flow row are each read once; the live aggregate never.
+    # The caller's facts and the flow row are each read once; no space
+    # aggregate and no flow aggregate.
     cast(AsyncMock, flow_repo.get).assert_not_awaited()
-    cast(AsyncMock, policy.space_service.get_space).assert_awaited_once_with(
-        context.space_id
-    )
+    cast(
+        AsyncMock, policy.space_service.get_space_access_facts
+    ).assert_awaited_once_with(context.space_id)
     cast(AsyncMock, flow_repo.get_history_access_context).assert_awaited_once_with(
         flow_id=context.flow_id,
         tenant_id=user.tenant_id,
@@ -1098,7 +1099,7 @@ async def test_live_read_refuses_a_retired_flow_whose_space_a_history_read_cache
     actor, _level = await policy.load_space_access(
         flow_id=retired.flow_id, history=True
     )
-    assert actor is policy.actor_manager.get_space_actor_from_space.return_value
+    assert actor is policy.actor_manager.get_space_actor.return_value
     with pytest.raises(NotFoundException):
         await policy.load_space_access(flow_id=retired.flow_id)
     with pytest.raises(NotFoundException):
@@ -1166,9 +1167,9 @@ async def test_service_key_raw_export_fails_closed_in_classification_three(
     )
     assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
     assert exc_info.value.context == {"auth_layer": "flow_run_principal"}
-    cast(AsyncMock, policy.space_service).get_space.assert_awaited_once_with(
-        flow.space_id
-    )
+    cast(
+        AsyncMock, policy.space_service
+    ).get_space_access_facts.assert_awaited_once_with(flow.space_id)
 
 
 def test_evidence_policy_reads_only_the_tenant_flow_settings(user) -> None:
@@ -1194,3 +1195,183 @@ def test_evidence_policy_reads_only_the_tenant_flow_settings(user) -> None:
         allow_run_owner_raw_export_class3=True,
         allow_service_key_raw_export_class3=True,
     )
+
+
+def _status_snapshot(run: FlowRun) -> FlowRunStatusSnapshot:
+    return FlowRunStatusSnapshot.model_validate(
+        run.model_dump(include=set(FlowRunStatusSnapshot.model_fields))
+    )
+
+
+def _content_readers(
+    user, caller: str
+) -> tuple[FlowRunAccessPolicy, FlowRunAccessPolicy, FlowRun]:
+    """Two policies for ``caller`` over one run, each with its own memo and
+    repositories that answer both the complete row and the status projection
+    with speaker labels: one to ask, one to ask the reference question."""
+    reader = user
+    if caller == "tenant_admin":
+        reader = user.model_copy(
+            update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
+        )
+    elif caller.startswith("service_key"):
+        reader = _service_key_user(user)
+    role = {"space_owner": "owner", "space_admin": "admin"}.get(caller, "viewer")
+    run: FlowRun | None = None
+    policies: list[FlowRunAccessPolicy] = []
+    for _ in range(2):
+        flow_repo = AsyncMock()
+        flow_run_repo = AsyncMock()
+        policies.append(
+            _policy_with_space(
+                reader, flow_repo=flow_repo, flow_run_repo=flow_run_repo, role=role
+            )
+        )
+        if run is None:
+            run = _run(user, flow_repo.get_history_access_context.return_value.flow_id)
+            if caller != "run_owner":
+                run = run.model_copy(update={"principal_user_id": uuid4()})
+            if caller.startswith("service_key"):
+                run = run.model_copy(
+                    update={
+                        "principal_type": PrincipalType.SERVICE_KEY,
+                        "principal_user_id": None,
+                        "principal_service_id": (
+                            reader.active_api_key.service_principal_id
+                            if caller == "service_key_matching"
+                            else uuid4()
+                        ),
+                    }
+                )
+        else:
+            context = flow_repo.get_history_access_context.return_value
+            flow_repo.get_history_access_context.return_value = replace(
+                context, flow_id=run.flow_id
+            )
+        flow_run_repo.get.return_value = run
+        flow_run_repo.get_status.return_value = _status_snapshot(run)
+        flow_run_repo.get_status_with_speaker_labels.return_value = (
+            _status_snapshot(run),
+            True,
+        )
+    assert run is not None
+    policy, reference = policies
+    return policy, reference, run
+
+
+async def _outcome(load) -> object:
+    try:
+        await load
+    except (NotFoundException, UnauthorizedException) as exc:
+        return (type(exc), str(exc), exc.code, getattr(exc, "context", None))
+    return "granted"
+
+
+_CONTENT_READERS = (
+    "run_owner",
+    "space_owner",
+    "space_admin",
+    "space_member",
+    "tenant_admin",
+    "service_key_matching",
+    "service_key_other",
+)
+
+
+@pytest.mark.parametrize("caller", _CONTENT_READERS)
+@pytest.mark.parametrize("history", [False, True])
+async def test_status_with_speaker_labels_grants_and_denies_as_a_content_read(
+    user, caller: str, history: bool
+) -> None:
+    policy, reference, run = _content_readers(user, caller)
+
+    expected = await _outcome(
+        reference.load_run(
+            run_id=run.id, flow_id=run.flow_id, access_kind="content", history=history
+        )
+    )
+    outcome = await _outcome(
+        policy.load_run_status_with_speaker_labels(
+            run_id=run.id, flow_id=run.flow_id, access_kind="content", history=history
+        )
+    )
+
+    assert outcome == expected
+    assert (expected == "granted") is (
+        caller not in {"space_member", "service_key_other"}
+    )
+    repo = cast(AsyncMock, policy.flow_run_repo)
+    repo.get.assert_not_awaited()
+    repo.get_status_with_speaker_labels.assert_awaited_once_with(
+        run_id=run.id, tenant_id=policy.user.tenant_id, flow_id=run.flow_id
+    )
+
+
+async def test_status_with_speaker_labels_returns_the_projection(user) -> None:
+    policy, _reference, run = _content_readers(user, "run_owner")
+
+    snapshot, speaker_labels = await policy.load_run_status_with_speaker_labels(
+        run_id=run.id, flow_id=run.flow_id, access_kind="content"
+    )
+
+    assert snapshot == _status_snapshot(run)
+    assert speaker_labels is True
+
+
+async def test_status_with_speaker_labels_answers_a_missing_run_not_found(
+    user,
+) -> None:
+    policy, _reference, run = _content_readers(user, "run_owner")
+    cast(
+        AsyncMock, policy.flow_run_repo
+    ).get_status_with_speaker_labels.side_effect = FlowRunNotFoundError(
+        run_id=run.id, tenant_id=user.tenant_id, flow_id=run.flow_id
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await policy.load_run_status_with_speaker_labels(
+            run_id=run.id, flow_id=run.flow_id, access_kind="content"
+        )
+
+    assert str(exc_info.value) == "Flow run not found."
+    assert exc_info.value.code is None
+
+
+async def test_status_with_speaker_labels_refuses_an_unknown_kind_and_a_history_mutation(
+    user,
+) -> None:
+    policy, _reference, run = _content_readers(user, "run_owner")
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await policy.load_run_status_with_speaker_labels(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            access_kind=cast(FlowRunAccessKind, "unknown_access_kind"),
+        )
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_access_kind"}
+
+    with pytest.raises(NotFoundException) as not_found:
+        await policy.load_run_status_with_speaker_labels(
+            run_id=run.id, flow_id=run.flow_id, access_kind="cancel", history=True
+        )
+    assert str(not_found.value) == "Flow not found."
+
+
+@pytest.mark.parametrize("caller", _CONTENT_READERS)
+async def test_load_run_status_takes_the_access_kind_it_is_asked_for(
+    user, caller: str
+) -> None:
+    policy, reference, run = _content_readers(user, caller)
+
+    expected = await _outcome(
+        reference.load_run(run_id=run.id, flow_id=run.flow_id, access_kind="content")
+    )
+    outcome = await _outcome(
+        policy.load_run_status(
+            run_id=run.id, flow_id=run.flow_id, access_kind="content"
+        )
+    )
+
+    assert outcome == expected
+    cast(AsyncMock, policy.flow_run_repo).get.assert_not_awaited()

@@ -1597,7 +1597,6 @@ async def test_flow_package_export_route_requires_space_edit_access(
             "space_id": space_id,
             "name": "Export auth boundary",
             "description": "Export must require space edit access.",
-            "steps": [],
         },
         headers={"Authorization": f"Bearer {owner_token}"},
     )

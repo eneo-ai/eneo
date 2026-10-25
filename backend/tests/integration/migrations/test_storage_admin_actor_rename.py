@@ -14,6 +14,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -58,35 +59,35 @@ def rename_db(test_settings, monkeypatch):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, PRE_RENAME_REVISION)
-    with connection.cursor() as cursor:
-        # Historical rows written when this boundary still recorded the
-        # overstated label — one per affected table.
-        cursor.execute(
-            "UPDATE object_content_deployment_policy "
-            "SET updated_by_actor = 'platform_admin' WHERE id = 1"
-        )
-        cursor.execute(
-            """
-            INSERT INTO object_store_connections (
-                id, revision, role, endpoint_url, region, bucket,
-                access_key_id_encrypted, secret_access_key_encrypted,
-                deployment_id, addressing_style, updated_by_actor
+    with at_revision(config, PRE_RENAME_REVISION):
+        with connection.cursor() as cursor:
+            # Historical rows written when this boundary still recorded the
+            # overstated label — one per affected table.
+            cursor.execute(
+                "UPDATE object_content_deployment_policy "
+                "SET updated_by_actor = 'platform_admin' WHERE id = 1"
             )
-            VALUES (
-                1, 1, 'active', 'https://objects.example.test', 'local',
-                'eneo-content', 'enc-key-id', 'enc-secret',
-                %s, 'path', 'platform_admin'
+            cursor.execute(
+                """
+                INSERT INTO object_store_connections (
+                    id, revision, role, endpoint_url, region, bucket,
+                    access_key_id_encrypted, secret_access_key_encrypted,
+                    deployment_id, addressing_style, updated_by_actor
+                )
+                VALUES (
+                    1, 1, 'active', 'https://objects.example.test', 'local',
+                    'eneo-content', 'enc-key-id', 'enc-secret',
+                    %s, 'path', 'platform_admin'
+                )
+                ON CONFLICT (id) DO UPDATE
+                    SET updated_by_actor = 'platform_admin', revision = 1
+                """,
+                (str(uuid4()),),
             )
-            ON CONFLICT (id) DO UPDATE
-                SET updated_by_actor = 'platform_admin', revision = 1
-            """,
-            (str(uuid4()),),
-        )
-    try:
-        yield connection, config
-    finally:
-        connection.close()
+        try:
+            yield connection, config
+        finally:
+            connection.close()
 
 
 def _actor(connection, table: str) -> str:

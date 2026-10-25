@@ -80,7 +80,7 @@ async def _no_rag(
 ) -> tuple[list[Any], dict[str, Any] | None, list[StepDiagnostic]]:
     return (
         [],
-        RagRetrievalRecord(status="skipped", reason="speaker_mapping").to_payload(),
+        RagRetrievalRecord(status="skipped_speaker_mapping").to_payload(),
         [],
     )
 

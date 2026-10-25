@@ -771,6 +771,9 @@ class CompletionService:
         file_reference_urls = self._build_file_reference_urls(
             (files or []) + history_files
         )
+        # The context estimate only sizes the history and knowledge budgets.
+        # Without either, each package's measured input reserve is its count.
+        account_tokens = session is not None or bool(info_blob_chunks)
 
         def package(
             package_prompt: str, kwargs: ModelKwargs | None
@@ -801,18 +804,19 @@ class CompletionService:
                 ),
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
+                account_tokens=account_tokens,
             )
             provider_input = adapter.prepare_provider_input(
                 context, mcp_proxy=mcp_proxy, skill_runtime=skill_runtime
             )
-            return replace(
-                adapter.package_request(
-                    provider_input,
-                    model_kwargs=kwargs,
-                    useful_output_reserve_tokens=useful_output_reserve_tokens,
-                ),
-                context=context,
+            request = adapter.package_request(
+                provider_input,
+                model_kwargs=kwargs,
+                useful_output_reserve_tokens=useful_output_reserve_tokens,
             )
+            if not account_tokens:
+                context.token_count = request.input_reserve.tokens
+            return replace(request, context=context)
 
         preferred = package(prompt, model_kwargs)
         fallback = None

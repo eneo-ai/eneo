@@ -818,7 +818,6 @@ async def test_the_contract_and_the_live_route_read_no_attachment_content(
         json={
             "space_id": published.json()["space_id"],
             "name": f"Unrelated {uuid4().hex[:8]}",
-            "steps": [],
         },
         headers=headers,
     )

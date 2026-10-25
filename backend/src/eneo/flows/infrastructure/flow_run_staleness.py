@@ -21,9 +21,10 @@ def execution_heartbeat_expiry_cutoff() -> sa.ColumnElement[datetime]:
     )
 
 
-def stale_running_flow_run_predicate() -> sa.ColumnElement[bool]:
-    """Select stale running runs that recovery may safely terminalize."""
-    pending_or_claimed_webhook_delivery = (
+def flow_run_awaits_webhook_delivery() -> sa.ColumnElement[bool]:
+    """A running run that waits on a pending outbound delivery: its worker has
+    handed it over, so no worker failure may end it."""
+    return (
         sa.select(FlowRunWebhookDeliveries.id)
         .where(FlowRunWebhookDeliveries.flow_run_id == FlowRuns.id)
         .where(FlowRunWebhookDeliveries.tenant_id == FlowRuns.tenant_id)
@@ -33,8 +34,12 @@ def stale_running_flow_run_predicate() -> sa.ColumnElement[bool]:
         )
         .exists()
     )
+
+
+def stale_running_flow_run_predicate() -> sa.ColumnElement[bool]:
+    """Select stale running runs that recovery may safely terminalize."""
     return sa.and_(
         FlowRuns.status == FlowRunStatus.RUNNING.value,
         FlowRuns.execution_heartbeat_at <= execution_heartbeat_expiry_cutoff(),
-        ~pending_or_claimed_webhook_delivery,
+        ~flow_run_awaits_webhook_delivery(),
     )

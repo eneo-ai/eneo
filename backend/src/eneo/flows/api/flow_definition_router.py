@@ -3,6 +3,9 @@ from fastapi import APIRouter as _APIRouter
 from eneo.flows.api.flow_authoring_router import (
     router as _authoring_router,
 )
+from eneo.flows.api.flow_execution_limits_router import (
+    router as _execution_limits_router,
+)
 from eneo.flows.api.flow_http_test_router import (
     router as _http_test_router,
 )
@@ -23,6 +26,8 @@ from eneo.flows.api.flow_tool_options_router import (
 )
 
 router = _APIRouter()
+# Before the authoring routes: its literal path would match their `/{id}/`.
+router.include_router(_execution_limits_router)
 router.include_router(_authoring_router)
 router.include_router(_template_router)
 router.include_router(_security_classification_router)

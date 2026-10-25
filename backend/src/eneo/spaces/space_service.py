@@ -285,12 +285,22 @@ class SpaceService:
         return space
 
     async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts":
-        """The facts ``get_space``'s caller decides permissions on, with
-        ``get_space``'s refusals, for a caller that needs nothing else of the
-        space: they are read without the MCP catalog (``get_access_facts``)."""
-        access = await self.repo.get_access_facts(id)
+        """The facts ``get_space``'s caller decides their own permissions on,
+        with ``get_space``'s refusals, for a caller that needs nothing else of
+        the space: only the caller's membership and key scope are read, never
+        the space aggregate (``SpaceRepository.get_space_access_facts``)."""
+        access = await self.repo.get_space_access_facts(id)
         _require_space_read(self.actor_manager.get_space_actor(access))
         return access
+
+    async def get_transcription_space(self, actor: "SpaceActor") -> Space:
+        """The space ``actor`` acts in, as far as deciding which transcription
+        services it may use needs (``SpaceRepository.get_transcription_space``),
+        with ``get_space``'s refusal, decided on the facts the actor was built
+        from rather than read again."""
+        _require_space_read(actor)
+        assert actor.space.id is not None, "an actor's facts name their space"
+        return await self.repo.get_transcription_space(actor.space.id)
 
     async def get_applications_projection(
         self, id: UUID
@@ -334,18 +344,22 @@ class SpaceService:
         if space_security_classification is None:
             return
         from eneo.mcp_servers.application.capability_resolver import (
-            get_active_capability_servers,
+            active_capability_providers,
             meets_security_classification,
         )
 
-        for purpose in {
+        purposes = {
             server.purpose
             for server in mcp_servers
             if is_capability_purpose(server.purpose)
-        }:
-            providers = await get_active_capability_servers(
-                self.repo.session, self.user.tenant_id, purpose
-            )
+        }
+        if not purposes:
+            return
+        all_providers = await active_capability_providers(
+            self.repo.session, self.user.tenant_id, purposes
+        )
+        for purpose in purposes:
+            providers = [p for p in all_providers if p.purpose == purpose]
             if providers and not any(
                 meets_security_classification(provider, space_security_classification)
                 for provider in providers

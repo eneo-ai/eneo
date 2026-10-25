@@ -82,7 +82,6 @@ class FlowDraftMaterializer:
             space_id=space_id,
             name=flow_name,
             description=changeset.flow_description,
-            steps=[],
             metadata_json=changeset.metadata_json,
         )
         flow_id = created_flow.require_persisted_id()

@@ -43,7 +43,6 @@ from eneo.flows.api.flow_authoring_router import (
 from eneo.flows.api.flow_models import (
     FlowCreateRequest,
     FlowRunCreateRequest,
-    FlowStepCreateRequest,
     FlowUpdateRequest,
 )
 from eneo.flows.api.flow_run_evidence_router import get_flow_run_evidence
@@ -224,17 +223,6 @@ async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
             flow_in=FlowCreateRequest(
                 space_id=target_space_id,
                 name="Flow",
-                steps=[
-                    FlowStepCreateRequest(
-                        assistant_id=uuid4(),
-                        step_order=1,
-                        user_description="Step",
-                        input_source="flow_input",
-                        input_type="text",
-                        output_mode="pass_through",
-                        output_type="json",
-                    )
-                ],
             ),
             container=container,
         )
@@ -873,16 +861,6 @@ async def test_create_flow_rejects_non_member(monkeypatch):
     flow_in = FlowCreateRequest(
         space_id=space_id,
         name="Test Flow",
-        steps=[
-            FlowStepCreateRequest(
-                assistant_id=uuid4(),
-                step_order=1,
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="json",
-            )
-        ],
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -915,16 +893,6 @@ async def test_create_flow_rejects_without_tenant_manage_permission(monkeypatch)
     flow_in = FlowCreateRequest(
         space_id=space_id,
         name="Test Flow",
-        steps=[
-            FlowStepCreateRequest(
-                assistant_id=uuid4(),
-                step_order=1,
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="json",
-            )
-        ],
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -1049,7 +1017,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     assert result["count"] == 1
     assert result["has_more"] is False
-    container.space_service.return_value.get_space.assert_awaited_once_with(
+    container.space_service.return_value.get_space_access_facts.assert_awaited_once_with(
         flow.space_id
     )
 
@@ -1090,6 +1058,40 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
         exc_info,
         message="API key space scope does not match requested flow.",
     )
+
+
+@pytest.mark.asyncio
+async def test_scope_mismatch_is_refused_before_the_callers_facts_are_read(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow = _flow(uuid4())
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    _enable_space_access(container)
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(scope_type="space", space_id=uuid4()),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await flow_access_context_module.enforce_flow_scope(
+            SimpleNamespace(state=SimpleNamespace()),
+            container,
+            flow_id=flow.id,
+            allow_service_key_principals=True,
+            history=True,
+        )
+
+    _assert_scope_mismatch(
+        exc_info,
+        message="API key space scope does not match requested flow.",
+    )
+    container.flow_repo.return_value.get_history_access_context.assert_awaited_once()
+    container.space_service.return_value.get_space_access_facts.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1137,7 +1139,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     assert result["count"] == 1
     assert result["has_more"] is False
-    container.space_service.return_value.get_space.assert_awaited_once_with(
+    container.space_service.return_value.get_space_access_facts.assert_awaited_once_with(
         flow.space_id
     )
 

@@ -7,7 +7,9 @@ import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { ReviewPanel } from "./review-panel";
 import { makeCheckpoint } from "./run-fixtures";
-import type { TranscriptTarget } from "./transcript";
+import { RunTranscripts } from "./run-transcript";
+import { runKeys, transcriptRevisionsQueryOptions } from "./runs-api";
+import { parseSegments, shownSegments, type TranscriptTarget } from "./transcript";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -23,6 +25,15 @@ vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
   return { useSpace: () => useSpaceFromQuery(() => space({})) };
+});
+// Counted, to tell whether a render with the same data reads the lines again.
+vi.mock("./transcript", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./transcript")>();
+  return {
+    ...actual,
+    parseSegments: vi.fn(actual.parseSegments),
+    shownSegments: vi.fn(actual.shownSegments)
+  };
 });
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
@@ -244,5 +255,84 @@ describe("The review's transcript draft", () => {
     );
     fireEvent.click(within(panel).getByRole("button", { name: messages.flow_runs_review_approve }));
     await waitFor(() => expect(calls(APPROVE)).toHaveLength(1));
+  });
+
+  it("has the step's correction history read again once the draft is saved", async () => {
+    answer();
+    const { lines, queryClient } = await renderReview();
+    const history = transcriptRevisionsQueryOptions("flow-1", "run-1", "step-1").queryKey;
+    queryClient.setQueryData(history, { pages: [], pageParams: [] });
+    correctLine(lines, "Tackar.");
+
+    await waitFor(() => expect(calls(EDIT)).toHaveLength(1), { timeout: 3_000 });
+    await waitFor(() => expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true));
+  });
+
+  it("has the step's correction history read again when someone else saved first", async () => {
+    answer();
+    state.routes[EDIT] = () => ({
+      status: 400,
+      body: { message: "Stale", code: "flow_transcript_corrections_stale_revision" }
+    });
+    const { lines, queryClient } = await renderReview();
+    const history = transcriptRevisionsQueryOptions("flow-1", "run-1", "step-1").queryKey;
+    queryClient.setQueryData(history, { pages: [], pageParams: [] });
+    correctLine(lines, "Tackar.");
+
+    await waitFor(() => expect(calls(EDIT)).toHaveLength(1), { timeout: 3_000 });
+    await waitFor(() => expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true));
+  });
+});
+
+describe("A run's transcript", () => {
+  it("reads the lines once while the data holds and again when the corrections change", async () => {
+    answer();
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+    const page = (label: string) => (
+      <RunTranscripts
+        flowId="flow-1"
+        runId="run-1"
+        targets={[target]}
+        labelFor={() => label}
+        mayEdit={false}
+        runCompleted
+      />
+    );
+    const { rerender } = renderInApp(page("Transkribera"), { queryClient });
+    const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+    expect(lines.textContent).toContain("Tack.");
+
+    // The page renders again (a poll, Refresh) with the same transcript and corrections.
+    vi.mocked(parseSegments).mockClear();
+    vi.mocked(shownSegments).mockClear();
+    rerender(page("Transkribering"));
+    expect(screen.getByRole("heading", { name: "Transkribering" })).toBeTruthy();
+    expect(parseSegments).not.toHaveBeenCalled();
+    expect(shownSegments).not.toHaveBeenCalled();
+
+    // A saved correction still shows.
+    act(() =>
+      queryClient.setQueryData(runKeys.corrections("flow-1", "run-1"), [
+        saved(
+          {
+            occurrences: [
+              {
+                segment_index: 1,
+                char_start: 0,
+                char_end: 4,
+                original: "Tack",
+                corrected: "Tackar"
+              }
+            ],
+            speaker_edits: []
+          },
+          1
+        )
+      ])
+    );
+    await waitFor(() => expect(lines.textContent).toContain("Tackar."));
+    expect(parseSegments).not.toHaveBeenCalled();
+    expect(shownSegments).toHaveBeenCalled();
   });
 });

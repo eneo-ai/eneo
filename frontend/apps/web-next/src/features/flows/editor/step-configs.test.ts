@@ -8,6 +8,7 @@ import {
   readLongMaterial,
   readRuntimeInput,
   readTemplateFill,
+  toolArguments,
   withHttpConfig,
   withLongMaterial,
   withReviewChoice,
@@ -106,6 +107,31 @@ describe("tools", () => {
     });
     expect(argumentValue("fem", "integer")).toEqual({ ok: false });
     expect(argumentValue("", "string")).toEqual({ ok: true, value: undefined });
+  });
+});
+
+describe("toolArguments", () => {
+  it("keeps what the approved schema says about an argument, for information", () => {
+    const [list, limit, day, plain] = toolArguments({
+      required: ["list"],
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+        day: { type: "string", format: "date" },
+        list: { type: "array", items: { type: "string" } },
+        plain: { type: "string", description: "Fri text" }
+      }
+    });
+    expect(list).toMatchObject({ name: "list", required: true, type: "array", items: "string" });
+    expect(limit).toMatchObject({ minimum: 1, maximum: 50, default: 10 });
+    expect(day).toMatchObject({ format: "date" });
+    expect(plain).toMatchObject({
+      description: "Fri text",
+      items: null,
+      format: null,
+      minimum: null,
+      maximum: null,
+      default: undefined
+    });
   });
 });
 

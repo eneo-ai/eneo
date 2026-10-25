@@ -696,7 +696,7 @@ async def test_ask_skips_a_removed_server_when_a_capability_is_requested(monkeyp
     # Kills the mutant that resolves capabilities without the space: that path
     # replaces the server list, so the removed server came back with web search.
     monkeypatch.setattr(
-        "eneo.mcp_servers.application.capability_resolver.get_active_capability_servers",
+        "eneo.mcp_servers.application.capability_resolver.active_capability_providers",
         AsyncMock(return_value=[]),
     )
     service, assistant, _ = _runtime_service(

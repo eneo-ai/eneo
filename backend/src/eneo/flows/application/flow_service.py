@@ -71,6 +71,10 @@ from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
+from eneo.flows.flow_runtime_policy import (
+    resolve_flow_runtime_policy,
+    resolve_step_timeout_seconds,
+)
 from eneo.flows.flow_security_classification import (
     FlowStepClassificationExplanation,
     explain_flow_security_classification,
@@ -234,37 +238,23 @@ class FlowService:
         *,
         space_id: UUID,
         name: str,
-        steps: list[FlowStep],
         description: str | None = None,
         metadata_json: FlowPersistedJsonObject | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
-        steps = [clean_inactive_step_config(step) for step in steps]
+        """A new flow, with no steps: each step runs an assistant the flow
+        owns (``create_flow_assistant``), so its steps are set by an update."""
         normalized_metadata, space = await self._fill_default_speaker_service(
             space_id=space_id,
             metadata_json=normalize_flow_metadata_for_write(metadata_json),
         )
-        self._validate_steps(steps, metadata_json=normalized_metadata)
+        # A form field alone can take a name the run reserves.
         self._validate_variable_alias_collisions(
-            steps=steps,
-            metadata_json=normalized_metadata,
+            steps=[], metadata_json=normalized_metadata
         )
-        space = await self._check_speaker_service(
+        await self._check_speaker_service(
             space_id=space_id, metadata_json=normalized_metadata, space=space
         )
-        await self._validate_assistant_scope_for_steps(
-            space_id=space_id,
-            steps=steps,
-        )
-        await self._validate_step_security_classification_for_steps(
-            space_id=space_id,
-            steps=steps,
-            space=space,
-        )
-
-        normalized_steps = self._normalize_steps_for_tenant(steps)
-        persisted_steps = self._protect_authored_step_secrets(normalized_steps)
-        self._reject_unresolved_secret_sentinels(persisted_steps)
         flow = Flow(
             id=None,
             tenant_id=self.user.tenant_id,
@@ -277,7 +267,7 @@ class FlowService:
             metadata_json=normalized_metadata,
             created_at=None,
             updated_at=None,
-            steps=persisted_steps,
+            steps=[],
         )
         return await self.flow_repo.create(flow=flow, tenant_id=self.user.tenant_id)
 
@@ -368,7 +358,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=existing.space_id,
             steps=next_steps,
-            owning_flow_id=existing.id,
+            owning_flow_id=existing.require_persisted_id(),
         )
 
         next_metadata = draft_write_metadata(existing.metadata_json, metadata_json)
@@ -389,6 +379,7 @@ class FlowService:
         )
         if refusals:
             raise refusals[0]
+        self._refuse_step_timeouts_above_the_maximum(next_steps)
         # An edit that leaves the metadata alone states no new choice.
         if metadata_json is not NOT_PROVIDED:
             space = await self._check_speaker_service(
@@ -704,7 +695,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
-            owning_flow_id=flow.id,
+            owning_flow_id=flow.require_persisted_id(),
         )
         assistants_by_id = await self._load_step_assistants(flow.steps)
         self._validate_publishable(
@@ -802,6 +793,21 @@ class FlowService:
         )
         if refusals:
             raise refusals[0]
+        # The maximum may have been lowered since the draft was saved.
+        self._refuse_step_timeouts_above_the_maximum(flow.steps)
+
+    def _refuse_step_timeouts_above_the_maximum(
+        self, steps: Sequence[FlowStep]
+    ) -> None:
+        """A step may not ask for more time than the organisation allows: the
+        run refuses it the same way (resolve_step_timeout_seconds)."""
+        policy = resolve_flow_runtime_policy(self.user.tenant.flow_settings)
+        for step in steps:
+            resolve_step_timeout_seconds(
+                step_order=step.step_order,
+                step_timeout_seconds=step.timeout_seconds,
+                policy=policy,
+            )
 
     def _validate_steps(
         self,
@@ -836,8 +842,7 @@ class FlowService:
         *,
         space_id: UUID,
         steps: list[FlowStep],
-        owning_flow_id: UUID | None = None,
-        require_owned_by_flow: bool = False,
+        owning_flow_id: UUID,
     ) -> None:
         assistant_ids = {step.assistant_id for step in steps}
         if not assistant_ids:
@@ -853,13 +858,6 @@ class FlowService:
         if missing:
             raise BadRequestException(
                 "One or more steps reference assistants outside the selected space or tenant."
-            )
-
-        if owning_flow_id is None:
-            if not require_owned_by_flow:
-                return
-            raise BadRequestException(
-                "Flow steps must reference flow-managed assistants owned by the flow."
             )
 
         non_owned = [
@@ -985,7 +983,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=candidate_steps,
-            owning_flow_id=flow.id,
+            owning_flow_id=flow.require_persisted_id(),
         )
         space = await self.space_service.get_space(flow.space_id)
         assistants_by_id: dict[UUID, Any] = dict(
@@ -1024,6 +1022,15 @@ class FlowService:
                 else step
                 for step in candidate_steps
             ]
+        # The save's step refusal comes first, as in the save: the
+        # classification reads the configuration a defective step holds.
+        refusals = draft_step_refusals(
+            candidate_steps,
+            metadata_json=draft_write_metadata(flow.metadata_json),
+            retained=retained_contracts(candidate_steps, flow.steps),
+        )
+        if refusals:
+            raise refusals[0]
         return await explain_flow_security_classification(
             steps=candidate_steps,
             assistants_by_id=assistants_by_id,

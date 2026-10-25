@@ -124,6 +124,7 @@ from eneo.flows.enums import (
     FlowOutputDelivery as FlowOutputDelivery,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
@@ -710,9 +711,10 @@ class FlowStepCreateRequest(BaseModel):
             "(including transcription), retrieval, every provider request of the "
             "step and finalization. Unset, the effective runtime policy's default "
             "applies (the organisation's flow runtime settings, else the "
-            "deployment default); a value above that policy's maximum fails the "
-            "step with a validation error when it starts. Exhaustion fails the run "
-            "with `flow_step_timeout`."
+            "deployment default). A value above that policy's maximum is refused "
+            "with `flow_step_timeout_exceeds_tenant_max` when the flow is saved "
+            "or published, and fails a run that still meets it. Exhaustion fails "
+            "the run with `flow_step_timeout`."
         ),
     )
     user_description: str | None = None
@@ -785,7 +787,17 @@ class FlowStepUpdateRequest(FlowStepCreateRequest):
     )
 
 
+# What a flow's name can hold: the length its materialization allows, and no
+# NUL, which the database cannot store.
+FlowName: TypeAlias = Annotated[
+    str, Field(max_length=MAX_FLOW_NAME_LENGTH, pattern=r"^[^\x00]*$")
+]
+
+
 class FlowCreateRequest(BaseModel):
+    """A new flow starts with no steps: each step runs an assistant the flow
+    owns, and those exist only once the flow does."""
+
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -793,24 +805,13 @@ class FlowCreateRequest(BaseModel):
                 "space_id": "00000000-0000-0000-0000-000000000001",
                 "name": "Municipality Intake Transcription",
                 "description": "Transcribe and summarize citizen audio",
-                "steps": [
-                    {
-                        "assistant_id": "00000000-0000-0000-0000-000000000002",
-                        "step_order": 1,
-                        "input_source": "flow_input",
-                        "input_type": "audio",
-                        "output_mode": "transcribe_only",
-                        "output_type": "text",
-                    }
-                ],
             }
         },
     )
 
     space_id: UUID
-    name: str
+    name: FlowName
     description: str | None = None
-    steps: list[FlowStepCreateRequest]
     metadata_json: dict[str, Any] | None = None
 
 
@@ -840,7 +841,7 @@ class FlowUpdateRequest(BaseModel):
         },
     )
 
-    name: str
+    name: FlowName
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
@@ -1702,12 +1703,13 @@ class FlowRunListPublic(BaseModel):
     has_more: bool = Field(
         description="Whether another page exists after the returned offset window."
     )
-    status_counts: FlowRunStatusCountsPublic = Field(
+    status_counts: FlowRunStatusCountsPublic | None = Field(
         description=(
             "How many runs the caller may list have each status, counted over every "
             "page within `mine` and `search` and without the `status` filter, so a "
             "status filter can show what each choice would leave. Counted when the "
-            "page is read; a run can move on before the next read."
+            "page is read; a run can move on before the next read. Null only when "
+            "the request passed `include_status_counts=false`."
         ),
     )
 
@@ -2484,6 +2486,13 @@ class FlowRunDebugRag(BaseModel):
     error_code: str | None = None
     retrieval_duration_ms: int | None = None
     retrieval_error_type: str | None = None
+    retrieval_error_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why retrieval failed: the error code and message, with credentials "
+            "and URLs redacted and the text bounded. Set only when it failed."
+        ),
+    )
     references: list[FlowRunDebugRagReference] | None = None
     knowledge_evidence_version: int | None = None
     sources_with_recorded_passages: int | None = Field(

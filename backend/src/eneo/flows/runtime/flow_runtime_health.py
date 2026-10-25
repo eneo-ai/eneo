@@ -826,12 +826,9 @@ async def _load_audit_outbox_summary(
                 FlowRunAuditOutbox.delivery_status
                 == FlowOutboxDeliveryStatus.PENDING.value
             )
-            .where(
-                sa.or_(
-                    FlowRunAuditOutbox.next_delivery_at.is_(None),
-                    FlowRunAuditOutbox.next_delivery_at <= backlog_before,
-                )
-            )
+            # A pending row always has a delivery time (its CHECK), so the
+            # bound is an index range.
+            .where(FlowRunAuditOutbox.next_delivery_at <= backlog_before)
         )
     ).one()
     dead_lettered_count, oldest_dead_lettered_at = (
@@ -881,12 +878,9 @@ async def _load_webhook_outbox_summary(
                 FlowRunWebhookDeliveries.delivery_status
                 == FlowOutboxDeliveryStatus.PENDING.value
             )
-            .where(
-                sa.or_(
-                    FlowRunWebhookDeliveries.next_delivery_at.is_(None),
-                    FlowRunWebhookDeliveries.next_delivery_at <= backlog_before,
-                )
-            )
+            # A pending row always has a delivery time (its CHECK), so the
+            # bound is an index range.
+            .where(FlowRunWebhookDeliveries.next_delivery_at <= backlog_before)
             .where(
                 sa.or_(
                     FlowRunWebhookDeliveries.claim_token.is_(None),

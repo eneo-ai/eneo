@@ -83,7 +83,9 @@ async def shared(
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Delad assistent", description=None, steps=[]
+            space_id=space_id,
+            name="Delad assistent",
+            description=None,
         )
         first, _ = await service.create_flow_assistant(flow_id=flow.id, name="steg1")
         shared_assistant, _ = await service.create_flow_assistant(

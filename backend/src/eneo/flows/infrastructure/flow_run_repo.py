@@ -4,7 +4,7 @@ import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence, TypedDict, cast
+from typing import Any, Collection, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -99,7 +99,9 @@ from eneo.flows.flow_run_error import (
 )
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    SPEAKER_LABELS_KEY,
     FlowRunInputEnvelopePatch,
+    speaker_labels_choice,
 )
 from eneo.flows.flow_run_provenance import (
     FlowImportedAttemptProvenance,
@@ -137,6 +139,7 @@ from eneo.flows.infrastructure.flow_run_list_query import (
     run_search_clause,
 )
 from eneo.flows.infrastructure.flow_run_staleness import (
+    flow_run_awaits_webhook_delivery,
     stale_running_flow_run_predicate,
 )
 from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
@@ -206,6 +209,7 @@ def _run_recovery_candidates_query(
     after: tuple[datetime, UUID] | None = None,
     through: tuple[datetime, UUID] | None = None,
     descending: bool = False,
+    kinds: Collection[FlowRunRecoveryKind] | None = None,
 ) -> sa.Subquery:
     deadline_anchor = sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
     heartbeat = sa.select(
@@ -241,7 +245,14 @@ def _run_recovery_candidates_query(
     ).where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
     # PostgreSQL may sort every UNION input before applying an outer LIMIT.
     bounded: list[sa.Select[Any]] = []
-    for branch in (heartbeat, exhausted, reviews):
+    branches = {
+        FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED: heartbeat,
+        FlowRunRecoveryKind.EXHAUSTED_DISPATCH: exhausted,
+        FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION: reviews,
+    }
+    for kind, branch in branches.items():
+        if kinds is not None and kind not in kinds:
+            continue
         anchor = branch.selected_columns.anchor_at
         run_id = branch.selected_columns.id
         if tenant_id is not None:
@@ -955,6 +966,39 @@ class FlowRunRepository:
             )
         return FlowRunStatusSnapshot.model_validate(row)
 
+    async def get_status_with_speaker_labels(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> tuple[FlowRunStatusSnapshot, bool | None]:
+        """The status projection and the run's speaker-label setting, without
+        loading the rest of its input payload: the graph poll reads only this."""
+        speaker_labels = FlowRuns.input_payload_json[SPEAKER_LABELS_KEY].label(
+            "speaker_labels"
+        )
+        stmt = (
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS, speaker_labels)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        row = (await self.session.execute(stmt)).mappings().one_or_none()
+        if row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        status = {key: value for key, value in row.items() if key != "speaker_labels"}
+        return (
+            FlowRunStatusSnapshot.model_validate(status),
+            speaker_labels_choice(row["speaker_labels"]),
+        )
+
     async def get_idempotent_run(
         self,
         *,
@@ -1005,8 +1049,16 @@ class FlowRunRepository:
         return [(run_id, tenant_id) for run_id, tenant_id in rows]
 
     async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
+        """Serialize this tenant's run creations until the transaction ends.
+
+        FOR NO KEY UPDATE: it excludes the next creation's lock, but not the
+        FOR KEY SHARE every foreign-key check on the tenant takes, so the
+        tenant's other writes (step results, outbox rows, uploads, audit
+        entries) do not wait for a run to be created."""
         await self.session.execute(
-            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+            sa.select(Tenants.id)
+            .where(Tenants.id == tenant_id)
+            .with_for_update(key_share=True)
         )
 
     async def list_statuses(
@@ -1094,8 +1146,12 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRun.model_validate(row) for row in rows]
 
-    async def recovery_sweep_boundary(self) -> tuple[datetime, UUID] | None:
-        candidates = _run_recovery_candidates_query(limit=1, descending=True)
+    async def recovery_sweep_boundary(
+        self, *, kinds: Collection[FlowRunRecoveryKind] | None = None
+    ) -> tuple[datetime, UUID] | None:
+        candidates = _run_recovery_candidates_query(
+            limit=1, descending=True, kinds=kinds
+        )
         row = (
             await self.session.execute(
                 sa.select(candidates.c.anchor_at, candidates.c.id)
@@ -1112,11 +1168,14 @@ class FlowRunRepository:
         limit: int = 25,
         after: tuple[datetime, UUID] | None = None,
         through: tuple[datetime, UUID] | None = None,
+        kinds: Collection[FlowRunRecoveryKind] | None = None,
     ) -> list[FlowRunRecoveryCandidate]:
+        """`kinds` names discovery branches; the review branch may come back
+        refined to an approved or missing checkpoint."""
         if limit < 1:
             return []
         candidates = _run_recovery_candidates_query(
-            limit=limit, tenant_id=tenant_id, after=after, through=through
+            limit=limit, tenant_id=tenant_id, after=after, through=through, kinds=kinds
         )
         stmt = (
             sa.select(candidates)
@@ -1207,24 +1266,31 @@ class FlowRunRepository:
     async def renew_execution_heartbeats(
         self, *, owners: Sequence[FlowRunExecutionOwner]
     ) -> set[FlowRunExecutionOwner]:
+        """Renew the leases of the owners whose run rows no other transaction
+        holds. A held row is skipped, not waited for: an owner left out may
+        still hold its lease (``has_execution_ownership`` tells)."""
         if not owners:
             return set()
+        lease = (
+            sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
+                [(owner.run_id, owner.tenant_id, owner.revision) for owner in owners]
+            ),
+            FlowRuns.status == FlowRunStatus.RUNNING.value,
+            FlowRuns.execution_heartbeat_at
+            > sa.func.clock_timestamp()
+            - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS),
+        )
+        # NO KEY UPDATE is the lock the update takes: a child row's foreign key
+        # check (KEY SHARE) does not make a run row look held.
+        free = (
+            sa.select(FlowRuns.id)
+            .where(*lease)
+            .with_for_update(key_share=True, skip_locked=True)
+            .correlate(None)
+        )
         rows = await self.session.execute(
             sa.update(FlowRuns)
-            .where(
-                sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
-                    [
-                        (owner.run_id, owner.tenant_id, owner.revision)
-                        for owner in owners
-                    ]
-                )
-            )
-            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
-            .where(
-                FlowRuns.execution_heartbeat_at
-                > sa.func.clock_timestamp()
-                - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS)
-            )
+            .where(FlowRuns.id.in_(free), *lease)
             .values(
                 execution_heartbeat_at=sa.func.clock_timestamp(),
                 updated_at=FlowRuns.updated_at,
@@ -1255,8 +1321,9 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         session: AsyncSession | None = None,
+        owner: FlowRunExecutionOwner | None = None,
     ) -> None:
-        owner = flow_run_execution_owner.get()
+        owner = owner or flow_run_execution_owner.get()
         if owner is None:
             return
         db_session = session or self.session
@@ -1588,8 +1655,13 @@ class FlowRunRepository:
         output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         stale_running_revision: int | None = None,
+        interrupted_owner: FlowRunExecutionOwner | None = None,
     ) -> FlowRun | None:
-        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        """``interrupted_owner`` ends a run its worker stopped executing: only
+        while that owner still holds it and it waits on no outbound delivery."""
+        await self.lock_execution_ownership(
+            run_id=run_id, tenant_id=tenant_id, owner=interrupted_owner
+        )
         if target_status not in TERMINAL_FLOW_RUN_STATUSES:
             raise ValueError("target_status must be terminal")
 
@@ -1627,6 +1699,8 @@ class FlowRunRepository:
                 stale_running_flow_run_predicate(),
                 FlowRuns.revision == stale_running_revision,
             )
+        if interrupted_owner is not None:
+            stmt = stmt.where(~flow_run_awaits_webhook_delivery())
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
             return None
@@ -2067,6 +2141,23 @@ class FlowRunRepository:
         ).all()
         return [FlowStepResultAnnotation.model_validate(row) for row in rows]
 
+    async def read_last_completed_output_payload(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowPersistedJsonObject | None:
+        """The output of the run's highest-order completed step: what a
+        completed run returns. One payload, never the other steps' content."""
+        return await self.session.scalar(
+            sa.select(FlowStepResults.output_payload_json)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status == FlowStepResultStatus.COMPLETED.value)
+            .order_by(FlowStepResults.step_order.desc())
+            .limit(1)
+        )
+
     async def list_step_results_by_orders(
         self,
         *,
@@ -2098,8 +2189,14 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         ceiling: int,
+        count_step_attempts: bool = True,
     ) -> FlowRunEvidenceRowCounts:
-        """Read at most ceiling+1 identities for each emitted fan-out."""
+        """Read at most ceiling+1 identities for each emitted fan-out.
+
+        A caller that sizes attempts some other way passes
+        ``count_step_attempts=False`` to skip that count; ``step_attempts`` is
+        then reported as 0 and must not be read.
+        """
         candidate_limit = ceiling + 1
         step_attempts = (
             sa.select(FlowStepAttempts.id)
@@ -2142,10 +2239,13 @@ class FlowRunRepository:
         )
         counts: list[int] = []
         for candidates in (
-            step_attempts,
+            step_attempts if count_step_attempts else None,
             result_files,
             runtime_input_files,
         ):
+            if candidates is None:
+                counts.append(0)
+                continue
             counts.append(
                 int(
                     await self.session.scalar(
@@ -3602,7 +3702,9 @@ class FlowRunRepository:
                 row.requested_model = merged_attempt_input.start.requested_model
                 row.provider = merged_attempt_input.start.provider
         await self.session.flush()
-        await self.session.refresh(row)
+        # The locked row holds what was just stored; only the server-set
+        # updated_at is read back, not the payloads.
+        await self.session.refresh(row, attribute_names=["updated_at"])
         return FlowStepAttempt.model_validate(row)
 
     async def write_attempt_tool_call_evidence(
@@ -3939,7 +4041,7 @@ class FlowRunRepository:
             row.output_payload_json = output_payload_json
         row.finished_at = datetime.now(timezone.utc)
         await self.session.flush()
-        await self.session.refresh(row)
+        await self.session.refresh(row, attribute_names=["updated_at"])
         return FlowStepAttempt.model_validate(row)
 
 

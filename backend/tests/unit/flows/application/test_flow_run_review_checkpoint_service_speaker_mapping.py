@@ -127,10 +127,10 @@ EDITED = {
 }
 
 
-def test_edit_reapplies_the_mapping_to_the_source_transcript() -> None:
+async def test_edit_reapplies_the_mapping_to_the_source_transcript() -> None:
     checkpoint = _checkpoint(_payload("[00:00:00 - 00:00:04] Anna: Hej.\n..."))
 
-    payload = build_edited_review_payload(
+    payload = await build_edited_review_payload(
         checkpoint=checkpoint, edited_value=EDITED, source_text=SOURCE
     )
 
@@ -164,11 +164,13 @@ SUPPORTED = {
 }
 
 
-def test_a_name_the_reviewer_gives_is_certain_and_one_they_clear_unknown() -> None:
+async def test_a_name_the_reviewer_gives_is_certain_and_one_they_clear_unknown() -> (
+    None
+):
     anna, bo = SUPPORTED["speakers"]
 
     # The review editor sends the step's confidence and evidence back as they were.
-    payload = build_edited_review_payload(
+    payload = await build_edited_review_payload(
         checkpoint=_checkpoint({**_payload(SOURCE), "structured": SUPPORTED}),
         edited_value={"speakers": [{**anna, "name": "Bertil"}, {**bo, "name": None}]},
         source_text=SOURCE,
@@ -188,7 +190,7 @@ def test_a_name_the_reviewer_gives_is_certain_and_one_they_clear_unknown() -> No
     }
 
 
-def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
+async def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
     anna, bo = SUPPORTED["speakers"]
     renamed = {**anna, "name": "Bertil", "confidence": "high", "evidence": ""}
     proposed = {**_payload(SOURCE), "structured": SUPPORTED}
@@ -202,7 +204,7 @@ def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
         }
     )
 
-    payload = build_edited_review_payload(
+    payload = await build_edited_review_payload(
         checkpoint=checkpoint,
         # Anna again, as the editor holds her after that save, and Bo with
         # support the step never gave.
@@ -218,26 +220,28 @@ def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
     assert payload["structured"] == SUPPORTED
 
 
-def test_edit_without_source_transcript_is_rejected() -> None:
+async def test_edit_without_source_transcript_is_rejected() -> None:
     with pytest.raises(TypedIOValidationException):
-        build_edited_review_payload(
+        await build_edited_review_payload(
             checkpoint=_checkpoint(_payload("x")), edited_value=EDITED, source_text=None
         )
 
 
-def test_edit_with_unknown_label_is_rejected() -> None:
+async def test_edit_with_unknown_label_is_rejected() -> None:
     bad = {"speakers": [{"label": "SPEAKER_07", "name": "Anna", "confidence": "high"}]}
     with pytest.raises(TypedIOValidationException):
-        build_edited_review_payload(
+        await build_edited_review_payload(
             checkpoint=_checkpoint(_payload("x")), edited_value=bad, source_text=SOURCE
         )
 
 
-def test_plain_json_checkpoints_are_unchanged() -> None:
+async def test_plain_json_checkpoints_are_unchanged() -> None:
     plain = {"text": "{}", "structured": {"a": 1}}
     checkpoint = _checkpoint(plain).model_copy(update={"output_contract_json": None})
 
-    payload = build_edited_review_payload(checkpoint=checkpoint, edited_value={"a": 2})
+    payload = await build_edited_review_payload(
+        checkpoint=checkpoint, edited_value={"a": 2}
+    )
 
     assert payload == {"text": '{"a": 2}', "structured": {"a": 2}}
 
@@ -363,7 +367,10 @@ async def test_review_skips_older_transcript_with_diagnostic(caplog):
     repo.update_input_payload.assert_not_awaited()
     assert run.input_payload_json["transkribering"] == SOURCE
     assert "transcript predates the current format" in caplog.text
-    assert any(record.run_id == str(run.id) for record in caplog.records)
+    # Other records, such as a once-per-process platform warning, carry no run_id.
+    assert any(
+        getattr(record, "run_id", None) == str(run.id) for record in caplog.records
+    )
 
 
 async def test_correction_approval_refuses_older_transcript_before_writing():
@@ -959,7 +966,7 @@ async def test_v3_unresolved_approval_propagates_to_named_output_and_run_variabl
     )
 
 
-def test_reviewed_transcript_names_edited_output_instead_of_captured_input():
+async def test_reviewed_transcript_names_edited_output_instead_of_captured_input():
     checkpoint = _checkpoint(
         {
             "text": "Captured input",
@@ -968,7 +975,7 @@ def test_reviewed_transcript_names_edited_output_instead_of_captured_input():
     ).model_copy(
         update={"output_type": FlowOutputType.TEXT, "output_contract_json": None}
     )
-    payload = build_edited_review_payload(
+    payload = await build_edited_review_payload(
         checkpoint=checkpoint, edited_value="Reviewed output"
     )
     assert payload == {"text": "Reviewed output"}

@@ -14,23 +14,23 @@ a report after the test process exits. No report belongs in the repository.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
+import re
+import time
 import tracemalloc
 from collections import Counter
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from random import Random
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.infrastructure.data_retention_service import (
@@ -77,6 +77,7 @@ from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import build_published_definition_json
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.integration.flows.statement_capture_support import capture_queries
 
 REPORT_SCHEMA_VERSION = "flow-run-listing-evidence-measurement.v1"
 WORKLOAD_SEED = 20260726
@@ -122,37 +123,6 @@ class _SeededWorkload:
     measured_flow_ids: tuple[UUID, UUID]
     representative_run_id: UUID
     heavy_run_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class _CapturedStatement:
-    sql: str
-    parameters: tuple[object, ...]
-
-
-@contextmanager
-def _capture_queries(
-    bind: Connection | Engine,
-) -> Iterator[list[_CapturedStatement]]:
-    captured: list[_CapturedStatement] = []
-
-    def record(
-        _connection: object,
-        _cursor: object,
-        statement: str,
-        parameters: object,
-        _context: object,
-        _executemany: bool,
-    ) -> None:
-        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
-            assert isinstance(parameters, tuple)
-            captured.append(_CapturedStatement(statement, parameters))
-
-    sa.event.listen(bind, "before_cursor_execute", record)
-    try:
-        yield captured
-    finally:
-        sa.event.remove(bind, "before_cursor_execute", record)
 
 
 def _next_uuid(random_source: Random) -> UUID:
@@ -645,7 +615,7 @@ async def _measure_run_listing_page(
 ) -> tuple[list[FlowRunStatusSnapshot], bool, list[dict[str, object]]]:
     bind = session.sync_session.bind
     assert bind is not None
-    with _capture_queries(bind) as captured:
+    with capture_queries(bind) as captured:
         runs = await run_service.list_run_statuses(
             flow_id=flow_id,
             limit=PAGE_LIMIT + 1,
@@ -688,7 +658,7 @@ async def _measure_evidence_assembly(
     assert bind is not None
     tracemalloc.start()
     try:
-        with _capture_queries(bind) as queries:
+        with capture_queries(bind) as queries:
             bundle = await evidence_service.get_redacted_evidence_bundle(run_id=run_id)
         serialized = json.dumps(
             bundle.to_dict(),
@@ -809,7 +779,7 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
 
         bind = session.sync_session.bind
         assert bind is not None
-        with _capture_queries(bind) as evidence_queries:
+        with capture_queries(bind) as evidence_queries:
             evidence_bundle = await (
                 container.flow_run_evidence_service().get_redacted_evidence_bundle(
                     run_id=workload.representative_run_id
@@ -956,3 +926,212 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
             encoding="utf-8",
         )
         print(f"{REPORT_SCHEMA_VERSION} report={report_path}")
+
+
+# A run that fills the view's attempt ceiling exactly: every attempt loads,
+# and its provider-call receipts overflow the embedded page so the view must
+# report an omission computed from the row-count preflight.
+CEILING_STEP_COUNT = 25
+CEILING_ATTEMPTS_PER_STEP = 20
+VIEW_TIMING_REPETITIONS = 3
+# The full redacted view of each seeded run, normalised by _normalised_view and
+# gzipped. Captured when row counts replaced the byte-measured view preflight,
+# whose view it was proven equal to. To regenerate after an intended view
+# change, temporarily replace the golden assertion in
+# test_evidence_view_of_seeded_runs_matches_its_golden with
+#   (VIEW_GOLDEN_DIR / f"{name}.json.gz").write_bytes(gzip.compress(
+#       (json.dumps(views[name], indent=1, sort_keys=True) + "\n").encode()))
+# run that test once, restore the assertion, and review the decompressed diff.
+VIEW_GOLDEN_DIR = Path(__file__).parents[2] / "fixtures" / "flow_evidence_view"
+# The view sizes attempts itself, so its run row count skips the attempt count
+# the export still reads (one statement each: see the row-count pin below).
+VIEW_STATEMENT_COUNTS = {"representative": 27, "attempt_ceiling": 25}
+EXPORT_RUN_ROW_COUNT_STATEMENTS = 4
+_UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+# Checksums and snapshot hashes cover ids, so they differ per seeded run.
+_DIGEST_PATTERN = re.compile(r"\b[0-9a-f]{64}\b")
+_TIMESTAMP_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
+)
+_DURATION_PATTERN = re.compile(r'"duration_ms": \d+')
+
+
+def _normalised_view(payload: str) -> Any:
+    """The view with run-specific ids, digests and clock readings made stable.
+
+    Each id and digest becomes its first-appearance ordinal, so the golden
+    still says which fields point at the same row or content.
+    """
+    for pattern, label in ((_UUID_PATTERN, "id"), (_DIGEST_PATTERN, "digest")):
+        seen: dict[str, str] = {}
+        payload = pattern.sub(
+            lambda match, seen=seen, label=label: seen.setdefault(
+                match.group(), f"<{label}-{len(seen)}>"
+            ),
+            payload,
+        )
+    payload = _TIMESTAMP_PATTERN.sub("<timestamp>", payload)
+    return json.loads(_DURATION_PATTERN.sub('"duration_ms": "<duration>"', payload))
+
+
+async def _view_observation(
+    *,
+    session: AsyncSession,
+    service: FlowRunEvidenceService,
+    run_id: UUID,
+) -> tuple[str, int, float]:
+    bind = session.sync_session.bind
+    assert bind is not None
+    payload = ""
+    statement_count = 0
+    durations: list[float] = []
+    for _ in range(VIEW_TIMING_REPETITIONS):
+        started = time.perf_counter()
+        with capture_queries(bind) as queries:
+            bundle = await service.get_redacted_evidence_bundle(run_id=run_id)
+        durations.append(time.perf_counter() - started)
+        payload = json.dumps(bundle.to_dict(), sort_keys=True, default=str)
+        statement_count = len(queries)
+    return payload, statement_count, sorted(durations)[len(durations) // 2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_view_of_seeded_runs_matches_its_golden(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        model = await completion_model_factory(session, "flow-evidence-view-model")
+        space = await space_factory(session, "Flow evidence view", [model.id])
+        assistant = await assistant_factory(
+            session, "Flow evidence view assistant", model.id, space_id=space.id
+        )
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
+        run_repo = FlowRunRepository(session=session)
+        input_file_ids, result_file_id = await _create_evidence_files(
+            file_service=container.file_service(),
+        )
+        run_ids: dict[str, UUID] = {}
+        for name, step_count, attempts_per_step, with_inputs in (
+            ("representative", EVIDENCE_STEP_COUNT, ATTEMPTS_PER_STEP, True),
+            (
+                "attempt_ceiling",
+                CEILING_STEP_COUNT,
+                CEILING_ATTEMPTS_PER_STEP,
+                False,
+            ),
+        ):
+            flow = await _create_flow(
+                flow_repo,
+                version_repo,
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+                name=f"Flow evidence view {name}",
+                step_count=step_count,
+            )
+            step_ids = tuple(cast(UUID, step.id) for step in flow.steps)
+            if with_inputs:
+                upload_repo = FlowRuntimeUploadRepository(session=session)
+                for file_id in input_file_ids:
+                    await upload_repo.create(
+                        file_id=file_id,
+                        flow_id=flow.id,
+                        tenant_id=admin_user.tenant_id,
+                        uploaded_for_step_id=step_ids[0],
+                        principal=FlowPrincipal.from_user(admin_user),
+                    )
+            run = await run_repo.create(
+                flow_id=flow.id,
+                flow_version=1,
+                principal_type="user",
+                principal_user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                input_payload_json={"api_key": SECRET_SENTINEL},
+                preseed_steps=[
+                    {
+                        "step_id": step_id,
+                        "step_order": step_order,
+                        "assistant_id": assistant.id,
+                    }
+                    for step_order, step_id in enumerate(step_ids, start=1)
+                ],
+                step_input_files=(
+                    [
+                        {
+                            "step_id": step_ids[0],
+                            "step_order": 1,
+                            "file_ids": list(input_file_ids),
+                        }
+                    ]
+                    if with_inputs
+                    else []
+                ),
+            )
+            await _write_representative_evidence(
+                session=session,
+                run_repo=run_repo,
+                run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                assistant_id=assistant.id,
+                step_ids=step_ids,
+                result_file_id=result_file_id,
+                attempts_per_step=attempts_per_step,
+                input_file_ids=input_file_ids if with_inputs else (),
+            )
+            run_ids[name] = run.id
+
+        service = container.flow_run_evidence_service()
+        views: dict[str, Any] = {}
+        for name, run_id in run_ids.items():
+            payload, statements, seconds = await _view_observation(
+                session=session, service=service, run_id=run_id
+            )
+            assert SECRET_SENTINEL not in payload
+            assert statements == VIEW_STATEMENT_COUNTS[name], name
+            views[name] = _normalised_view(payload)
+            print(
+                f"evidence-view {name}: {statements} statements, "
+                f"median view {seconds * 1000:.1f} ms"
+            )
+            golden = json.loads(
+                gzip.decompress((VIEW_GOLDEN_DIR / f"{name}.json.gz").read_bytes())
+            )
+            assert views[name] == golden, name
+
+        bind = session.sync_session.bind
+        assert bind is not None
+        for count_step_attempts, expected in (
+            (True, EXPORT_RUN_ROW_COUNT_STATEMENTS),
+            (False, EXPORT_RUN_ROW_COUNT_STATEMENTS - 1),
+        ):
+            with capture_queries(bind) as queries:
+                counts = await run_repo.measure_evidence_row_counts(
+                    run_id=run_ids["representative"],
+                    tenant_id=admin_user.tenant_id,
+                    ceiling=CEILING_STEP_COUNT * CEILING_ATTEMPTS_PER_STEP,
+                    count_step_attempts=count_step_attempts,
+                )
+            assert len(queries) == expected
+            assert counts.step_attempts == (ATTEMPT_COUNT if count_step_attempts else 0)
+
+        ceiling_view = views["attempt_ceiling"]
+        assert len(ceiling_view["step_attempts"]) == (
+            CEILING_STEP_COUNT * CEILING_ATTEMPTS_PER_STEP
+        )
+        assert {
+            "reason": "row_limit",
+            "section": "provider_calls",
+            "rows_omitted": 1,
+            "count_truncated": True,
+        } in ceiling_view["debug_export"]["run"]["summary"]["omissions"]

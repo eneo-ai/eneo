@@ -50,10 +50,11 @@ router = APIRouter()
         "`send_http` and the tool of `tool`, judged as entered and valid; and "
         "the checks a save makes against the space (assistants, security "
         "classification, the transcription service). Every change to a "
-        "published flow is refused with `flow_unpublish_required`. The answer "
-        "grows with the square of the step count, so a client that needs one "
-        "place names it with `position` or `step_id`. It needs read access to "
-        "the draft."
+        "published flow is refused with `flow_unpublish_required`. A read names "
+        "the places it asks about, `position`, `step_id` or both: each place "
+        "judges the whole draft once per kind, so every place at once would "
+        "grow with the square of the step count. It needs read access to the "
+        "draft."
     ),
     responses={
         200: {
@@ -61,7 +62,10 @@ router = APIRouter()
             "content": {"application/json": {"example": FLOW_STEP_KINDS_EXAMPLE}},
         },
         400: error_response(
-            description="`position` is past the place after the last step.",
+            description=(
+                "Neither `position` nor `step_id` names a place, or `position` "
+                "is past the place after the last step."
+            ),
             message="position must be between 1 and 3.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
@@ -98,9 +102,8 @@ async def get_flow_step_kinds(
         Query(
             ge=1,
             description=(
-                "Answer only this insertion place (1 is first, one past the "
-                "last step is last), and no saved step unless `step_id` names "
-                "one."
+                "The insertion place to answer (1 is first, one past the last "
+                "step is last). A read names this, `step_id` or both."
             ),
         ),
     ] = None,
@@ -108,8 +111,8 @@ async def get_flow_step_kinds(
         UUID | None,
         Query(
             description=(
-                "Answer only this saved step, and no insertion place unless "
-                "`position` names one."
+                "The saved step to answer, turned to each kind. A read names "
+                "this, `position` or both."
             ),
         ),
     ] = None,
@@ -117,6 +120,8 @@ async def get_flow_step_kinds(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
+    if position is None and step_id is None:
+        raise BadRequestException("position or step_id must name the place to answer.")
     access = await require_flow_current_definition_access(
         request, container, flow_id=id
     )
@@ -128,14 +133,13 @@ async def get_flow_step_kinds(
     if step_id is not None and all(step.id != step_id for step in flow.steps):
         raise NotFoundException("Step not found.")
     stored = await container.flow_service().get_flow_assistant_prompts(flow)
-    narrowed = position is not None or step_id is not None
     # Pure computation over the draft; off the event loop for large flows.
     answer = await asyncio.to_thread(
         step_kind_answer,
         flow,
         prompts={assistant_id: prompt.text for assistant_id, prompt in stored.items()},
-        positions=([position] if position is not None else []) if narrowed else None,
-        step_ids=([step_id] if step_id is not None else []) if narrowed else None,
+        positions=[] if position is None else [position],
+        step_ids=[] if step_id is None else [step_id],
     )
     return FlowStepKindsPublic.from_answer(
         flow_id=flow.require_persisted_id(),

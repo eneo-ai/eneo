@@ -54,8 +54,9 @@ NAMED_EXCEPTIONS = {
         "the live transcription upstream is the api_base of a transcription "
         "model's provider, set by a tenant administrator "
         "(flow_live_transcription_socket_router._load_upstream_target), not by a "
-        "flow author. It stays outside the destination policy for now because a "
-        "local speech service is a legitimate target; a follow-up decides its policy"
+        "flow author. It imports the websockets client, which has no vetted "
+        "connector; it vets the upstream with the egress policy (private networks "
+        "allowed) and connects to the vetted address itself, without a proxy"
     ),
 }
 

@@ -44,6 +44,7 @@ from eneo.flows.runtime.live_transcription.tickets import (
 from eneo.flows.runtime.live_transcription.upstream import realtime_websocket_url
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     NotFoundException,
@@ -189,7 +190,7 @@ async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarge
         "The transcription model is no longer available for live use.",
     )
     async with sessionmanager.session() as session, session.begin():
-        container = Container(session=providers.Object(session))
+        container = request_container(session=providers.Object(session))
         try:
             await require_flows_enabled(
                 container.feature_flag_service(), grant.tenant_id

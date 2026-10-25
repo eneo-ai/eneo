@@ -10,7 +10,15 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Play, RotateCcw, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { refusalText } from "./run-messages";
 import { inputFilePlayback, transcriptWordsQueryOptions } from "./runs-api";
@@ -23,16 +31,89 @@ import {
   type PlacedWord
 } from "./transcript-playback";
 
+/**
+ * The line playing, by position in the lines, and its word; -1 for none.
+ * Kept outside React state: a tick of playback renders again only the lines
+ * it leaves and reaches (`usePlayingWord`, `usePlayingLine`), not the list.
+ */
+export type PlaybackMarks = {
+  current: () => { line: number; word: number };
+  /** Hears when line `position` starts or stops playing, or its word changes. */
+  subscribe: (position: number, listener: () => void) => () => void;
+};
+
+function createPlaybackMarks(): PlaybackMarks & { set: (line: number, word: number) => void } {
+  let current = { line: -1, word: -1 };
+  const listeners = new Map<number, Set<() => void>>();
+  const notify = (position: number) => {
+    for (const listener of listeners.get(position) ?? []) listener();
+  };
+  return {
+    current: () => current,
+    set(line, word) {
+      const left = current.line;
+      current = { line, word };
+      notify(line);
+      if (left !== line) notify(left);
+    },
+    subscribe(position, listener) {
+      const own = listeners.get(position) ?? new Set();
+      listeners.set(position, own);
+      own.add(listener);
+      return () => {
+        own.delete(listener);
+        if (own.size === 0) listeners.delete(position);
+      };
+    }
+  };
+}
+
+const noUnsubscribe = () => {};
+
+/** The word marked in line `position` while it plays (-1 for none), or null while it does not. */
+export function usePlayingWord(marks: PlaybackMarks | null, position: number): number | null {
+  const subscribe = useCallback(
+    (listener: () => void) => marks?.subscribe(position, listener) ?? noUnsubscribe,
+    [marks, position]
+  );
+  const snapshot = () => {
+    const current = marks?.current();
+    return current?.line === position ? current.word : null;
+  };
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/**
+ * Which of `positions` (a turn's lines) plays, or -1: a word moving within
+ * the line renders nothing again.
+ */
+export function usePlayingLine(marks: PlaybackMarks | null, positions: readonly number[]): number {
+  const key = positions.join(",");
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      if (!marks || !key) return noUnsubscribe;
+      const stops = key.split(",").map((position) => marks.subscribe(Number(position), listener));
+      return () => stops.forEach((stop) => stop());
+    },
+    [marks, key]
+  );
+  const snapshot = () => {
+    const line = marks?.current().line ?? -1;
+    return positions.includes(line) ? line : -1;
+  };
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
 export type Playback = {
   /**
    * Plays file `fileIndex` from `time` seconds, loading it first when
    * needed; stops at `until` seconds when given (a speaker's sample).
    */
   seek: (fileIndex: number, time: number, until?: number) => void;
-  /** The line playing, by position in the lines, and its word; -1 for none. */
-  activeLine: number;
-  activeWord: number;
+  marks: PlaybackMarks;
   words: ReadonlyMap<number, PlacedWord[]>;
+  /** How many placed words the aligner only guessed the time of. */
+  uncertain: number;
   /** The id of the element that shows line `position`, for following playback. */
   lineId: (position: number) => string;
   /** The player above the lines. */
@@ -112,16 +193,37 @@ export function useTranscriptPlayback({
   const [follow, setFollow] = useState(true);
   const [rate, setRate] = useState(1);
   const [focused, setFocused] = useState(false);
-  const [position, setPosition] = useState({ line: -1, word: -1 });
+  const [marks] = useState(createPlaybackMarks);
   /** Where playback of the loaded file stops by itself (a sample); null to play on. */
   const stopAt = useRef<number | null>(null);
   const shortcutsId = `${baseId}-shortcuts`;
   const started = src !== null;
   const words = useQuery({
-    ...transcriptWordsQueryOptions(flowId, runId, target.stepId),
+    ...transcriptWordsQueryOptions(flowId, runId, target),
     enabled: started || eagerWords
   });
-  const placed = words.data ? wordsByLine(lines, words.data, sourceHash) : NO_WORDS;
+  const placed = useMemo(
+    () => (words.data ? wordsByLine(lines, words.data, sourceHash) : NO_WORDS),
+    [lines, words.data, sourceHash]
+  );
+  const uncertain = useMemo(() => uncertainWordCount(placed), [placed]);
+  // The transcript is the audio's text: its lines are the captions too.
+  const captionsSrc = useMemo(
+    () =>
+      started
+        ? `data:text/vtt;charset=utf-8,${encodeURIComponent(
+            captionsFor(
+              lines,
+              file,
+              (position) =>
+                lines[position]?.name ??
+                lines[position]?.label ??
+                t("flow_runs_transcript_unknown_speaker")
+            )
+          )}`
+        : undefined,
+    [started, lines, file, t]
+  );
 
   const lineId = (index: number) => `${baseId}-line-${index}`;
   const fileCount = target.fileIds.length;
@@ -226,9 +328,10 @@ export function useTranscriptPlayback({
     const line = activeLine(lines, file, time);
     const own = line >= 0 ? placed.get(lines[line]!.index) : undefined;
     const word = own ? activeWord(own, time) : -1;
-    if (line === position.line && word === position.word) return;
-    setPosition({ line, word });
-    if (follow && line !== position.line && line >= 0 && !element.paused) {
+    const playing = marks.current();
+    if (line === playing.line && word === playing.word) return;
+    marks.set(line, word);
+    if (follow && line !== playing.line && line >= 0 && !element.paused) {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       document
         .getElementById(lineId(line))
@@ -297,21 +400,7 @@ export function useTranscriptPlayback({
               void load(file, event.currentTarget.currentTime || 0);
             }}
           >
-            {/* The transcript is the audio's text: its lines are the captions too. */}
-            <track
-              kind="captions"
-              label={t("flow_runs_transcript_heading")}
-              src={`data:text/vtt;charset=utf-8,${encodeURIComponent(
-                captionsFor(
-                  lines,
-                  file,
-                  (position) =>
-                    lines[position]?.name ??
-                    lines[position]?.label ??
-                    t("flow_runs_transcript_unknown_speaker")
-                )
-              )}`}
-            />
+            <track kind="captions" label={t("flow_runs_transcript_heading")} src={captionsSrc} />
             {t("flow_transcript_audio_unsupported")}
           </audio>
           <div className="flex flex-wrap items-center gap-1">
@@ -400,9 +489,9 @@ export function useTranscriptPlayback({
 
   return {
     seek,
-    activeLine: position.line,
-    activeWord: position.word,
+    marks,
     words: placed,
+    uncertain,
     lineId,
     player
   };

@@ -211,3 +211,21 @@ def event_loop():
     loop = policy.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(autouse=True)
+async def process_redis_clients():
+    """Run every test inside the process's Redis client lifetime.
+
+    Every process that builds containers starts these clients first
+    (eneo.redis.clients), and tests build containers directly. Starting them
+    connects nothing. tests/integration overrides this fixture to start them on
+    the integration settings.
+    """
+    from eneo.redis.clients import redis_clients
+
+    redis_clients.start()
+    try:
+        yield
+    finally:
+        await redis_clients.stop()

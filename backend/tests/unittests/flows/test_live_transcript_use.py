@@ -151,6 +151,7 @@ def live_audio(user, monkeypatch, spool_contract):
         stage_transcript_source=lambda reference, source: staged.append(
             (reference, source)
         ),
+        stage_run_transcript=lambda reference, transcript: None,
     )
     return SimpleNamespace(
         row=row,

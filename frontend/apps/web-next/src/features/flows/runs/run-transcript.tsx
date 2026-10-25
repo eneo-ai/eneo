@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState, type Ref } from "react";
+import { useId, useMemo, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -171,17 +171,26 @@ function StepTranscript({
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
-  const correctionsKey = transcriptCorrectionsQueryOptions(flowId, runId).queryKey;
+  const correctionsKey = runKeys.corrections(flowId, runId);
   const save = useMutation({
     mutationFn: (body: EditRequest) =>
       editTranscriptCorrections(flowId, runId, target.stepId, body),
     onSuccess: (saved) => {
-      // The step's set as saved; the others stay as they are.
-      queryClient.setQueryData(correctionsKey, (current) =>
+      // The step's set as saved; the others stay as they are. The save is a
+      // new version in the step's history.
+      queryClient.setQueryData<TranscriptCorrections[]>(correctionsKey, (current) =>
         current ? [...current.filter((item) => item.step_id !== target.stepId), saved] : [saved]
       );
+      void queryClient.invalidateQueries({
+        queryKey: runKeys.revisions(flowId, runId, target.stepId)
+      });
     }
   });
+  // Read once per source and corrections, so a render with the same data (a
+  // poll, Refresh) hands the lines on as they were and their memos hold.
+  const raw = source.data?.status === "present" ? source.data.segments : null;
+  const segments = useMemo(() => (raw ? parseSegments(raw) : []), [raw]);
+  const shown = useMemo(() => shownSegments(segments, corrections), [segments, corrections]);
 
   if (source.isPending) return <LoadingState rows={3} label={t("flow_runs_transcript_loading")} />;
   if (source.isError) {
@@ -203,8 +212,6 @@ function StepTranscript({
       </p>
     );
   }
-  const segments = parseSegments(source.data.segments);
-  const shown = shownSegments(segments, corrections);
   const labels = speakerLabels(shown);
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
   const sourceHash = source.data.sourceHash;
@@ -249,6 +256,9 @@ function StepTranscript({
                 } catch (error) {
                   if (isStaleRefusal(error)) {
                     void queryClient.invalidateQueries({ queryKey: correctionsKey });
+                    void queryClient.invalidateQueries({
+                      queryKey: runKeys.revisions(flowId, runId, target.stepId)
+                    });
                   }
                   return refusalText(error, t);
                 }

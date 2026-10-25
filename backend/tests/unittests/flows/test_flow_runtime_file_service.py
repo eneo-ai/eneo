@@ -95,7 +95,7 @@ class _Session:
         return _Transaction(self)
 
 
-class _ConstraintOrigin(Exception):
+class _DriverError(Exception):
     def __init__(self, constraint_name: str):
         super().__init__(constraint_name)
         self.constraint_name = constraint_name
@@ -117,19 +117,11 @@ def _runtime_upload_repo(*, session: _Session | None = None) -> AsyncMock:
 
 
 def _integrity_error_for_constraint(constraint_name: str) -> IntegrityError:
-    return IntegrityError(
-        statement="DELETE FROM files",
-        params={},
-        orig=_ConstraintOrigin(constraint_name),
-    )
-
-
-def _integrity_error_with_origin_message(message: str) -> IntegrityError:
-    return IntegrityError(
-        statement="DELETE FROM files",
-        params={},
-        orig=Exception(message),
-    )
+    # SQLAlchemy's asyncpg adapter wraps the driver error; the constraint is
+    # named on the cause, never in the wrapper's message.
+    wrapper = Exception("asyncpg IntegrityConstraintViolationError")
+    wrapper.__cause__ = _DriverError(constraint_name)
+    return IntegrityError(statement="DELETE FROM files", params={}, orig=wrapper)
 
 
 def _flow(*, step: FlowStep) -> Flow:
@@ -1755,35 +1747,6 @@ async def test_delete_runtime_file_maps_runtime_attachment_constraints(
         await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
 
     assert str(exc_info.value) == "Runtime file is already attached to a flow run."
-    assert exc_info.value.code == "flow_runtime_file_attached"
-    assert exc_info.value.context == {
-        "flow_id": str(flow.id),
-        "file_id": str(file_id),
-    }
-
-
-@pytest.mark.asyncio
-async def test_delete_runtime_file_maps_asyncpg_attachment_message() -> None:
-    flow_service = AsyncMock()
-    file_service = AsyncMock()
-    settings_service = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(step=_step(step_order=1, input_type="audio"))
-    file_id = uuid4()
-    flow_service.get_flow.return_value = flow
-    file_service.delete_file.side_effect = _integrity_error_with_origin_message(
-        'violates foreign key constraint "flow_run_step_input_files_file_id_fkey"'
-    )
-    service = _service(
-        flow_service=flow_service,
-        file_service=file_service,
-        settings_service=settings_service,
-        flow_version_repo=flow_version_repo,
-    )
-
-    with pytest.raises(ConflictException) as exc_info:
-        await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
-
     assert exc_info.value.code == "flow_runtime_file_attached"
     assert exc_info.value.context == {
         "flow_id": str(flow.id),

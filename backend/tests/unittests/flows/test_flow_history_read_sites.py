@@ -67,11 +67,13 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         for name in (
             "FlowRunAccessPolicy._ensure_caller_may_access_run",
             "FlowRunAccessPolicy._ensure_flow_allows_evidence_export",
+            "FlowRunAccessPolicy._load_accessible_run",
             "FlowRunAccessPolicy.can_list_all_runs_in_flow",
             "FlowRunAccessPolicy.ensure_can_access_run",
             "FlowRunAccessPolicy.evidence_access_for_run",
             "FlowRunAccessPolicy.load_run",
             "FlowRunAccessPolicy.load_run_status",
+            "FlowRunAccessPolicy.load_run_status_with_speaker_labels",
             "FlowRunAccessPolicy.load_space_access",
             "FlowRunAccessPolicy.passage_disclosure_for_run",
             "FlowRunAccessPolicy.space_role",
@@ -111,6 +113,8 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         )
     }
     | {
+        # The flow gate asks the run access policy the routes' services ask.
+        ("flows/api/flow_access_context.py", "enforce_flow_scope"),
         (
             "flows/application/flow_run_review_checkpoint_service.py",
             "FlowRunReviewCheckpointService.get_active_review_checkpoint",
@@ -118,10 +122,6 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         (
             "flows/application/flow_transcript_corrections_service.py",
             "FlowTranscriptCorrectionsService.list_for_run",
-        ),
-        (
-            "flows/application/flow_transcript_words_service.py",
-            "FlowTranscriptWordsService.get_for_step",
         ),
     }
     | {
@@ -132,7 +132,6 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         for name in (
             "_load_attempt",
             "get_for_attempt",
-            "get_reference_for_attempt",
             "get_references_for_step_results",
         )
     }

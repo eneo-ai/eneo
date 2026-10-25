@@ -217,7 +217,7 @@ FLOW_PACKAGE_TOO_LARGE_EXAMPLE: dict[str, dict[str, object]] = {
         "value": {
             "message": "Flow package upload exceeds the allowed size.",
             "eneo_error_code": int(ErrorCodes.FILE_TOO_LARGE),
-            "code": "flow_package_file_too_large",
+            "code": FlowPackageErrorCode.FILE_TOO_LARGE.value,
             "context": {"max_package_upload_bytes": MAX_PACKAGE_UPLOAD_BYTES},
             "details": {
                 "file_size_bytes": MAX_PACKAGE_UPLOAD_BYTES + 1,

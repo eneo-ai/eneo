@@ -134,8 +134,11 @@ async def render_docx_template(
     context: Mapping[str, str | None],
     step_order: int,
     limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
-) -> tuple[bytes, str]:
-    """Fill every control from ``context`` and return the finished document.
+) -> tuple[bytes, str, str]:
+    """Fill every control and return the document, its mimetype and its text.
+
+    The text is the body as ``extract_docx_text`` reads it, the same value the
+    render limits were checked against.
 
     Value semantics per target: a missing key or a ``None`` value is an error
     (nothing was produced for a target the template requires); an empty
@@ -186,7 +189,7 @@ async def render_docx_template(
         else:
             fill[name] = values[name]
     try:
-        rendered = await runtime_client.render_document(
+        document, mimetype = await runtime_client.render_document(
             output_type="docx", template=template_bytes, values=fill
         )
     except runtime_client.RuntimeUnavailable as exc:
@@ -196,8 +199,9 @@ async def render_docx_template(
             "The template could not be filled within its limits.",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         ) from exc
-    ensure_source_within_limits(extract_docx_text(rendered[0]), limits=limits)
-    return rendered
+    text = extract_docx_text(document)
+    ensure_source_within_limits(text, limits=limits)
+    return document, mimetype, text
 
 
 def extract_docx_text(document_bytes: bytes) -> str:

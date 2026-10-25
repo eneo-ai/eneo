@@ -32,12 +32,10 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-    InputBindingContractError,
+    input_binding_key_refusal,
     input_contract_binding_conflict,
     is_structured_projection_binding,
     source_ref_bindings,
-    unsupported_input_binding_key,
-    validate_source_refs_binding,
 )
 from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
@@ -407,22 +405,13 @@ def _validate_input_contract_binding_compatibility(
 
 
 def _validate_supported_input_binding_keys(input_fields: _StepInputFields) -> None:
-    unsupported_key = unsupported_input_binding_key(input_fields.input_bindings)
-    if unsupported_key is not None:
+    refusal = input_binding_key_refusal(input_fields.input_bindings)
+    if refusal is not None:
         raise BadRequestException(
-            f"Unsupported input_bindings key '{unsupported_key}'. "
-            "Only input_bindings.question and input_bindings.source_refs are supported.",
+            str(refusal),
             code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-            context={"field": "input_bindings", "key": unsupported_key},
-        )
-    try:
-        validate_source_refs_binding(input_fields.input_bindings)
-    except InputBindingContractError as exc:
-        raise BadRequestException(
-            str(exc),
-            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-            context={"field": "input_bindings", "key": exc.key},
-        ) from exc
+            context={"field": "input_bindings", "key": refusal.key},
+        ) from refusal
 
 
 def _parse_input_config(

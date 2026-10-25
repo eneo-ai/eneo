@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
+from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -99,12 +100,14 @@ from eneo.flows.runtime.transcription_runtime import (
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
 from eneo.flows.step_chain_rules import OUTSIDE_INPUT_SOURCES
-from eneo.flows.step_lineage import selected_source_step_order
+from eneo.flows.step_lineage import (
+    selected_source_step_order,
+    selects_run_transcript,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
     consumes_runtime_input,
-    referenced_form_fields,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -115,7 +118,7 @@ from eneo.main.exceptions import (
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
-    from eneo.files.file_service import FileService
+    from eneo.files.file_service import FileDownload, FileService
     from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
     from eneo.flows.runtime.transcription import (
@@ -153,6 +156,9 @@ class StepInputResolutionDeps:
     stage_transcript_source: Callable[
         [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
+    stage_run_transcript: Callable[
+        [TranscriptSourceReference, InlineTranscript | None], None
+    ]
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowOutsideInputResolution]]
     resolve_tool_input: ResolveToolInputFn
@@ -167,6 +173,8 @@ class StepInputResolutionDeps:
     max_audio_files: int
     max_inline_text_bytes: int
     logger: Any
+    # Ends the session's transaction when it has only read.
+    end_read_transaction: Callable[[], Awaitable[None]]
     input_limits: FlowInputLimits | None = None
     transcription_call_observer: "ProviderCallObserver | None" = None
     transcript_source_preparation: TranscriptSourcePreparation | None = None
@@ -193,6 +201,21 @@ class ResolvedStepInputBinding:
     edges: tuple[FlowResolvedInputEdge, ...]
     diagnostic: StepDiagnostic
     structured: dict[str, Any] | None = None
+
+
+async def _open_audio_download(
+    deps: StepInputResolutionDeps, file_id: UUID
+) -> FileDownload:
+    # The download reads its bytes through its own snapshot. End the
+    # transaction that opened it if it has only read, so the step's session
+    # holds none while the audio is spooled and transcribed.
+    download = await deps.file_service.get_audio_download(file_id)
+    try:
+        await deps.end_read_transaction()
+    except BaseException:
+        await download.aclose()
+        raise
+    return download
 
 
 async def resolve_step_input(
@@ -347,6 +370,7 @@ async def resolve_step_input(
                     else None
                 ),
             )
+
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,
                 commit=deps.commit,
@@ -356,9 +380,10 @@ async def resolve_step_input(
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,
                 actor=deps.actor,
-                open_audio_download=deps.file_service.get_audio_download,
+                open_audio_download=partial(_open_audio_download, deps),
                 transcription_call_observer=deps.transcription_call_observer,
                 stage_transcript_source=deps.stage_transcript_source,
+                stage_run_transcript=deps.stage_run_transcript,
             )
             record_step_phase(FlowStepPhase.TRANSCRIPTION)
             audio_resolution = await resolve_transcribe_and_attach_audio_input(
@@ -1395,13 +1420,8 @@ async def _resolve_step_materials(
             step_refs=state.step_ref_mapping if state else {},
             form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY},
         )
-        if FLOW_INPUT_TRANSCRIPTION_KEY in referenced_form_fields(
-            references, form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY}
-        ):
-            selected_transcript = True
+        selected_transcript |= selects_run_transcript(references)
         for reference in references:
-            if reference.head == FLOW_INPUT_TRANSCRIPTION_KEY and not reference.tail:
-                selected_transcript = True
             order = selected_source_step_order(
                 reference, step_order=step.step_order, section_processing=processing
             )

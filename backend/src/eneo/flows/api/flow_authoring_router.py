@@ -226,8 +226,11 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
     operation_id="create_flow",
     summary="Create Flow",
     description=(
-        "Create a new draft flow definition, including its initial ordered steps, "
-        f"inside a space. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+        "Create a new, empty draft flow inside a space. Each step runs an "
+        "assistant the flow owns, so steps follow once the flow exists: create "
+        "each step's assistant with `POST /api/v1/flows/{id}/assistants/`, then "
+        "send the steps with `PATCH /api/v1/flows/{id}/`. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(
@@ -350,7 +353,7 @@ async def list_flows(
 ):
     service_key_principal = FlowPrincipal.from_user(container.user()).is_service_key
     if space_id is not None:
-        access_context = await flow_access_context.resolve_space_access_context(
+        actor = await flow_access_context.resolve_space_actor(
             request,
             container,
             space_id=space_id,
@@ -358,13 +361,13 @@ async def list_flows(
             scope_mismatch_message="API key space scope does not match requested space.",
             allow_service_key_principals=True,
         )
-        if not access_context.actor.can_read_flows():
+        if not actor.can_read_flows():
             raise FlowUnauthorizedException(
                 "You do not have permission to access flows in this space.",
                 code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
                 context={"auth_layer": "space_membership"},
             )
-        spaces = {space_id: access_context.actor}
+        spaces = {space_id: actor}
     elif service_key_principal:
         raise FlowBadRequestException(
             "Service keys must name the space to list flows from with space_id.",

@@ -110,7 +110,9 @@ async def tool_flow(
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Verktygssteg", description=None, steps=[]
+            space_id=space_id,
+            name="Verktygssteg",
+            description=None,
         )
         assistant, _ = await service.create_flow_assistant(
             flow_id=flow.id, name="steg1"

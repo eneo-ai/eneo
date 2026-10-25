@@ -233,8 +233,10 @@ async def test_imported_section_processing_planner_publish_parity(
 ) -> None:
     bindings, source, projected = _wildcard_projection_case()
     bindings["source_refs"][0]["step_ref"] = "extract"
+    # Uploads give the sections their one material.
     input_config: FlowPersistedJsonObject = {
-        "text_processing": {"mode": "process_each_section"}
+        "text_processing": {"mode": "process_each_section"},
+        "runtime_input": {"enabled": True},
     }
     if with_item_map:
         input_config["item_map"] = {"enabled": True, "max_items": 3}

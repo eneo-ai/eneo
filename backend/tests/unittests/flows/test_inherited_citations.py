@@ -1,80 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from eneo.flows.citation_sidecar import build_citation_sidecar
 from eneo.flows.domain.flow import FlowStepResult
 from eneo.flows.domain.rag_evidence import build_step_result_citation_state
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
-from eneo.flows.enums import FlowStepResultStatus
 from eneo.flows.runtime.inherited_citations import (
     collect_inherited_citation_context,
     inherited_cited_sources,
 )
-
-
-def _completed_grounded_result(
-    *,
-    step_order: int,
-    source_id: str = "11111111-1111-1111-1111-111111111111",
-    rag: dict[str, object] | None = None,
-) -> FlowStepResult:
-    now = datetime.now(timezone.utc)
-    return FlowStepResult(
-        id=uuid4(),
-        flow_run_id=uuid4(),
-        flow_id=uuid4(),
-        tenant_id=uuid4(),
-        step_id=uuid4(),
-        step_order=step_order,
-        assistant_id=uuid4(),
-        input_payload_json={
-            "rag": rag
-            if rag is not None
-            else {
-                "status": "success",
-                "tracking": {
-                    "retrieval_tracked": True,
-                    "prompt_context_inclusion_tracked": True,
-                    "citation_tracked": False,
-                    "material_influence_tracked": False,
-                },
-                "prompt_context": {
-                    "tracked": True,
-                    "included_source_ids": [source_id],
-                    "included_source_titles": ["Procurement memo"],
-                    "included_groups": [
-                        {
-                            "source_id": source_id,
-                            "source_id_short": source_id[:8],
-                            "source_title": "Procurement memo",
-                            "chunk_count": 1,
-                        }
-                    ],
-                },
-                "citation_sources": [
-                    {
-                        "id": source_id,
-                        "id_short": source_id[:8],
-                        "title": "Procurement memo",
-                        "source_title": "Procurement memo",
-                        "source_display_name": "Procurement memo",
-                    }
-                ],
-                "passage_evidence_location": "attempt_provenance",
-            }
-        },
-        effective_prompt=None,
-        output_payload_json={"text": "Grounded summary"},
-        model_parameters_json=None,
-        num_tokens_input=None,
-        num_tokens_output=None,
-        status=FlowStepResultStatus.COMPLETED,
-        flow_step_execution_hash=None,
-        created_at=now,
-        updated_at=now,
-    )
+from tests.unittests.flows.executor_test_support import (
+    completed_grounded_result as _completed_grounded_result,
+)
 
 
 def _runtime_step(*, input_bindings: dict[str, object]) -> RuntimeStep:

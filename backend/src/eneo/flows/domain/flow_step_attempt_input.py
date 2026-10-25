@@ -61,6 +61,8 @@ class FlowStepAttemptStart(_FlowStepAttemptInputModel):
     provider: str | None = None
     resolved_timeout_seconds: int = Field(ge=1)
     input_text_length: int = Field(ge=0)
+    # No longer written, kept so stored starts still parse: the provider's
+    # reported usage (num_tokens_input) is the input's real token count.
     input_tokens_estimate: int | None = Field(default=None, ge=0)
     mapped_admission: FlowStepAttemptMappedAdmission | None = None
 

@@ -6,6 +6,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -37,7 +38,17 @@ def seed_default_models():
 
 
 @pytest.fixture
-def round_trip_db(test_settings):
+def round_trip_db(test_settings, monkeypatch):
+    def clear_seed_variables() -> None:
+        for variable in (
+            "UPLOAD_FILE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_MAX_FILE_SIZE",
+            "TRANSCRIPTION_MAX_FILE_SIZE",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+
+    clear_seed_variables()
     config = _alembic_cfg(test_settings.sync_database_url)
     connection = psycopg2.connect(
         host=test_settings.postgres_host,
@@ -47,11 +58,13 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, POLICY_REVISION)
-    try:
-        yield connection, config
-    finally:
-        connection.close()
+    with at_revision(config, POLICY_REVISION):
+        try:
+            yield connection, config
+        finally:
+            connection.close()
+            # The upgrade to head on exit seeds from the environment.
+            clear_seed_variables()
 
 
 def _policy_limits(connection) -> tuple[int, int, int, int]:

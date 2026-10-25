@@ -74,6 +74,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_TASK_TIMEOUT: "flow_task_timeout";
   RUN_TASK_FAILURE: "flow_task_failure";
   RUN_WORKER_STALLED: "flow_worker_stalled";
+  RUN_WORKER_SHUTDOWN: "flow_worker_shutdown";
   RUN_ABANDONED: "flow_run_abandoned";
   RUN_ERROR_PAYLOAD_INVALID: "flow_run_error_payload_invalid";
   RUN_EVIDENCE_FORBIDDEN: "flow_run_evidence_forbidden";
@@ -121,6 +122,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   LLM_OUTPUT_WHITESPACE_ABORT: "flow_llm_output_whitespace_abort";
   LLM_REQUEST_TIMEOUT: "flow_llm_request_timeout";
   STEP_TIMEOUT: "flow_step_timeout";
+  STEP_TIMEOUT_EXCEEDS_TENANT_MAX: "flow_step_timeout_exceeds_tenant_max";
   RUNTIME_INPUT_NOT_CONSUMED: "flow_runtime_input_not_consumed";
   MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: "flow_mapped_provider_call_limit_exceeded";
   SUMMARIZATION_NON_CONVERGENT: "flow_summarization_non_convergent";
@@ -324,6 +326,7 @@ export type FlowApiErrorCode =
   | "flow_task_timeout"
   | "flow_task_failure"
   | "flow_worker_stalled"
+  | "flow_worker_shutdown"
   | "flow_run_abandoned"
   | "flow_run_error_payload_invalid"
   | "flow_run_evidence_forbidden"
@@ -371,6 +374,7 @@ export type FlowApiErrorCode =
   | "flow_llm_output_whitespace_abort"
   | "flow_llm_request_timeout"
   | "flow_step_timeout"
+  | "flow_step_timeout_exceeds_tenant_max"
   | "flow_runtime_input_not_consumed"
   | "flow_mapped_provider_call_limit_exceeded"
   | "flow_summarization_non_convergent"

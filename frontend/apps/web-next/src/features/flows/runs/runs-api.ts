@@ -12,8 +12,7 @@ import type { TranscriptWords } from "./transcript-playback";
  * cancel, retry and redispatch, downloads and human review.
  *
  * Content-free reads (the list, `/status/`, the run-pinned graph) are what
- * polling uses. The run detail and its steps are audited content reads: they
- * are read when the screen opens and again only when the run moved on.
+ * polling uses. Content reads are audited (`AUDITED_READ`, `auditedRead`).
  */
 
 export type RunContract = Schema<"FlowRunContractPublic">;
@@ -41,6 +40,30 @@ export type RunErrorWithGuidance = Schema<"FlowRunErrorPublic">;
 export type TokenUsage = Schema<"FlowRunTokenUsagePublic">;
 export type TranscriptionUsage = Schema<"FlowRunTranscriptionUsagePublic">;
 
+/**
+ * An audited content read kept for as long as it is cached: read when it is
+ * opened, when its key changes, when it is invalidated (a save, Refresh),
+ * never on a window focus, a reconnect or a remount. Only for a read whose
+ * key names a version of what it reads: the run detail (keyed by the run's
+ * progress), the word timings of a finished transcription, and a settled
+ * run's steps and evidence (`auditedRead`).
+ */
+const AUDITED_READ = { staleTime: Infinity } as const;
+
+/**
+ * How long a run's steps and evidence are kept. While the run is live or
+ * awaits review: the app's default, since a review checkpoint's edit or
+ * approval changes them without moving the run's progress. Once the run is
+ * settled (`isTerminal`, which their keys name): for good, since nothing
+ * changes them any more. Transcript corrections and their history always keep
+ * the default: they are saved, and speakers named, on a settled run too,
+ * without moving it. So do the active review and its edits, which exist only
+ * while a review is open.
+ */
+export function auditedRead(settled: boolean): { staleTime?: number } {
+  return settled ? AUDITED_READ : {};
+}
+
 /** Every run query of a flow sits under `["flows", flowId, "runs"]`. */
 export const runKeys = {
   all: (flowId: string) => ["flows", flowId, "runs"] as const,
@@ -58,7 +81,25 @@ export const runKeys = {
     ["flows", flowId, "runs", runId, "steps", version] as const,
   review: (flowId: string, runId: string, version: string) =>
     ["flows", flowId, "runs", runId, "review", version] as const,
-  evidence: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "evidence"] as const
+  /** `settled`: whether the run had settled (`isTerminal`) when this was read. */
+  evidence: (flowId: string, runId: string, settled: boolean) =>
+    ["flows", flowId, "runs", runId, "evidence", settled ? "settled" : "live"] as const,
+  corrections: (flowId: string, runId: string) =>
+    ["flows", flowId, "runs", runId, "transcript-corrections"] as const,
+  revisions: (flowId: string, runId: string, stepId: string) =>
+    ["flows", flowId, "runs", runId, "transcript-revisions", stepId] as const,
+  /**
+   * A run's transcript reads, each of one attempt: under the literal
+   * "transcripts" (like "contract" and "list") rather than under `run`, so a
+   * save or a refusal that reads the run again does not read every page of a
+   * source that has not changed. Refresh reads them again.
+   */
+  transcripts: (flowId: string, runId: string) =>
+    ["flows", flowId, "runs", "transcripts", runId] as const,
+  transcriptSource: (flowId: string, runId: string, stepId: string, attemptNo: number) =>
+    ["flows", flowId, "runs", "transcripts", runId, "source", stepId, attemptNo] as const,
+  transcriptWords: (flowId: string, runId: string, stepId: string, attemptNo: number) =>
+    ["flows", flowId, "runs", "transcripts", runId, "words", stepId, attemptNo] as const
 };
 
 /** The published contract a run form is built from; a draft has none (404 or 400). */
@@ -113,7 +154,10 @@ export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine
               ...(filter.mine ? { mine: true } : {}),
               ...(filter.status ? { status: [filter.status] } : {}),
               ...(filter.search ? { search: filter.search } : {}),
-              ...(filter.sort ? { sort: filter.sort.key, order: filter.sort.order } : {})
+              ...(filter.sort ? { sort: filter.sort.key, order: filter.sort.order } : {}),
+              // The list shows the first page's counts; counting the whole
+              // history again for every older page would only be thrown away.
+              ...(pageParam > 0 ? { include_status_counts: false } : {})
             }
           },
           signal
@@ -143,7 +187,8 @@ export function runDetailQueryOptions(
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...AUDITED_READ
   });
 }
 
@@ -167,7 +212,10 @@ export function lastOwnRunQueryOptions(flowId: string) {
     queryFn: async ({ signal }): Promise<RunSummary | null> => {
       const page = await unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/", {
-          params: { path: { id: flowId }, query: { limit: 1, mine: true } },
+          params: {
+            path: { id: flowId },
+            query: { limit: 1, mine: true, include_status_counts: false }
+          },
           signal
         })
       );
@@ -177,7 +225,12 @@ export function lastOwnRunQueryOptions(flowId: string) {
   });
 }
 
-export function runStepsQueryOptions(flowId: string, runId: string, version: string) {
+export function runStepsQueryOptions(
+  flowId: string,
+  runId: string,
+  version: string,
+  settled: boolean
+) {
   return queryOptions({
     queryKey: runKeys.steps(flowId, runId, version),
     queryFn: ({ signal }): Promise<RunStep[]> =>
@@ -186,7 +239,8 @@ export function runStepsQueryOptions(flowId: string, runId: string, version: str
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...auditedRead(settled)
   });
 }
 
@@ -209,16 +263,19 @@ export function getRunGraph(flowId: string, runId: string, signal?: AbortSignal)
   );
 }
 
-export function runEvidenceQueryOptions(flowId: string, runId: string) {
+export function runEvidenceQueryOptions(flowId: string, runId: string, settled: boolean) {
   return queryOptions({
-    queryKey: runKeys.evidence(flowId, runId),
+    queryKey: runKeys.evidence(flowId, runId, settled),
     queryFn: ({ signal }): Promise<RunEvidence> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/evidence/", {
           params: { path: { id: flowId, run_id: runId } },
           signal
         })
-      )
+      ),
+    ...auditedRead(settled),
+    // A bundle can be megabytes: not kept long once nothing shows it.
+    gcTime: 60_000
   });
 }
 
@@ -396,10 +453,20 @@ export function newIdempotencyKey(): string {
 export type TranscriptSourcePage = Schema<"PresentTranscriptSourcePage">;
 export type TranscriptSpeakerReview = Schema<"TranscriptSpeakerReviewPublic">;
 
+/** How many transcript source pages are read at once after the first. */
+const TRANSCRIPT_SOURCE_PAGE_CONCURRENCY = 3;
+
 /**
  * The transcript source of one transcription attempt, all pages read in
  * order: its raw lines, the hash corrections are anchored to, and its
  * speaker review. `omitted` and `unavailable` sources carry no lines.
+ *
+ * Pages are addressed by line index, so the first page's size and line count
+ * say where the others start: they are requested a few at a time, then read
+ * in order by `next_segment_index`, which still decides where the next page
+ * starts (a page not requested in advance is requested then). One failed page
+ * fails the read, starts no other and stops the requests still out, as
+ * cancelling does.
  */
 export async function getTranscriptSource(
   flowId: string,
@@ -416,43 +483,90 @@ export async function getTranscriptSource(
   | { status: "omitted"; tooLarge: boolean }
   | { status: "unavailable" }
 > {
-  const segments: TranscriptSourceSegment[] = [];
-  let sourceHash: string | null = null;
-  let speakerReview: TranscriptSpeakerReview | null = null;
-  let start = 0;
-  for (;;) {
-    const page = await unwrap(
-      browserApi.GET(
-        "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
-        {
-          params: {
-            path: {
-              flow_id: flowId,
-              run_id: runId,
-              step_id: target.stepId,
-              attempt_no: target.attemptNo
-            },
-            query: { start_segment_index: start }
-          },
-          signal
-        }
-      )
-    );
-    // A source too large to page; the other reasons have no lines to page.
-    if (page.status === "omitted") {
-      return { status: "omitted", tooLarge: page.reason === OMISSION_REASON.TOO_LARGE };
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal?.reason);
+  if (signal?.aborted) cancel();
+  signal?.addEventListener("abort", cancel);
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const fetchPage = async (start: number) => {
+    while (active >= TRANSCRIPT_SOURCE_PAGE_CONCURRENCY) {
+      await new Promise<void>((resume) => waiting.push(resume));
     }
-    if (page.status !== "present") return { status: "unavailable" };
-    sourceHash ??= page.source_hash;
-    // The speaker review comes with the first page only.
-    speakerReview ??= page.speaker_review ?? null;
-    segments.push(...page.segments);
-    if (page.next_segment_index === null) break;
-    if (page.next_segment_index <= start)
-      throw new Error("Transcript source paging did not advance");
-    start = page.next_segment_index;
+    active += 1;
+    try {
+      controller.signal.throwIfAborted();
+      return await unwrap(
+        browserApi.GET(
+          "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+          {
+            params: {
+              path: {
+                flow_id: flowId,
+                run_id: runId,
+                step_id: target.stepId,
+                attempt_no: target.attemptNo
+              },
+              query: { start_segment_index: start }
+            },
+            signal: controller.signal
+          }
+        )
+      );
+    } catch (error) {
+      // A failed page fails the read with its own error, before its slot goes
+      // to a page queued behind it: that page and the ones still out stop. A
+      // page stopped that way may reject with a bare AbortError, so every page
+      // rethrows the first reason: the read fails with the error that ended it.
+      controller.abort(error);
+      throw controller.signal.reason;
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+  try {
+    const segments: TranscriptSourceSegment[] = [];
+    let sourceHash: string | null = null;
+    let speakerReview: TranscriptSpeakerReview | null = null;
+    let start = 0;
+    let page = await fetchPage(start);
+    const requested = new Map<number, ReturnType<typeof fetchPage>>();
+    for (;;) {
+      // A source too large to page; the other reasons have no lines to page.
+      if (page.status === "omitted") {
+        return { status: "omitted", tooLarge: page.reason === OMISSION_REASON.TOO_LARGE };
+      }
+      if (page.status !== "present") return { status: "unavailable" };
+      sourceHash ??= page.source_hash;
+      // The speaker review comes with the first page only.
+      speakerReview ??= page.speaker_review ?? null;
+      segments.push(...page.segments);
+      if (page.next_segment_index === null) break;
+      if (page.next_segment_index <= start)
+        throw new Error("Transcript source paging did not advance");
+      if (start === 0 && page.page_size > 0) {
+        for (
+          let next = page.next_segment_index;
+          next < page.bounds.segments_count;
+          next += page.page_size
+        ) {
+          const request = fetchPage(next);
+          // Not left unhandled: its failure ends the read through the
+          // controller, whether or not the read reaches it.
+          request.catch(() => undefined);
+          requested.set(next, request);
+        }
+      }
+      start = page.next_segment_index;
+      page = await (requested.get(start) ?? fetchPage(start));
+    }
+    return { status: "present", segments, sourceHash: sourceHash ?? "", speakerReview };
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    // Stops pages requested in advance that the read did not reach.
+    controller.abort();
   }
-  return { status: "present", segments, sourceHash: sourceHash ?? "", speakerReview };
 }
 
 export function transcriptQueryOptions(
@@ -461,7 +575,7 @@ export function transcriptQueryOptions(
   target: { stepId: string; attemptNo: number }
 ) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript", target.stepId, target.attemptNo],
+    queryKey: runKeys.transcriptSource(flowId, runId, target.stepId, target.attemptNo),
     queryFn: ({ signal }) => getTranscriptSource(flowId, runId, target, signal),
     // A finished attempt's source does not change.
     staleTime: Infinity
@@ -471,15 +585,23 @@ export function transcriptQueryOptions(
 /**
  * The word timings a transcription step stored, or null when it stored
  * none. An audited content read: asked for once someone plays the audio.
+ * The endpoint answers for the step's current attempt; the key names the
+ * attempt the transcript shows, so another attempt is read afresh (a "none"
+ * included). Words of another source are never placed (`wordsByLine`
+ * checks the hash).
  */
-export function transcriptWordsQueryOptions(flowId: string, runId: string, stepId: string) {
+export function transcriptWordsQueryOptions(
+  flowId: string,
+  runId: string,
+  target: { stepId: string; attemptNo: number }
+) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-words", stepId],
+    queryKey: runKeys.transcriptWords(flowId, runId, target.stepId, target.attemptNo),
     queryFn: async ({ signal }): Promise<TranscriptWords | null> => {
       try {
         return await unwrap(
           browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/", {
-            params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+            params: { path: { id: flowId, run_id: runId, step_id: target.stepId } },
             signal
           })
         );
@@ -488,7 +610,7 @@ export function transcriptWordsQueryOptions(flowId: string, runId: string, stepI
         throw error;
       }
     },
-    staleTime: Infinity
+    ...AUDITED_READ
   });
 }
 
@@ -514,7 +636,7 @@ export async function inputFilePlayback(
 
 export function transcriptCorrectionsQueryOptions(flowId: string, runId: string) {
   return queryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-corrections"],
+    queryKey: runKeys.corrections(flowId, runId),
     queryFn: ({ signal }) =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/", {
@@ -546,10 +668,13 @@ export type TranscriptRegeneration = Schema<"FlowTranscriptRegenerationPublic">;
 /** Revisions per page of a step's correction history. */
 export const REVISIONS_PAGE_SIZE = 20;
 
-/** Every saved version of a step's transcript corrections, oldest first, a page at a time. */
+/**
+ * Every saved version of a step's transcript corrections, oldest first, a
+ * page at a time. A save adds one: it invalidates `runKeys.revisions`.
+ */
 export function transcriptRevisionsQueryOptions(flowId: string, runId: string, stepId: string) {
   return infiniteQueryOptions({
-    queryKey: [...runKeys.run(flowId, runId), "transcript-revisions", stepId],
+    queryKey: runKeys.revisions(flowId, runId, stepId),
     queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET(

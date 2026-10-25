@@ -1,7 +1,7 @@
 """Record the forwarding facts of a step attempt's first model call next to its resolved inputs.
 
-Revision ID: 202610231100
-Revises: 202610231000
+Revision ID: 202610250900
+Revises: 202610241100
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "202610231100"
-down_revision = "202610231000"
+revision = "202610250900"
+down_revision = "202610241100"
 branch_labels = None
 depends_on = None
 

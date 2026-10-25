@@ -120,7 +120,6 @@ async def test_create_mode_materializes_flow_and_resource_bindings() -> None:
         space_id=space_id,
         name="Created flow",
         description="Description",
-        steps=[],
         metadata_json=None,
     )
     service.update_flow.assert_awaited_once()

@@ -23,6 +23,7 @@ from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepExecutionOutput
 from eneo.flows.domain.runtime_invariant_exceptions import MappedEvidenceNestingError
 from eneo.flows.runtime.rag_metadata import build_retrieved_knowledge_evidence
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
     MappedCallEvidence,
     carry_call_evidence,
@@ -197,7 +198,7 @@ def test_a_failed_mapped_step_keeps_evidence_from_completed_calls() -> None:
         failure,
         _call_output(passage_text="third call passage", policy=policy).rag_metadata,
     )
-    collector.admit(getattr(failure, "rag_metadata", None))
+    collector.admit(failure_evidence(failure).rag_metadata)
     partial = collector.partial_payload()
 
     assert partial is not None
@@ -228,7 +229,7 @@ def test_carry_call_evidence_never_overwrites_evidence_already_on_the_error() ->
     carry_call_evidence(failure, original)
     carry_call_evidence(failure, later)
 
-    assert getattr(failure, "rag_metadata") is original
+    assert failure_evidence(failure).rag_metadata is original
 
 
 def test_withholding_recomputes_the_mapped_root_aggregates() -> None:

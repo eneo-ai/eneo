@@ -10,11 +10,9 @@ import asyncio
 import json
 import math
 import time
-from contextlib import nullcontext
 from dataclasses import replace
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, create_autospec
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import httpx
@@ -24,15 +22,9 @@ import eneo.flows.runtime.executor as executor_module
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
-from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
-from eneo.completion_models.domain.request_preflight import (
-    CompletionRequestPackage,
-    CompletionRequestPreflight,
-)
 from eneo.files.file_models import FileType
-from eneo.files.file_service import FileService
 from eneo.files.text import (
     PDF_TEXT_LIKELY_REVERSED_WARNING,
     TEXT_EXTRACTION_WARNINGS,
@@ -43,25 +35,19 @@ from eneo.flows.application.flow_run_export_json import (
 )
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
-    FlowRun,
     FlowRunStatus,
-    FlowStepResult,
     FlowStepResultStatus,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY, interpret_step_text
+from eneo.flows.domain.step_output import interpret_step_text
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
-    FlowRunExecutor,
     RunExecutionState,
-    RuntimeStep,
     StepInputValue,
 )
-from eneo.flows.runtime.flow_run_actor import FlowRunActor
-from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.http_orchestration import deliver_webhook
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
@@ -69,6 +55,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     build_output_payload,
     json_mode_cache_key,
 )
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
@@ -82,6 +69,20 @@ from eneo.main.exceptions import (
     TypedIOValidationException,
 )
 from eneo.object_content.content import ObjectContentUnavailableError
+from tests.unittests.flows.executor_test_support import (
+    build_step_executor as _build_executor,
+)
+from tests.unittests.flows.executor_test_support import (
+    completed_step_result as _completed_step_result,
+)
+from tests.unittests.flows.executor_test_support import (
+    context_preflight as _context_preflight,
+)
+from tests.unittests.flows.executor_test_support import flow_run as _run
+from tests.unittests.flows.executor_test_support import (
+    mock_assistant_for_execute_step as _mock_assistant_for_execute_step,
+)
+from tests.unittests.flows.executor_test_support import runtime_step as _runtime_step
 from tests.unittests.flows.test_http_orchestration import _make_deps as _webhook_deps
 from tests.unittests.flows.test_http_orchestration import _Run as _WebhookRun
 from tests.unittests.flows.test_http_orchestration import _Step as _WebhookStep
@@ -89,167 +90,6 @@ from tests.unittests.flows.test_http_orchestration import _Step as _WebhookStep
 _LIKELY_REVERSED_PDF_TEXT = (
     "[PAGE 1]\n" + "hco tta ted ned mos dem llit relle aks rah nak etni " * 4
 )
-
-
-def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
-    now = datetime.now(timezone.utc)
-    return FlowRun(
-        id=uuid4(),
-        flow_id=uuid4(),
-        flow_version=1,
-        principal_type=PrincipalType.USER,
-        principal_user_id=user.id,
-        tenant_id=user.tenant_id,
-        trace_id=uuid4(),
-        status=status,
-        cancelled_at=None,
-        input_payload_json=(
-            input_payload if input_payload is not None else {"text": "hello"}
-        ),
-        output_payload_json=None,
-        job_id=None,
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def _build_executor(
-    user,
-    *,
-    max_inline_text_bytes: int = 1024 * 1024,
-    invocation_deadline: float | None = None,
-):
-    flow_repo = AsyncMock()
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    session.rollback = AsyncMock()
-    flow_run_repo = AsyncMock()
-    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
-    flow_run_repo.list_retained_input_file_ids = AsyncMock(
-        side_effect=lambda **kwargs: list(
-            flow_run_repo.list_step_input_file_ids.return_value
-        )
-    )
-    flow_run_repo.list_step_results.return_value = []
-
-    async def _activate_step_attempt(**kwargs):
-        attempt_input = kwargs["attempt_input"]
-        return SimpleNamespace(
-            input_payload_json=(
-                attempt_input.to_payload() if attempt_input is not None else None
-            )
-        )
-
-    flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
-    flow_run_repo.write_attempt_tool_call_evidence = AsyncMock(return_value="written")
-    flow_version_repo = AsyncMock()
-    flow_run_review_checkpoint_repo = AsyncMock()
-    space_repo = AsyncMock()
-    completion_service = AsyncMock()
-    file_repo = AsyncMock()
-    file_repo.get_content_references.return_value = []
-    file_content_loader = AsyncMock()
-    file_service = create_autospec(FileService, instance=True)
-    file_service.repo = file_repo
-
-    async def owned_infos(*, file_ids):
-        content = file_service.get_files_by_ids
-        if callable(content.side_effect):
-            files = await content.side_effect(file_ids=file_ids)
-        elif isinstance(content.side_effect, BaseException):
-            files = [SimpleNamespace(id=file_id) for file_id in file_ids]
-        else:
-            files = content.return_value
-        return [
-            SimpleNamespace(
-                id=file.id,
-                name=getattr(file, "name", "source"),
-                mimetype=getattr(file, "mimetype", "text/plain"),
-                file_type=getattr(file, "file_type", FileType.TEXT),
-                size=getattr(file, "size", 0),
-            )
-            for file in files
-        ]
-
-    file_service.get_owned_file_infos.side_effect = owned_infos
-    template_asset_repo = AsyncMock()
-    encryption_service = AsyncMock()
-    flow_run_terminalizer = SimpleNamespace()
-
-    async def _terminalize_run(**kwargs):
-        return SimpleNamespace(
-            run=SimpleNamespace(status=kwargs["target_status"]),
-            did_transition=True,
-            target_status=kwargs["target_status"],
-            source=kwargs["source"],
-            audit_outbox_id=uuid4(),
-        )
-
-    flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
-    executor = FlowRunExecutor(
-        # The worker opens this on a session of its own; here the executor's audit service serves.
-        read_audit_service=lambda: nullcontext(executor.audit_service),
-        runtime_actor=FlowRunActor.from_user(user=user),
-        session=session,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
-        flow_version_repo=flow_version_repo,
-        space_repo=space_repo,
-        completion_service=completion_service,
-        file_repo=file_repo,
-        file_content_loader=file_content_loader,
-        file_service=file_service,
-        template_asset_repo=template_asset_repo,
-        encryption_service=encryption_service,
-        flow_run_terminalizer=flow_run_terminalizer,
-        max_inline_text_bytes=max_inline_text_bytes,
-        invocation_deadline=invocation_deadline,
-        input_limits=FlowInputLimits(
-            file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
-        ),
-    )
-    # What execute_claimed derives from the pinned definition before any step.
-    executor.generated_file_names = GeneratedFileNames.for_run(
-        flow_name="Nämndmöte",
-        steps=(),
-        run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
-    )
-    return executor, flow_repo, flow_run_repo, flow_version_repo
-
-
-def _runtime_step(
-    *,
-    step_order: int = 1,
-    input_source: str = "flow_input",
-    input_type: str = "text",
-    input_contract: dict | None = None,
-    output_type: str = "text",
-    output_contract: dict | None = None,
-    input_bindings: dict | None = None,
-    input_config: dict | None = None,
-    output_mode: str = "pass_through",
-    output_config: dict | None = None,
-) -> RuntimeStep:
-    if input_config is None and input_type in {"document", "file"}:
-        input_config = {"runtime_input": {"enabled": True, "input_format": "document"}}
-    if input_config is None and input_type == "audio":
-        input_config = {"runtime_input": {"enabled": True, "input_format": "audio"}}
-    return RuntimeStep(
-        step_id=uuid4(),
-        step_order=step_order,
-        assistant_id=uuid4(),
-        user_description=None,
-        input_source=input_source,
-        input_bindings=input_bindings,
-        input_config=input_config,
-        output_mode=output_mode,
-        output_config=output_config,
-        output_type=output_type,
-        output_contract=output_contract,
-        input_type=input_type,
-        input_contract=input_contract,
-    )
 
 
 def _runtime_file(*, file_id, text: str, name: str | None = None) -> SimpleNamespace:
@@ -490,7 +330,7 @@ async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
     assert error.value.context["measured_bytes"] > 6000
     assert error.value.context["ceiling_bytes"] == 6000
     assert assistant.get_response.await_count == completed
-    evidence = error.value.rag_metadata
+    evidence = failure_evidence(error.value).rag_metadata
     assert len(evidence["items" if mode == "per_item" else "sources"]) == completed
     run_repo.update_step_result.assert_not_awaited()
     assert run.output_payload_json is None
@@ -509,86 +349,6 @@ def _prompt_for_output_format(
     return append_output_format_instructions(
         prompt, spec.prompt_instructions(output_contract)
     )
-
-
-def _completed_step_result(
-    *,
-    run_id,
-    flow_id,
-    tenant_id,
-    step_order: int,
-    text: str,
-    structured: dict | list | None = None,
-    text_overflow: dict | None = None,
-) -> FlowStepResult:
-    now = datetime.now(timezone.utc)
-    payload: dict[str, object] = {"text": text}
-    if structured is not None:
-        payload["structured"] = structured
-    if text_overflow is not None:
-        payload[OUTPUT_TEXT_OVERFLOW_KEY] = text_overflow
-    return FlowStepResult(
-        id=uuid4(),
-        flow_run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        step_id=uuid4(),
-        step_order=step_order,
-        assistant_id=uuid4(),
-        current_attempt_no=1,
-        input_payload_json={"text": f"input-{step_order}"},
-        effective_prompt="prompt",
-        output_payload_json=payload,
-        model_parameters_json={},
-        num_tokens_input=1,
-        num_tokens_output=1,
-        status=FlowStepResultStatus.COMPLETED,
-        flow_step_execution_hash="hash",
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def _context_preflight(token_count: int) -> CompletionRequestPreflight:
-    from eneo.tokens.token_utils import TokenCount, TokenCountSource
-
-    package = CompletionRequestPackage(
-        messages=[],
-        tools=[],
-        response_format=None,
-        input_reserve=TokenCount(tokens=token_count, source=TokenCountSource.LITELLM),
-        useful_output_reserve_tokens=256,
-        output_cap_tokens=4000,
-    )
-    return CompletionRequestPreflight(
-        model_route="test/model",
-        capacity=ModelCapacity(100_000, 4000),
-        retrieval_included=False,
-        preferred=package,
-        fallback=replace(package),
-    )
-
-
-def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
-    assistant = MagicMock()
-    assistant.mcp_servers = []
-    assistant.get_prompt_text.return_value = ""
-    assistant.completion_model_kwargs = ModelKwargs()
-    assistant.completion_model = SimpleNamespace(
-        id=uuid4(),
-        name="test",
-        provider_type="test",
-        litellm_model_name=None,
-        supported_model_kwargs=SupportedModelKwargs(),
-    )
-    assistant.get_response = AsyncMock(
-        return_value=SimpleNamespace(
-            completion=response_text,
-            total_token_count=3,
-        )
-    )
-    assistant.preflight_response_context = AsyncMock(return_value=_context_preflight(1))
-    return assistant
 
 
 # --- RuntimeStep extended fields ---

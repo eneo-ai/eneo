@@ -33,6 +33,7 @@ from eneo.flows.runtime.step_deadline import (
     step_deadline_scope,
 )
 from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_handlers.summarize import (
     fold_section_records,
     record_bytes,
@@ -489,9 +490,9 @@ async def test_summarization_keeps_execution_error_when_persistence_fails(
         with pytest.raises(type(expected)) as caught:
             await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
     assert caught.value is expected
-    assert getattr(caught.value, "total_items", 0) > 0
+    assert (failure_evidence(caught.value).total_items or 0) > 0
     if primary is not None:
-        assert getattr(caught.value, "completed_items", None) == 0
+        assert failure_evidence(caught.value).completed_items == 0
         if isinstance(primary, TypedIOValidationException):
             assert primary.context is not None
             assert primary.context["completed_items"] == 0
@@ -517,8 +518,8 @@ async def test_fold_failure_reports_progress_within_the_current_round(user):
     assistant.get_response.side_effect = reject_fold
     with pytest.raises(TypedIOValidationException) as caught:
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
-    assert caught.value.completed_items == 0
-    assert 0 < caught.value.total_items < len(questions)
+    assert failure_evidence(caught.value).completed_items == 0
+    assert 0 < (failure_evidence(caught.value).total_items or 0) < len(questions)
 
 
 @pytest.mark.parametrize("retained", [False, True])

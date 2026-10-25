@@ -319,6 +319,9 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # How long a command waits for a free connection when REDIS_MAX_CONNECTIONS
+    # bounds its pool. Unset waits up to REDIS_CONN_TIMEOUT.
+    redis_pool_wait_timeout: int | None = None
     # MCP tool approval configuration
     mcp_tool_approval_timeout_seconds: int = 300
     mcp_tool_approval_ttl_seconds: int = 305
@@ -424,6 +427,23 @@ class Settings(BaseSettings):
     task_maintenance_max_jobs: int = 2
     task_execution_timeout_seconds: int = 28800
     task_maintenance_timeout_seconds: int = 120
+    # Contract checks one event loop runs at once, each in its own process; at
+    # most TASK_EXECUTION_MAX_JOBS, since a run checks one value at a time.
+    flow_contract_check_slots: int = Field(default=2, gt=0)
+    # The memory each contract check's process may take on Linux (its heap and
+    # private mappings); a check past it ends as not checked, whether the value
+    # is valid or not. At least 128 MiB: the largest request at the default
+    # FLOW_MAX_INLINE_TEXT_BYTES needs 80 MiB to arrive. The default holds a
+    # value at that ceiling in its costliest decoded shape (about 420 MiB of
+    # data measured, 21.5 MiB of it the idle process); that value peaked at
+    # about 440 MiB resident while checked, under an anyOf, uniqueItems or a
+    # recursive $ref alike. anyOf and oneOf keep only a failing branch's first
+    # error, so a valid 3 MiB array of 400,000 integers under a two-branch anyOf
+    # or oneOf passes. A value past a raised ceiling can still exceed it: raise
+    # it with that ceiling.
+    flow_contract_check_child_memory_bytes: int = Field(
+        default=512 * 1024 * 1024, ge=128 * 1024 * 1024
+    )
     # Seconds between sweeps that cancel the runs of deleted flows; a divisor of
     # 60, since the sweep runs at fixed seconds of every minute.
     flow_retired_run_drain_interval_seconds: int = 60
@@ -1140,6 +1160,16 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if (
+            self.redis_pool_wait_timeout is not None
+            and self.redis_pool_wait_timeout <= 0
+        ):
+            logging.error(
+                "REDIS_POOL_WAIT_TIMEOUT must be greater than zero when set. Current value: %s",
+                self.redis_pool_wait_timeout,
             )
             sys.exit(1)
 

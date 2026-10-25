@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Suspense } from "react";
+import { focusManager } from "@tanstack/react-query";
+import { Profiler, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Permission } from "@/lib/auth/permissions";
@@ -49,6 +50,7 @@ const GRAPH = "GET /api/v1/flows/{id}/graph/";
 const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
 const STEPS = "GET /api/v1/flows/{id}/runs/{run_id}/steps/";
 const REVIEW = "GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/";
+const EVIDENCE = "GET /api/v1/flows/{id}/runs/{run_id}/evidence/";
 
 const graph = makeRunGraph([
   { order: 1, label: "Sammanfatta", status: "completed" },
@@ -62,18 +64,55 @@ function answerRun(summary: RunSummary, detail: RunDetail = makeRunDetail(summar
   state.routes[STEPS] = () => ({ body: [makeRunStep(1), makeRunStep(2)] });
 }
 
+function answerEvidence() {
+  state.routes[EVIDENCE] = () => ({
+    body: {
+      run: makeRunSummary(),
+      debug_export: {
+        run: { run_id: "run-1", summary: null },
+        security: { redaction_applied: false }
+      },
+      step_attempts: [],
+      provider_calls: {
+        count: 0,
+        items: [],
+        has_more: false,
+        next_after_event_id: null,
+        total_count: 0
+      },
+      knowledge_traces: []
+    }
+  });
+}
+
 function calls(route: string) {
   return state.stub.calls.filter((call) => `${call.method} ${call.path}` === route);
 }
 
-function renderRun(permissions: Permission[] = ["flows_view", "flows_run"]) {
+/** The person leaves the tab and comes back to it, after the app's 30 s. */
+async function comeBack() {
+  await act(() => vi.advanceTimersByTimeAsync(31_000));
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
+  focusManager.setFocused(undefined);
+  await act(() => vi.advanceTimersByTimeAsync(100));
+}
+
+function renderRun(
+  permissions: Permission[] = ["flows_view", "flows_run"],
+  onCommit: () => void = () => {}
+) {
   const queryClient = testQueryClient();
   const flow = makeFlow({ published_version: 3 });
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
   return renderInApp(
     <Suspense>
-      <FlowRunPage flowId="flow-1" runId="run-1" />
+      <Profiler id="run-page" onRender={onCommit}>
+        <FlowRunPage flowId="flow-1" runId="run-1" />
+      </Profiler>
     </Suspense>,
     { queryClient, appContext: testAppContext({ permissions }) }
   );
@@ -476,6 +515,80 @@ describe("FlowRunPage", () => {
     expect(calls(STATUS)).toHaveLength(3);
   });
 
+  it("reads the trace once more when the run it was read from ends, and keeps it from then on", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    answerEvidence();
+    renderRun();
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_run_extras_trace_show })
+    );
+    await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
+    expect(calls(EVIDENCE)).toHaveLength(1);
+
+    answerRun(makeRunSummary({ revision: 3 }));
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    await waitFor(() => expect(calls(EVIDENCE)).toHaveLength(2));
+
+    await comeBack();
+    expect(calls(EVIDENCE)).toHaveLength(2);
+  });
+
+  it("offers to send a queued run again the moment its dispatch is due, without reading it again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queued = makeRunSummary({
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_next_attempt_at: new Date(Date.now() + 1_000).toISOString()
+    });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    expect(screen.queryByRole("button", { name: messages.flow_runs_redispatch })).toBeNull();
+    const reads = calls(STATUS).length;
+
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByRole("button", { name: messages.flow_runs_redispatch })).toBeTruthy();
+    expect(calls(STATUS)).toHaveLength(reads);
+  });
+
+  it("renders nothing again while the run's polls answer the same, and renders what moved or failed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queued = makeRunSummary({ status: "queued", started_at: null, finished_at: null });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    let commits = 0;
+    renderRun(undefined, () => (commits += 1));
+    await screen.findByText(messages.flow_runs_result_pending);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const reads = calls(STATUS).length;
+    commits = 0;
+
+    for (let poll = 0; poll < 3; poll += 1) await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(reads + 3);
+    expect(commits).toBe(0);
+
+    // A count the signature does not carry still reaches the page.
+    const counted = makeRunGraph([
+      { order: 1, label: "Sammanfatta", status: "completed" },
+      { order: 2, label: "Skriv svar", status: "completed" }
+    ]);
+    counted.nodes[0]!.num_tokens_input = 42;
+    state.routes[GRAPH] = () => ({ body: counted });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(commits).toBeGreaterThan(0);
+    expect(calls(DETAIL)).toHaveLength(1);
+
+    state.routes[STATUS] = () => ({
+      status: 503,
+      body: { message: "Busy", code: "service_unavailable" }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+  });
+
   describe("review", () => {
     function answerReview(checkpoint = makeCheckpoint()) {
       const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
@@ -662,11 +775,66 @@ describe("FlowRunPage", () => {
       ).toEqual({ expected_checkpoint_revision: 1, reason: "Fel mottagare" });
     });
 
+    it("shows another reviewer's edit and approval on coming back, though the run did not move", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerReview();
+      renderRun(["flows_view", "flows_manage"]);
+      const region = { name: "Granska steg 2: Skriv svar" };
+      const text = () =>
+        within(screen.getByRole("region", region)).getByLabelText<HTMLTextAreaElement>(
+          /^Stegets text/
+        ).value;
+      await screen.findByRole("region", region);
+      expect(text()).toBe("Hej Anna, tack för ditt brev.");
+
+      // An edit moves the checkpoint and the step's output, not the run.
+      state.routes[REVIEW] = () => ({
+        body: makeCheckpoint({
+          revision: 2,
+          state: "edited",
+          current_payload_json: { text: "Hej Anna, vi återkommer." }
+        })
+      });
+      await comeBack();
+      await waitFor(() => expect(text()).toBe("Hej Anna, vi återkommer."));
+      expect(calls(STEPS)).toHaveLength(2);
+
+      // So does approving it without letting the run go on.
+      state.routes[REVIEW] = () => ({
+        body: makeCheckpoint({
+          revision: 3,
+          state: "approved",
+          current_payload_json: { text: "Hej Anna, vi återkommer." }
+        })
+      });
+      await comeBack();
+      expect(
+        await screen.findByRole("button", { name: messages.flow_runs_review_resume })
+      ).toBeTruthy();
+      // The run's detail, read once for its version, is not read again.
+      expect(calls(DETAIL)).toHaveLength(1);
+    });
+
     it("offers no decision once the review time has run out", async () => {
       answerReview(makeCheckpoint({ expires_at: "2026-10-01T00:00:00Z" }));
       renderRun(["flows_view", "flows_manage"]);
       expect(await screen.findByText(messages.flow_runs_review_expired_title)).toBeTruthy();
       expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+    });
+
+    it("takes the decision away the moment the review time runs out, without reading it again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerReview(makeCheckpoint({ expires_at: new Date(Date.now() + 1_000).toISOString() }));
+      renderRun(["flows_view", "flows_manage"]);
+      expect(
+        await screen.findByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+      const reads = calls(REVIEW).length + calls(STATUS).length;
+
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(screen.getByText(messages.flow_runs_review_expired_title)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+      expect(calls(REVIEW).length + calls(STATUS).length).toBe(reads);
     });
 
     it("shows the output to someone who may not review, and says who can", async () => {
@@ -756,6 +924,125 @@ describe("FlowRunPage", () => {
         speaker_edits: [],
         speaker_names: { SPEAKER_00: "Anna", SPEAKER_01: null }
       });
+      // The run's reads are read again, the attempt's transcript source is not:
+      // naming the speakers changes the corrections, never the source.
+      await waitFor(() => expect(calls(CORRECTIONS)).toHaveLength(2));
+      await waitFor(() => expect(calls(STEPS)).toHaveLength(2));
+      expect(calls(SOURCE)).toHaveLength(1);
+    });
+
+    it("reads the transcript source and the word timings again on Refresh", async () => {
+      const WORDS = "GET /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/";
+      answerAudioRun();
+      state.routes["POST /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"] =
+        () => ({
+          body: {
+            url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+            expires_at: "2026-10-21T10:00:00Z"
+          }
+        });
+      state.routes[WORDS] = () => ({ status: 404, body: { detail: "No word timings" } });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      renderRun(["flows_view"]);
+
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
+      await screen.findByLabelText(messages.flow_transcript_audio_label);
+      await waitFor(() => expect(calls(WORDS)).toHaveLength(1));
+      expect(calls(SOURCE)).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
+      );
+      expect(calls(SOURCE)).toHaveLength(2);
+      expect(calls(WORDS)).toHaveLength(2);
+      play.mockRestore();
+    });
+
+    it("reads the run's detail, steps and evidence again on Refresh or when the run moved, never on a refocus", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerAudioRun();
+      answerEvidence();
+      renderRun(["flows_view"]);
+      await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+      await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
+      const audited = () => [DETAIL, STEPS, CORRECTIONS, EVIDENCE].map((r) => calls(r).length);
+      expect(audited()).toEqual([1, 1, 1, 1]);
+
+      // Back to the tab twice, after the app's 30 s: the content-free status is
+      // read again, the run's detail, steps and evidence are not. Corrections,
+      // which change on a finished run too, are read once more.
+      await act(() => vi.advanceTimersByTimeAsync(31_000));
+      for (let i = 0; i < 2; i++) {
+        act(() => {
+          focusManager.setFocused(false);
+          focusManager.setFocused(true);
+        });
+        await act(() => vi.advanceTimersByTimeAsync(100));
+      }
+      focusManager.setFocused(undefined);
+      await waitFor(() => expect(calls(STATUS)).toHaveLength(2));
+      expect(audited()).toEqual([1, 1, 2, 1]);
+
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
+      );
+      expect(audited()).toEqual([2, 2, 3, 2]);
+
+      // The run moved on (a new revision): its detail and steps are read once more.
+      state.routes[STATUS] = () => ({ body: makeRunSummary({ revision: 9 }) });
+      await act(() => vi.advanceTimersByTimeAsync(31_000));
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      focusManager.setFocused(undefined);
+      await waitFor(() => expect(calls(DETAIL)).toHaveLength(3));
+      await waitFor(() => expect(calls(STEPS)).toHaveLength(3));
+      await act(() => vi.advanceTimersByTimeAsync(100));
+      expect(audited()).toEqual([3, 3, 4, 2]);
+    });
+
+    it("shows a correction saved elsewhere on a finished run on coming back", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerAudioRun();
+      renderRun(["flows_view"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      expect(within(lines).getByText("Tack.")).toBeTruthy();
+
+      // Another reviewer corrects a line; the run itself does not move.
+      state.routes[CORRECTIONS] = () => ({
+        body: [
+          {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision: 1,
+            occurrences: [
+              {
+                segment_index: 1,
+                char_start: 0,
+                char_end: 4,
+                original: "Tack",
+                corrected: "Tackar"
+              }
+            ],
+            speaker_edits: [],
+            speaker_names: {}
+          }
+        ]
+      });
+      await comeBack();
+      expect(await within(lines).findByText(/Tackar/)).toBeTruthy();
+      expect(calls(STEPS)).toHaveLength(1);
     });
 
     it("plays the audio from a line or a word and marks the line playing", async () => {
@@ -1069,6 +1356,88 @@ describe("FlowRunPage", () => {
           .getByRole("link", { name: messages.flow_transcript_regenerate_open })
           .getAttribute("href")
       ).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
+    });
+
+    it("shows a correction saved since the history was open when it opens again", async () => {
+      answerAudioRun();
+      const REVISIONS =
+        "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions";
+      const set = (revision: number, occurrences: unknown) => ({
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        created_at: "2026-10-21T09:00:00Z",
+        updated_at: "2026-10-21T09:00:00Z",
+        edited_by_principal_type: "user",
+        schema_version: 3,
+        segments_hash: "hash-1",
+        stale: false,
+        revision,
+        occurrences,
+        speaker_edits: [],
+        speaker_names: {}
+      });
+      const version = (revision: number) => ({
+        id: `rev-${revision}`,
+        correction_set_id: "set-1",
+        created_at: "2026-10-21T09:00:00Z",
+        edited_by_principal_type: "user",
+        edited_by_user_id: "user-1",
+        edited_by_service_id: null,
+        flow_id: "flow-1",
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        tenant_id: "tenant-1",
+        revision,
+        segments_hash: "hash-1",
+        occurrences_json: [],
+        speaker_edits_json: [],
+        speaker_names: {}
+      });
+      const versions = [version(1)];
+      state.routes[CORRECTIONS] = () => ({ body: [set(1, [])] });
+      state.routes[REVISIONS] = () => ({
+        body: {
+          baseline: {
+            revision: 0,
+            occurrences_json: [],
+            speaker_edits_json: [],
+            speaker_names: {}
+          },
+          truncated: false,
+          next_after_revision: null,
+          items: [...versions]
+        }
+      });
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        versions.push(version(2));
+        return { body: set(2, init.body.occurrences) };
+      };
+      renderRun(["flows_view", "flows_manage"]);
+      const toggle = await screen.findByRole("button", {
+        name: messages.flow_transcript_history_heading
+      });
+      const history = () =>
+        screen.findByRole("list", { name: messages.flow_transcript_history_heading });
+
+      fireEvent.click(toggle);
+      expect(within(await history()).getByText(/Version 1/)).toBeTruthy();
+      fireEvent.click(toggle);
+
+      const lines = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.change(within(lines).getByLabelText("Texten på raden 1:05"), {
+        target: { value: "Tack så mycket." }
+      });
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
+      );
+
+      fireEvent.click(toggle);
+      expect(await within(await history()).findByText(/Version 2/)).toBeTruthy();
+      expect(calls(REVISIONS)).toHaveLength(2);
     });
 
     it("marks where more than one voice spoke and lets the reviewer decide the speaker", async () => {

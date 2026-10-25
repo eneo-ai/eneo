@@ -73,7 +73,9 @@ async def saved(client, db_container, admin_user, patch_auth_service_jwt) -> Sav
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Tre steg", description="", steps=[]
+            space_id=space_id,
+            name="Tre steg",
+            description="",
         )
         assistants = [
             (await service.create_flow_assistant(flow_id=flow.id, name=f"s{order}"))[0]

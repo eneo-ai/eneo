@@ -2863,14 +2863,14 @@ async def test_debug_evidence_redaction_leaves_no_model_listed_as_used(
     await async_session.flush()
 
     with_receipts = await calls.list_models_used_by_step(
-        run_id=run_id, tenant_id=test_tenant.id
+        run_id=run_id, tenant_id=test_tenant.id, limit=100
     )
     counts = await flow_retention_service.redact_old_flow_debug_evidence(
         now=datetime.now(timezone.utc)
     )
     await _flush_and_clear_identity_map(async_session)
     after_redaction = await calls.list_models_used_by_step(
-        run_id=run_id, tenant_id=test_tenant.id
+        run_id=run_id, tenant_id=test_tenant.id, limit=100
     )
 
     assert with_receipts == {step_id: ("whisper-1",)}

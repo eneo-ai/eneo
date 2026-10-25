@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 
 import pytest
 from pydantic import BaseModel, TypeAdapter
 
+import eneo.flow_packages.api as flow_package_api
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
     FlowPackageExportRequest,
@@ -14,7 +17,10 @@ from eneo.flow_packages.api.flow_package_models import (
     FlowPackageImportRequest,
     FlowPackageValidationPublic,
 )
-from eneo.flow_packages.domain.flow_package_errors import FlowPackageExportErrorCode
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageExportErrorCode,
+)
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.server.main import get_application
@@ -605,3 +611,21 @@ def _examples(responses: dict, status_code: str) -> dict:
     )
     assert isinstance(examples, dict)
     return examples
+
+
+def test_flow_package_api_string_codes_are_enum_members() -> None:
+    """A literal `code="..."` in the package API must name a package error code."""
+    known = {c.value for c in FlowPackageErrorCode} | {
+        c.value for c in FlowPackageExportErrorCode
+    }
+    literals = {
+        (path.name, node.value.value)
+        for path in Path(cast(list[str], flow_package_api.__path__)[0]).glob("*.py")
+        for call in ast.walk(ast.parse(path.read_text()))
+        if isinstance(call, ast.Call)
+        for node in call.keywords
+        if node.arg == "code"
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+    assert {value for _, value in literals} <= known, sorted(literals)

@@ -174,6 +174,49 @@ def _principal_fk_index(table_name: str, column: str) -> Index:
     )
 
 
+def _flow_run_listing_index(name: str, *starter: str, **options: Any) -> Index:
+    """A flow's runs (or one starter's, for runs listed as their own) in the
+    started_at order of ``run_list_order``, so a run list page is read in
+    index order without a sort.
+
+    Measured on 305k runs, 200k in one flow (revision 202610241000): the
+    started_at page went from 27k buffers to 26, and a starter's own page
+    from up to 25k buffers to 7-28. ``ix_flow_runs_flow_id_status`` serves
+    lookups by flow_id alone.
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        *starter,
+        sa.text("coalesce(started_at, created_at) DESC"),
+        sa.text("created_at DESC"),
+        sa.text("id DESC"),
+        **options,
+    )
+
+
+def _flow_run_status_count_index(name: str, starter: str) -> Index:
+    """One starter's runs of a flow by status, so the run list's status count
+    for a member or a service key reads the index alone.
+
+    Measured on 1M runs, 600k in one flow (revision 202610241100): a heavy
+    member's unsearched count went from 60.6 ms (sequential scan) to 7.9 ms
+    (index-only scan), other members' and a service key's from 6-10 to
+    0.5-0.9 ms. The admin count does not use these indexes. Searched counts
+    now start from them too: most are about even, but the heavy member's went
+    from 265 to 306 ms (+16 %, 77k -> 86k buffers).
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        starter,
+        "status",
+        postgresql_where=sa.text(f"{starter} IS NOT NULL"),
+    )
+
+
 def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
     return ",".join(f"('{left}','{right}')" for left, right in values)
 
@@ -875,7 +918,6 @@ class FlowRuns(BasePublic):
     flow_id: Mapped[UUID] = mapped_column(
         ForeignKey(Flows.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     flow_version: Mapped[int] = mapped_column(nullable=False)
     principal_type: Mapped[str] = mapped_column(
@@ -1040,15 +1082,6 @@ class FlowRuns(BasePublic):
         Index("ix_flow_runs_job_id", "job_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
-        # One flow's runs newest first (its run list, the suggestions'
-        # measured runs): a read of N runs costs N rows, not the flow's history.
-        Index(
-            "ix_flow_runs_tenant_flow_created_at",
-            "tenant_id",
-            "flow_id",
-            "created_at",
-            "id",
-        ),
         Index(
             "ix_flow_runs_queued_dispatch_due",
             "tenant_id",
@@ -1121,6 +1154,25 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text(
                 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
             ),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_listing", postgresql_include=("status",)
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_user_listing",
+            "principal_user_id",
+            postgresql_where=sa.text("principal_user_id IS NOT NULL"),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_service_listing",
+            "principal_service_id",
+            postgresql_where=sa.text("principal_service_id IS NOT NULL"),
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_user_status", "principal_user_id"
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_service_status", "principal_service_id"
         ),
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),
@@ -2245,6 +2297,11 @@ class FlowRunAuditOutbox(BasePublic):
             ")",
             name="ck_flow_run_audit_outbox_delivery_timestamps",
         ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_audit_outbox_pending_next_delivery",
+        ),
         Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
         Index("ix_flow_run_audit_outbox_action", "action"),
         Index(
@@ -2383,6 +2440,11 @@ class FlowRunWebhookDeliveries(BasePublic):
             "AND dead_lettered_at IS NOT NULL)"
             ")",
             name="ck_flow_run_webhook_deliveries_delivery_timestamps",
+        ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_webhook_deliveries_pending_next_delivery",
         ),
         CheckConstraint(
             "("

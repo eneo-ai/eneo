@@ -55,6 +55,7 @@ afterEach(() => {
   prompts.byAssistant = {};
   prompts.suggestions = [];
   prompts.measured = { runs: null, items: [] };
+  vi.useRealTimers();
 });
 
 /** A `duplicate_read` about `stepId` (its first step): step 1 as its input and in its prompt. */
@@ -111,7 +112,8 @@ const steps = [
 function renderList(
   canEdit = true,
   speakerOffer: SpeakerStepOffer | null = null,
-  suggestionActions: { suggestionFix?: SuggestionFix; onAskChat?: (text: string) => void } = {}
+  suggestionActions: { suggestionFix?: SuggestionFix; onAskChat?: (text: string) => void } = {},
+  mayEdit = canEdit
 ) {
   const actions = {
     onOpen: vi.fn(),
@@ -127,6 +129,7 @@ function renderList(
         draftRevision={draftRevision}
         steps={steps}
         canEdit={canEdit}
+        mayEdit={mayEdit}
         headingRef={createRef()}
         speakerOffer={speakerOffer}
         {...suggestionActions}
@@ -136,6 +139,11 @@ function renderList(
   );
   const view = renderInApp(ui(4));
   return { ...view, actions, ui };
+}
+
+/** The step prompt reads the list made (every read but the suggestions'). */
+function promptReads(): number {
+  return api.GET.mock.calls.filter(([path]) => path !== "/api/v1/flows/{id}/suggestions/").length;
 }
 
 /** The suggestion reads the list made, by the runs they measured (0 for none). */
@@ -172,6 +180,7 @@ function renderMeasured(revision = 4) {
           draftRevision={draftRevision}
           steps={steps}
           canEdit
+          mayEdit
           headingRef={createRef()}
           measure={{ runs, onMeasure: () => setRuns(10), onPlain: () => setRuns(0) }}
           onOpen={vi.fn()}
@@ -237,6 +246,7 @@ function renderDismissable(fix?: SuggestionFix) {
           draftRevision={4}
           steps={steps}
           canEdit
+          mayEdit
           headingRef={createRef()}
           suggestionFix={fix}
           dismissal={dismissal}
@@ -813,5 +823,31 @@ describe("FlowStepList", () => {
     expect(screen.queryByRole("button", { name: "Lägg till steg" })).toBeNull();
     // Suggestions are for editors: they are not asked for.
     expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything());
+  });
+
+  it("reads each AI step's prompt once for an editor, not again on a refocus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderList();
+    // Steps 1 and 3 use a model; step 2 renders its input as it is.
+    await waitFor(() => expect(promptReads()).toBe(2));
+
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(promptReads()).toBe(2);
+  });
+
+  it("reads no prompts for someone who may not edit the flow, and reads them for a published one", async () => {
+    renderList(false);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(promptReads()).toBe(0);
+    cleanup();
+
+    renderList(false, null, {}, true);
+    await waitFor(() => expect(promptReads()).toBe(2));
   });
 });

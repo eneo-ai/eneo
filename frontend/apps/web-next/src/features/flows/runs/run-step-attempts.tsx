@@ -19,16 +19,22 @@ export function StepAttempts({
   flowId,
   runId,
   order,
-  title
+  title,
+  runSettled
 }: {
   flowId: string;
   runId: string;
   order: number;
   title: string;
+  /** The run has ended (`isTerminal`). */
+  runSettled: boolean;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const evidence = useQuery({ ...runEvidenceQueryOptions(flowId, runId), enabled: open });
+  const evidence = useQuery({
+    ...runEvidenceQueryOptions(flowId, runId, runSettled),
+    enabled: open
+  });
   const attempts = (evidence.data?.step_attempts ?? []).filter(
     (attempt) => attempt.step_order === order
   );

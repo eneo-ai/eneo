@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -8,14 +9,14 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizer,
 )
 from eneo.flows.domain.flow import (
-    FlowPersistedJsonObject,
     FlowRunStatus,
-    FlowStepResult,
+    FlowStepResultAnnotation,
     FlowStepResultStatus,
 )
 from eneo.flows.enums import ACTIVE_FLOW_STEP_RESULT_STATUSES, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowPrincipal
 
 
@@ -25,7 +26,6 @@ class RunOutcome:
     flow_status: str | None = None
     error_code: FlowApiErrorCode | None = None
     error_message: str | None = None
-    output_payload_json: FlowPersistedJsonObject | None = None
     reason: str | None = None
 
 
@@ -35,8 +35,10 @@ class RunFinalizationResult:
     terminalization: FlowRunTerminalizationResult | None
 
 
-def determine_run_outcome(*, results: list[FlowStepResult]) -> RunOutcome:
-    if any(item.status == FlowStepResultStatus.FAILED for item in results):
+def determine_run_outcome(
+    *, statuses: Sequence[FlowStepResultAnnotation]
+) -> RunOutcome:
+    if any(item.status == FlowStepResultStatus.FAILED for item in statuses):
         return RunOutcome(
             result_status="failed",
             flow_status="failed",
@@ -44,13 +46,13 @@ def determine_run_outcome(*, results: list[FlowStepResult]) -> RunOutcome:
             error_message="One or more flow steps failed.",
         )
 
-    if any(item.status in ACTIVE_FLOW_STEP_RESULT_STATUSES for item in results):
+    if any(item.status in ACTIVE_FLOW_STEP_RESULT_STATUSES for item in statuses):
         return RunOutcome(
             result_status="skipped",
             reason="run_in_progress",
         )
 
-    if any(item.status == FlowStepResultStatus.CANCELLED for item in results):
+    if any(item.status == FlowStepResultStatus.CANCELLED for item in statuses):
         return RunOutcome(
             result_status="cancelled",
             flow_status="cancelled",
@@ -58,34 +60,27 @@ def determine_run_outcome(*, results: list[FlowStepResult]) -> RunOutcome:
             error_message="One or more steps were cancelled.",
         )
 
-    last_completed = next(
-        (
-            item
-            for item in sorted(
-                results, key=lambda result: result.step_order, reverse=True
-            )
-            if item.status == FlowStepResultStatus.COMPLETED
-        ),
-        None,
-    )
-    return RunOutcome(
-        result_status="completed",
-        flow_status="completed",
-        output_payload_json=last_completed.output_payload_json
-        if last_completed
-        else None,
-    )
+    return RunOutcome(result_status="completed", flow_status="completed")
 
 
 async def finalize_run_from_current_results(
     *,
     run_id: UUID,
     tenant_id: UUID,
-    results: list[FlowStepResult],
+    flow_run_repo: FlowRunRepository,
     terminalizer: FlowRunTerminalizer,
     principal: FlowPrincipal | None = None,
 ) -> RunFinalizationResult:
-    outcome = determine_run_outcome(results=results)
+    """Decide the run's outcome from its step statuses and terminalize it.
+
+    Only a completed run reads a step's content: the output of its last
+    completed step, which becomes the run's output.
+    """
+    outcome = determine_run_outcome(
+        statuses=await flow_run_repo.list_step_result_annotations(
+            run_id=run_id, tenant_id=tenant_id
+        )
+    )
     if outcome.result_status == "skipped":
         return RunFinalizationResult(
             payload={
@@ -118,13 +113,20 @@ async def finalize_run_from_current_results(
         if target_status == FlowRunStatus.COMPLETED
         else failure_source
     )
+    output_payload_json = (
+        await flow_run_repo.read_last_completed_output_payload(
+            run_id=run_id, tenant_id=tenant_id
+        )
+        if target_status == FlowRunStatus.COMPLETED
+        else None
+    )
     terminalization = await terminalizer.terminalize_run(
         run_id=run_id,
         tenant_id=tenant_id,
         target_status=target_status,
         source=source,
         error=run_error,
-        output_payload_json=outcome.output_payload_json,
+        output_payload_json=output_payload_json,
         principal=principal,
     )
     return RunFinalizationResult(

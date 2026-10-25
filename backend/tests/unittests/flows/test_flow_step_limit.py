@@ -105,35 +105,6 @@ def _saved_flow(user, steps: list[FlowStep]) -> Flow:
 
 
 @pytest.mark.asyncio
-async def test_create_refuses_one_step_too_many_and_writes_nothing(user):
-    flow_repo = AsyncMock()
-    service = _service(user, flow_repo)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Big",
-            steps=_chain(MAX_FLOW_AUTHORING_STEPS + 1),
-        )
-
-    assert exc_info.value.code == LIMIT_CODE
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_accepts_the_largest_flow(user):
-    flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(user, flow_repo)
-
-    await service.create_flow(
-        space_id=uuid4(), name="Big", steps=_chain(MAX_FLOW_AUTHORING_STEPS)
-    )
-
-    flow_repo.create.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_update_refuses_one_step_too_many_and_writes_nothing(user):
     flow_repo = AsyncMock()
     stored = _chain(2)

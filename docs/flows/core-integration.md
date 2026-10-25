@@ -204,9 +204,10 @@ save accepts the change and `refusals` are its errors (`code`, `issue_code`,
 the step). `tests/unit/flows/application/test_flow_step_kinds.py` sends every
 answer through `apply_editor_update` and checks that the save agrees. Not
 judged: the new step's name, the URL or tool the author enters, and the checks
-against the space (assistants, classification, transcription service). The
-work grows with the square of the step count; `position` and `step_id` narrow
-the answer to one place.
+against the space (assistants, classification, transcription service). A read
+names its places, `position`, `step_id` or both, and one that names neither is
+refused with 400: each place judges the whole draft once per kind, so every
+place at once would grow with the square of the step count in one request.
 
 The core is the judge: a speaker mapping may follow any step, and a step can
 be added before a first step that takes uploads beside a text input (the core

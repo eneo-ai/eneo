@@ -20,6 +20,7 @@ import eneo.database.tables  # noqa: F401
 from alembic import command
 from alembic.config import Config
 from eneo.database.tables.flow_tables import FlowRetentionHolds
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -56,14 +57,13 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     conn.autocommit = True
-    command.upgrade(cfg, REVISION)
-    engine = sa.create_engine(test_settings.sync_database_url)
-    try:
-        yield conn, cfg, engine
-    finally:
-        command.upgrade(cfg, "head")
-        engine.dispose()
-        conn.close()
+    with at_revision(cfg, REVISION):
+        engine = sa.create_engine(test_settings.sync_database_url)
+        try:
+            yield conn, cfg, engine
+        finally:
+            engine.dispose()
+            conn.close()
 
 
 def _ddl_text(ddl: str) -> str:

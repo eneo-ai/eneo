@@ -13,7 +13,7 @@ lock_timeout bounds those waits. The downgrade drops the table and its
 dismissals with it.
 
 Revision ID: 202610251100
-Revises: 202610251000
+Revises: 202610250900
 Create Date: 2026-10-25 11:00:00.000000
 """
 
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202610251100"
-down_revision: str | None = "202610251000"
+down_revision: str | None = "202610250900"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

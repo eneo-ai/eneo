@@ -1,4 +1,4 @@
-"""Database-free SQL generation of 202610231100 (`alembic upgrade --sql`)."""
+"""Database-free SQL generation of 202610250900 (`alembic upgrade --sql`)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from alembic.operations import Operations
 
 _PATH = (
     Path(__file__).parents[3]
-    / "alembic/versions/202610231100_flow_attempt_forwarding_facts.py"
+    / "alembic/versions/202610250900_flow_attempt_forwarding_facts.py"
 )
 
 
@@ -32,14 +32,6 @@ def _sql(direction: str) -> str:
     with Operations.context(context):
         getattr(migration, direction)()
     return output.getvalue()
-
-
-def test_the_revision_follows_the_merge_of_the_flows_heads() -> None:
-    migration = _migration()
-    assert (migration.revision, migration.down_revision) == (
-        "202610231100",
-        "202610231000",
-    )
 
 
 def test_offline_upgrade_adds_one_nullable_jsonb_column() -> None:

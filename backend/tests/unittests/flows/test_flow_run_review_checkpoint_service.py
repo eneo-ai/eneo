@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -42,6 +44,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointResumeResult,
 )
+from eneo.flows.runtime import tool_argument_check
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -713,6 +716,68 @@ async def test_json_edit_rejects_value_violating_the_output_contract(user):
     assert exc_info.value.context is not None
     assert exc_info.value.context["payload_field"] == "structured"
     checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+async def test_an_edit_whose_contract_backtracks_is_refused_without_holding_the_loop(
+    user, monkeypatch
+):
+    # Python's re backtracks on this for seconds; each character more doubles
+    # it. The flow author owns the contract, so the reviewer's value must be
+    # checked where the check can be killed, not on the API event loop.
+    monkeypatch.setattr(tool_argument_check, "CONTRACT_CHECK_TIMEOUT_SECONDS", 1.0)
+    checkpoint_repo, access_policy, terminalizer = AsyncMock(), AsyncMock(), AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(
+        user,
+        run,
+        output_contract_json={
+            "type": "object",
+            "properties": {"code": {"type": "string", "pattern": "^(a+)+$"}},
+        },
+    )
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user,
+        checkpoint_repo=checkpoint_repo,
+        access_policy=access_policy,
+        terminalizer=terminalizer,
+    )
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            beats.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    beating = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    try:
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await _edit(
+                service=service,
+                run=run,
+                checkpoint=checkpoint,
+                edited_value={"code": "a" * 27 + "!"},
+            )
+    finally:
+        ended = time.monotonic()
+        beating.cancel()
+    marks = [started, *(beat for beat in beats if beat >= started), ended]
+
+    # The loop kept beating, and the refusal came within a bound.
+    assert max(b - a for a, b in zip(marks, marks[1:])) < 0.5
+    assert ended - started < 10.0
+    assert exc_info.value.code == "typed_io_contract_not_checked"
+    assert exc_info.value.context == {
+        "checkpoint_id": str(checkpoint.id),
+        "step_id": str(checkpoint.step_id),
+        "step_order": checkpoint.step_order,
+        "payload_field": "structured",
+    }
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio

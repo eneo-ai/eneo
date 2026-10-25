@@ -5,6 +5,7 @@ through the real transport; only the socket layer and the resolver are scripted.
 from __future__ import annotations
 
 import logging
+import os
 import ssl
 import time
 
@@ -15,12 +16,16 @@ import pytest
 
 from eneo.flows.runtime.egress import http as egress_http
 from eneo.flows.runtime.egress.http import (
-    MAX_CONNECT_ATTEMPTS,
     VettedAsyncTransport,
+    VettedClientFactory,
     VettedNetworkBackend,
     build_http_client,
 )
-from eneo.flows.runtime.egress.policy import DestinationRefused, FlowDestinationPolicy
+from eneo.flows.runtime.egress.policy import (
+    MAX_CONNECT_ATTEMPTS,
+    DestinationRefused,
+    FlowDestinationPolicy,
+)
 from tests.unittests.flows.egress.egress_test_support import (
     FixedResolver,
     SpyConnector,
@@ -184,6 +189,110 @@ async def test_ssl_cert_file_stays_honoured_for_an_enterprise_ca(tmp_path, monke
         monkeypatch.setenv("SSL_CERT_FILE", str(pem))
         async with _client(FixedResolver([PUBLIC]), connector) as client:
             assert (await client.get(url)).status_code == 200
+
+
+@pytest.mark.parametrize("replacement", ["rewritten in place", "renamed over"])
+async def test_a_replaced_ca_file_is_honoured_by_the_next_client(
+    tmp_path, monkeypatch, replacement
+):
+    (tmp_path / "served").mkdir()
+    (tmp_path / "retired").mkdir()
+    served = self_signed_certificate(tmp_path / "served", "corp.example.test")
+    retired = self_signed_certificate(tmp_path / "retired", "corp.example.test")
+    # Of one size, as a renewed CA of the same key type often is, so the size
+    # does not tell the two bundles apart.
+    width = max(len(served.read_bytes()), len(retired.read_bytes()))
+    served_bundle = served.read_bytes().ljust(width, b"\n")
+    bundle = tmp_path / "ca.pem"
+    bundle.write_bytes(retired.read_bytes().ljust(width, b"\n"))
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+    async with recording_server(ssl_context=server_ssl_context(served)) as origin:
+        connector = SpyConnector(forward_to=origin.port)
+        url = "https://corp.example.test:8443/"
+
+        async with _client(FixedResolver([PUBLIC]), connector) as client:
+            with pytest.raises(httpx.ConnectError):
+                await client.get(url)
+
+        if replacement == "rewritten in place":
+            inode = bundle.stat().st_ino
+            bundle.write_bytes(served_bundle)
+            # A rotation comes well after the bundle was written; a coarse
+            # filesystem clock could otherwise stamp both writes alike.
+            later = bundle.stat().st_mtime_ns + 1_000_000_000
+            os.utime(bundle, ns=(later, later))
+            assert bundle.stat().st_ino == inode
+        else:
+            staged = tmp_path / "ca.pem.new"
+            staged.write_bytes(served_bundle)
+            staged.replace(bundle)
+
+        async with _client(FixedResolver([PUBLIC]), connector) as client:
+            assert (await client.get(url)).status_code == 200
+
+
+def _pool_ssl_context(client: httpx.AsyncClient) -> ssl.SSLContext | None:
+    transport = client._transport  # pyright: ignore[reportPrivateUsage]
+    pool = transport._pool  # pyright: ignore[reportAttributeAccessIssue]
+    return pool._ssl_context  # pyright: ignore[reportPrivateUsage]
+
+
+def test_clients_share_one_default_context_until_the_trust_configuration_changes(
+    tmp_path, monkeypatch
+):
+    built: list[ssl.SSLContext] = []
+    create_ssl_context = httpx.create_ssl_context
+
+    def counting_create_ssl_context(*args, **kwargs) -> ssl.SSLContext:
+        built.append(create_ssl_context(*args, **kwargs))
+        return built[-1]
+
+    monkeypatch.setattr(httpx, "create_ssl_context", counting_create_ssl_context)
+    # A bundle path no earlier test used, so the first client below builds one.
+    monkeypatch.setenv(
+        "SSL_CERT_FILE", str(self_signed_certificate(tmp_path, "first.example.test"))
+    )
+    mcp_clients = VettedClientFactory(policy=STRICT, resolver=FixedResolver([PUBLIC]))
+
+    clients = [build_http_client(policy=STRICT, timeout_seconds=5) for _ in range(3)]
+    clients += [mcp_clients(headers={}, timeout=httpx.Timeout(5)) for _ in range(3)]
+    assert len(built) == 1
+    assert all(_pool_ssl_context(client) is built[0] for client in clients)
+
+    explicit = ssl.create_default_context()
+    given = build_http_client(policy=STRICT, timeout_seconds=5, ssl_context=explicit)
+    assert _pool_ssl_context(given) is explicit
+    after_explicit = build_http_client(policy=STRICT, timeout_seconds=5)
+    assert len(built) == 1
+    assert _pool_ssl_context(after_explicit) is built[0]
+
+    monkeypatch.setenv(
+        "SSL_CERT_FILE", str(self_signed_certificate(tmp_path, "second.example.test"))
+    )
+    rotated = build_http_client(policy=STRICT, timeout_seconds=5)
+    assert len(built) == 2
+    assert _pool_ssl_context(rotated) is built[1]
+
+
+@pytest.mark.parametrize("directories", ["one", "a search list"])
+def test_a_ca_directory_context_is_built_for_every_client(
+    tmp_path, monkeypatch, directories
+):
+    # OpenSSL reads a capath at each handshake, so a fresh context sees every
+    # change to what the directories hold, as each client did before.
+    anchors = tmp_path / "anchors"
+    anchors.mkdir()
+    self_signed_certificate(anchors, "held.example.test")
+    value = str(anchors)
+    if directories == "a search list":
+        (tmp_path / "more").mkdir()
+        value = os.pathsep.join([str(tmp_path / "more"), value])
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setenv("SSL_CERT_DIR", value)
+
+    first = build_http_client(policy=STRICT, timeout_seconds=5)
+    second = build_http_client(policy=STRICT, timeout_seconds=5)
+    assert _pool_ssl_context(second) is not _pool_ssl_context(first)
 
 
 async def test_the_first_reachable_vetted_address_is_used():

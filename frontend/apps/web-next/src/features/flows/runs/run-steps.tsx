@@ -3,6 +3,7 @@
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "next-intl";
+import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
@@ -20,7 +21,7 @@ import {
   type RunStepView
 } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
-import { NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
+import { isTerminal, NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
 import { StepAttempts } from "./run-step-attempts";
 import { StepPromptDetails } from "./run-step-details";
 import {
@@ -100,13 +101,40 @@ function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; 
   );
 }
 
+/**
+ * What a step was sent, with a button that copies it: closed until asked
+ * for, and rendered only while open, since a large input weighs on the page.
+ */
+function StepInput({ payload }: { payload: NonNullable<RunStep["input_payload_json"]> }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible
+      isOpen={open}
+      onOpenChange={setOpen}
+      chevronPosition="start"
+      trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
+    >
+      {open ? (
+        <div className="flex items-start gap-2 pt-2">
+          <div className="min-w-0 flex-1">
+            <JsonValue value={payload} />
+          </div>
+          <CopyButton label={t("flow_run_more_copy_input")} value={payload} />
+        </div>
+      ) : null}
+    </Collapsible>
+  );
+}
+
 function StepCard({
   flowId,
   runId,
   step,
   isNext,
   notRun,
-  canReadEvidence
+  canReadEvidence,
+  runSettled
 }: {
   flowId: string;
   runId: string;
@@ -115,6 +143,8 @@ function StepCard({
   /** The run ended without the step starting. */
   notRun: boolean;
   canReadEvidence: boolean;
+  /** The run has ended (`isTerminal`). */
+  runSettled: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -224,22 +254,17 @@ function StepCard({
       ) : null}
       {result ? <StepTranscriptionFacts result={result} /> : null}
       {result?.input_payload_json && Object.keys(result.input_payload_json).length > 0 ? (
-        <Collapsible
-          defaultIsOpen={false}
-          chevronPosition="start"
-          trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
-        >
-          <div className="flex items-start gap-2 pt-2">
-            <div className="min-w-0 flex-1">
-              <JsonValue value={result.input_payload_json} />
-            </div>
-            <CopyButton label={t("flow_run_more_copy_input")} value={result.input_payload_json} />
-          </div>
-        </Collapsible>
+        <StepInput payload={result.input_payload_json} />
       ) : null}
       {result ? <StepPromptDetails result={result} /> : null}
       {canReadEvidence && result?.started_at ? (
-        <StepAttempts flowId={flowId} runId={runId} order={step.order} title={title} />
+        <StepAttempts
+          flowId={flowId}
+          runId={runId}
+          order={step.order}
+          title={title}
+          runSettled={runSettled}
+        />
       ) : null}
     </article>
   );
@@ -277,6 +302,7 @@ export function RunSteps({
     return <p className="text-ax-text-secondary text-sm">{t("flow_runs_steps_none")}</p>;
   }
   const next = nextStepOrder(steps);
+  const runSettled = runStatus !== null && isTerminal(runStatus);
   return (
     <ol className="m-0 flex flex-col gap-3 p-0">
       {steps.map((step) => (
@@ -288,6 +314,7 @@ export function RunSteps({
             isNext={step.order === next}
             notRun={stepNeverRan(step, runStatus)}
             canReadEvidence={canReadEvidence}
+            runSettled={runSettled}
           />
         </li>
       ))}

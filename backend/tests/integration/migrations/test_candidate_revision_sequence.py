@@ -15,6 +15,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -58,11 +59,11 @@ def slot_db(test_settings, monkeypatch):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, SLOT_REVISION)
-    try:
-        yield connection, config
-    finally:
-        connection.close()
+    with at_revision(config, SLOT_REVISION):
+        try:
+            yield connection, config
+        finally:
+            connection.close()
 
 
 def _sequence_exists(connection) -> bool:

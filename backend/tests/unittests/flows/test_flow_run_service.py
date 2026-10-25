@@ -31,6 +31,7 @@ from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunStatus,
+    FlowRunStatusSnapshot,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStep,
@@ -67,7 +68,11 @@ from eneo.flows.flow_evidence_policy import (
     flow_evidence_metadata_facts,
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
-from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
+from eneo.flows.flow_run_input_envelope import (
+    build_initial_run_input_envelope,
+    read_speaker_labels_choice,
+    speaker_labels_choice,
+)
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     parse_resolved_input_edges,
@@ -162,11 +167,12 @@ def _flow_repo() -> AsyncMock:
     return AsyncMock()
 
 
-def _seed_flow_repo(flow_repo, flow) -> None:
+def _seed_flow_repo(flow_repo, flow, *, classification_level: int = 0) -> None:
     """Answer both flow reads the access policy makes with the real flow.
 
     The disclosure decision reads a narrow typed evidence-access context; a
-    double that returned a mock there would withhold every passage.
+    double that returned a mock there would withhold every passage. The
+    context carries the space's classification, as the policy reads it.
     """
     flow_repo.get.return_value = flow
     flow_repo.lock_publication_pointer.return_value = flow.published_version
@@ -178,7 +184,7 @@ def _seed_flow_repo(flow_repo, flow) -> None:
         retired=False,
         sensitive=evidence_facts.sensitive,
         evidence_export_allowed=evidence_facts.export_allowed,
-        classification_level=0,
+        classification_level=classification_level,
     )
 
 
@@ -2347,12 +2353,11 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.list_statuses.return_value = []
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
@@ -2391,11 +2396,10 @@ async def test_list_runs_space_admin_sees_every_run_of_the_flow_unless_mine(user
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.list_statuses.return_value = []
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -2675,7 +2679,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
     flow = _exportable_flow(user)
@@ -2691,10 +2695,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     )
     version = _version(user=user, flow=flow, version=1)
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
@@ -2797,7 +2798,7 @@ async def test_export_evidence_json_refuses_a_space_admin_while_export_is_off(
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
     flow = _flow(user=user)
@@ -2807,7 +2808,6 @@ async def test_export_evidence_json_refuses_a_space_admin_while_export_is_off(
     )
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -2989,14 +2989,13 @@ async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
@@ -3107,14 +3106,13 @@ async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -3144,7 +3142,7 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3152,7 +3150,6 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -3174,22 +3171,57 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     assert result == []
 
 
+def _status_snapshot(run: FlowRun) -> FlowRunStatusSnapshot:
+    """The content-free projection the repository answers a status read with."""
+    return FlowRunStatusSnapshot.model_validate(
+        run.model_dump(include=set(FlowRunStatusSnapshot.model_fields))
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "choice"),
+    [
+        (True, True),
+        (False, False),
+        (None, None),
+        ("true", None),
+        ("false", None),
+        (1, None),
+        (0, None),
+        ({}, None),
+    ],
+)
+def test_only_a_boolean_is_a_speaker_labels_choice(value, choice) -> None:
+    # `True == 1` and `False == 0`: identity, not equality, pins the type.
+    assert speaker_labels_choice(value) is choice
+    assert read_speaker_labels_choice({"speaker_labels": value}) is choice
+
+
+def test_a_payload_without_the_key_records_no_speaker_labels_choice() -> None:
+    assert read_speaker_labels_choice(None) is None
+    assert read_speaker_labels_choice({"input": "value"}) is None
+
+
 @pytest.mark.asyncio
-async def test_get_run_versioned_view_loads_run_definition_and_results(user):
+@pytest.mark.parametrize("speaker_labels", [True, False, None])
+async def test_get_run_versioned_view_loads_run_definition_and_results(
+    user, speaker_labels: bool | None
+):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"input_payload_json": {"input": "value", "speaker_labels": False}}
-    )
+    run = _run(user=user, flow_id=flow.id)
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
     step_result = FlowStepResultAnnotation.model_validate(
         _step_result_record(run, step_order=1)
     )
-    flow_run_repo.get.return_value = run
+    flow_run_repo.get_status_with_speaker_labels.return_value = (
+        _status_snapshot(run),
+        speaker_labels,
+    )
     flow_run_repo.list_step_result_annotations.return_value = [step_result]
     flow_version_repo.get.return_value = version
     service = _flow_run_service(
@@ -3210,8 +3242,11 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
     assert result.published_definition.flow_id == run.flow_id
     assert result.published_definition.schema_version == FLOW_DEFINITION_SCHEMA_VERSION
     assert result.step_results == (step_result,)
-    assert result.speaker_labels is False
-    flow_run_repo.get.assert_awaited_once_with(
+    assert result.speaker_labels is speaker_labels
+    # The graph is polled: the run's content, its input payload above all,
+    # is never loaded for it.
+    flow_run_repo.get.assert_not_awaited()
+    flow_run_repo.get_status_with_speaker_labels.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
         flow_id=run.flow_id,
@@ -3237,7 +3272,10 @@ async def test_get_run_versioned_view_rejects_checksum_drift_before_results(user
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
-    flow_run_repo.get.return_value = run
+    flow_run_repo.get_status_with_speaker_labels.return_value = (
+        _status_snapshot(run),
+        None,
+    )
     flow_version_repo.get.return_value = version.model_copy(
         update={"definition_checksum": "stored-checksum-does-not-match"}
     )
@@ -3281,7 +3319,10 @@ async def test_get_run_versioned_view_rejects_matching_checksum_invalid_runtime_
             for index, step in enumerate(flow.steps)
         ],
     )
-    flow_run_repo.get.return_value = run
+    flow_run_repo.get_status_with_speaker_labels.return_value = (
+        _status_snapshot(run),
+        None,
+    )
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=run.flow_version,
@@ -3316,7 +3357,10 @@ async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user
     _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
-    flow_run_repo.get.return_value = run
+    flow_run_repo.get_status_with_speaker_labels.return_value = (
+        _status_snapshot(run),
+        None,
+    )
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=run.flow_version,
@@ -3350,6 +3394,67 @@ async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user
 
 
 @pytest.mark.asyncio
+async def test_get_run_versioned_view_refuses_another_users_run_before_the_definition(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    assert flow.id is not None
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"principal_user_id": uuid4()}
+    )
+    flow_run_repo.get_status_with_speaker_labels.return_value = (
+        _status_snapshot(run),
+        True,
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_owner"}
+    flow_version_repo.get.assert_not_awaited()
+    flow_run_repo.list_step_result_annotations.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_versioned_view_answers_a_missing_run_not_found(user):
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    flow_run_repo.get_status_with_speaker_labels.side_effect = FlowRunNotFoundError(
+        run_id=run_id, tenant_id=user.tenant_id, flow_id=flow_id
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.get_run_versioned_view(
+            flow_id=flow_id, run_id=run_id, history=True
+        )
+
+    assert str(exc_info.value) == "Flow run not found."
+    flow_version_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
@@ -3357,7 +3462,7 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3367,7 +3472,6 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3401,7 +3505,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3409,10 +3513,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3447,7 +3548,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "owner")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3457,10 +3558,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3503,7 +3601,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "viewer"
     )
     flow = _exportable_flow(trace_user)
@@ -3513,10 +3611,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=trace_user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=trace_user,
         flow_repo=flow_repo,
@@ -3568,6 +3663,36 @@ async def test_create_run_rejects_oversized_input_payload(user):
             input_payload_json={"text": "x" * (8 * 1024 * 1024 + 1)},
         )
     assert exc_info.value.code == "flow_run_input_payload_too_large"
+
+
+@pytest.mark.asyncio
+async def test_create_run_refuses_a_lone_surrogate_before_storing_it(user):
+    # A JSON request can carry an escaped lone surrogate: a Python string that
+    # is not text and cannot be encoded, counted or stored.
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.count_active_runs.return_value = 0
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id, input_payload_json={"text": "a\ud800b"}
+        )
+
+    assert exc_info.value.code == "typed_io_validation_failed"
+    flow_run_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

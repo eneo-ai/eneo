@@ -32,16 +32,27 @@ def ensure_inline_payload_size_allowed(
     flow_id: UUID,
     input_payload_json: FlowPersistedJsonObject | None,
 ) -> None:
+    """Refuse a payload over the inline limit, or one holding a lone surrogate:
+    a JSON request can escape one, and it is a Python string that is not text,
+    so it can be neither counted nor stored. The run's other encodings of the
+    payload (its idempotency fingerprint) come after this check."""
     if input_payload_json is None:
         return
-    payload_size = len(
-        json.dumps(
-            input_payload_json,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    )
+    try:
+        payload_size = len(
+            json.dumps(
+                input_payload_json,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+    except UnicodeEncodeError as exc:
+        raise FlowBadRequestException(
+            "Flow run input payload contains text that is not valid UTF-8.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={"flow_id": str(flow_id)},
+        ) from exc
     max_inline_text_bytes = get_settings().flow_max_inline_text_bytes
     if payload_size <= max_inline_text_bytes:
         return

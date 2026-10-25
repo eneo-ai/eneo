@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files import text as file_text_module
 from eneo.files.file_models import FileType
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -24,6 +25,7 @@ from eneo.flows.domain.runtime import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from eneo.flows.runtime.docx_template_runtime import extract_docx_text
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.template_fill_runtime import (
@@ -1197,7 +1199,40 @@ async def test_execute_template_fill_step_reports_generated_document_save_failur
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_reports_generated_document_read_failure(
+async def test_execute_template_fill_step_reads_the_generated_document_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    state = _state(result=_completed_result(run=run))
+    template_file = SimpleNamespace(
+        id=uuid4(),
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(template_file=template_file)
+    reads: list[bytes] = []
+    read_body_text = file_text_module.extract_docx_body_text
+
+    def counting_read(document_bytes: bytes) -> str:
+        reads.append(document_bytes)
+        return read_body_text(document_bytes)
+
+    monkeypatch.setattr(file_text_module, "extract_docx_body_text", counting_read)
+
+    output = await execute_template_fill_step(
+        step=_step(), run=run, state=state, deps=deps
+    )
+
+    saved = deps.file_service.save_generated_file.await_args.kwargs["payload"]
+    assert reads == [saved]
+    monkeypatch.undo()
+    assert output.full_text == extract_docx_text(saved)
+    assert "Detta är sammanfattningen." in output.full_text
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_a_generated_document_read_failure_at_render(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = _run()
@@ -1212,8 +1247,8 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
         blob=_build_template_bytes(),
     )
     monkeypatch.setattr(
-        template_fill_runtime_module,
-        "extract_docx_text",
+        file_text_module,
+        "extract_docx_body_text",
         lambda blob: (_ for _ in ()).throw(RuntimeError("document parse failed")),
     )
     deps = _runtime_deps(
@@ -1222,13 +1257,14 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
         template_file=template_file,
     )
 
-    with pytest.raises(TypedIOValidationException, match="reading the generated DOCX"):
+    with pytest.raises(TypedIOValidationException, match="rendering the DOCX template"):
         await execute_template_fill_step(
             step=_step(),
             run=run,
             state=state,
             deps=deps,
         )
+    deps.file_service.save_generated_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -121,10 +121,11 @@ upload a replacement DOCX for each missing template. Eneo checks that its conten
 control tags and field types match the package before allowing import. You may
 change layout and other document text while preserving those fields.
 
-An import is refused before any work starts when its request is larger than the
-package limit allows (the package plus its replacement files), or when its Word
-templates together unpack to more than 100 MiB. Each step that fills a template
-counts with its own copy, so a file reused by many steps counts once per step.
+An import is refused before any Word template is opened when its request is
+larger than the package limit allows (the included templates plus its
+replacement files), or when its Word templates together unpack to more than
+100 MiB. Each template slot counts with its own copy of the unpacked size, so a
+file reused by many slots counts once per slot.
 
 Packages with template requirements use `eneo.flow_package.v2` and require an
 Eneo version that supports this format, whether or not the DOCX files are

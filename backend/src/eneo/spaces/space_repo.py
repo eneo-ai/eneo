@@ -151,6 +151,7 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model_repo import (
         TranscriptionModelRepository,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
     from eneo.users.user import UserInDB
     from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
     from eneo.websites.infrastructure.http_auth_encryption import (
@@ -876,10 +877,22 @@ class SpaceRepository:
                 override.mcp_server_tool_id
             ] = override.is_enabled
 
+        # Each assistant is projected over its own servers' rows only, so the
+        # work stays the size of what it returns, not assistants x catalog.
+        tools_by_server: dict[UUID, list[MCPServerToolsTable]] = {}
+        for tool in tools_db:
+            tools_by_server.setdefault(tool.mcp_server_id, []).append(tool)
+
         return {
             projection.assistant_id: self._project_assistant_mcp_server_tools(
                 mcp_servers=deepcopy(list(projection.mcp_servers)),
-                tools_db=tools_db,
+                tools_db=[
+                    tool
+                    for server_id in dict.fromkeys(
+                        server.id for server in projection.mcp_servers
+                    )
+                    for tool in tools_by_server.get(server_id, ())
+                ],
                 tenant_tool_settings=tenant_tool_settings,
                 space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
                 assistant_tool_overrides=assistant_tool_overrides.get(
@@ -916,10 +929,8 @@ class SpaceRepository:
         space_id: UUID,
         *,
         hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
-        with_mcp_tools: bool = True,
     ) -> Sequence[Assistants]:
-        """The space's assistants; without ``with_mcp_tools`` their MCP
-        servers are loaded without tools."""
+        """The space's assistants, their MCP servers with their tools."""
         stmt = (
             sa.select(Assistants)
             .execution_options(populate_existing=True)
@@ -968,27 +979,26 @@ class SpaceRepository:
         for assistant in assistants:
             assistant.prompt = prompt_by_assistant_id.get(assistant.id)  # type: ignore[attr-defined]
 
-        # For each assistant, load MCP servers with tools and apply space+assistant overrides
-        for assistant in assistants:
-            if with_mcp_tools and assistant.mcp_servers:
-                from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
-                    MCPServerMapper,
+        # Each assistant's MCP servers with their tools, switched by the space
+        # and by that assistant, projected for all assistants in one pass.
+        with_mcp_servers = [
+            assistant for assistant in assistants if assistant.mcp_servers
+        ]
+        projected = await self.project_assistants_mcp_servers(
+            [
+                AssistantMCPServerProjection(
+                    space_id=space_id,
+                    assistant_id=assistant.id,
+                    mcp_servers=tuple(
+                        MCPServerMapper.to_entities(assistant.mcp_servers)
+                    ),
                 )
-
-                # Map to domain entities first
-                mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
-
-                # Apply space + assistant level overrides using same logic as space MCP loading
-                mcp_servers = (
-                    await self._load_assistant_mcp_server_tools_with_overrides(
-                        space_id=space_id,
-                        assistant_id=assistant.id,
-                        mcp_servers=mcp_servers,
-                    )
-                )
-
-                # Store the filtered entities back on the assistant for the factory
-                setattr(assistant, "_mcp_server_entities", mcp_servers)
+                for assistant in with_mcp_servers
+            ]
+        )
+        for assistant in with_mcp_servers:
+            # The factory takes these in place of the unfiltered relationship.
+            setattr(assistant, "_mcp_server_entities", projected[assistant.id])
 
         return assistants
 
@@ -1274,23 +1284,28 @@ class SpaceRepository:
         )
         return list(rows.all())
 
+    async def _linked_transcription_services(
+        self, space: Spaces
+    ) -> list["TranscriptionServiceConnection"]:
+        """A personal space links every connection, like every model; any
+        other space only what is granted to it."""
+        connections = TranscriptionServiceConnectionRepository(
+            self.session, self.tenant_id
+        )
+        if space.user_id is not None:
+            return await connections.list()
+        return await connections.list_granted(space.id)
+
     async def _get_from_query(
         self,
         query: sa.Select[tuple[Spaces]],
         *,
         hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
-        with_mcp_catalog: bool = True,
         with_document_counts: bool = False,
     ) -> Space | None:
         """Load the space with its visible assistants and, of the hidden ones,
         only ``hidden_assistant_ids``: building every hidden assistant of a
-        space made each write to one of them cost the whole space.
-
-        Without ``with_mcp_catalog`` no MCP tool is read and no MCP server
-        but those its assistants attach: the space's MCP lists are empty, its
-        assistants' servers carry no tools and no capability availability is
-        computed, so such a space is for ``get_access_facts`` only and never
-        leaves this repository."""
+        space made each write to one of them cost the whole space."""
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1308,16 +1323,7 @@ class SpaceRepository:
         transcription_models = await self.transcription_model_repo.all(
             with_deprecated=True
         )
-        # A personal space may use every connection, like every model; any
-        # other space only what is granted to it.
-        connections = TranscriptionServiceConnectionRepository(
-            self.session, self.tenant_id
-        )
-        transcription_services = (
-            await connections.list()
-            if entry_in_db.user_id is not None
-            else await connections.list_granted(entry_in_db.id)
-        )
+        transcription_services = await self._linked_transcription_services(entry_in_db)
 
         # Get tenant-enabled MCP servers directly
         from sqlalchemy.orm import selectinload as _selectinload
@@ -1347,8 +1353,6 @@ class SpaceRepository:
         )
         mcp_servers_db: Sequence[MCPServersTable] = (
             (await self.session.execute(mcp_servers_query)).scalars().all()
-            if with_mcp_catalog
-            else ()
         )
 
         # Convert to domain entities
@@ -1395,7 +1399,6 @@ class SpaceRepository:
         assistants = await self._get_assistants(
             space_id=entry_in_db.id,
             hidden_assistant_ids=hidden_assistant_ids,
-            with_mcp_tools=with_mcp_catalog,
         )
         unloaded_hidden_assistant_ids = (
             await self._unloaded_hidden_assistant_ids(
@@ -1436,14 +1439,17 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
             unloaded_hidden_assistant_ids=unloaded_hidden_assistant_ids,
         )
-        if not with_mcp_catalog:
-            return space
         from eneo.mcp_servers.application.capability_resolver import (
-            capability_availability,
+            active_capability_providers,
+            availability_from_providers,
         )
 
-        space.available_capabilities = await capability_availability(
-            self.session, self.tenant_id, space.security_classification
+        # One provider load serves the tenant-wide and the user-scoped view.
+        capability_providers = await active_capability_providers(
+            self.session, self.tenant_id
+        )
+        space.available_capabilities = availability_from_providers(
+            capability_providers, space.security_classification
         )
         if space.is_personal():
             space.enabled_capabilities = [
@@ -1461,9 +1467,8 @@ class SpaceRepository:
             # A user-scoped repository narrows availability to the user's
             # groups and permissions; a tenant-only repository (workers) reads
             # the tenant-wide availability.
-            personal_availability = await capability_availability(
-                self.session,
-                self.tenant_id,
+            personal_availability = availability_from_providers(
+                capability_providers,
                 space.security_classification,
                 user_group_ids=(
                     self.user.user_groups_ids if self.user is not None else None
@@ -1589,20 +1594,6 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
-
-    async def get_access_facts(self, id: UUID) -> SpaceAccessFacts:
-        """What ``SpaceActor`` decides on for the space ``one`` loads, read
-        the same way but without the MCP catalog: no MCP tool and no MCP
-        server but those the space's assistants attach. No permission
-        decision reads the catalog, and it grows with every server and tool
-        a tenant registers."""
-        space = await self._get_from_query(
-            self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id)),
-            with_mcp_catalog=False,
-        )
-        if space is None:
-            raise NotFoundException()
-        return SpaceAccessFacts.from_space(space)
 
     async def get_applications_projection(
         self, id: UUID
@@ -1845,6 +1836,20 @@ class SpaceRepository:
 
     async def get_execution_space(self, space_id: UUID) -> Space:
         """Read classification context without hydrating application content."""
+        return await self._classification_context(space_id)
+
+    async def get_transcription_space(self, space_id: UUID) -> Space:
+        """``get_execution_space`` with the transcription services the space
+        links, as a full load links them: the space decides which of them it
+        may use by the rules of a full load, without its applications or any
+        other link being read."""
+        return await self._classification_context(
+            space_id, with_transcription_services=True
+        )
+
+    async def _classification_context(
+        self, space_id: UUID, *, with_transcription_services: bool = False
+    ) -> Space:
         record = await self.session.scalar(
             sa.select(Spaces)
             .where(Spaces.id == space_id, Spaces.tenant_id == self.tenant_id)
@@ -1878,6 +1883,11 @@ class SpaceRepository:
             members={},
             security_classification=SecurityClassification.to_domain(
                 record.security_classification
+            ),
+            transcription_services=(
+                await self._linked_transcription_services(record)
+                if with_transcription_services
+                else None
             ),
         )
 

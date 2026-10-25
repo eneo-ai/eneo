@@ -45,9 +45,13 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.infrastructure.flow_repo import FlowRepository
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.runtime.execution_heartbeat import FlowExecutionHeartbeats
 from eneo.flows.runtime.executor import (
     _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE,
     _PROVIDER_WORK_AMBIGUITY_DISCLOSURE,
@@ -793,13 +797,33 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             await write_session.commit()
             return saved
 
+    heartbeats = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(tasks_module, "execution_heartbeats", lambda: heartbeats)
+
     async def _execute_until_cancelled(**_kwargs) -> dict[str, str]:
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
+        # As the real execution does: claim the run, then own it while it runs;
+        # the timeout ends only a run the task owns.
+        async with sessionmanager.session() as claim_session:
+            enable_autobegin_for_flow_task_session(claim_session)
+            assert await FlowRunRepository(
+                session=claim_session
+            ).mark_running_if_claimable(
+                run_id=context.run_id,
+                tenant_id=context.tenant_id,
+                expected_revision=context.run_revision,
+            )
+            await claim_session.commit()
+        async with heartbeats.track(
+            FlowRunExecutionOwner(
+                context.run_id, context.tenant_id, context.run_revision
+            )
+        ):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
 
     monkeypatch.setattr(
         tasks_module,
@@ -820,6 +844,7 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
         task_id="runtime-timeout-terminalization",
         retry_count=0,
     )
+    await heartbeats.stop()
 
     assert task_result == {"status": "failed", "reason": "timeout"}
     assert started.is_set()

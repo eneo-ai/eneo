@@ -247,6 +247,21 @@ def _service(
     return service
 
 
+async def _write_new_steps(
+    service: FlowService, flow_repo: AsyncMock, steps: list[FlowStep], **update: Any
+) -> Flow:
+    """Write `steps` as new steps of a draft that has none, as a flow gets its
+    first steps: create_flow makes it empty and an update sets them."""
+    draft = _published_flow_for_update(service.user, [])
+    flow_repo.get.return_value = draft
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    return await service.update_flow(
+        flow_id=draft.id,
+        steps=[step.model_copy(update={"id": None}) for step in steps],
+        **update,
+    )
+
+
 @pytest.mark.asyncio
 async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
     service = _service(
@@ -357,7 +372,6 @@ async def test_create_flow_rejects_invalid_form_schema(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={"form_schema": {"fields": "not-a-list"}},
         )
 
@@ -375,7 +389,6 @@ async def test_create_flow_rejects_invalid_care_data_policy(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={
                 "care_data_policy": {
                     "sensitive": True,
@@ -386,35 +399,17 @@ async def test_create_flow_rejects_invalid_care_data_policy(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_duplicate_step_order(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    step_one = _step(step_order=1)
-    step_duplicate = _step(step_order=1)
-
-    with pytest.raises(BadRequestException, match="Duplicate step_order"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step_one, step_duplicate],
-            metadata_json=None,
-        )
-
-
-@pytest.mark.asyncio
-async def test_create_flow_rejects_non_contiguous_step_order(user):
+async def test_update_flow_rejects_non_contiguous_step_order(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     with pytest.raises(BadRequestException, match="contiguous and start at 1"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[_step(step_order=1), _step(step_order=3)],
-            metadata_json=None,
+        await _write_new_steps(
+            service, flow_repo, [_step(step_order=1), _step(step_order=3)]
         )
+
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -476,8 +471,12 @@ async def test_publish_flow_snapshots_the_assistants_it_validated(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     section_step = _step(step_order=2).model_copy(
         update={
-            "input_bindings": {"question": "{{ flow_input.text }}"},
-            "input_config": {"text_processing": {"mode": "process_each_section"}},
+            "input_bindings": {"question": "{{ step_input.text }}"},
+            # Uploads give the sections their one material.
+            "input_config": {
+                "text_processing": {"mode": "process_each_section"},
+                "runtime_input": {"enabled": True},
+            },
             "output_contract": {
                 "type": "object",
                 "properties": {
@@ -1860,7 +1859,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_forward_step_reference(user):
+async def test_update_flow_rejects_forward_step_reference(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -1869,12 +1868,7 @@ async def test_create_flow_rejects_forward_step_reference(user):
     )
 
     with pytest.raises(BadRequestException):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
 
 @pytest.mark.asyncio
@@ -1914,10 +1908,9 @@ async def test_update_flow_allows_explicit_description_clear(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_encrypts_authored_http_secret_values(user):
+async def test_update_flow_encrypts_authored_http_secret_values(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -1949,60 +1942,20 @@ async def test_create_flow_encrypts_authored_http_secret_values(user):
         }
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
+    updated = await _write_new_steps(service, flow_repo, [step])
 
-    input_config = created.steps[0].input_config
-    output_config = created.steps[0].output_config
+    input_config = updated.steps[0].input_config
+    output_config = updated.steps[0].output_config
     assert input_config["auth"]["token"] == "enc:Bearer topsecret"
     assert input_config["custom_headers"][0]["value"] == "visible"
     assert output_config["auth"]["key"] == "enc:abc123"
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_http_secret_when_encryption_inactive(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=version_repo,
-        encryption_service=_InactiveEncryptionService(),
-    )
-    step = _step(step_order=1).model_copy(
-        update={
-            "input_source": "http_get",
-            "input_config": {
-                "url": "https://example.org/input",
-                "auth": {"mode": "bearer_token", "token": "Bearer topsecret"},
-            },
-        }
-    )
-
-    with pytest.raises(BadRequestException) as excinfo:
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
-
-    assert "ENCRYPTION_KEY" in str(excinfo.value)
-    assert "topsecret" not in str(excinfo.value)
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_flow_rejects_secret_disguised_with_encryption_prefix(user):
+async def test_update_flow_rejects_secret_disguised_with_encryption_prefix(user):
     """The prefix is authored syntax, not proof that a value is ciphertext."""
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -2023,56 +1976,17 @@ async def test_create_flow_rejects_secret_disguised_with_encryption_prefix(user)
     )
 
     with pytest.raises(BadRequestException):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
-    flow_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_url_userinfo_behind_a_templated_host(user):
-    """Userinfo is authored literally, so a template must not defer it past save."""
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=version_repo,
-        encryption_service=_FakeEncryptionService(),
-    )
-    step = _step(step_order=1).model_copy(
-        update={
-            "input_source": "http_get",
-            "input_config": {
-                "url": "https://alice:secret@{{host}}/input",
-                "auth": {"mode": "none"},
-            },
-        }
-    )
-
-    with pytest.raises(BadRequestException):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
-
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_flow_persists_secret_free_http_config_when_encryption_inactive(
+async def test_update_flow_persists_secret_free_http_config_when_encryption_inactive(
     user,
 ):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -2092,14 +2006,9 @@ async def test_create_flow_persists_secret_free_http_config_when_encryption_inac
         }
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
+    updated = await _write_new_steps(service, flow_repo, [step])
 
-    assert created.steps[0].input_config["custom_headers"][0]["value"] == "visible"
+    assert updated.steps[0].input_config["custom_headers"][0]["value"] == "visible"
 
 
 def _http_step_with_token(token, *, step_id=None, step_order: int = 1):
@@ -2149,6 +2058,7 @@ async def test_update_flow_rejects_new_http_secret_when_encryption_inactive(user
         )
 
     assert "ENCRYPTION_KEY" in str(excinfo.value)
+    assert "brand-new-secret" not in str(excinfo.value)
     flow_repo.update.assert_not_awaited()
 
 
@@ -2207,32 +2117,9 @@ async def test_origin_change_refuses_save_without_claiming_the_credential_was_de
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_sentinel_that_can_resolve_to_nothing(user):
-    flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=AsyncMock(),
-        encryption_service=_FakeEncryptionService(),
-    )
-
-    with pytest.raises(BadRequestException):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[_http_step_with_token(SECRET_SENTINEL)],
-            metadata_json=None,
-        )
-
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_flow_encrypts_authored_value_wearing_encryption_prefix(user):
+async def test_update_flow_encrypts_authored_value_wearing_encryption_prefix(user):
     """An author-typed prefix must not suppress encryption on the active path."""
     flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -2240,15 +2127,12 @@ async def test_create_flow_encrypts_authored_value_wearing_encryption_prefix(use
         encryption_service=_FakeEncryptionService(),
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[_http_step_with_token("enc:not-really-encrypted")],
-        metadata_json=None,
+    updated = await _write_new_steps(
+        service, flow_repo, [_http_step_with_token("enc:not-really-encrypted")]
     )
 
     assert (
-        created.steps[0].input_config["auth"]["token"] == "enc:enc:not-really-encrypted"
+        updated.steps[0].input_config["auth"]["token"] == "enc:enc:not-really-encrypted"
     )
 
 
@@ -2301,33 +2185,10 @@ def _assert_credential_refusal(exc: BaseException, *, side: str, field: str) -> 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
-async def test_create_flow_refuses_a_template_in_a_credential(user, side, field):
-    flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=AsyncMock(),
-        encryption_service=_FakeEncryptionService(),
-    )
-    step = _http_step_with_credential(
-        side, _credential_config(field, _TEMPLATED_CREDENTIAL)
-    )
-
-    with pytest.raises(BadRequestException) as excinfo:
-        await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
-
-    _assert_credential_refusal(excinfo.value, side=side, field=field)
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
-async def test_create_flow_keeps_a_literal_credential_and_a_templated_open_field(
+async def test_update_flow_keeps_a_literal_credential_and_a_templated_open_field(
     user, side, field
 ):
     flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -2338,10 +2199,10 @@ async def test_create_flow_keeps_a_literal_credential_and_a_templated_open_field
     config["url"] = "https://example.org/{{ flow_input.case }}"
     step = _http_step_with_credential(side, config)
 
-    created = await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
+    updated = await _write_new_steps(service, flow_repo, [step])
 
-    assert getattr(created.steps[0], side)["url"].endswith("{{ flow_input.case }}")
-    flow_repo.create.assert_awaited_once()
+    assert getattr(updated.steps[0], side)["url"].endswith("{{ flow_input.case }}")
+    flow_repo.update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2524,31 +2385,6 @@ def _assert_typed_http_config_refusal(error: BaseException, *, side: str) -> Non
     "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
 )
 @pytest.mark.parametrize("side", ["input_config", "output_config"])
-async def test_create_flow_reports_the_typed_code_of_a_config_the_runtime_rejects(
-    user, side, config
-):
-    flow_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=AsyncMock(),
-        encryption_service=_OpaqueEncryptionService(),
-    )
-    step = _http_step_with_credential(side, dict(config))
-
-    with pytest.raises(BadRequestException) as excinfo:
-        await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
-
-    _assert_typed_http_config_refusal(excinfo.value, side=side)
-    flow_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
-)
-@pytest.mark.parametrize("side", ["input_config", "output_config"])
 async def test_publish_flow_refuses_a_stored_http_config_that_authoring_rejects(
     user, side, config
 ):
@@ -2592,6 +2428,33 @@ async def test_update_flow_refuses_a_stored_http_config_that_authoring_rejects(
 
     with pytest.raises(BadRequestException) as excinfo:
         await service.update_flow(flow_id=stored.id, name="Renamed")
+
+    _assert_typed_http_config_refusal(excinfo.value, side=side)
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
+)
+@pytest.mark.parametrize("side", ["input_config", "output_config"])
+async def test_update_flow_reports_the_typed_code_of_a_written_config_the_runtime_rejects(
+    user, side, config
+):
+    # A config in the request meets the authored-secret handling first; the
+    # runtime's typed code still answers, as for a stored one.
+    flow_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_OpaqueEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await _write_new_steps(
+            service, flow_repo, [_http_step_with_credential(side, dict(config))]
+        )
 
     _assert_typed_http_config_refusal(excinfo.value, side=side)
     flow_repo.update.assert_not_awaited()
@@ -2727,26 +2590,20 @@ async def test_publish_flow_allows_a_stored_literal_credential(user, side, field
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_previous_step_input_for_first_step(user):
+async def test_update_flow_rejects_previous_step_input_for_first_step(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step(step_order=1).model_copy(update={"input_source": "previous_step"})
 
     with pytest.raises(BadRequestException):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
 
 @pytest.mark.asyncio
-async def test_create_flow_allows_http_get_input_source_with_valid_config(user):
+async def test_update_flow_allows_http_get_input_source_with_valid_config(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create = AsyncMock(side_effect=lambda **kwargs: kwargs["flow"])
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step(step_order=1).model_copy(
         update={
@@ -2760,19 +2617,14 @@ async def test_create_flow_allows_http_get_input_source_with_valid_config(user):
         }
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
+    updated = await _write_new_steps(service, flow_repo, [step])
 
-    assert created.steps[0].input_source == "http_get"
-    assert created.steps[0].input_config["url"] == "https://example.org/source"
+    assert updated.steps[0].input_source == "http_get"
+    assert updated.steps[0].input_config["url"] == "https://example.org/source"
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_http_get_input_without_url(user):
+async def test_update_flow_rejects_http_get_input_without_url(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -2784,16 +2636,11 @@ async def test_create_flow_rejects_http_get_input_without_url(user):
     )
 
     with pytest.raises(BadRequestException, match="HTTP_MISSING_URL"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_legacy_http_post_input_before_persistence(user):
+async def test_update_flow_rejects_legacy_http_post_input_before_persistence(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -2810,18 +2657,13 @@ async def test_create_flow_rejects_legacy_http_post_input_before_persistence(use
     with pytest.raises(
         BadRequestException, match="unsupported input_source 'http_post'"
     ):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
-    flow_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_http_post_output_without_url(user):
+async def test_update_flow_rejects_http_post_output_without_url(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -2833,19 +2675,13 @@ async def test_create_flow_rejects_http_post_output_without_url(user):
     )
 
     with pytest.raises(BadRequestException, match="HTTP_MISSING_URL"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [step])
 
 
 @pytest.mark.asyncio
-async def test_create_flow_allows_http_post_output_with_valid_config(user):
+async def test_update_flow_allows_http_post_output_with_valid_config(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create = AsyncMock(side_effect=lambda **kwargs: kwargs["flow"])
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step(step_order=1).model_copy(
         update={
@@ -2862,22 +2698,16 @@ async def test_create_flow_allows_http_post_output_with_valid_config(user):
         }
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
+    updated = await _write_new_steps(service, flow_repo, [step])
 
-    assert created.steps[0].output_mode == "http_post"
-    assert created.steps[0].output_config["url"] == "https://example.org/hook"
+    assert updated.steps[0].output_mode == "http_post"
+    assert updated.steps[0].output_config["url"] == "https://example.org/hook"
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
+async def test_update_flow_rejects_assistants_outside_space_or_tenant(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.create.return_value = AsyncMock()
     flow_repo.get_assistant_scope_rows.return_value = []
 
     service = FlowService(
@@ -2890,57 +2720,19 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
     with pytest.raises(
         BadRequestException, match="outside the selected space or tenant"
     ):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[_step(step_order=1)],
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, [_step(step_order=1)])
 
     flow_repo.get_assistant_scope_rows.assert_awaited_once()
     kwargs = flow_repo.get_assistant_scope_rows.await_args.kwargs
-    assert kwargs["space_id"]
+    assert kwargs["space_id"] == flow_repo.get.return_value.space_id
     assert kwargs["tenant_id"] == user.tenant_id
     assert len(kwargs["assistant_ids"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_create_flow_allows_scoped_assistant_references_before_flow_exists(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    assistant_id = uuid4()
-    flow_repo.create.side_effect = lambda **kwargs: kwargs["flow"]
-    flow_repo.get_assistant_scope_rows.return_value = [
-        SimpleNamespace(
-            id=assistant_id,
-            origin=AssistantOrigin.USER.value,
-            managing_flow_id=None,
-        )
-    ]
-
-    service = FlowService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_version_repo=version_repo,
-        assistant_service=AsyncMock(),
-    )
-    step = _step(step_order=1).model_copy(update={"assistant_id": assistant_id})
-
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
-
-    assert created.steps[0].assistant_id == assistant_id
-    flow_repo.get_assistant_scope_rows.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforcement(
-    user,
-):
+async def test_create_flow_starts_without_steps_and_reads_no_assistant_scope(user):
+    # A step runs an assistant its flow owns, which exists only once the flow
+    # does, so a new flow has no steps to check.
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_repo.create.side_effect = lambda **kwargs: kwargs["flow"]
@@ -2952,14 +2744,10 @@ async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforceme
         assistant_service=AsyncMock(),
     )
 
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[],
-        metadata_json=None,
-    )
+    created = await service.create_flow(space_id=uuid4(), name="Flow")
 
     assert created.steps == []
+    assert flow_repo.create.await_args.kwargs["flow"].steps == []
     flow_repo.get_assistant_scope_rows.assert_not_awaited()
 
 
@@ -3386,23 +3174,7 @@ def _classified_chain(user, steps: list[_ClassifiedStep], *, space_level: int = 
     return service, flow_repo, flow
 
 
-async def _save(service: FlowService, flow: Flow, operation: str) -> None:
-    if operation == "create":
-        await service.create_flow(
-            space_id=flow.space_id, name=flow.name, steps=flow.steps
-        )
-    else:
-        await service.update_flow(flow_id=flow.id, steps=flow.steps)
-
-
-def _rows_written(flow_repo: AsyncMock, operation: str) -> bool:
-    return (
-        flow_repo.create if operation == "create" else flow_repo.update
-    ).await_count > 0
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize(
     ("steps", "code"),
     [
@@ -3452,19 +3224,18 @@ def _rows_written(flow_repo: AsyncMock, operation: str) -> bool:
     ],
 )
 async def test_save_refuses_a_step_that_reads_a_classified_step_it_is_not_cleared_for(
-    user, steps, code, operation
+    user, steps, code
 ):
     service, flow_repo, flow = _classified_chain(user, steps)
 
     with pytest.raises(BadRequestException) as exc_info:
-        await _save(service, flow, operation)
+        await service.update_flow(flow_id=flow.id, steps=flow.steps)
 
     assert exc_info.value.code == code
-    assert not _rows_written(flow_repo, operation)
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize(
     "steps",
     [
@@ -3508,14 +3279,12 @@ async def test_save_refuses_a_step_that_reads_a_classified_step_it_is_not_cleare
         ),
     ],
 )
-async def test_save_accepts_a_step_cleared_for_everything_it_reads(
-    user, steps, operation
-):
+async def test_save_accepts_a_step_cleared_for_everything_it_reads(user, steps):
     service, flow_repo, flow = _classified_chain(user, steps)
 
-    await _save(service, flow, operation)
+    await service.update_flow(flow_id=flow.id, steps=flow.steps)
 
-    assert _rows_written(flow_repo, operation)
+    flow_repo.update.assert_awaited_once()
 
 
 def _authored_http(**fields: Any) -> dict[str, Any]:
@@ -3550,7 +3319,6 @@ def _http_get(config: dict[str, Any], **fields: Any) -> _ClassifiedStep:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize(
     ("steps", "code"),
     [
@@ -3645,19 +3413,18 @@ def _http_get(config: dict[str, Any], **fields: Any) -> _ClassifiedStep:
     ],
 )
 async def test_save_refuses_a_step_that_reads_a_classified_step_through_its_config(
-    user, steps, code, operation
+    user, steps, code
 ):
     service, flow_repo, flow = _classified_chain(user, steps)
 
     with pytest.raises(BadRequestException) as exc_info:
-        await _save(service, flow, operation)
+        await service.update_flow(flow_id=flow.id, steps=flow.steps)
 
     assert exc_info.value.code == code
-    assert not _rows_written(flow_repo, operation)
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize(
     "steps",
     [
@@ -3737,17 +3504,16 @@ async def test_save_refuses_a_step_that_reads_a_classified_step_through_its_conf
     ],
 )
 async def test_save_accepts_a_config_that_reads_only_what_the_step_is_cleared_for(
-    user, steps, operation
+    user, steps
 ):
     service, flow_repo, flow = _classified_chain(user, steps)
 
-    await _save(service, flow, operation)
+    await service.update_flow(flow_id=flow.id, steps=flow.steps)
 
-    assert _rows_written(flow_repo, operation)
+    flow_repo.update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "update"])
 @pytest.mark.parametrize(
     ("config", "reported"),
     [
@@ -3767,7 +3533,7 @@ async def test_save_accepts_a_config_that_reads_only_what_the_step_is_cleared_fo
     ],
 )
 async def test_save_reports_a_malformed_http_config_before_the_classification(
-    user, config, reported, operation
+    user, config, reported
 ):
     # The config also reads a classified step through its url, so the
     # classification check would refuse the save first if it ran first.
@@ -3776,11 +3542,11 @@ async def test_save_reports_a_malformed_http_config_before_the_classification(
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        await _save(service, flow, operation)
+        await service.update_flow(flow_id=flow.id, steps=flow.steps)
 
     assert exc_info.value.code != _MISMATCH
     assert reported in str(exc_info.value)
-    assert not _rows_written(flow_repo, operation)
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4483,7 +4249,7 @@ async def test_update_flow_assistant_rejects_a_document_template(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_duplicate_step_names_case_insensitive(user):
+async def test_update_flow_rejects_duplicate_step_names_case_insensitive(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -4493,12 +4259,7 @@ async def test_create_flow_rejects_duplicate_step_names_case_insensitive(user):
     ]
 
     with pytest.raises(BadRequestException, match="Step names must be unique"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=steps,
-            metadata_json=None,
-        )
+        await _write_new_steps(service, flow_repo, steps)
 
 
 @pytest.mark.asyncio
@@ -4511,7 +4272,6 @@ async def test_create_flow_rejects_invalid_form_field_type(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={
                 "form_schema": {
                     "fields": [
@@ -4536,7 +4296,6 @@ async def test_create_flow_rejects_multiselect_without_options(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={
                 "form_schema": {
                     "fields": [
@@ -4563,7 +4322,6 @@ async def test_create_flow_rejects_options_for_non_multiselect(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={
                 "form_schema": {
                     "fields": [
@@ -4589,7 +4347,6 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
     created = await service.create_flow(
         space_id=uuid4(),
         name="Flow",
-        steps=[_step()],
         metadata_json={
             "form_schema": {
                 "fields": [
@@ -4621,7 +4378,6 @@ async def test_create_flow_rejects_unknown_metadata_bucket(user):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
-            steps=[_step()],
             metadata_json={"transcription": {"language": "sv"}},
         )
     flow_repo.create.assert_not_awaited()
@@ -4677,7 +4433,6 @@ async def test_create_flow_allows_scalar_runtime_reserved_form_field_names(user)
     created = await service.create_flow(
         space_id=uuid4(),
         name="Flow",
-        steps=[_step()],
         metadata_json={
             "form_schema": {
                 "fields": [{"name": "datum", "type": "date", "required": True}]
@@ -4689,16 +4444,16 @@ async def test_create_flow_allows_scalar_runtime_reserved_form_field_names(user)
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_form_field_name_conflicting_with_step_name(user):
+async def test_update_flow_rejects_form_field_name_conflicting_with_step_name(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     with pytest.raises(BadRequestException, match="conflicts with form field name"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[
+        await _write_new_steps(
+            service,
+            flow_repo,
+            [
                 _step(step_order=1).model_copy(
                     update={"user_description": "Sammanfattning"}
                 ),
@@ -4790,9 +4545,8 @@ async def test_publish_flow_allows_encrypted_stored_http_secret(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_drops_inactive_config_before_secret_validation(user):
+async def test_update_flow_drops_inactive_config_before_secret_validation(user):
     repo = AsyncMock()
-    repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(user=user, flow_repo=repo, version_repo=AsyncMock())
     step = _step().model_copy(
         update={
@@ -4804,9 +4558,9 @@ async def test_create_flow_drops_inactive_config_before_secret_validation(user):
             },
         }
     )
-    created = await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
-    assert created.steps[0].input_config is None
-    assert created.steps[0].output_config == {"extension": "preserved"}
+    updated = await _write_new_steps(service, repo, [step])
+    assert updated.steps[0].input_config is None
+    assert updated.steps[0].output_config == {"extension": "preserved"}
     assert step.input_config == {"url": "obsolete", "auth": "malformed"}
 
 
@@ -4832,3 +4586,92 @@ async def test_update_flow_drops_inactive_stored_credentials(user, supply_steps)
         steps=[incoming, new_step] if supply_steps else None,
     )
     assert all(step.input_config is None for step in updated.steps)
+
+
+def _with_max_step_timeout(user, seconds: int):
+    tenant = user.tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_step_timeout_seconds": seconds}
+            }
+        }
+    )
+    return user.model_copy(update={"tenant": tenant})
+
+
+def _flow_with_steps(user, steps: list[FlowStep]) -> Flow:
+    return Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=steps,
+    )
+
+
+# The run refuses a step that asks for more time than the organisation allows
+# (resolve_step_timeout_seconds), so a save and a publish refuse it with the
+# same code, also a value no database integer column can hold.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_seconds", [301, 10**12])
+async def test_update_flow_refuses_a_step_timeout_above_the_maximum(
+    user, timeout_seconds: int
+):
+    flow_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+    )
+    existing = _flow_with_steps(user, [_step(step_order=1)])
+    flow_repo.get.return_value = existing
+    incoming = existing.steps[0].model_copy(update={"timeout_seconds": timeout_seconds})
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=existing.id, steps=[incoming])
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_saved_step_timeout_above_a_lowered_maximum(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+    )
+    step = _step(step_order=1).model_copy(update={"timeout_seconds": 600})
+    flow_repo.get.return_value = _flow_with_steps(user, [step])
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.publish_flow(flow_id=flow_repo.get.return_value.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_step_timeout_within_the_maximum_saves(user):
+    flow_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+    )
+    step = _step(step_order=1).model_copy(update={"timeout_seconds": 300})
+
+    await _write_new_steps(service, flow_repo, [step])
+
+    flow_repo.update.assert_awaited_once()

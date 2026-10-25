@@ -24,6 +24,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     select_effective_reasoning_effort,
 )
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -59,11 +60,11 @@ def reasoning_db(test_settings):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, PRE_REVISION)
-    try:
-        yield connection, config
-    finally:
-        connection.close()
+    with at_revision(config, PRE_REVISION):
+        try:
+            yield connection, config
+        finally:
+            connection.close()
 
 
 def _legacy_capabilities() -> dict[str, object]:

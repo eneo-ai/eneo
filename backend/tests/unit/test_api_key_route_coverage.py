@@ -454,34 +454,54 @@ _STASHED_API_KEY_GUARDS = frozenset(
 )
 
 
-def _resolution_order(dependant) -> list[str]:
-    """Dependency names in the order FastAPI resolves them: each one's own
+def _resolved_calls(dependant) -> list:
+    """Dependency callables in the order FastAPI resolves them: each one's own
     dependencies first."""
-    names: list[str] = []
+    calls: list = []
     for sub in dependant.dependencies:
-        names.extend(_resolution_order(sub))
-        names.append(getattr(sub.call, "__name__", ""))
-    return names
+        calls.extend(_resolved_calls(sub))
+        calls.append(sub.call)
+    return calls
+
+
+def _resolution_order(dependant) -> list[str]:
+    return [getattr(call, "__name__", "") for call in _resolved_calls(dependant)]
 
 
 class TestFlowFeatureGateOrdering:
-    """The flows_core gate authenticates before the route does, and that pass
-    authorizes the key against the guards stashed on the request so far. Ahead
-    of them it falls back to the basic method check, which refuses a write
-    key the runtime-file delete override allows."""
+    """The flows_core gate only stashes itself; the route's one authentication
+    runs it once the user is known. That pass authorizes the key against the
+    guards stashed on the request so far (ahead of them it falls back to the
+    basic method check, which refuses a write key the runtime-file delete
+    override allows), and a gate stashed after it, or a route with no such
+    authentication, would never be checked at all."""
 
-    def test_the_flow_gate_follows_every_api_key_guard_of_its_route(self):
+    def test_every_flow_gated_route_runs_the_gate_in_its_one_authentication(
+        self,
+    ):
         gated_routes = 0
         for route in runtime_router_routes():
-            names = _resolution_order(route.dependant)
+            calls = _resolved_calls(route.dependant)
+            names = [getattr(call, "__name__", "") for call in calls]
             if "require_flow_feature" not in names:
                 continue
             gated_routes += 1
-            gate = names.index("require_flow_feature")
-            late_guards = [
-                name for name in names[gate + 1 :] if name in _STASHED_API_KEY_GUARDS
+            authenticators = list(
+                dict.fromkeys(
+                    call for call in calls if hasattr(call, "__eneo_authentication__")
+                )
+            )
+            assert [getattr(call, "__name__", "") for call in authenticators] == [
+                "_get_container_with_user"
+            ], (route.methods, route.path, authenticators)
+            authenticated = calls.index(authenticators[0])
+            late = [
+                name
+                for call, name in zip(calls, names)
+                if name in _STASHED_API_KEY_GUARDS | {"require_flow_feature"}
+                and calls.index(call) > authenticated
             ]
-            assert not late_guards, (route.methods, route.path, late_guards)
+            assert not late, (route.methods, route.path, late)
 
         assert gated_routes, "No route carries the flows_core gate."
 

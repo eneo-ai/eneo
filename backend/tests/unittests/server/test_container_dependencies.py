@@ -46,7 +46,7 @@ async def test_explicit_user_setup_runs_inside_authentication_transaction(
         with_user=True
     )
     result = await dependency(
-        request=SimpleNamespace(method="GET"),
+        request=SimpleNamespace(method="GET", state=SimpleNamespace()),
         token="test-token",
         api_key="",
         container=container,

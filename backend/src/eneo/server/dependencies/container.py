@@ -20,6 +20,7 @@ from eneo.database.database import (
 )
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
+from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import AuthenticationException, NotFoundException
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
@@ -37,6 +38,21 @@ from eneo.server.dependencies.module_credentials import (
 )
 from eneo.users.setup import setup_user
 from eneo.users.user import UserInDB
+
+RequestGate = Callable[[Container, UserInDB], Awaitable[None]]
+
+
+def add_request_gate(request: Request, gate: RequestGate) -> None:
+    """Have the route's user authentication run ``gate`` once the user is known.
+
+    A router-level dependency stashes the gate the way the API key guards stash
+    their configuration; the route's own ``get_container(with_user=True)`` runs
+    it in its transaction after setting the user up and before upload
+    admission, so the gate needs no authentication of its own.
+    """
+    gates: tuple[RequestGate, ...] = getattr(request.state, "_post_auth_gates", ())
+    if gate not in gates:
+        request.state._post_auth_gates = (*gates, gate)
 
 
 def _raise_api_key_http_error(
@@ -86,7 +102,7 @@ def get_container(
             ),
         ],
     ) -> Container:
-        return Container(
+        return request_container(
             session=providers.Object(session),
         )
 
@@ -114,6 +130,12 @@ def get_container(
                 )
             if not user.is_active:
                 await setup_user(container=container, user=user)
+            gates: tuple[RequestGate, ...] = getattr(
+                request.state, "_post_auth_gates", ()
+            )
+            request.state._post_auth_gates = ()
+            for gate in gates:
+                await gate(container, user)
             if with_upload_admission:
                 await load_container_upload_admission(container)
             return user
@@ -237,7 +259,7 @@ def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:
     async def _get_container_for_sysadmin(
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Container:
-        return Container(
+        return request_container(
             session=providers.Object(session),
         )
 
@@ -252,7 +274,7 @@ async def get_user_from_websocket(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> UserInDB:
     async with sessionmanager.session() as session, session.begin():
-        container = Container(session=providers.Object(session))
+        container = request_container(session=providers.Object(session))
 
         try:
             user = await container.user_service().authenticate(token=token)

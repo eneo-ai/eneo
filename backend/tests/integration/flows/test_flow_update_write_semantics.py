@@ -107,7 +107,6 @@ async def _flow(
             space_id=space_id,
             name="Skrivregler",
             description="Läser, bedömer, skriver.",
-            steps=[],
             metadata_json=metadata_json,
         )
         rows: list[FlowStep] = []

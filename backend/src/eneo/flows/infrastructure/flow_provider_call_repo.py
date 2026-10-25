@@ -486,8 +486,13 @@ class FlowProviderCallRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int,
     ) -> dict[UUID, tuple[str, ...]]:
         """The models that answered in one run, per step, sorted by name.
+
+        At most ``limit`` (step, model) pairs are read, in step then name
+        order. A caller that must not truncate silently passes its ceiling
+        plus one and treats a larger answer as an overflow.
 
         A model is listed when a completion or transcription call to it
         completed, in any attempt. Its name is the one the answer gave, or the
@@ -514,6 +519,8 @@ class FlowProviderCallRepository:
             .where(FlowStepAttempts.tenant_id == tenant_id)
             .where(FlowProviderCalls.status == ProviderCallStatus.COMPLETED.value)
             .distinct()
+            .order_by(FlowStepAttempts.step_id, model)
+            .limit(limit)
         )
         models_by_step_id: dict[UUID, list[str]] = {}
         for row in rows:

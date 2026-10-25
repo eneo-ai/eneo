@@ -159,7 +159,7 @@ async def _draft_flow(
 
     created = await client.post(
         "/api/v1/flows/",
-        json={"space_id": space_id, "name": f"Live {uuid4().hex[:8]}", "steps": []},
+        json={"space_id": space_id, "name": f"Live {uuid4().hex[:8]}"},
         headers=headers,
     )
     assert created.status_code == 201, created.text
@@ -608,6 +608,25 @@ async def test_realtime_switched_off_after_admission_ends_the_session(
         json={"supports_realtime": False},
     )
     assert switched_off.status_code == 200, switched_off.text
+
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        events = [json.loads(message) async for message in socket]
+
+    assert [event["code"] for event in events] == ["model_unavailable"]
+    assert live_stack.model_server.received == []
+
+
+async def test_flows_switched_off_after_admission_ends_the_session(
+    live_stack: LiveStack, db_container, admin_user
+):
+    session = await live_stack.open_session()
+    async with db_container() as container:
+        flag = await container.feature_flag_repo().one(name="flows_core")
+        await container.feature_flag_service().disable_tenant(
+            flag.feature_id, admin_user.tenant_id
+        )
 
     async with connect(
         live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])

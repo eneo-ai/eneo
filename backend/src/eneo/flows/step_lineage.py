@@ -13,6 +13,7 @@ from eneo.flows.domain.speaker_mapping_config import (
 )
 from eneo.flows.domain.tool_input import tool_reference_sites
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.http_transport import (
     HTTP_CONFIG_KEYS,
@@ -724,6 +725,22 @@ def selected_source_step_order(
     if names_step_without_result(reference, step_order=step_order):
         return None
     return referenced_step_order(reference, step_order=step_order)
+
+
+def selects_run_transcript(references: list[TemplateReference]) -> bool:
+    """Return whether a step's input references select the run's transcript.
+
+    The runtime selects the transcript by this rule and publish counts it, so
+    the two cannot drift: its bare name, or a run form read of it. Analyze the
+    template with ``form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY}``.
+    """
+    transcript = {FLOW_INPUT_TRANSCRIPTION_KEY}
+    return any(
+        reference.head == FLOW_INPUT_TRANSCRIPTION_KEY and not reference.tail
+        for reference in references
+    ) or FLOW_INPUT_TRANSCRIPTION_KEY in referenced_form_fields(
+        references, form_field_names=transcript
+    )
 
 
 def referenced_step_order(

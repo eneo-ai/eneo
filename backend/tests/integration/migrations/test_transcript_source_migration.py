@@ -13,7 +13,7 @@ from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
 from eneo.flows.runtime.transcription import capture_transcript_source
-from tests.integration.flows import test_transcript_source
+from tests.integration.flows import transcript_source_support
 from tests.integration.flows.test_transcript_corrections import SEGMENTS
 from tests.integration.flows.test_transcript_source import (
     _attempt,
@@ -21,7 +21,7 @@ from tests.integration.flows.test_transcript_source import (
     _reference,
 )
 
-source_scenario = test_transcript_source.source_scenario
+source_scenario = transcript_source_support.source_scenario
 
 pytestmark = pytest.mark.migration_isolation
 

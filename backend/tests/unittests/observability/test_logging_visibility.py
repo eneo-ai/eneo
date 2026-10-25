@@ -69,3 +69,24 @@ def test_flow_module_records_reach_the_application_handler(module):
         payload = json.loads(line)
         assert payload["body"] == "visibility_sentinel"
         assert payload["attributes"]["probe"] == module.__name__
+
+
+def test_a_level_change_applies_to_a_logger_that_already_logged():
+    """A SimpleLogger is not registered with logging's manager, so the
+    manager's cache clearing on setLevel never reaches it: a level read once
+    must not outlive a later setLevel."""
+    logger = SimpleLogger(
+        name="eneo.tests.level_change", level=logging.INFO, console=False
+    )
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler(logging.DEBUG)
+    handler.emit = records.append  # type: ignore[method-assign]
+    logger.addHandler(handler)
+
+    logger.debug("before")
+    logger.setLevel(logging.DEBUG)
+    logger.debug("after")
+    logger.setLevel(logging.INFO)
+    logger.debug("hidden again")
+
+    assert [record.getMessage() for record in records] == ["after"]

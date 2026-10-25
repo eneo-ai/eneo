@@ -371,6 +371,7 @@ def apply_flow_runtime_policy_patch(
 
 def resolve_step_timeout_seconds(
     *,
+    step_order: int,
     step_timeout_seconds: int | None,
     policy: FlowRuntimePolicy,
 ) -> int:
@@ -378,9 +379,13 @@ def resolve_step_timeout_seconds(
         return policy.default_step_timeout_seconds
     parsed = _parse_positive_int(step_timeout_seconds, "timeout_seconds")
     if parsed > policy.max_step_timeout_seconds:
-        raise BadRequestException(
-            "Step timeout exceeds the tenant runtime policy maximum.",
+        raise FlowBadRequestException(
+            f"Step {step_order}: timeout_seconds {parsed} exceeds the "
+            f"organisation's maximum step timeout of "
+            f"{policy.max_step_timeout_seconds} seconds.",
+            code=FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX,
             context={
+                "step_order": step_order,
                 "timeout_seconds": parsed,
                 "max_step_timeout_seconds": policy.max_step_timeout_seconds,
             },

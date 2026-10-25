@@ -126,12 +126,11 @@ async def require_flow_assistant_read_access(
     operation_id="create_flow_assistant",
     summary="Create Flow Assistant",
     description=(
-        "Create a flow-managed assistant owned by the specified draft flow. Use this "
-        "authoring endpoint when a flow editor needs a dedicated assistant for one or "
-        "more steps instead of reusing an existing assistant. The created assistant is "
-        "returned with the caller's effective permissions and can then be referenced by "
-        "step `assistant_id` values in flow create/update payloads."
-        + _DRAFT_OWNERSHIP_DESCRIPTION
+        "Create a flow-managed assistant owned by the specified draft flow. Each flow "
+        "step runs an assistant its flow owns, so create one here for a step before "
+        "adding the step. The created assistant is returned with the caller's "
+        "effective permissions and is referenced by step `assistant_id` values in a "
+        "flow update (`PATCH /api/v1/flows/{id}/`)." + _DRAFT_OWNERSHIP_DESCRIPTION
     ),
     responses={
         201: {

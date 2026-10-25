@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from hashlib import sha256
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_handlers.text_sections import (
     prepare_text_processing_call,
     prepare_text_sections,
@@ -84,6 +86,191 @@ def _byte_budget_preflight(budget, **kwargs):
         ),
         refusal=None if package.fits else "current_request_input_does_not_fit",
     )
+
+
+def _oracle_section_ends(text, fits):
+    """Longest fitting prefix by linear scan, then the section snap rule.
+
+    Returns the section ends and why the split stopped early, if it did.
+    """
+    ends, start = [], 0
+    while start < len(text):
+        end = start
+        while end < len(text) and fits(start, end + 1):
+            end += 1
+        if end == start:
+            return ends, "refused"
+        if end < len(text):
+            newline = text.rfind("\n", start + (end - start) // 2, end)
+            snapped = (
+                newline + 1
+                if newline >= 0
+                else next(
+                    (i + 1 for i in range(end - 1, start - 1, -1) if text[i].isspace()),
+                    end,
+                )
+            )
+            if snapped != end and text[start:snapped].strip():
+                end = snapped
+        if not text[start:end].strip():
+            return ends, "blank"
+        ends.append(end)
+        start = end
+    return ends, None
+
+
+# Paragraphs, double spaces, multi-byte characters and a run with no whitespace,
+# so the oracle covers newline snaps, space snaps and raw cuts.
+_ORACLE_TEXT = "".join(
+    "x" * 2600 + " "
+    if index == 90
+    else f"Å municipal record {index} 🙂 notes.\n"
+    if index % 7 == 0
+    else f"Word{index} kommunen  beslut "
+    for index in range(320)
+)
+
+
+def _monotone_section_model(
+    *,
+    tokens_per_byte,
+    overhead,
+    fallback_extra,
+    caller_cap,
+    bound_output,
+    slack="consistent",
+):
+    """A preflight whose fit depends only on the section text, and its predicate.
+
+    Material costs grow with the section's bytes, so the predicate is monotone.
+    Bound output needs every dispatched package to fit, so a fallback there
+    costs at least as much as the primary and decides the fit; otherwise the
+    cheapest package does. With a "constant" or "misleading" slack the packages
+    lie about their size and only the refusal tells the truth.
+    """
+    capacity = ModelCapacity(2400, 600)
+
+    def material(text):
+        return math.ceil(len(text.encode()) * tokens_per_byte)
+
+    def output_cap(tokens):
+        cap = capacity.resolve_output_cap(
+            input_tokens=tokens, safety_tokens=0, caller_cap=caller_cap
+        )
+        return None if isinstance(cap, ModelCapacityNoFit) else cap
+
+    def fits_text(text):
+        extras = (0,) if fallback_extra is None else (0, fallback_extra)
+        tokens = overhead + (max if bound_output else min)(extras) + material(text)
+        cap = output_cap(tokens)
+        return (
+            cap is not None
+            and cap >= 256
+            and (not bound_output or material(text) <= cap)
+        )
+
+    async def preflight(**kwargs):
+        question = kwargs["question"]
+        preview = _section_preflight(1, **kwargs)
+        packages = []
+        for base, extra in ((preview.preferred, 0), (preview.fallback, fallback_extra)):
+            if base is None or extra is None:
+                packages.append(None)
+                continue
+            tokens = overhead + extra
+            if slack == "consistent":
+                tokens += material(question)
+            elif slack == "misleading":
+                tokens += len(question) * 7919 % 97
+            packages.append(
+                replace(
+                    base,
+                    input_reserve=replace(base.input_reserve, tokens=tokens),
+                    output_cap_tokens=output_cap(tokens),
+                )
+            )
+        preferred, fallback = packages
+        admitted = preferred.fits or (fallback is not None and fallback.fits)
+        return replace(
+            preview,
+            capacity=capacity,
+            preferred=preferred,
+            fallback=fallback,
+            refusal=(
+                None
+                if admitted and (slack == "consistent" or fits_text(question))
+                else "current_request_input_does_not_fit"
+            ),
+        )
+
+    return preflight, fits_text
+
+
+async def _prepare_against_oracle(
+    user,
+    *,
+    tokens_per_byte,
+    overhead,
+    fallback_extra,
+    mode,
+    caller_cap,
+    slack="consistent",
+):
+    """Split the oracle corpus, check it against the oracle and count preflights."""
+    from eneo.flows.runtime.step_handlers.mapped_outputs import (
+        mapped_admission_payload,
+    )
+
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, text=_ORACLE_TEXT
+    )
+    step = replace(step, input_config={"text_processing": {"mode": mode}})
+    bound_output = mode == "process_each_section"
+    preflight, fits_text = _monotone_section_model(
+        tokens_per_byte=tokens_per_byte,
+        overhead=overhead,
+        fallback_extra=fallback_extra,
+        caller_cap=caller_cap,
+        bound_output=bound_output,
+        slack=slack,
+    )
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    before = assistant.preflight_response_context.await_count
+    policy = FlowMappedExecutionPolicy()
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=policy
+    )
+    preflights = assistant.preflight_response_context.await_count - before
+
+    expected, stopped = _oracle_section_ends(
+        text, lambda start, end: fits_text(text[start:end])
+    )
+    assert stopped is None
+    assert [section.core.end_char for section in prepared.manifest.sections] == (
+        expected
+    )
+    sources = tuple(call.prepared.step_input.source_text for call in prepared.calls)
+    assert prepared.manifest.resplit(text) == sources
+    assert "".join(sources) == text
+    estimates = []
+    for call in prepared.calls:
+        completion = call.prepared.completion_call
+        assert completion.selected_package.fits
+        assert fits_text(call.prepared.step_input.text)
+        estimates.append(completion.preflight.admission_input_reserve_tokens)
+    assert state.mapped_admission_by_step[step.step_id] == mapped_admission_payload(
+        execution_mode="per_item",
+        estimates=estimates,
+        native_json_fallback_possible=(
+            base.prepared.completion_call.capability_fallback_model_kwargs is not None
+        ),
+        policy=policy,
+    )
+    assistant.get_response.assert_not_awaited()
+    return prepared, preflights
 
 
 def _case(
@@ -653,6 +840,260 @@ async def test_section_boundary_keeps_measured_cut_when_shorter_prefix_costs_mor
     )
 
 
+@pytest.mark.parametrize("caller_cap", [None, 400])
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+@pytest.mark.parametrize("fallback_extra", [None, 120], ids=["primary", "fallback"])
+@pytest.mark.parametrize("overhead", [40, 700])
+@pytest.mark.parametrize("tokens_per_byte", [0.25, 0.5, 1, 2])
+async def test_sections_match_the_linear_scan_oracle(
+    user, tokens_per_byte, overhead, fallback_extra, mode, caller_cap
+):
+    await _prepare_against_oracle(
+        user,
+        tokens_per_byte=tokens_per_byte,
+        overhead=overhead,
+        fallback_extra=fallback_extra,
+        mode=mode,
+        caller_cap=caller_cap,
+    )
+
+
+@pytest.mark.parametrize("slack", ["constant", "misleading"])
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+@pytest.mark.parametrize("fallback_extra", [None, 120], ids=["primary", "fallback"])
+async def test_sections_match_the_oracle_when_package_sizes_mislead(
+    user, slack, mode, fallback_extra
+):
+    await _prepare_against_oracle(
+        user,
+        tokens_per_byte=0.5,
+        overhead=40,
+        fallback_extra=fallback_extra,
+        mode=mode,
+        caller_cap=None,
+        slack=slack,
+    )
+
+
+@pytest.mark.parametrize("tokens_per_byte", [1, 2])
+async def test_sections_match_the_oracle_when_a_cheaper_fallback_is_selected(
+    user, tokens_per_byte
+):
+    # Without bound output any fitting package admits a section, so the cheaper
+    # fallback carries the cuts inside the run that has no whitespace.
+    prepared, _ = await _prepare_against_oracle(
+        user,
+        tokens_per_byte=tokens_per_byte,
+        overhead=40,
+        fallback_extra=-30,
+        mode="summarize",
+        caller_cap=None,
+    )
+    assert any(
+        call.prepared.completion_call.selected_package
+        is call.prepared.completion_call.preflight.fallback
+        for call in prepared.calls
+    )
+
+
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+@pytest.mark.parametrize("fallback_extra", [None, 120], ids=["primary", "fallback"])
+async def test_section_search_takes_few_preflights_per_section(
+    user, fallback_extra, mode
+):
+    # A performance target for this fixed corpus, not a runtime limit.
+    prepared, preflights = await _prepare_against_oracle(
+        user,
+        tokens_per_byte=1 / 3,
+        overhead=40,
+        fallback_extra=fallback_extra,
+        mode=mode,
+        caller_cap=None,
+    )
+    sections = len(prepared.calls)
+    assert sections > 1
+    assert preflights <= 9 * sections + 4
+
+
+_SEARCH_SLACKS = {
+    "truthful": lambda remaining, length: remaining,
+    "zero": lambda remaining, length: 0,
+    "constant": lambda remaining, length: 700,
+    "overstated": lambda remaining, length: remaining + 5000,
+    "understated": lambda remaining, length: remaining // 10,
+    "misleading": lambda remaining, length: length * 7919 % 3001,
+}
+
+
+@pytest.mark.parametrize(
+    "limit,fitting",
+    [
+        (1, 1),
+        (300, 0),
+        (300, 1),
+        (300, 299),
+        (3000, 3000),
+        (5000, 4095),
+        (5000, 4097),
+        (40_000, 12_345),
+        (40_000, 39_999),
+        (70_000, 70_000),
+    ],
+)
+@pytest.mark.parametrize("hint", [None, 1.0, 10.0, 0.1])
+@pytest.mark.parametrize("slack", sorted(_SEARCH_SLACKS))
+async def test_section_search_finds_the_longest_fit_in_bounded_probes_per_slack_kind(
+    slack, hint, limit, fitting
+):
+    from eneo.flows.runtime.step_handlers.text_sections import (
+        _largest_fitting_end,
+        _Probe,
+    )
+
+    start = 17
+    measured = []
+    remaining = _SEARCH_SLACKS[slack]
+
+    async def measure(begin, end):
+        assert begin == start < end <= start + limit
+        measured.append(end)
+        length = end - start
+        if length > fitting:
+            return None
+        return _Probe(
+            call=None,
+            estimate=length,
+            slack_tokens=remaining(fitting - length, length),
+        )
+
+    found = await _largest_fitting_end(
+        measure,
+        start,
+        start + limit,
+        empty_slack=remaining(fitting, 0),
+        chars_per_token=hint,
+    )
+
+    if fitting == 0:
+        assert found is None
+    else:
+        end, probe, _ = found
+        assert end == start + fitting
+        assert probe.estimate == fitting
+        assert fitting == limit or end + 1 in measured
+    assert len(measured) == len(set(measured))
+    assert len(measured) <= 2 * math.ceil(math.log2(limit)) + 4
+
+
+@pytest.mark.parametrize("top,period", [(30, 31), (20, 21), (12, 13)])
+@pytest.mark.parametrize("fitting_share", ["all", "all_but_one", "third"])
+@pytest.mark.parametrize("limit", [100_000, 500_000, 1_000_000])
+async def test_section_search_stays_within_the_probe_bound_when_slack_halves_and_resets(
+    limit, fitting_share, top, period
+):
+    # Each fit reports half the previous slack until it resets every period fits,
+    # so the slack keeps halving while the fit barely moves.
+    from eneo.flows.runtime.step_handlers.text_sections import (
+        _largest_fitting_end,
+        _Probe,
+    )
+
+    start = 17
+    fitting = {"all": limit, "all_but_one": limit - 1, "third": limit // 3}[
+        fitting_share
+    ]
+    measured = []
+    fits = 0
+
+    async def measure(begin, end):
+        nonlocal fits
+        assert begin == start < end <= start + limit
+        measured.append(end)
+        length = end - start
+        if length > fitting:
+            return None
+        fits += 1
+        return _Probe(
+            call=None, estimate=length, slack_tokens=2 ** (top - fits % period)
+        )
+
+    found = await _largest_fitting_end(
+        measure, start, start + limit, empty_slack=2**top, chars_per_token=None
+    )
+
+    assert found is not None
+    end, probe, _ = found
+    assert end == start + fitting
+    assert probe.estimate == fitting
+    assert fitting == limit or end + 1 in measured
+    assert len(measured) == len(set(measured))
+    assert len(measured) <= 2 * math.ceil(math.log2(limit)) + 4
+
+
+async def test_section_search_starts_with_a_calibration_probe(user):
+    # The first section has no density yet; one 4 KB probe supplies it.
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, text=_ORACLE_TEXT
+    )
+    preflight, _ = _monotone_section_model(
+        tokens_per_byte=0.25,
+        overhead=40,
+        fallback_extra=None,
+        caller_cap=None,
+        bound_output=True,
+    )
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    assistant.preflight_response_context.reset_mock()
+    await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+    questions = [
+        call.kwargs["question"]
+        for call in assistant.preflight_response_context.await_args_list
+    ]
+    assert questions[:2] == ["", text[:4096]]
+
+
+async def test_section_search_propagates_other_refusals_unchanged(user):
+    executor, repo, assistant, run, state, step, text, _, _, _ = _case(
+        user, text=_ORACLE_TEXT
+    )
+    preflight, _ = _monotone_section_model(
+        tokens_per_byte=0.5,
+        overhead=40,
+        fallback_extra=120,
+        caller_cap=None,
+        bound_output=True,
+    )
+    other = TypedIOValidationException(
+        "Section rejected", code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    )
+
+    async def calibration_refused(**kwargs):
+        if kwargs["question"] == text[:4096]:
+            raise other
+        return await preflight(**kwargs)
+
+    assistant.preflight_response_context.side_effect = calibration_refused
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    with pytest.raises(TypedIOValidationException) as caught:
+        await prepare_text_sections(
+            step=step,
+            run=run,
+            state=state,
+            base=base,
+            policy=FlowMappedExecutionPolicy(),
+        )
+    assert caught.value is other
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
 @pytest.mark.parametrize("inline", [False, True])
 async def test_prompt_only_material_preserves_independent_flow_input_question(
     user, inline
@@ -855,8 +1296,8 @@ async def test_section_aggregate_overflow_stops_before_the_next_call(user):
     assert details.completed_items == len(questions) == 4
     assert details.total_items == progress[0][1]
     assert details.total_items > 4
-    assert exc_info.value.completed_items == 4
-    assert exc_info.value.total_items == details.total_items
+    assert failure_evidence(exc_info.value).completed_items == 4
+    assert failure_evidence(exc_info.value).total_items == details.total_items
 
 
 @pytest.mark.parametrize("binding", [None, "repeat", "prompt_only"])
@@ -1439,6 +1880,13 @@ async def test_section_builder_round_trip(case):
     base = await executor._preview_assistant_step(
         step=step, run=run, state=state, version_metadata=None, attempt_no=1
     )
+
+    def fits(start, end):
+        # The package fits its budget and the section fits the output cap left.
+        material = len(text[start:end].encode())
+        return material <= budget and material <= 256 + budget - material
+
+    oracle_ends, stopped = _oracle_section_ends(text, fits)
     try:
         prepared = await prepare_text_sections(
             step=step,
@@ -1448,10 +1896,12 @@ async def test_section_builder_round_trip(case):
             policy=FlowMappedExecutionPolicy(),
         )
     except TypedIOValidationException as exc:
+        assert stopped == "blank"
         ordinal = max(fitting_sections)
         start = sum(
             len(fitting_sections[index]["question"]) for index in range(1, ordinal)
         )
+        assert start == (oracle_ends[-1] if oracle_ends else 0)
         measured = fitting_sections[ordinal]
         prefix = measured["question"]
         assert not prefix.strip()
@@ -1470,6 +1920,8 @@ async def test_section_builder_round_trip(case):
         assistant.get_response.assert_not_awaited()
         return
     manifest = prepared.manifest
+    assert stopped is None
+    assert [section.core.end_char for section in manifest.sections] == oracle_ends
     questions = tuple(call.prepared.step_input.text for call in prepared.calls)
     assert len(questions) > 1
     assert manifest.resplit(text) == tuple(questions)

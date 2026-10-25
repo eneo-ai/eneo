@@ -55,7 +55,6 @@ async def _flow_with_assistants(db_container, *, space_id: UUID, names: list[str
             space_id=space_id,
             name="Syskon",
             description="Assistenter i samma utrymme.",
-            steps=[],
         )
         ids = []
         for name in names:

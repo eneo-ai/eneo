@@ -1192,7 +1192,7 @@ Service keys can drive published runtime paths inside their scope and cannot ins
 
 1. Use a key scoped to the flow's space.
 2. Create runs through published runtime paths, not draft authoring paths.
-3. List runs with `runtime_paths.list_runs`; service keys see only their own runs. Tenant admins and same-space admins and owners also see other people's runs, and `mine=true` lists only the caller's own, which in a module session are the signed-in user's. `search` matches the run label and the starter's name (never run content), `sort` orders by `created_at` (default), `started_at`, `status` or `duration` with `order=asc|desc`, and every page carries `status_counts` for the listed runs before any `status` filter.
+3. List runs with `runtime_paths.list_runs`; service keys see only their own runs. Tenant admins and same-space admins and owners also see other people's runs, and `mine=true` lists only the caller's own, which in a module session are the signed-in user's. `search` matches the run label and the starter's name (never run content), `sort` orders by `created_at` (default), `started_at`, `status` or `duration` with `order=asc|desc`, and each page carries `status_counts` for the listed runs before any `status` filter. Counting costs a query, so pass `include_status_counts=false` (default `true`) on pages that do not show the counts, such as later pages of the same list; `status_counts` is then `null`.
 4. Request evidence only when the key has the explicit evidence permission. The run detail's `evidence_access` says which evidence routes would answer the caller (`can_read_evidence`, `can_export_redacted`, `can_export_raw`) and the code each refusal would carry.
 
 Endpoint facts:
@@ -2071,6 +2071,8 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 | `ATTACHMENT_MAX_FILES`                        | 100                   | Persistent attachments per assistant                                                                                                                                                                                                                                   |
 
 The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dgh9`); release orchestration enforces this dependency. For longer recordings, operators change **`FLOW_AUDIO_MAX_DURATION_SECONDS` and `TASK_EXECUTION_TIMEOUT_SECONDS` together**. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These provisional duration and execution defaults may be revised by the measurement receipt tracked as `eneo-hy7c`.
+
+Within that budget, a step's `timeout_seconds` is bounded by the organisation's step timeout limits. `GET /api/v1/flows/execution-limits/` (`get_flow_execution_limits`) returns `default_step_timeout_seconds`, used when a step sets none, and `max_step_timeout_seconds`, above which a save or run is refused with `flow_step_timeout_exceeds_tenant_max`. Anyone who may manage flows can read it; administrators change it with `PATCH /api/v1/settings/flow-runtime-policy`.
 
 ### Workload receipt
 

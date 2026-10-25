@@ -280,7 +280,12 @@ def test_publish_lets_only_a_sectioned_prompt_read_the_section_index(
         1,
         output_type="json",
         output_contract=records,
-        input_config={"text_processing": {"mode": mode}} if mode else None,
+        # Uploads give the sections their one material.
+        input_config=(
+            {"text_processing": {"mode": mode}, "runtime_input": {"enabled": True}}
+            if mode
+            else None
+        ),
     )
     prompts = {1: "Avsnitt {{ section_index }}"}
 

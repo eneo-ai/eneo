@@ -83,16 +83,26 @@ Production has two Flow-related platform processes:
 
 There is no Flow-private worker, beat process, or scheduler.
 
-The webhook outbox cron ticks every 30 seconds and runs one job at a time: it
-is enqueued under one fixed ARQ job id without a kept result, so ARQ skips a
-tick while the previous job is queued or running. ARQ keeps a finished cron
-job's in-progress marker for 60 s, so the next job starts no earlier than 60 s
-after the previous one ended. A job killed mid-run (for example by a SIGKILL
-at deploy) keeps its job id, so ticks are skipped until ARQ picks it up again
-when its in-progress marker expires: the longest maintenance job timeout plus
-10 s after it started (205 s with the default 120 s request timeout). The
-webhook cron allows one try, so that pickup records the job as failed; the
-maintenance worker keeps no failed result, so the next tick runs a new job.
+A run that ends in a webhook requests the webhook outbox job
+(`flows.drain_webhook_outbox`) right after it commits the delivery,
+best-effort: a request that is refused, has an unknown outcome, fails or
+outlasts `REDIS_CONN_TIMEOUT` is logged as
+`flow_executor.webhook_delivery_request_*` and the run stays as committed. The
+webhook outbox cron requests the same job every 30 seconds as recovery. The
+30 s is the cadence, not a delivery bound: a backlog, the job's row cap, slow
+waves and worker or Redis outages delay delivery.
+
+One outbox job runs at a time: every request uses one fixed ARQ job id, so ARQ
+takes no second job while one is queued or running, and the job keeps no result
+once it ends, so the next request starts a new one. Each cron tick has its own
+ARQ job id. A job killed mid-run (for example by a SIGKILL at deploy) keeps its
+job id, so requests join it until ARQ picks it up again when its in-progress
+marker expires: the maintenance worker's longest job timeout plus 10 s after it
+started (205 s by default). The job allows one try, so that pickup records it
+as failed and the next request starts a new job. Restart maintenance workers
+together when deploying: an old worker delivers inside the cron and does not
+know the new job, so while old and new workers overlap two deliveries can run
+at once (claims stay correct).
 
 The job's time budget is derived from `FLOW_HTTP_MAX_TIMEOUT_SECONDS`
 (default 120). One delivery is budgeted 15 s of preparation, the maximum

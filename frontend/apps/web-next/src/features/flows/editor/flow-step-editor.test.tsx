@@ -7,6 +7,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
+import { flowEditorKeys } from "./editor-api";
 import type { FlowPublic } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
@@ -76,10 +77,18 @@ function renderEditor(
     suggestionRuns?: number;
     navigation?: StepNavigation;
     leaveRef?: React.Ref<EditorLeave>;
+    /** The step assistant as the step list already read it. */
+    cachedAssistant?: ReturnType<typeof makeAssistant>;
   } = {}
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], overrides.space ?? makeSpace());
+  if (overrides.cachedAssistant) {
+    queryClient.setQueryData(
+      flowEditorKeys.assistant(flow.id, "assistant-1"),
+      overrides.cachedAssistant
+    );
+  }
   const onSaved = vi.fn();
   const onCancel = vi.fn();
   const view = renderInApp(
@@ -131,6 +140,35 @@ afterEach(() => {
 });
 
 describe("FlowStepEditor", () => {
+  it("shows the organisation's default step time limit and ceiling at the control", async () => {
+    api.routes["GET /api/v1/flows/execution-limits/"] = () => ({
+      body: { default_step_timeout_seconds: 900, max_step_timeout_seconds: 1800 }
+    });
+    renderEditor(makeFlow());
+    const field = (await screen.findByLabelText(
+      new RegExp(`^${messages.flow_step_editor_timeout}`)
+    )) as HTMLInputElement;
+    await waitFor(() => expect(field.placeholder).toBe("900"));
+    expect(field.getAttribute("aria-valuemax") ?? field.max).toBe("1800");
+    expect(screen.getByText(/1800/)).toBeTruthy();
+    // A flow editor reads the Flows route, never the administrators' settings.
+    expect(api.stub.calls.some((call) => call.path.startsWith("/api/v1/settings/"))).toBe(false);
+  });
+
+  it("keeps a working time limit control when the limits cannot be read", async () => {
+    renderEditor(makeFlow());
+    const field = (await screen.findByLabelText(
+      new RegExp(`^${messages.flow_step_editor_timeout}`)
+    )) as HTMLInputElement;
+    await waitFor(() =>
+      expect(api.stub.calls.some((call) => call.path === "/api/v1/flows/execution-limits/")).toBe(
+        true
+      )
+    );
+    expect(field.placeholder).toBe(messages.flow_step_editor_timeout_default);
+    expect(field.getAttribute("aria-valuemax") ?? field.max).toBeFalsy();
+  });
+
   it("shows an AI step's task, input, result and control as labelled sections", async () => {
     const { container } = renderEditor(makeFlow());
     await nameField();
@@ -684,6 +722,16 @@ describe("FlowStepEditor", () => {
     expect(
       screen.queryByRole("switch", { name: messages.flow_editor_tools_long_material })
     ).toBeNull();
+  });
+
+  it("reads its assistant again when it opens, though the step list read it", async () => {
+    renderEditor(makeFlow(), { cachedAssistant: makeAssistant() });
+    await nameField();
+    await waitFor(() =>
+      expect(
+        api.stub.calls.filter((call) => `${call.method} ${call.path}` === ASSISTANT)
+      ).toHaveLength(1)
+    );
   });
 
   it("saves an instruction with the step assistant only, and reads the assistant back", async () => {

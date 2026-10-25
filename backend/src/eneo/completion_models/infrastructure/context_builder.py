@@ -922,7 +922,22 @@ class ContextBuilder:
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
+        account_tokens: bool = True,
     ) -> Context:
+        """Build the request context and, by default, its token estimate.
+
+        The estimate sizes the history and knowledge budgets and the
+        over-limit check. A caller that sends neither and measures the final
+        request itself may pass account_tokens=False: the context is built the
+        same, its token_count is left at 0, and no over-limit warning is logged.
+        """
+        if not account_tokens and (
+            session is not None or info_blob_chunks or reject_over_limit
+        ):
+            raise ValueError(
+                "History, knowledge and over-limit rejection need the token "
+                "estimate; only a request without them can skip it."
+            )
         if files is None:
             files = []
         if prompt_files is None:
@@ -935,9 +950,7 @@ class ContextBuilder:
             mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens. The current question is sent as
-        # a user message carrying both the text and any attached images, so it
-        # is counted in exactly that shape.
+        # Create the input; its tokens are counted with the prompt below.
         _input_string = self._build_input(
             input_str=input_str,
             files=files,
@@ -970,14 +983,10 @@ class ContextBuilder:
                 if file.id not in seen_image_ids
                 and file.parent_file_id not in url_only_prompt_file_ids
             ]
-        tokens_used_input = count_message_tokens(
-            [{"role": "user", "content": _input_string}], model_name
-        ) + _image_files_tokens(current_images, model_name)
-        tokens_used += tokens_used_input
 
-        # Tool definitions occupy context space too — count them up front so
-        # the history and knowledge budgets shrink accordingly. extra_tool_dicts
-        # carries definitions merged later by the adapter (MCP proxy tools).
+        # Tool definitions occupy context space too, so they are counted with
+        # the input and prompt below. extra_tool_dicts carries definitions
+        # merged later by the adapter (MCP proxy tools).
         functions: list[FunctionDefinition] = list(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
@@ -985,10 +994,8 @@ class ContextBuilder:
         ]
         if extra_tool_dicts:
             tool_dicts.extend(extra_tool_dicts)
-        tokens_used += count_tool_tokens(tool_dicts, model_name)
 
         # Create the necessary parts of the prompt.
-        # Add the tokens used.
         _prompt = _Prompt(
             version=version,
             model_name=model_name,
@@ -1009,7 +1016,20 @@ class ContextBuilder:
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.
         _prompt.add_knowledge_catalog(knowledge_catalog)
-        tokens_used += _prompt.num_tokens
+
+        # The required parts are counted up front so the history and knowledge
+        # budgets shrink accordingly. The current question is sent as a user
+        # message carrying both the text and any attached images, so it is
+        # counted in exactly that shape.
+        if account_tokens:
+            tokens_used += (
+                count_message_tokens(
+                    [{"role": "user", "content": _input_string}], model_name
+                )
+                + _image_files_tokens(current_images, model_name)
+                + count_tool_tokens(tool_dicts, model_name)
+                + _prompt.num_tokens
+            )
 
         # Create the messages. When knowledge chunks are present, reserve 80%
         # for knowledge and cap history to 20%. When there are no chunks the

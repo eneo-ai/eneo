@@ -29,7 +29,7 @@ from eneo.flows.application.flow_trace_audit import (
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
-from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.flow import FlowRunStatusSnapshot
 from eneo.flows.domain.transcript_source import (
     TranscriptComponentOmissions,
     TranscriptSourceBounds,
@@ -300,7 +300,7 @@ async def get_flow_run_transcript_source(
         get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ) -> JSONResponse:
-    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    committed_audit_context: tuple[UserInDB, FlowRunStatusSnapshot] | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
@@ -311,29 +311,30 @@ async def get_flow_run_transcript_source(
                 allow_service_key_principals=True,
                 history=True,
             )
-            run = await container.flow_run_service().get_run(
+            run = await container.flow_run_access_policy().load_run_status(
                 run_id=run_id, flow_id=flow_id, access_kind="content", history=True
             )
-            state = await container.flow_transcript_source_service().get_for_attempt(
-                flow_id=flow_id,
-                run_id=run_id,
-                step_id=step_id,
-                attempt_no=attempt_no,
-                history=True,
+            state = (
+                await container.flow_transcript_source_service().get_page_for_attempt(
+                    run=run,
+                    step_id=step_id,
+                    attempt_no=attempt_no,
+                    start=start_segment_index,
+                    limit=TRANSCRIPT_SOURCE_PAGE_SIZE,
+                )
             )
             identity = TranscriptSourcePageIdentity(
                 run_id=run.id, step_id=step_id, attempt_no=attempt_no
             ).model_dump()
             page: TranscriptSourcePage
             if state.status == "present":
-                source = state.source
+                source = state.page
                 if source.segments is None or source.source_hash is None:
                     raise ValueError(
                         "Present transcript source lacks segments or hash."
                     )
                 end = min(
-                    start_segment_index + TRANSCRIPT_SOURCE_PAGE_SIZE,
-                    len(source.segments),
+                    start_segment_index + TRANSCRIPT_SOURCE_PAGE_SIZE, source.total
                 )
                 page = PresentTranscriptSourcePage(
                     **identity,
@@ -343,14 +344,13 @@ async def get_flow_run_transcript_source(
                     start_segment_index=start_segment_index,
                     page_size=TRANSCRIPT_SOURCE_PAGE_SIZE,
                     max_response_bytes=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
-                    next_segment_index=end if end < len(source.segments) else None,
+                    next_segment_index=end if end < source.total else None,
                     segments=[
                         TranscriptSourceSegmentPublic.model_validate(
                             {**segment, "segment_index": index}
                         )
                         for index, segment in enumerate(
-                            source.segments[start_segment_index:end],
-                            start=start_segment_index,
+                            source.segments, start=start_segment_index
                         )
                     ],
                 )

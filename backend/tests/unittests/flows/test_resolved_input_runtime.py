@@ -388,6 +388,7 @@ def _resolution_deps(
     run_repo.list_retained_input_file_ids.return_value = []
     return StepInputResolutionDeps(
         stage_transcript_source=MagicMock(),
+        stage_run_transcript=MagicMock(),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         variable_resolver=FlowVariableResolver(),
@@ -413,7 +414,60 @@ def _resolution_deps(
             file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
         ),
         logger=MagicMock(),
+        end_read_transaction=AsyncMock(),
     )
+
+
+def test_resolution_deps_require_the_read_transaction_ending() -> None:
+    deps = _resolution_deps()
+    fields = {
+        name: getattr(deps, name)
+        for name in StepInputResolutionDeps.__dataclass_fields__
+        if name != "end_read_transaction"
+    }
+
+    with pytest.raises(TypeError, match="end_read_transaction"):
+        StepInputResolutionDeps(**fields)  # pyright: ignore[reportCallIssue]
+
+
+@pytest.mark.asyncio
+async def test_audio_download_ends_the_read_transaction_after_it_opens() -> None:
+    events: list[str] = []
+    download = MagicMock(aclose=AsyncMock())
+    deps = _resolution_deps()
+
+    async def get_audio_download(file_id):
+        events.append("download")
+        return download
+
+    async def end_read_transaction() -> None:
+        events.append("end read")
+
+    deps.file_service.get_audio_download.side_effect = get_audio_download
+    deps = replace(deps, end_read_transaction=end_read_transaction)
+    file_id = uuid4()
+
+    opened = await step_input_resolution._open_audio_download(deps, file_id)
+
+    assert opened is download
+    assert events == ["download", "end read"]
+    deps.file_service.get_audio_download.assert_awaited_once_with(file_id)
+    download.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_download_is_closed_when_ending_the_read_fails() -> None:
+    download = MagicMock(aclose=AsyncMock())
+    deps = _resolution_deps()
+    deps.file_service.get_audio_download.return_value = download
+    deps = replace(
+        deps, end_read_transaction=AsyncMock(side_effect=RuntimeError("db down"))
+    )
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await step_input_resolution._open_audio_download(deps, uuid4())
+
+    download.aclose.assert_awaited_once_with()
 
 
 def _publish_step(step: RuntimeStep) -> FlowStep:

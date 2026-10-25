@@ -121,7 +121,6 @@ async def _create_flow(client, *, token: str, space_id: str, name: str) -> str:
             "space_id": space_id,
             "name": name,
             "description": "service key integration test flow",
-            "steps": [],
         },
         headers={"Authorization": f"Bearer {token}"},
     )

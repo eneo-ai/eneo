@@ -5,13 +5,15 @@ from dataclasses import dataclass
 from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.flows.flow_run_redaction import redact_string
 from eneo.main.config import get_settings
+from eneo.tasks.contracts import TaskCapacityClass, TaskEnqueueRequest
+from eneo.tasks.routing import FLOW_DRAIN_WEBHOOK_OUTBOX_TASK
 
-# The outbox cron ticks at this cadence (one job at a time), and a job claims
-# new waves only during its first interval.
+# The outbox cron requests an outbox job at this cadence, and a job claims new
+# waves only during its first interval.
 FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS = 30
 FLOW_WEBHOOK_DELIVERY_BATCH_SIZE = 50
-# Bounds simultaneous outbound requests of one outbox job. The cron enqueues the
-# job under one fixed ARQ job id, so one job runs at a time across maintenance
+# Bounds simultaneous outbound requests of one outbox job. Every request for the
+# job carries one fixed task key, so one job runs at a time across maintenance
 # processes.
 #
 # Delivery is at-least-once. A claim whose outcome is unknown when it expires is
@@ -104,6 +106,44 @@ class FlowWebhookDeliveryDeadline:
 def flow_webhook_delivery_budget() -> FlowWebhookDeliveryBudget:
     return FlowWebhookDeliveryBudget(
         max_request_timeout_seconds=get_settings().flow_http_max_timeout_seconds
+    )
+
+
+def flow_webhook_delivery_request() -> TaskEnqueueRequest:
+    """The request for one webhook outbox job.
+
+    A run sends it once its deliveries are committed, and the outbox cron sends
+    it every interval. The task runtime takes no second job under the fixed key
+    while one is queued or running, so concurrent requests share one job; an
+    ended job leaves the key free, so the next request starts a new one."""
+    return TaskEnqueueRequest(
+        task_name=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        capacity_class=TaskCapacityClass.MAINTENANCE,
+        idempotency_key=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+        payload={},
+    )
+
+
+# What a run needs, after its delivery request, to return before its
+# invocation ends.
+FLOW_WEBHOOK_DELIVERY_REQUEST_RETURN_MARGIN_SECONDS = 1.0
+
+
+def flow_webhook_delivery_request_timeout_seconds(
+    *, invocation_remaining_seconds: float | None = None
+) -> float:
+    """How long a run waits for its delivery request: as long as opening a
+    connection to the task broker may take, and never so long that the run's
+    invocation ends first. A broker that holds the request longer neither
+    holds the run's execution slot nor fails its task; at zero or less the run
+    sends no request."""
+    timeout = float(get_settings().redis_conn_timeout)
+    if invocation_remaining_seconds is None:
+        return timeout
+    return min(
+        timeout,
+        invocation_remaining_seconds
+        - FLOW_WEBHOOK_DELIVERY_REQUEST_RETURN_MARGIN_SECONDS,
     )
 
 

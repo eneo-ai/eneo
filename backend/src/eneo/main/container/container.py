@@ -2,7 +2,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
-import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 
 from eneo.actors import ActorFactory, ActorManager
@@ -408,7 +407,7 @@ from eneo.prompts.prompt_factory import PromptFactory
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
-from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.redis.clients import redis_clients
 from eneo.rerank_models.application import RerankModelCRUDService
 from eneo.rerank_models.application.rerank_service import RerankService
 from eneo.rerank_models.domain import RerankModelRepository
@@ -513,16 +512,6 @@ from eneo.worker.task_manager import TaskManager
 from eneo.workflows.step_repo import StepRepository
 
 _logger = get_logger(__name__)
-
-
-def _create_redis_client() -> aioredis.Redis:
-    settings = get_settings()
-    url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
-
-    # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the
-    # call as partially unknown even though the return type is concrete.
-    return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _build_crawl_engine() -> PythonCrawlEngine:
@@ -660,7 +649,9 @@ class Container(containers.DeclarativeContainer):
         _build_encryption_service
     )
 
-    redis_client = providers.Singleton(_create_redis_client)
+    # The process's command client (eneo.redis.clients): every container shares
+    # its pool, and resolving it outside the process's lifetime is refused.
+    redis_client = providers.Callable(redis_clients.commands)
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
@@ -1635,7 +1626,10 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         tool_facts_reader=unattended_tool_facts_reader,
     )
-    flow_run_access_policy = providers.Factory(
+    # One per Container, so the flow gate and every run service of a request
+    # share its memo. A Container is built per request and given its user by
+    # `override_user`: never resolve this before authentication.
+    flow_run_access_policy = providers.Singleton(
         FlowRunAccessPolicy,
         user=user,
         flow_repo=flow_repo,
@@ -1713,7 +1707,6 @@ class Container(containers.DeclarativeContainer):
         FlowTranscriptWordsService,
         user=user,
         transcript_words_repo=flow_transcript_words_repo,
-        access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
         transcript_source_service=flow_transcript_source_service,
     )

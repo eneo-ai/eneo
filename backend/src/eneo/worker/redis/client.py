@@ -9,8 +9,7 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 from eneo.jobs.job_manager import DEFAULT_QUEUE_NAME
-from eneo.main.config import get_settings
-from eneo.redis.connection import build_redis_pool_kwargs, build_redis_url
+from eneo.redis.clients import redis_clients
 from eneo.websites.domain.crawl_schedule import (
     SchedulerRunRecord,
     SchedulerTenantCounts,
@@ -26,30 +25,14 @@ CRAWL_SCHEDULER_RUN_TTL_SECONDS = 7 * 24 * 3600
 _SCHEDULER_RUN_VERSION = 1
 
 
-def _get_redis_connection() -> aioredis.Redis:
-    """Lazy initialization of Redis connection using current settings.
-
-    Honors settings.redis_db to ensure health endpoint reads from the same
-    Redis database as the background workers.
-    """
-    settings = get_settings()
-    redis_url = build_redis_url(settings)
-    redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
-    connection_pool_factory: Any = aioredis.ConnectionPool
-    pool = connection_pool_factory.from_url(redis_url, **redis_kwargs)
-    return aioredis.Redis(connection_pool=pool)
-
-
-# Initialize on first import
-_redis_client: aioredis.Redis | None = None
-
-
 def get_redis() -> aioredis.Redis:
-    """Get Redis client, creating it if needed."""
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = _get_redis_connection()
-    return _redis_client
+    """The process's command client (eneo.redis.clients).
+
+    The same client the containers hand out. Pub/sub listeners hold their
+    connections on the separate subscription client instead. Refused outside
+    the process's lifetime.
+    """
+    return redis_clients.commands()
 
 
 async def mark_crawl_reconciliation_healthy() -> None:
@@ -134,20 +117,15 @@ async def read_crawl_scheduler_run(
     return decode_scheduler_run(raw)
 
 
-def reset_redis_client() -> aioredis.Redis:
-    """Rebuild the Redis singleton from the current settings."""
-    global _redis_client
-    _redis_client = _get_redis_connection()
-    return _redis_client
-
-
 class _RedisClientProxy:
     """Lazy compatibility proxy for modules that import the legacy `r` client.
 
-    Only plain attribute access is forwarded (``r.publish``, ``r.pubsub`` …).
-    Despite the cast below, ``r`` is NOT a real Redis instance: dunder-based
-    protocols and ``isinstance`` checks bypass ``__getattr__`` and will fail.
-    New code should call ``get_redis()`` instead of importing ``r``.
+    Only plain attribute access is forwarded (``r.publish``, ``r.get`` …), to
+    the command client; a pub/sub listener takes
+    ``redis_clients.subscriptions()`` instead. Despite the cast below, ``r`` is
+    NOT a real Redis instance: dunder-based protocols and ``isinstance`` checks
+    bypass ``__getattr__`` and will fail. New code should call ``get_redis()``
+    instead of importing ``r``.
     """
 
     def __getattr__(self, name: str) -> Any:

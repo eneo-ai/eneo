@@ -171,6 +171,7 @@ async def _resolve(
             apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
             commit=AsyncMock(),
             stage_transcript_source=lambda reference, source: staged.append(source),
+            stage_run_transcript=lambda reference, transcript: None,
         ),
     )
     return resolved, staged[0], with_service

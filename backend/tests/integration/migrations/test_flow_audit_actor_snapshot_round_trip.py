@@ -14,6 +14,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -49,12 +50,11 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     conn.autocommit = True
-    command.upgrade(cfg, SNAPSHOT_REVISION)
-    try:
-        yield conn, cfg
-    finally:
-        command.upgrade(cfg, "head")
-        conn.close()
+    with at_revision(cfg, SNAPSHOT_REVISION):
+        try:
+            yield conn, cfg
+        finally:
+            conn.close()
 
 
 def _snapshot_column(conn) -> tuple[str, str] | None:

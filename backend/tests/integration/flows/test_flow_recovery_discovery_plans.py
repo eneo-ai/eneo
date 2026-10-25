@@ -9,8 +9,8 @@ from eneo.database.database import sessionmanager
 from eneo.flows.domain.flow_run_recovery_policy import FlowRunRecoveryKind
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from tests.integration.flows import test_flow_run_abandonment
+from tests.integration.flows.statement_capture_support import capture_queries
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
-    _capture_queries,
     _decode_explain,
 )
 from tests.integration.flows.test_flow_run_repository import (
@@ -116,14 +116,14 @@ async def test_recovery_discovery_plans_bound_parent_reads(approved_wait, tmp_pa
             repo = FlowRunRepository(session=session)
             bind = session.sync_session.bind
             assert bind is not None
-            with _capture_queries(bind) as boundary_queries:
+            with capture_queries(bind) as boundary_queries:
                 boundary = await repo.recovery_sweep_boundary()
             assert boundary is not None
-            with _capture_queries(bind) as first_queries:
+            with capture_queries(bind) as first_queries:
                 first = await repo.list_recovery_candidates(
                     limit=page_size, through=boundary
                 )
-            with _capture_queries(bind) as resumed_queries:
+            with capture_queries(bind) as resumed_queries:
                 resumed = await repo.list_recovery_candidates(
                     limit=page_size, after=first[-1].cursor, through=boundary
                 )

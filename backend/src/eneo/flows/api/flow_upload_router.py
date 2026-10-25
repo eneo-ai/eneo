@@ -201,7 +201,7 @@ async def get_flow_run_contract(
         get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
-    space = await flow_access_context.enforce_flow_scope(
+    access = await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
@@ -210,7 +210,8 @@ async def get_flow_run_contract(
         require_published_for_service_key=True,
     )
     return await container.flow_run_contract_service().get_run_contract(
-        flow_id=id, space=space
+        flow_id=id,
+        space=await container.space_service().get_space(access.flow.space_id),
     )
 
 

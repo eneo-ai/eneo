@@ -13,6 +13,10 @@ Stdlib only (no deps) so it runs on the bare image. Listens on :8200.
 import hashlib
 import json
 import os
+import random
+import threading
+import time
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from workflow_model import response as workflow_response
@@ -23,6 +27,23 @@ PORT = int(os.environ.get("MOCK_PORT", "8200"))
 # Vector size for a request without `dimensions`; the seeded embedding model
 # sends none (e2e/seed.py).
 EMBEDDING_DIMENSIONS = int(os.environ.get("MOCK_EMBEDDING_DIMENSIONS", "32"))
+# Scale-test knobs (e2e/scale); the defaults keep the E2E behaviour.
+LATENCY_MS = int(os.environ.get("MOCK_LATENCY_MS", "0"))
+LATENCY_JITTER_MS = int(os.environ.get("MOCK_LATENCY_JITTER_MS", "0"))
+TRANSCRIPT_WORDS = int(os.environ.get("MOCK_TRANSCRIPT_WORDS", "200"))
+STATS: Counter = Counter()
+STATS_LOCK = threading.Lock()
+
+
+def _count(path: str) -> None:
+    with STATS_LOCK:
+        STATS[path.split("?", 1)[0]] += 1
+
+
+def _delay() -> None:
+    # Runs in the handler's own thread, so other requests are not held up.
+    if LATENCY_MS or LATENCY_JITTER_MS:
+        time.sleep((LATENCY_MS + random.uniform(0, LATENCY_JITTER_MS)) / 1000)
 
 
 def _chunk(delta: dict, finish_reason=None) -> bytes:
@@ -62,6 +83,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path.startswith("/stats"):
+            with STATS_LOCK:
+                counts = dict(STATS)
+                if "reset" in self.path:
+                    STATS.clear()
+            self._json(200, counts)
+            return
+        _count(self.path)
         # Health + a stub /models so any litellm preflight is happy.
         self._json(
             200, {"status": "ok"} if self.path.endswith("/health") else {"data": []}
@@ -70,6 +99,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b"{}"
+        _count(self.path)
+        _delay()
+        if self.path.endswith("/audio/transcriptions"):
+            words = " ".join(f"word{i}" for i in range(TRANSCRIPT_WORDS))
+            self._json(200, {"text": words})
+            return
         try:
             req = json.loads(body or b"{}")
         except json.JSONDecodeError:

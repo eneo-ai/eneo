@@ -15,6 +15,7 @@ import type { FlowPublic } from "../flows-api";
 import { EvidenceOmissions } from "./run-evidence-counters";
 import { RunEvidenceExport } from "./run-evidence-export";
 import type { RunStepView } from "./run-progress";
+import { isTerminal } from "./run-status";
 import { stepTitle } from "./run-steps";
 import { RunTraceAttempts } from "./run-trace-attempts";
 import { RunTraceProviderCalls } from "./run-trace-provider-calls";
@@ -42,7 +43,8 @@ function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string
   const t = useTranslations();
   const { copy, isCopied } = useClipboard({ announce: t("flow_run_extras_debug_copied") });
   const debug = evidence.debug_export;
-  const text = JSON.stringify(debug, null, 2);
+  // Written out when asked for: the export can be large, and a render need not pay for it.
+  const text = () => JSON.stringify(debug, null, 2);
   return (
     <div className="flex flex-col items-start gap-2">
       <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_debug_hint")}</p>
@@ -51,7 +53,7 @@ function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string
           label={isCopied ? t("copied") : t("flow_run_extras_debug_copy")}
           icon={isCopied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           onClick={async () => {
-            if (!(await copy(text))) toast.error(t("chat_copy_failed"));
+            if (!(await copy(text()))) toast.error(t("chat_copy_failed"));
           }}
         />
         <Button
@@ -59,7 +61,7 @@ function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string
           icon={<Download aria-hidden="true" />}
           onClick={() =>
             saveBlob(
-              new Blob([text], { type: "application/json" }),
+              new Blob([text()], { type: "application/json" }),
               `flow-debug-export-${debug.run.run_id || runId}.json`
             )
           }
@@ -134,7 +136,7 @@ export function RunTrace({
   const headingId = useId();
   const [requested, setRequested] = useState(false);
   const evidence = useQuery({
-    ...runEvidenceQueryOptions(flow.id, summary.id),
+    ...runEvidenceQueryOptions(flow.id, summary.id, isTerminal(summary.status)),
     enabled: requested
   });
 

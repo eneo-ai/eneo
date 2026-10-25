@@ -16,6 +16,7 @@ compose file) the key stays plaintext, which the backend then reads as-is.
 """
 
 import asyncio
+import os
 from uuid import UUID
 
 from pydantic import TypeAdapter, ValidationError
@@ -23,7 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+from eneo.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+    TranscriptionModels,
+)
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.tenant_table import Tenants
@@ -34,7 +39,9 @@ from eneo.server.dependencies.predefined_roles import (
 from eneo.settings.encryption_service import EncryptionService
 
 MOCK_ENDPOINT = "http://e2e-mock-model:8200/v1"
-TENANT_NAME = "E2ETenant"
+TENANT_NAME = os.environ.get("E2E_TENANT_NAME", "E2ETenant")
+# Opt-in (e2e/scale): a default transcription model on the mock, by this name.
+TRANSCRIPTION_MODEL_NAME = os.environ.get("E2E_TRANSCRIPTION_MODEL")
 PROVIDER_NAME = "E2E Mock Provider"
 # A dummy: the mock accepts any key.
 API_KEY = "test-key"
@@ -150,7 +157,9 @@ async def main() -> None:
             done.append("encrypted the E2E mock provider's key")
         provider_id = provider.id
 
-        async def add_if_missing(model: CompletionModels | EmbeddingModels, kind: str):
+        async def add_if_missing(
+            model: CompletionModels | EmbeddingModels | TranscriptionModels, kind: str
+        ):
             table = type(model)
             existing = await session.execute(
                 select(table.id).where(
@@ -206,6 +215,25 @@ async def main() -> None:
             ),
             "default embedding model",
         )
+        if TRANSCRIPTION_MODEL_NAME:
+            await add_if_missing(
+                TranscriptionModels(
+                    name=TRANSCRIPTION_MODEL_NAME,
+                    model_name=TRANSCRIPTION_MODEL_NAME,
+                    nickname="E2E Mock Transcription",
+                    open_source=False,
+                    family="openai",
+                    stability="stable",
+                    hosting="usa",
+                    org="OpenAI",
+                    base_url=MOCK_ENDPOINT,
+                    tenant_id=tenant_id,
+                    provider_id=provider_id,
+                    is_enabled=True,
+                    is_default=True,
+                ),
+                "default transcription model",
+            )
 
     for item in done:
         print(f"[seed] {item}", flush=True)

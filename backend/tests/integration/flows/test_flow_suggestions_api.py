@@ -69,7 +69,7 @@ async def _tracer(client, db_container, admin_user, *, prompt: str) -> Tracer:
         }
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Dubbel läsning", description=None, steps=[]
+            space_id=space_id, name="Dubbel läsning", description=None
         )
         steps: list[FlowStep] = []
         for order, text in ((1, "Läs brevet."), (2, prompt)):
@@ -253,7 +253,7 @@ async def _seeded(client, db_container, admin_user, specs: list[StepSpec]) -> Tr
         }
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Förslag", description=None, steps=[]
+            space_id=space_id, name="Förslag", description=None
         )
         steps: list[FlowStep] = []
         for order, spec in enumerate(specs, start=1):

@@ -76,8 +76,10 @@ class FlowSuggestionEvidenceRepository:
         self, *, flow_id: UUID, tenant_id: UUID, limit: int
     ) -> list[FlowRunStatusSnapshot]:
         """The flow's last ``limit`` finished runs (``COUNTED_RUN_STATUSES``)
-        in which at least one step ran, newest first, as the status
-        snapshots the run access policy judges."""
+        in which at least one step ran, the latest started first, as the
+        status snapshots the run access policy judges. The order is the run
+        list's by start time, so ``ix_flow_runs_flow_listing`` serves
+        it: a read of N runs walks N entries, whatever the flow's history."""
         if limit <= 0:
             return []
         step_ran = (
@@ -92,7 +94,11 @@ class FlowSuggestionEvidenceRepository:
             .where(FlowRuns.flow_id == flow_id)
             .where(FlowRuns.status.in_(COUNTED_RUN_STATUSES))
             .where(step_ran)
-            .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
+            .order_by(
+                sa.func.coalesce(FlowRuns.started_at, FlowRuns.created_at).desc(),
+                FlowRuns.created_at.desc(),
+                FlowRuns.id.desc(),
+            )
             .limit(limit)
         )
         rows = (await self.session.execute(stmt)).mappings().all()

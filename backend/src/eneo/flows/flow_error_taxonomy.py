@@ -327,9 +327,15 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT: _entry(
         category="Run input",
         surfaced_through="API error response",
-        cause="The retry key was reused with different run input.",
-        consumer_action="Retry with the original payload or choose a new idempotency key.",
-        user_action="Start a new run or retry the exact original request.",
+        cause=(
+            "The idempotency key was already used for a different request: other "
+            "run input, or another review checkpoint of the run."
+        ),
+        consumer_action=(
+            "Send the new request with a new idempotency key; the original request "
+            "with its own key returns its first result."
+        ),
+        user_action="Reload the page and try again.",
     ),
     FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED: _entry(
         category="Run input",
@@ -635,6 +641,17 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "eligible failed run or creating a new run; escalate recurring stalls."
         ),
         user_action="Check the run history or contact support before starting another run.",
+    ),
+    FlowApiErrorCode.RUN_WORKER_SHUTDOWN: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker shut down while the run was executing, so the run failed at once.",
+        # Not requeued: a step that was executing may already have had effects.
+        consumer_action=(
+            "Inspect earlier external effects, then retry the failed run from its "
+            "failed step where eligible or start a new run; nothing is requeued."
+        ),
+        user_action="Check the run's steps before you retry it or start a new run.",
     ),
     FlowApiErrorCode.RUN_ABANDONED: _entry(
         category="Run lifecycle",
@@ -1076,6 +1093,23 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "step's time budget or reduce the input."
         ),
     ),
+    FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause=(
+            "The step's timeout_seconds is above the organisation's maximum step "
+            "timeout, so the save or publish is refused or the run does not start "
+            "the step."
+        ),
+        consumer_action=(
+            "Lower the step's timeout_seconds to the maximum the message names and "
+            "save again; after a failed run, publish again and start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to lower the step's time limit, or an administrator "
+            "to raise the maximum."
+        ),
+    ),
     FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
@@ -1106,9 +1140,9 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED: _entry(
         category="Typed input/output",
-        surfaced_through="Run error payload",
-        cause="A step's input or output, or its tool call's arguments, could not be checked against its contract in time, which a larger value or more work per item reaches sooner, or at all.",
-        consumer_action="Send a smaller value or simplify the contract, then start a new run.",
+        surfaced_through="API response and run error payload",
+        cause="A step's input or output, its tool call's arguments, or a review edit could not be checked against its contract in time, or at all.",
+        consumer_action="Send a smaller value or simplify the contract, then retry the review edit or start a new run.",
         user_action="Ask a flow editor to simplify the step's format, or use less material.",
     ),
     FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED: _entry(

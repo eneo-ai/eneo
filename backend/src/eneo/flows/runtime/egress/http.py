@@ -23,6 +23,7 @@ import ssl
 from collections.abc import Callable, Iterable
 from typing import Protocol, cast
 
+import certifi
 import httpcore
 import httpx
 
@@ -31,17 +32,19 @@ from eneo.flows.runtime.egress.policy import (
     DestinationRefused,
     FlowDestinationPolicy,
     Resolver,
+    connect_to_first_answering,
     vet_destination,
 )
 from eneo.flows.runtime.egress.resolver import flow_name_resolver
 
 logger = logging.getLogger(__name__)
 
-# More attempts would only spend the shared deadline on hosts that are down.
-MAX_CONNECT_ATTEMPTS = 3
-
 _PROXY_ENVIRONMENT_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
 _proxy_environment_warned = False
+# What httpx.create_ssl_context(trust_env=True) reads from the environment,
+# ssl.create_default_context's SSLKEYLOGFILE included.
+_TRUST_ENVIRONMENT_VARIABLES = ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE")
+_default_context_cache: tuple[tuple[object, ...], ssl.SSLContext] | None = None
 
 
 class VettedNetworkBackend(httpcore.AsyncNetworkBackend):
@@ -87,24 +90,20 @@ class VettedNetworkBackend(httpcore.AsyncNetworkBackend):
             raise httpcore.ConnectTimeout(
                 f"Resolving {host} exceeded the connect timeout"
             ) from exc
-        attempts = addresses[:MAX_CONNECT_ATTEMPTS]
-        failure: httpcore.ConnectError | httpcore.ConnectTimeout | None = None
-        for index, address in enumerate(attempts):
-            budget = deadline.share(len(attempts) - index)
-            if budget is not None and budget <= 0:
-                break
-            try:
-                return await self._connector.connect_tcp(
-                    str(address),
-                    port,
-                    timeout=budget,
-                    local_address=local_address,
-                    socket_options=socket_options,
-                )
-            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
-                failure = exc
-        raise failure or httpcore.ConnectTimeout(
-            f"Connecting to {host} exceeded the connect timeout"
+        return await connect_to_first_answering(
+            addresses,
+            deadline=deadline,
+            connect=lambda address, budget: self._connector.connect_tcp(
+                str(address),
+                port,
+                timeout=budget,
+                local_address=local_address,
+                socket_options=socket_options,
+            ),
+            retry_on=(httpcore.ConnectError, httpcore.ConnectTimeout),
+            timed_out=lambda: httpcore.ConnectTimeout(
+                f"Connecting to {host} exceeded the connect timeout"
+            ),
         )
 
     async def connect_unix_socket(
@@ -225,9 +224,10 @@ def _vetted_client(
     return httpx.AsyncClient(
         transport=VettedAsyncTransport(
             policy=policy,
-            # trust_env=True keeps SSL_CERT_FILE / SSL_CERT_DIR (an enterprise CA
-            # bundle); trust_env=False below is about proxies, not trust anchors.
-            ssl_context=ssl_context or httpx.create_ssl_context(trust_env=True),
+            # The default context trusts SSL_CERT_FILE / SSL_CERT_DIR (an
+            # enterprise CA bundle); trust_env=False below is about proxies, not
+            # trust anchors.
+            ssl_context=ssl_context or _default_ssl_context(),
             resolver=resolver,
             connector=connector,
             on_refused=on_refused,
@@ -236,6 +236,50 @@ def _vetted_client(
         timeout=timeout,
         follow_redirects=False,
         trust_env=False,
+    )
+
+
+def _default_ssl_context() -> ssl.SSLContext:
+    """``httpx.create_ssl_context(trust_env=True)``. One loaded from a bundle
+    (SSL_CERT_FILE, else certifi's) costs milliseconds of CPU, so clients share
+    it until what it reads changes: a client after a change of SSL_CERT_FILE, or
+    a replacement of the bundle, trusts the new anchors. One for SSL_CERT_DIR
+    reads its directories lazily, at each handshake, so it is cheap and built
+    for every client, as before.
+
+    The clients can share one: httpcore's only change to it, at each
+    connection, sets the same ALPN list (HTTP/1.1; the vetted pool has no
+    HTTP/2).
+    """
+    global _default_context_cache
+    certificate_file = os.environ.get("SSL_CERT_FILE")
+    if not certificate_file and os.environ.get("SSL_CERT_DIR"):
+        return httpx.create_ssl_context(trust_env=True)
+    # Read before the build, so a change during the build rebuilds next time.
+    configuration = _trust_configuration(certificate_file or certifi.where())
+    if _default_context_cache is None or _default_context_cache[0] != configuration:
+        _default_context_cache = (
+            configuration,
+            httpx.create_ssl_context(trust_env=True),
+        )
+    return _default_context_cache[1]
+
+
+def _trust_configuration(bundle: str) -> tuple[object, ...]:
+    environment = tuple(os.environ.get(name) for name in _TRUST_ENVIRONMENT_VARIABLES)
+    try:
+        status = os.stat(bundle)
+    except OSError:
+        # A missing bundle: building raises, as before.
+        return (*environment, bundle, None)
+    return (
+        *environment,
+        bundle,
+        status.st_dev,
+        status.st_ino,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
     )
 
 

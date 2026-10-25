@@ -2,7 +2,9 @@
 
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { executionLimitsQueryOptions } from "./editor-api";
 import { Anchor, EditorSection, problemStatus } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import { isJsonObject, type JsonObject, type StepConfig } from "./step-types";
@@ -49,6 +51,7 @@ export function StepAdvancedSection({
   problems: FieldProblems;
 }) {
   const t = useTranslations();
+  const limits = useQuery(executionLimitsQueryOptions()).data;
   function contractField(field: ContractField, label: string, description: string) {
     const text = drafts[field] ?? contractText(draft[field]);
     const parsed = parseContract(text);
@@ -86,7 +89,14 @@ export function StepAdvancedSection({
       <Anchor formId={formId} anchor="timeout_seconds">
         <NumberInput
           label={t("flow_step_editor_timeout")}
-          description={t("flow_step_editor_timeout_description")}
+          description={[
+            t("flow_step_editor_timeout_description"),
+            limits
+              ? t("flow_step_editor_timeout_max", { max: limits.max_step_timeout_seconds })
+              : null
+          ]
+            .filter(Boolean)
+            .join(" ")}
           value={draft.timeout_seconds}
           onChange={(value) =>
             onChange({
@@ -95,11 +105,16 @@ export function StepAdvancedSection({
             })
           }
           min={1}
+          max={limits?.max_step_timeout_seconds}
           isIntegerOnly
           hasClear
           isOptional
           units={t("flow_step_editor_seconds_unit")}
-          placeholder={t("flow_step_editor_timeout_default")}
+          placeholder={
+            limits
+              ? String(limits.default_step_timeout_seconds)
+              : t("flow_step_editor_timeout_default")
+          }
           status={problemStatus(problems.timeout_seconds)}
         />
       </Anchor>

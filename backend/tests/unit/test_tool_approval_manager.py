@@ -527,3 +527,23 @@ async def test_malformed_context_payload_returns_not_found():
     assert result.context is None
 
     await manager._delete_state(approval_id)
+
+
+@pytest.mark.asyncio
+async def test_the_shared_manager_uses_the_latest_redis_client(monkeypatch):
+    """Each process lifetime hands over its own client; an earlier one is closed."""
+    monkeypatch.setattr(tool_approval_module, "_approval_manager", None)
+    stopped, current = AsyncMock(), AsyncMock()
+    tool_approval_module.get_approval_manager(redis_client=stopped)
+
+    manager = tool_approval_module.get_approval_manager(redis_client=current)
+    await manager.request_approval(
+        approval_id=str(uuid4()),
+        tool_call_ids=["tool-1"],
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        session_id=uuid4(),
+    )
+
+    current.set.assert_awaited_once()
+    stopped.set.assert_not_awaited()

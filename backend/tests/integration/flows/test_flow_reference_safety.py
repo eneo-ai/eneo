@@ -120,7 +120,9 @@ async def _flow_with_steps(
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name=name, description=None, steps=[]
+            space_id=space_id,
+            name=name,
+            description=None,
         )
         assistants = []
         for index in range(steps + 1):

@@ -213,7 +213,7 @@ describe("StartRunDialog", () => {
         count: 1,
         items: [makeRunSummary({ id: "run-7" })],
         has_more: true,
-        status_counts: {}
+        status_counts: null
       }
     });
     api.routes[DETAIL] = () => ({
@@ -227,7 +227,8 @@ describe("StartRunDialog", () => {
     const list = api.stub.calls.find((call) => `${call.method} ${call.path}` === LIST);
     expect((list?.init as { params?: { query?: unknown } }).params?.query).toEqual({
       limit: 1,
-      mine: true
+      mine: true,
+      include_status_counts: false
     });
     // The run's input is a content read, made only when asked for.
     expect(api.stub.calls.some((call) => `${call.method} ${call.path}` === DETAIL)).toBe(false);

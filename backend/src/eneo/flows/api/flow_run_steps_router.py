@@ -46,7 +46,7 @@ from eneo.flows.application.flow_trace_audit import (
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_contract_service import speakers_identifiable_in_space
+from eneo.flows.flow_run_contract_service import speakers_identifiable
 from eneo.flows.flow_run_input_envelope import read_single_recording_steps
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
@@ -189,7 +189,6 @@ async def list_flow_run_steps(
         get_container_for_explicit_transaction(
             with_user=True,
             with_module_user=True,
-            with_upload_admission=True,
         )
     ),
 ):
@@ -327,11 +326,11 @@ async def get_flow_graph(
         ),
     ),
     container: Container = Depends(
-        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True)
     ),
 ):
     if run_id is not None:
-        space = await flow_access_context.enforce_flow_scope(
+        access = await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
@@ -350,8 +349,11 @@ async def get_flow_graph(
             versioned_view.published_definition.steps,
             versioned_view.step_results,
             wizard_metadata=wizard,
-            speaker_identification_available=speakers_identifiable_in_space(
-                wizard, space
+            speaker_identification_available=await speakers_identifiable(
+                wizard,
+                load_space=lambda: container.space_service().get_transcription_space(
+                    access.actor
+                ),
             ),
             speaker_labels=versioned_view.speaker_labels,
         )
@@ -371,8 +373,11 @@ async def get_flow_graph(
     return build_graph_response(
         published_definition.steps,
         wizard_metadata=wizard,
-        speaker_identification_available=speakers_identifiable_in_space(
-            wizard, published_access.space
+        speaker_identification_available=await speakers_identifiable(
+            wizard,
+            load_space=lambda: container.space_service().get_transcription_space(
+                published_access.actor
+            ),
         ),
     )
 

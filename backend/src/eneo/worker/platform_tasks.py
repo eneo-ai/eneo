@@ -3,9 +3,15 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from arq.worker import func as arq_func
+
+from eneo.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS,
+)
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
     flow_webhook_delivery_budget,
+    flow_webhook_delivery_request,
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
@@ -24,16 +30,18 @@ from eneo.flows.runtime.tasks import (
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.tasks.contracts import TaskEnqueueStatus
 from eneo.tasks.routing import (
     FLOW_DELIVER_AUDIT_OUTBOX_TASK,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     FLOW_DRAIN_RETIRED_RUNS_TASK,
+    FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
     FLOW_EXECUTE_TASK,
     FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
     FLOW_RECONCILE_RUNNING_TASK,
     FLOW_REDISPATCH_STALE_QUEUED_TASK,
 )
-from eneo.worker.worker import ARQContext, Worker
+from eneo.worker.worker import ARQContext, Worker, traced_job
 
 execution_worker = Worker()
 maintenance_worker = Worker()
@@ -105,7 +113,7 @@ async def drain_retired_runs(*, container: Container) -> dict[str, int | str]:
 @maintenance_worker.cron_job(
     manages_own_session=True,
     name=FLOW_DELIVER_AUDIT_OUTBOX_TASK,
-    second=0,
+    second=set(range(0, 60, FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS)),
     keep_result=60,
 )
 async def deliver_audit_outbox(*, container: Container) -> dict[str, int | str]:
@@ -117,22 +125,34 @@ async def deliver_audit_outbox(*, container: Container) -> dict[str, int | str]:
     manages_own_session=True,
     name=FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     second=set(range(0, 60, FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS)),
-    # One webhook job at a time, so jobs that outlast the cadence cannot fill
-    # the maintenance slots: ARQ skips a tick while a job with this id is
-    # queued or running, and a kept result would skip ticks after it ended.
-    job_id=FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
-    keep_result=0,
-    # The job stops itself at its hard stop; ARQ only cancels a job that overruns.
-    timeout=flow_webhook_delivery_budget().job_timeout_seconds,
+    keep_result=60,
 )
 async def deliver_webhook_outbox(*, container: Container) -> dict[str, int | str]:
-    del container
+    """Request the webhook outbox job: recovery for deliveries their run's own
+    request did not reach. Each tick has its own ARQ job id, so a tick that
+    ended never holds back the next one."""
+    result = await container.platform_task_enqueuer().enqueue(
+        flow_webhook_delivery_request()
+    )
+    if result.status is not TaskEnqueueStatus.ACCEPTED:
+        raise RuntimeError(
+            f"{FLOW_DELIVER_WEBHOOK_OUTBOX_TASK} could not request delivery: "
+            f"{result.status.value}"
+        )
+    return {"status": result.status.value}
+
+
+async def drain_webhook_outbox(
+    ctx: ARQContext, payload: object
+) -> dict[str, int | str]:
+    """The webhook outbox job. ``payload`` is its request's empty payload."""
+    del ctx, payload
     return await deliver_flow_webhook_outbox()
 
 
 async def execution_startup(ctx: ARQContext) -> None:
     await execution_worker.on_startup(ctx)
-    execution_heartbeats().start()
+    execution_heartbeats().attach_to_worker()
 
 
 async def execution_shutdown(ctx: ARQContext) -> None:
@@ -167,7 +187,21 @@ class PlatformExecutionWorkerSettings:
 
 class PlatformMaintenanceWorkerSettings:
     settings = get_settings()
-    functions: list[object] = []
+    functions = [
+        arq_func(
+            traced_job("job", drain_webhook_outbox),
+            name=FLOW_DRAIN_WEBHOOK_OUTBOX_TASK,
+            # An ended job keeps nothing under its fixed key, so the next
+            # request starts a new job.
+            keep_result=0,
+            # The job stops itself at its hard stop; ARQ only cancels a job
+            # that overruns.
+            timeout=flow_webhook_delivery_budget().job_timeout_seconds,
+            # One try: a job killed mid-run is recorded as failed when it is
+            # picked up again, and the next request starts a new one.
+            max_tries=1,
+        )
+    ]
     cron_jobs = maintenance_worker.cron_jobs
     redis_settings = maintenance_worker.redis_settings
     on_startup = maintenance_worker.on_startup
@@ -177,10 +211,10 @@ class PlatformMaintenanceWorkerSettings:
     job_deserializer = maintenance_worker.job_deserializer
     job_timeout = settings.task_maintenance_timeout_seconds
     # A job killed mid-run is picked up again when its in-progress marker expires
-    # and, past its one try, recorded as failed with this worker-level value, not
-    # the cron's own keep_result. A kept result under the webhook cron's fixed job
-    # id would skip its ticks until it expired (an hour by default). Nothing reads
-    # these results.
+    # and, past its tries, recorded as failed with this worker-level value, not
+    # the job's own keep_result; so is a job this worker cannot run. A kept
+    # result under the webhook outbox job's fixed key would refuse every request
+    # for it until it expired (an hour by default). Nothing reads these results.
     keep_result = 0
     max_jobs = settings.task_maintenance_max_jobs
     queue_name = settings.task_maintenance_queue

@@ -340,15 +340,21 @@ function StepKnowledgeTrace({
 export function RunKnowledge({
   flowId,
   runId,
-  steps
+  steps,
+  runSettled
 }: {
   flowId: string;
   runId: string;
   steps: readonly RunStepView[];
+  /** The run has ended (`isTerminal`). */
+  runSettled: boolean;
 }) {
   const t = useTranslations();
   const [requested, setRequested] = useState(false);
-  const evidence = useQuery({ ...runEvidenceQueryOptions(flowId, runId), enabled: requested });
+  const evidence = useQuery({
+    ...runEvidenceQueryOptions(flowId, runId, runSettled),
+    enabled: requested
+  });
 
   if (!requested) {
     return (

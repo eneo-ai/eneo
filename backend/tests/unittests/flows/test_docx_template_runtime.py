@@ -79,7 +79,7 @@ async def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_
         ("nasta_steg", "rich", "Nästa steg"),
     ]
 
-    result, _ = await render_docx_template(
+    result, _, _ = await render_docx_template(
         template_bytes=template,
         template_name="example.docx",
         context={
@@ -343,7 +343,7 @@ async def test_inspect_normalizes_corrupt_archives() -> None:
 
 
 async def test_render_writes_markdown_sections_with_the_template_styles() -> None:
-    blob, mimetype = await render_docx_template(
+    blob, mimetype, _ = await render_docx_template(
         template_bytes=_rapport(),
         template_name="mall.docx",
         context={
@@ -394,7 +394,7 @@ async def test_render_keeps_relative_heading_levels_under_the_section_heading() 
         rich=[("avsnitt", "Avsnitt", "x")], heading_level=2
     )
 
-    blob, _ = await render_docx_template(
+    blob, _, _ = await render_docx_template(
         template_bytes=template,
         template_name="mall.docx",
         context={"avsnitt": "# Delrubrik\n\nText\n\n## Underrubrik"},
@@ -429,7 +429,7 @@ async def test_render_text_controls_take_one_line_unless_multiline() -> None:
     multi = document.add_paragraph("Flera: ")
     append_text_control(multi, tag="flera", label="Flera", hint="f", multiline=True)
 
-    blob, _ = await render_docx_template(
+    blob, _, _ = await render_docx_template(
         template_bytes=_bytes(document),
         template_name="mall.docx",
         context={"en": "första\nandra", "flera": "första\nandra"},
@@ -445,7 +445,7 @@ async def test_render_text_controls_take_one_line_unless_multiline() -> None:
 async def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> (
     None
 ):
-    blob, _ = await render_docx_template(
+    blob, _, _ = await render_docx_template(
         template_bytes=_rapport(),
         template_name="mall.docx",
         context={"titel": "T", "datum": "", "sammanfattning": "S", "analys": ""},
@@ -547,14 +547,14 @@ async def test_extract_docx_text_reads_control_content_and_skips_page_furniture(
     document.add_paragraph("Före")
     append_rich_control(document, tag="mitt", label="Mitt", hint="Placeholder")
     document.add_paragraph("Efter")
-    blob, _ = await render_docx_template(
+    blob, _, text = await render_docx_template(
         template_bytes=_bytes(document),
         template_name="mall.docx",
         context={"mitt": "Inuti kontrollen\n\n| A | B |\n|---|---|\n| 1 | 2 |"},
         step_order=1,
     )
 
-    text = extract_docx_text(blob)
+    assert text == extract_docx_text(blob)
 
     assert text.index("Före") < text.index("Inuti kontrollen") < text.index("Efter")
     assert "1" in text and "B" in text

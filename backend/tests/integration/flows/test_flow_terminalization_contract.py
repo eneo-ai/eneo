@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -1069,7 +1069,18 @@ async def test_death_after_claim_before_first_attempt_is_recovered(
                 - timedelta(seconds=181)
             )
         )
-    monkeypatch.setattr(flow_runtime_tasks, "_stale_running_cursor", None)
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_actionable_recovery",
+        flow_runtime_tasks._RecoveryWindow(
+            flow_runtime_tasks._ACTIONABLE_RECOVERY_KINDS
+        ),
+    )
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_review_recovery",
+        flow_runtime_tasks._RecoveryWindow(flow_runtime_tasks._REVIEW_RECOVERY_KINDS),
+    )
     await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants()
     async with sessionmanager.session() as session, session.begin():
         recovered = await FlowRunRepository(session=session).get(
@@ -1096,6 +1107,152 @@ async def test_death_after_claim_before_first_attempt_is_recovered(
             )
             == 1
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_run_is_recovered_ahead_of_older_healthy_reviews_elsewhere(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    from eneo.database.tables.tenant_table import Tenants
+
+    limit, reviews = 100, 150
+    async with sessionmanager.session() as session, session.begin():
+        run, flow, _ = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(execution_heartbeat_at=sa.func.clock_timestamp() - _stale_run_age())
+        )
+        other_tenant_id = await session.scalar(
+            sa.insert(Tenants)
+            .values(name=f"healthy-reviews-{uuid4().hex}", quota_limit=0)
+            .returning(Tenants.id)
+        )
+        # A flow row of its own lets tenant B's runs satisfy the tenant FKs.
+        other_flow_id = await session.scalar(
+            sa.text("""
+                INSERT INTO flows (
+                    name, tenant_id, space_id, created_by_user_id, owner_user_id
+                )
+                SELECT 'Healthy reviews elsewhere', :tenant_id, space_id,
+                    created_by_user_id, owner_user_id
+                FROM flows WHERE id = :flow_id
+                RETURNING id
+            """),
+            {"tenant_id": other_tenant_id, "flow_id": flow.id},
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_versions (
+                    flow_id, version, tenant_id, definition_checksum, definition_json
+                )
+                SELECT :other_flow_id, version, :tenant_id, definition_checksum,
+                    definition_json
+                FROM flow_versions WHERE flow_id = :flow_id AND version = 1
+            """),
+            {
+                "tenant_id": other_tenant_id,
+                "flow_id": flow.id,
+                "other_flow_id": other_flow_id,
+            },
+        )
+        parameters = {
+            "tenant_id": other_tenant_id,
+            "flow_id": other_flow_id,
+            "user_id": admin_user.id,
+            "step_id": flow.steps[0].id,
+            "reviews": reviews,
+        }
+        # Healthy reviews in another tenant, every one older than the stale run.
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_runs (
+                    tenant_id, flow_id, flow_version, principal_user_id, status,
+                    created_at
+                )
+                SELECT :tenant_id, :flow_id, 1, :user_id, 'awaiting_review',
+                    now() - interval '60 days' + n * interval '1 second'
+                FROM generate_series(1, :reviews) series(n)
+            """),
+            parameters,
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_step_attempts (
+                    flow_run_id, flow_id, tenant_id, step_id, step_order,
+                    attempt_no, status, started_at, finished_at
+                )
+                SELECT id, flow_id, tenant_id, :step_id, 1, 1, 'completed', now(), now()
+                FROM flow_runs WHERE tenant_id = :tenant_id
+            """),
+            parameters,
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_run_review_checkpoints (
+                    flow_run_id, flow_id, tenant_id, step_id, step_order, attempt_no,
+                    review_mode, output_type, requester_principal_type,
+                    requester_user_id, expires_at
+                )
+                SELECT id, flow_id, tenant_id, :step_id, 1, 1,
+                    'view', 'json', 'user', principal_user_id, now() + interval '14 days'
+                FROM flow_runs WHERE tenant_id = :tenant_id
+            """),
+            parameters,
+        )
+        assert (
+            await FlowRunRepository(session=session).count_active_runs(
+                tenant_id=run.tenant_id
+            )
+            == 1
+        )
+
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_actionable_recovery",
+        flow_runtime_tasks._RecoveryWindow(
+            flow_runtime_tasks._ACTIONABLE_RECOVERY_KINDS
+        ),
+    )
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_review_recovery",
+        flow_runtime_tasks._RecoveryWindow(flow_runtime_tasks._REVIEW_RECOVERY_KINDS),
+    )
+    result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=limit
+    )
+
+    assert result["reconciled"] == 1
+    assert result["review_checkpoint_invariant_violations"] == 0
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        recovered = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
+        assert recovered.status == FlowRunStatus.FAILED
+        assert recovered.error.code == FlowApiErrorCode.RUN_WORKER_STALLED
+        # The stale run no longer holds the tenant's active-run capacity.
+        assert await repo.count_active_runs(tenant_id=run.tenant_id) == 0
+
+    # Review inspection keeps its own paging and advances across ticks.
+    first_review_cursor = flow_runtime_tasks._review_recovery.cursor
+    assert first_review_cursor is not None
+    second = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=limit
+    )
+    assert second["reconciled"] == second["abandoned"] == 0
+    assert flow_runtime_tasks._review_recovery.cursor > first_review_cursor
 
 
 @pytest.mark.asyncio
@@ -1223,7 +1380,12 @@ async def test_renewal_and_two_recoveries_have_one_terminal_owner(
             )
 
     renewed, first, second = await asyncio.gather(renew(), recover(), recover())
-    assert renewed == (set() if expired else {owner})
+    if expired:
+        assert renewed == set()
+    else:
+        # A recovery that holds the row while the renewal runs is skipped, not
+        # waited for; the heartbeat's next cycle renews the lease.
+        assert renewed <= {owner}
     assert sum(result.did_transition for result in (first, second)) == int(expired)
     async with sessionmanager.session() as session, session.begin():
         assert await session.scalar(
@@ -1231,6 +1393,347 @@ async def test_renewal_and_two_recoveries_have_one_terminal_owner(
             .select_from(FlowRunAuditOutbox)
             .where(FlowRunAuditOutbox.flow_run_id == run.id)
         ) == int(expired)
+
+
+async def _running_runs(
+    count: int = 2,
+    *,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+
+    async with sessionmanager.session() as session, session.begin():
+        first, flow, repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            start_attempt=False,
+        )
+        runs = [first]
+        for _ in range(count - 1):
+            run = await repo.create(
+                flow_id=flow.id,
+                flow_version=1,
+                principal_user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                input_payload_json={"question": "What happened next?"},
+                preseed_steps=[
+                    {
+                        "step_id": step.id,
+                        "assistant_id": step.assistant_id,
+                        "step_order": step.step_order,
+                    }
+                    for step in flow.steps
+                ],
+            )
+            assert await repo.mark_running_if_claimable(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                expected_revision=run.revision,
+            )
+            runs.append(run)
+    return tuple(
+        FlowRunExecutionOwner(run.id, run.tenant_id, run.revision) for run in runs
+    )
+
+
+@asynccontextmanager
+async def _row_held(run_id: UUID, *, lock: str = "update") -> AsyncIterator[None]:
+    """Hold the run's row until the block ends, as a fenced write does
+    (FOR UPDATE) or a child row's foreign key check (FOR KEY SHARE)."""
+    statement = sa.select(FlowRuns.id).where(FlowRuns.id == run_id)
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            statement.with_for_update(read=True, key_share=True)
+            if lock == "key_share"
+            else statement.with_for_update()
+        )
+        yield
+
+
+async def _heartbeat_at(run_id: UUID) -> datetime:
+    async with sessionmanager.session() as session, session.begin():
+        return await session.scalar(
+            sa.select(FlowRuns.execution_heartbeat_at).where(FlowRuns.id == run_id)
+        )
+
+
+async def _age_heartbeat(run_id: UUID, *, seconds: float) -> datetime:
+    async with sessionmanager.session() as session, session.begin():
+        return await session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp()
+                - timedelta(seconds=seconds),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns.execution_heartbeat_at)
+        )
+
+
+async def _fenced_write_wait(owner) -> float:
+    """Seconds a fenced write of the run waits for its row."""
+    loop = asyncio.get_running_loop()
+    async with sessionmanager.session() as session, session.begin():
+        started = loop.time()
+        await FlowRunRepository(session=session).lock_execution_ownership(
+            run_id=owner.run_id, tenant_id=owner.tenant_id, owner=owner
+        )
+        return loop.time() - started
+
+
+class _WorkerClock:
+    """Stands in for the monotonic clock the worker's heartbeats run on."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("lock", "renews_held"), [("update", False), ("key_share", True)]
+)
+async def test_renewal_skips_a_held_run_row_without_waiting(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    lock,
+    renews_held,
+):
+    held, free = await _running_runs(
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+
+    async with _row_held(held.run_id, lock=lock):
+        async with sessionmanager.session() as session, session.begin():
+            repo = FlowRunRepository(session=session)
+            renewed = await asyncio.wait_for(
+                repo.renew_execution_heartbeats(owners=[held, free]), 2
+            )
+            # A child row's key check does not make the row look held.
+            assert renewed == ({held, free} if renews_held else {free})
+            # The committed row says the skipped run's lease still stands.
+            assert await repo.has_execution_ownership(owner=held)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_held_run_row_does_not_stop_the_other_runs_on_the_worker(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS,
+    )
+    from eneo.flows.runtime import execution_heartbeat as heartbeat
+
+    held, free = await _running_runs(
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    clock = _WorkerClock()
+    monkeypatch.setattr(heartbeat, "time", clock)
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=2)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    release = asyncio.Event()
+    tracking = asyncio.Barrier(3)
+
+    async def job(owner):
+        async with manager.track(owner):
+            await tracking.wait()
+            await release.wait()
+
+    jobs = {owner: asyncio.create_task(job(owner)) for owner in (held, free)}
+    await tracking.wait()
+    loop = asyncio.get_running_loop()
+
+    async def timed_renewal() -> float:
+        started = loop.time()
+        await manager.renew()
+        return loop.time() - started
+
+    try:
+        for cycle in range(1, 6):
+            clock.now += FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS
+            # The held run's committed lease ages as the worker's clock does.
+            held_at = await _age_heartbeat(
+                held.run_id, seconds=cycle * FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS
+            )
+            free_at = await _heartbeat_at(free.run_id)
+            async with _row_held(held.run_id):
+                renewal = asyncio.create_task(timed_renewal())
+                # By now a renewal that waits for the held row would hold the
+                # free one too: the free run's fenced writes must not wait.
+                await asyncio.sleep(0.2)
+                assert await asyncio.wait_for(_fenced_write_wait(free), 2) < 1
+                assert await renewal < 1
+                if cycle < 5:
+                    assert not any(task.done() for task in jobs.values())
+                else:
+                    # Its lease could expire before the next renewal lands: it
+                    # stops while the lease still stands, so before any
+                    # recovery could end the run.
+                    with pytest.raises(heartbeat.FlowExecutionOwnershipLost):
+                        await jobs[held]
+                    async with sessionmanager.session() as session, session.begin():
+                        repo = FlowRunRepository(session=session)
+                        assert await repo.has_execution_ownership(owner=held)
+                        assert held.run_id not in {
+                            row.id
+                            for row in await repo.list_recovery_candidates(
+                                tenant_id=held.tenant_id
+                            )
+                        }
+            assert await _heartbeat_at(held.run_id) == held_at
+            assert await _heartbeat_at(free.run_id) > free_at
+            assert not jobs[free].done()
+        release.set()
+        await jobs[free]
+    finally:
+        release.set()
+        await manager.stop()
+        await asyncio.gather(*jobs.values(), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("change", ["revision", "status", "expired_lease"])
+async def test_a_held_run_whose_ownership_changed_stops_at_once(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    change,
+):
+    from eneo.flows.runtime import execution_heartbeat as heartbeat
+
+    held, free = await _running_runs(
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=2)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    release = asyncio.Event()
+    tracking = asyncio.Barrier(3)
+
+    async def job(owner):
+        async with manager.track(owner):
+            await tracking.wait()
+            await release.wait()
+
+    jobs = {owner: asyncio.create_task(job(owner)) for owner in (held, free)}
+    await tracking.wait()
+    values = {
+        "revision": {"revision": FlowRuns.revision + 1},
+        "status": {"status": FlowRunStatus.CANCELLED.value},
+        "expired_lease": {
+            "execution_heartbeat_at": sa.func.clock_timestamp() - timedelta(seconds=181)
+        },
+    }[change]
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowRuns).where(FlowRuns.id == held.run_id).values(**values)
+        )
+
+    try:
+        free_at = await _heartbeat_at(free.run_id)
+        async with _row_held(held.run_id):
+            await asyncio.wait_for(manager.renew(), 2)
+        # Skipped as held, and the committed row says it is no longer owned.
+        with pytest.raises(heartbeat.FlowExecutionOwnershipLost):
+            await jobs[held]
+        assert not jobs[free].done()
+        assert await _heartbeat_at(free.run_id) > free_at
+    finally:
+        release.set()
+        await manager.stop()
+        await asyncio.gather(*jobs.values(), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_one_renewal_tells_a_held_run_from_a_lost_one(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    """In one cycle: a held run still owned keeps running, a run whose
+    revision changed stops at once, and a healthy run is renewed."""
+    from eneo.flows.runtime import execution_heartbeat as heartbeat
+
+    held, healthy, lost = await _running_runs(
+        3,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=3)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    release = asyncio.Event()
+    tracking = asyncio.Barrier(4)
+
+    async def job(owner):
+        async with manager.track(owner):
+            await tracking.wait()
+            await release.wait()
+
+    jobs = {owner: asyncio.create_task(job(owner)) for owner in (held, healthy, lost)}
+    await tracking.wait()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == lost.run_id)
+            .values(revision=FlowRuns.revision + 1)
+        )
+
+    try:
+        held_at = await _heartbeat_at(held.run_id)
+        healthy_at = await _heartbeat_at(healthy.run_id)
+        async with _row_held(held.run_id):
+            await asyncio.wait_for(manager.renew(), 2)
+            # Stopped from the committed row alone, while the hold goes on.
+            with pytest.raises(heartbeat.FlowExecutionOwnershipLost):
+                await asyncio.wait_for(jobs[lost], 2)
+            assert not jobs[held].done()
+            assert not jobs[healthy].done()
+        assert await _heartbeat_at(held.run_id) == held_at
+        assert await _heartbeat_at(healthy.run_id) > healthy_at
+        await asyncio.sleep(0)
+        assert not jobs[held].done()
+        assert not jobs[healthy].done()
+    finally:
+        release.set()
+        await manager.stop()
+        await asyncio.gather(*jobs.values(), return_exceptions=True)
 
 
 @pytest.mark.asyncio

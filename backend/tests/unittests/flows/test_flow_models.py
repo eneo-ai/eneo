@@ -155,7 +155,6 @@ def _flow_create_payload(**overrides: object) -> dict[str, object]:
         "space_id": str(uuid4()),
         "name": "Flow",
         "description": "Flow description",
-        "steps": [_payload()],
     }
     payload.update(overrides)
     return payload
@@ -351,10 +350,7 @@ def test_flow_request_shell_models_keep_nested_maps_open() -> None:
         )
     )
     flow_request = FlowCreateRequest.model_validate(
-        _flow_create_payload(
-            metadata_json={"wizard": {"transcription_enabled": True}},
-            steps=[step_request.model_dump(mode="json")],
-        )
+        _flow_create_payload(metadata_json={"wizard": {"transcription_enabled": True}})
     )
     update_request = FlowUpdateRequest.model_validate(
         {"metadata_json": {"wizard": {"transcription_enabled": True}}}

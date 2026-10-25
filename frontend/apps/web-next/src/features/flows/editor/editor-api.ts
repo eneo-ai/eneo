@@ -58,8 +58,10 @@ export async function unwrapFlow<T>(
 }
 
 export const flowEditorKeys = {
+  /** Every step assistant of the flow: what a new draft revision reads again. */
+  assistants: (flowId: string) => ["flows", flowId, "assistants"] as const,
   assistant: (flowId: string, assistantId: string) =>
-    ["flows", flowId, "assistants", assistantId] as const,
+    [...flowEditorKeys.assistants(flowId), assistantId] as const,
   toolOptions: (flowId: string) => ["flows", flowId, "tool-options"] as const,
   templateFiles: (flowId: string) => ["flows", flowId, "template-files"] as const,
   templateInspection: (flowId: string, assetId: string) =>
@@ -68,9 +70,30 @@ export const flowEditorKeys = {
     ["flows", flowId, "classification-preview", request] as const,
   insertionKinds: (flowId: string, revision: number, position: number) =>
     ["flows", flowId, "step-kinds", revision, "insertion", position] as const,
-  securityClassifications: () => ["security-classifications"] as const
+  securityClassifications: () => ["security-classifications"] as const,
+  executionLimits: () => ["flows", "execution-limits"] as const
 };
 
+/**
+ * The organisation's step time limit (default and ceiling), as a run applies
+ * it. Anyone who may edit flows may read it; if the request fails the editor
+ * shows the control without them.
+ */
+export function executionLimitsQueryOptions() {
+  return queryOptions({
+    queryKey: flowEditorKeys.executionLimits(),
+    queryFn: (): Promise<components["schemas"]["FlowExecutionLimitsPublic"]> =>
+      unwrap(browserApi.GET("/api/v1/flows/execution-limits/")),
+    retry: false,
+    staleTime: 5 * 60_000
+  });
+}
+
+/**
+ * A step assistant, read again when the flow's draft revision moves (the
+ * flow page invalidates them all): a save can rewrite its prompt, but time
+ * alone does not. Not retried: a refusal would only be repeated.
+ */
 export function flowAssistantQueryOptions(flowId: string, assistantId: string) {
   return queryOptions({
     queryKey: flowEditorKeys.assistant(flowId, assistantId),
@@ -79,7 +102,9 @@ export function flowAssistantQueryOptions(flowId: string, assistantId: string) {
         browserApi.GET("/api/v1/flows/{id}/assistants/{assistant_id}/", {
           params: { path: { id: flowId, assistant_id: assistantId } }
         })
-      )
+      ),
+    retry: false,
+    staleTime: Infinity
   });
 }
 

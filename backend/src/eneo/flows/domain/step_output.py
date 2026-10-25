@@ -94,7 +94,12 @@ class StepOutputAbortedException(TypedIOValidationException):
 
 
 def utf8_prefix(text: str, *, max_bytes: int) -> str:
-    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
+    encoded = text.encode("utf-8")
+    limit = max(0, max_bytes)
+    if len(encoded) <= limit:
+        # The text itself, not a decoded copy of it.
+        return text
+    return encoded[:limit].decode("utf-8", errors="ignore")
 
 
 def build_rejected_output_payload(

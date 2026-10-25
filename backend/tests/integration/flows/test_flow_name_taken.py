@@ -34,7 +34,7 @@ async def _create(
 ) -> Response:
     return await client.post(
         "/api/v1/flows/",
-        json={"space_id": space_id, "name": name, "steps": []},
+        json={"space_id": space_id, "name": name},
         headers=headers,
     )
 

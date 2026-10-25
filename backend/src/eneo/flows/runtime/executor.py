@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
@@ -20,7 +21,6 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.audit.domain.outcome import Outcome
 from eneo.completion_models.infrastructure.completion_service import CompletionService
-from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
@@ -29,6 +29,10 @@ from eneo.files.file_service import FileService
 from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
+)
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    flow_webhook_delivery_request,
+    flow_webhook_delivery_request_timeout_seconds,
 )
 from eneo.flows.assistant_execution_snapshot import (
     AssistantExecutionSnapshotV2,
@@ -157,6 +161,7 @@ from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.infrastructure.session_writes import TransactionWrites
 from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
@@ -242,6 +247,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     execution_hash,
     prepare_step_execution,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+    rejected_output_of,
+)
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
 from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
@@ -317,6 +327,7 @@ from eneo.object_content.content import ObjectContentIntegrityError
 from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
+from eneo.tasks.contracts import TaskEnqueuer, TaskEnqueueStatus
 
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
@@ -358,6 +369,17 @@ class _ToolPreflight:
     # By step order, the level the answer of each completed tool step was
     # counted at when it was read.
     recorded_levels: Mapping[int, int | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingTranscript:
+    """What an attempt's transcription leaves for its activation to publish:
+    the transcript source and, while the latest transcript is inline, that
+    transcript for the run row. A file-backed one is committed when written."""
+
+    reference: TranscriptSourceReference
+    preparation: TranscriptSourcePreparation
+    run_transcript: InlineTranscript | None = None
 
 
 class _FlowDeletedDuringRun(Exception):
@@ -530,6 +552,7 @@ class FlowRunExecutorConfig:
     def step_deadline_seconds(self, step: RuntimeStep) -> float:
         return float(
             resolve_step_timeout_seconds(
+                step_order=step.step_order,
                 step_timeout_seconds=step.timeout_seconds,
                 policy=self.runtime_policy,
             )
@@ -617,7 +640,6 @@ def _start_describes_a_completion_request(start: FlowStepAttemptStart | None) ->
     return start is not None and (
         start.requested_model is not None
         or start.provider is not None
-        or start.input_tokens_estimate is not None
         or start.mapped_admission is not None
     )
 
@@ -630,6 +652,23 @@ def _attempt_start_for_step(
     if state is None:
         return None
     return state.attempt_start_by_step.get(step.step_id)
+
+
+def _failed_item_counts(exc: BaseException | None) -> tuple[int | None, int | None]:
+    """Mapped item progress at failure.
+
+    A mapped handler records its counts on the error as it leaves, so they win
+    over the step-progress snapshot a deadline error took when it was raised.
+    """
+    evidence = failure_evidence(exc)
+    deadline = exc if isinstance(exc, StepDeadlineExceeded) else None
+    completed_items = evidence.completed_items
+    if completed_items is None and deadline is not None:
+        completed_items = deadline.completed_items
+    total_items = evidence.total_items
+    if total_items is None and deadline is not None:
+        total_items = deadline.total_items
+    return completed_items, total_items
 
 
 def _pre_attempt_start_model_from_state_cache(
@@ -684,6 +723,7 @@ class FlowRunExecutor:
             [], AbstractAsyncContextManager[AuditService | None]
         ],
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
+        task_enqueuer: TaskEnqueuer | None = None,
         references_service: ReferencesService | None = None,
         transcribers: FlowTranscribers | None = None,
         max_audio_files: int = 10,
@@ -714,8 +754,7 @@ class FlowRunExecutor:
         self.flow_run_repo = flow_run_repo
         self.transcript_words_repo = transcript_words_repo
         self._pending_transcript_sources: dict[
-            tuple[UUID, UUID, int],
-            tuple[TranscriptSourceReference, TranscriptSourcePreparation],
+            tuple[UUID, UUID, int], _PendingTranscript
         ] = {}
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
@@ -724,6 +763,7 @@ class FlowRunExecutor:
             if webhook_delivery_repo is not None
             else FlowRunWebhookDeliveryRepository(session=session)
         )
+        self.task_enqueuer = task_enqueuer
         self.flow_version_repo = flow_version_repo
         self.space_repo = space_repo
         self.completion_service = completion_service
@@ -784,6 +824,22 @@ class FlowRunExecutor:
         self.max_generic_files = resolved_config.max_generic_files
         self.input_limits = resolved_config.input_limits
 
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    @session.setter
+    def session(self, session: AsyncSession) -> None:
+        # Watched from the moment the executor runs on it, so
+        # _end_read_transaction can tell a transaction that has only read.
+        previous = getattr(self, "_transaction_writes", None)
+        if previous is not None:
+            if self._session is session:
+                return
+            previous.stop()
+        self._session = session
+        self._transaction_writes = TransactionWrites(session)
+
     async def execute(
         self,
         *,
@@ -794,6 +850,9 @@ class FlowRunExecutor:
         dispatch_task_id: str | None,
         retry_count: int,
     ) -> dict[str, object]:
+        # Read before the claim stamps the lease, so its commit counts
+        # against the lease the heartbeats then keep.
+        leased_at = time.monotonic()
         can_run = await self.flow_run_repo.mark_running_if_claimable(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -808,7 +867,8 @@ class FlowRunExecutor:
 
         try:
             async with execution_heartbeats().track(
-                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision),
+                leased_at=leased_at,
             ):
                 return await self.execute_claimed(
                     run_id=run_id,
@@ -980,6 +1040,9 @@ class FlowRunExecutor:
             flow_id=flow_id,
             reviewed_results=reviewed_results(payloads, steps=steps),
         )
+        # The state holds what the steps read of these rows; the full rows
+        # would otherwise stay alive for the rest of the run.
+        del persisted_results, payloads
         try:
             await self._validate_assistant_snapshots(
                 steps=steps,
@@ -1051,6 +1114,8 @@ class FlowRunExecutor:
             level=evidence_classification_level(step_output_levels),
             has_completed_steps=bool(state.completed_by_order),
         )
+        # Each step reads the run again; this copy, with its input, is done.
+        del run
         for step in sorted(steps, key=lambda item: item.step_order):
             latest_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
@@ -1100,6 +1165,10 @@ class FlowRunExecutor:
                     claim_resolution=claim_resolution,
                     step_id=step.step_id,
                 )
+                # The re-read row lives on in the decision only, which ends
+                # with this step too: a completed row must not outlast its
+                # projection into the state.
+                del existing, claim_resolution
                 if postclaim_decision.action == "return":
                     return postclaim_decision.result or {
                         "status": "skipped",
@@ -1128,8 +1197,10 @@ class FlowRunExecutor:
                     and postclaim_decision.completed_result is not None
                 ):
                     state.append_completed(postclaim_decision.completed_result)
+                    del postclaim_decision
                     continue
                 if postclaim_decision.action == "continue":
+                    del postclaim_decision
                     continue
 
             claimed_result = cast(FlowStepResult, claimed)
@@ -1190,24 +1261,18 @@ class FlowRunExecutor:
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
-                failed_input_payload = getattr(typed_exc, "input_payload_json", None)
+                failed_input_payload = typed_exc.input_payload_json
                 resolved_input_source = step.input_source
-                if isinstance(failed_input_payload, dict):
-                    failed_input_payload_dict = cast(
-                        dict[str, Any], failed_input_payload
-                    )
-                    raw_contract_diag = failed_input_payload_dict.get(
-                        "contract_validation"
-                    )
+                if failed_input_payload is not None:
+                    raw_contract_diag = failed_input_payload.get("contract_validation")
                     contract_diag = (
                         cast(dict[str, Any], raw_contract_diag)
                         if isinstance(raw_contract_diag, dict)
                         else None
                     )
-                    payload_source = failed_input_payload_dict.get("input_source")
+                    payload_source = failed_input_payload.get("input_source")
                     if isinstance(payload_source, str) and payload_source:
                         resolved_input_source = payload_source
-                    failed_input_payload = failed_input_payload_dict
                 else:
                     failed_input_payload = build_default_failed_input_payload(
                         input_source=step.input_source
@@ -1240,9 +1305,7 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                     claimed=claimed_result,
                     typed_exc=typed_exc,
-                    failed_input_payload=cast(
-                        dict[str, Any] | None, failed_input_payload
-                    ),
+                    failed_input_payload=failed_input_payload,
                     state=state,
                 )
             except Exception as exc:
@@ -1261,12 +1324,6 @@ class FlowRunExecutor:
                     state=state,
                     exc=exc,
                 )
-
-            latest_run = await self.flow_run_repo.get(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-            )
 
             success_plan = build_step_success_plan(
                 claimed=claimed_result,
@@ -1303,6 +1360,12 @@ class FlowRunExecutor:
             step_result = persisted_step_result
 
             state.append_completed(step_result)
+            # Only the delivery intents are read past this point; the step's
+            # output and the rows built and saved for it would otherwise stay
+            # alive through the next step.
+            delivery_intents = success_plan.delivery_intents
+            del execution_result, output, success_plan, step_result
+            del persisted_step_result
 
             review_policy = step.review_policy
             if review_policy is not None:
@@ -1316,23 +1379,21 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                 )
 
-            if success_plan.delivery_intents:
-                for delivery_intent in success_plan.delivery_intents:
+            if delivery_intents:
+                for delivery_intent in delivery_intents:
                     await self.webhook_delivery_repo.insert_pending_delivery(
                         flow_id=flow_id,
                         tenant_id=tenant_id,
                         intent=delivery_intent,
                     )
                 await self._commit()
+                await self._request_webhook_delivery(run_id=run_id)
                 return {"status": FlowRunStatus.RUNNING.value}
 
-        results = await self.flow_run_repo.list_step_results(
-            run_id=run_id, tenant_id=tenant_id
-        )
         finalization = await finalize_run_from_current_results(
             run_id=run_id,
             tenant_id=tenant_id,
-            results=results,
+            flow_run_repo=self.flow_run_repo,
             terminalizer=self.flow_run_terminalizer,
             principal=self.principal,
         )
@@ -1501,13 +1562,26 @@ class FlowRunExecutor:
                                 version_metadata=version_metadata,
                                 attempt_no=attempt_no,
                             )
+                            if (
+                                run.id,
+                                step.step_id,
+                                attempt_no,
+                            ) in self._pending_transcript_sources:
+                                # Activation publishes the transcript and its
+                                # source; without it both would be lost.
+                                raise FlowRuntimeInvariantError(
+                                    "A step that transcribed audio completed "
+                                    "without activating its attempt "
+                                    f"(step_id={step.step_id}, "
+                                    f"attempt_no={attempt_no})."
+                                )
                             result.output.materials = state.resolved_materials
                             result.output.max_inline_text_bytes = (
                                 self.max_inline_text_bytes
                             )
                     except TypedIOValidationException as exc:
-                        prompt = getattr(exc, "effective_prompt", None)
-                        if isinstance(prompt, str):
+                        prompt = exc.effective_prompt
+                        if prompt is not None:
                             exc.effective_prompt = utf8_prefix(
                                 prompt, max_bytes=self.max_inline_text_bytes
                             )
@@ -1531,13 +1605,15 @@ class FlowRunExecutor:
                         # the runtime and the mapped handlers hang their
                         # completed-call evidence on that cancellation (or on
                         # the error itself).
-                        partial_evidence = getattr(exc, "rag_metadata", None)
+                        partial_evidence = failure_evidence(exc).rag_metadata
                         if partial_evidence is None:
-                            partial_evidence = getattr(
-                                exc.__cause__, "rag_metadata", None
-                            )
+                            partial_evidence = failure_evidence(
+                                exc.__cause__
+                            ).rag_metadata
                         if partial_evidence is not None:
-                            setattr(typed, "rag_metadata", partial_evidence)
+                            attach_failure_evidence(
+                                typed, rag_metadata=partial_evidence
+                            )
                         raise typed from exc
                     record_step_phase(FlowStepPhase.FINALIZATION)
                     if deadline.expired():
@@ -1550,7 +1626,9 @@ class FlowRunExecutor:
                             provider_request_in_flight=False,
                         )
                         if result.output.rag_metadata is not None:
-                            setattr(late, "rag_metadata", result.output.rag_metadata)
+                            attach_failure_evidence(
+                                late, rag_metadata=result.output.rag_metadata
+                            )
                         raise late
                 step_span.set_result(status="completed")
                 return result
@@ -1725,6 +1803,7 @@ class FlowRunExecutor:
                 summarization_input=summarization_input,
                 summarization=summarization,
                 digest_call=digest_call,
+                before_request=self._end_read_transaction,
             ),
             persist_summarization=partial(
                 self._persist_summarization,
@@ -1744,6 +1823,7 @@ class FlowRunExecutor:
                 completion_model_id=None,
                 mapped_call=None,
                 resolved_input_edge_indexes=(),
+                before_request=self._end_read_transaction,
             ),
         )
 
@@ -1885,7 +1965,6 @@ class FlowRunExecutor:
             provider=_provider_from_assistant(prepared.assistant),
             resolved_timeout_seconds=resolved_timeout_seconds,
             input_text_length=input_text_length,
-            input_tokens_estimate=count_tokens(prepared.step_input.text),
             mapped_admission=state.mapped_admission_by_step.get(step.step_id),
         )
 
@@ -1911,7 +1990,9 @@ class FlowRunExecutor:
             for prepared_step in prepared_steps:
                 metadata = prepared_step.prepared.step_input.transcription_metadata
                 if metadata is not None:
-                    metadata["source"] = pending_source[0].model_dump(mode="json")
+                    metadata["source"] = pending_source.reference.model_dump(
+                        mode="json"
+                    )
         completion_configuration, execution_inputs = _attempt_completion_evidence(
             prepared_steps
         )
@@ -1978,7 +2059,7 @@ class FlowRunExecutor:
         )
         if pending_source is not None:
             resolved_input = with_transcript_source_reference(
-                resolved_input, pending_source[0]
+                resolved_input, pending_source.reference
             )
         hold_attempt_edges(resolved_input_edges.edges)
         activated = await self.flow_run_repo.activate_step_attempt(
@@ -1999,6 +2080,9 @@ class FlowRunExecutor:
                 "Flow step attempt closed before input evidence activation "
                 f"(step_id={step.step_id}, attempt_no={attempt_no})."
             )
+        if pending_source is not None and pending_source.run_transcript is not None:
+            # The run row is already locked by the activation above.
+            await self._persist_run_transcript(run, pending_source.run_transcript)
         await self._publish_transcript_source(
             run_id=run.id,
             step_id=step.step_id,
@@ -2007,7 +2091,7 @@ class FlowRunExecutor:
             flow_id=run.flow_id,
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run.id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run.id, step.step_id, attempt_no)
         if attempt_start is not None:
             persisted_attempt_input = parse_flow_step_attempt_input(
                 activated.input_payload_json
@@ -2174,7 +2258,11 @@ class FlowRunExecutor:
         # The run was lost either because it was terminalized (report the
         # honest terminal outcome, as a late write always did) or because
         # recovery gave it to another owner or back to the queue (only then
-        # is "ownership lost" the whole truth).
+        # is "ownership lost" the whole truth). Either way no transcript the
+        # run staged is published.
+        for run_id_, step_id, attempt_no in list(self._pending_transcript_sources):
+            if run_id_ == run_id:
+                self._forget_pending_transcript(run_id, step_id, attempt_no)
         try:
             return await self._return_after_terminalized_step_write(
                 run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
@@ -2273,6 +2361,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None,
     ) -> dict[str, Any]:
         await self._rollback()
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         if current_execution_ownership_lost():
             raise FlowExecutionOwnershipLost()
         attempt_start = _attempt_start_for_step(state=state, step=step)
@@ -2315,9 +2404,7 @@ class FlowRunExecutor:
         # preparation interpolates one for every step and attaches it to what
         # it refuses.
         failed_prompt = (
-            getattr(typed_exc, "effective_prompt", None)
-            if step.may_call_completion_provider
-            else ""
+            typed_exc.effective_prompt if step.may_call_completion_provider else ""
         )
         error_code = typed_io_failure_code(typed_exc.code)
         rejected_completion = (
@@ -2329,7 +2416,7 @@ class FlowRunExecutor:
             step_order=step.step_order,
             error_code=error_code,
             error_message=str(typed_exc),
-            contract_validation=getattr(typed_exc, "contract_validation", None),
+            contract_validation=typed_exc.contract_validation,
         )
         if isinstance(typed_exc, StepDeadlineExceeded):
             error_message = str(typed_exc)
@@ -2349,6 +2436,8 @@ class FlowRunExecutor:
                 step=step,
                 completion_received=rejected_completion is not None,
             )
+        deadline = typed_exc if isinstance(typed_exc, StepDeadlineExceeded) else None
+        completed_items, total_items = _failed_item_counts(typed_exc)
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
             error_code=error_code,
@@ -2356,14 +2445,16 @@ class FlowRunExecutor:
             input_payload_json=failed_input_payload,
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
             run_error_message=run_error_message,
-            rejected_output=getattr(typed_exc, "rejected_output", None),
+            rejected_output=rejected_output_of(typed_exc),
             rejected_completion=rejected_completion,
             max_inline_text_bytes=self.max_inline_text_bytes,
-            step_phase=getattr(typed_exc, "step_phase", None),
-            completed_items=getattr(typed_exc, "completed_items", None),
-            total_items=getattr(typed_exc, "total_items", None),
-            provider_work_may_have_completed=getattr(
-                typed_exc, "provider_work_may_have_completed", None
+            step_phase=deadline.step_phase if deadline is not None else None,
+            completed_items=completed_items,
+            total_items=total_items,
+            provider_work_may_have_completed=(
+                deadline.provider_work_may_have_completed
+                if deadline is not None
+                else None
             ),
             run_error_details=(
                 typed_exc.run_error_details
@@ -2373,21 +2464,12 @@ class FlowRunExecutor:
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)
-        requested_model = getattr(typed_exc, "requested_model", None)
-        provider = getattr(typed_exc, "provider", None)
-        if requested_model is None or provider is None:
-            state_model, state_provider = (
-                (
-                    attempt_start.requested_model,
-                    attempt_start.provider,
-                )
-                if attempt_start is not None
-                else _pre_attempt_start_model_from_state_cache(state=state, step=step)
-            )
-            if requested_model is None:
-                requested_model = state_model
-            if provider is None:
-                provider = state_provider
+        evidence = failure_evidence(typed_exc)
+        requested_model, provider = (
+            (attempt_start.requested_model, attempt_start.provider)
+            if attempt_start is not None
+            else _pre_attempt_start_model_from_state_cache(state=state, step=step)
+        )
         self._attach_pending_transcript_source(failure_plan.failed_result, attempt_no)
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
@@ -2398,12 +2480,10 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code.value,
             error_message=failure_plan.error_message,
             rejected_completion=rejected_completion,
-            requested_model=requested_model
-            if isinstance(requested_model, str)
-            else None,
-            provider=provider if isinstance(provider, str) else None,
+            requested_model=requested_model,
+            provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
-                rag_metadata=getattr(typed_exc, "rag_metadata", None),
+                rag_metadata=evidence.rag_metadata,
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,
@@ -2428,6 +2508,7 @@ class FlowRunExecutor:
                 await self._rollback()
             else:
                 await self._commit()
+            self._forget_pending_transcript(run_id, step.step_id, attempt_no)
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
@@ -2454,7 +2535,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         return failure_plan.return_result
 
     async def _handle_generic_step_failure(
@@ -2472,11 +2553,9 @@ class FlowRunExecutor:
         evidence_persistence_error = (
             exc if isinstance(exc, ProviderCallEvidencePersistenceError) else None
         )
+        completed_items, total_items = _failed_item_counts(exc)
         run_error_details = FlowRunErrorDetails.from_budget_context(
-            {
-                "completed_items": getattr(exc, "completed_items", None),
-                "total_items": getattr(exc, "total_items", None),
-            }
+            {"completed_items": completed_items, "total_items": total_items}
         )
         if evidence_persistence_error is not None:
             run_error_details = (run_error_details or FlowRunErrorDetails()).model_copy(
@@ -2572,7 +2651,7 @@ class FlowRunExecutor:
             requested_model=requested_model,
             provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
-                rag_metadata=getattr(exc, "rag_metadata", None),
+                rag_metadata=failure_evidence(exc).rag_metadata,
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,
@@ -2597,6 +2676,7 @@ class FlowRunExecutor:
                 await self._rollback()
             else:
                 await self._commit()
+            self._forget_pending_transcript(run_id, step.step_id, attempt_no)
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
@@ -2628,7 +2708,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
-        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
+        self._forget_pending_transcript(run_id, step.step_id, attempt_no)
         return failure_plan.return_result
 
     async def _persist_successful_step(
@@ -2826,6 +2906,7 @@ class FlowRunExecutor:
         return StepInputResolutionDeps(
             apply_output_cap=self._apply_output_cap,
             commit=self._commit,
+            end_read_transaction=self._end_read_transaction,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             resolve_tool_input=partial(self._resolve_tool_input, attempt_no=attempt_no),
@@ -2843,6 +2924,7 @@ class FlowRunExecutor:
             logger=logger,
             transcription_call_observer=transcription_call_observer,
             stage_transcript_source=self._stage_transcript_source,
+            stage_run_transcript=self._stage_run_transcript,
             transcript_source_preparation=transcript_source_preparation,
         )
 
@@ -2851,11 +2933,31 @@ class FlowRunExecutor:
     ) -> None:
         key = (reference.run_id, reference.step_id, reference.attempt_no)
         pending = self._pending_transcript_sources.get(key)
-        if pending is not None and pending[1] is not source:
+        if pending is not None and pending.preparation is not source:
             raise FlowRuntimeInvariantError(
                 "A transcription attempt must share its preparation state."
             )
-        self._pending_transcript_sources[key] = (reference, source)
+        self._pending_transcript_sources[key] = _PendingTranscript(
+            reference=reference, preparation=source
+        )
+
+    def _stage_run_transcript(
+        self, reference: TranscriptSourceReference, transcript: InlineTranscript | None
+    ) -> None:
+        key = (reference.run_id, reference.step_id, reference.attempt_no)
+        pending = self._pending_transcript_sources.get(key)
+        if pending is None:
+            raise FlowRuntimeInvariantError(
+                "A run transcript was staged before its transcript source."
+            )
+        self._pending_transcript_sources[key] = replace(
+            pending, run_transcript=transcript
+        )
+
+    def _forget_pending_transcript(
+        self, run_id: UUID, step_id: UUID, attempt_no: int
+    ) -> None:
+        self._pending_transcript_sources.pop((run_id, step_id, attempt_no), None)
 
     def _attach_pending_transcript_source(
         self, result: FlowStepResult, attempt_no: int
@@ -2865,7 +2967,7 @@ class FlowRunExecutor:
         )
         if pending is not None:
             result.input_payload_json = with_transcript_source_reference(
-                result.input_payload_json, pending[0]
+                result.input_payload_json, pending.reference
             )
 
     async def _publish_transcript_source(
@@ -2881,12 +2983,11 @@ class FlowRunExecutor:
 
         pending = self._pending_transcript_sources.get((run_id, step_id, attempt_no))
         if pending is not None:
-            reference, source = pending
             await FlowTranscriptSourceRepository(session=self.session).insert(
                 tenant_id=tenant_id,
                 flow_id=flow_id,
-                reference=reference,
-                source=source.source,
+                reference=pending.reference,
+                source=pending.preparation.source,
             )
             await persist_transcript_words(
                 transcript_words_repo=self.transcript_words_repo,
@@ -2894,7 +2995,7 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
                 step_id=step_id,
-                preparation=source,
+                preparation=pending.preparation,
             )
 
     async def _resolve_step_input(
@@ -2918,7 +3019,9 @@ class FlowRunExecutor:
         deps = self._build_step_input_resolution_deps(
             transcription_call_observer,
             attempt_no=attempt_no,
-            transcript_source_preparation=pending[1] if pending is not None else None,
+            transcript_source_preparation=(
+                pending.preparation if pending is not None else None
+            ),
         )
         return await resolve_step_input_runtime(
             attempt_no=attempt_no,
@@ -3663,6 +3766,79 @@ class FlowRunExecutor:
 
     async def _commit(self) -> None:
         await self.session.commit()
+
+    async def _request_webhook_delivery(self, *, run_id: UUID) -> None:
+        """Ask for the webhook deliveries this run just committed to be sent now.
+
+        Best-effort, outside any transaction: the outbox cron requests delivery
+        every interval once workers and the task broker are available, so a
+        request that is refused, has an unknown outcome, fails or outlasts its
+        deadline is logged and the run goes on as committed. The interval is a
+        cadence, not a delivery bound: a backlog, the job's row cap, slow waves
+        and worker or broker outages delay delivery. A request that would
+        outlast the run's invocation is cut short, or not sent when no time is
+        left. Cancellation propagates."""
+        if self.task_enqueuer is None:
+            return
+        timeout = flow_webhook_delivery_request_timeout_seconds(
+            invocation_remaining_seconds=None
+            if self.invocation_deadline is None
+            else self.invocation_deadline - asyncio.get_running_loop().time()
+        )
+        if timeout <= 0:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_skipped run_id=%s",
+                run_id,
+            )
+            return
+        try:
+            async with asyncio.timeout(timeout):
+                result = await self.task_enqueuer.enqueue(
+                    flow_webhook_delivery_request()
+                )
+        except Exception:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_failed run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+            return
+        if result.status is not TaskEnqueueStatus.ACCEPTED:
+            logger.warning(
+                "flow_executor.webhook_delivery_request_not_accepted run_id=%s status=%s",
+                run_id,
+                result.status.value,
+            )
+
+    async def _end_read_transaction(self) -> None:
+        """End the session's transaction before outside work, if it only read.
+
+        A provider call or an audio download can last minutes, and an idle
+        transaction keeps its connection checked out and its snapshot held for
+        all of that time. A transaction that has written (or locked a row) is
+        left open: what a step writes before its attempt is activated stays
+        uncommitted, so a failure before activation still rolls it back.
+
+        The next transaction is begun at once, so a writer that joins an
+        ambient transaction (and commits its own only when there is none)
+        still writes inside the step's. Beginning is lazy: it takes no
+        connection or snapshot until the next statement.
+
+        The rows the session holds are not expired: the step reads rows it
+        loaded before the call after it, and an expired attribute cannot be
+        loaded lazily under asyncio. Nothing was written, and under READ
+        COMMITTED a held row could already be older than a later statement
+        inside one transaction, so keeping them changes nothing.
+        """
+        if self._transaction_writes.only_read():
+            sync_session = self.session.sync_session
+            expire_on_commit = sync_session.expire_on_commit
+            sync_session.expire_on_commit = False
+            try:
+                await self._commit()
+            finally:
+                sync_session.expire_on_commit = expire_on_commit
+            await self.session.begin()
 
     async def _rollback(self) -> None:
         await self.session.rollback()

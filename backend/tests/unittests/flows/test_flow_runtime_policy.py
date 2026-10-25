@@ -190,14 +190,21 @@ def test_step_timeout_uses_policy_default_and_rejects_override_above_max() -> No
         defaults=_settings(),
     )
 
-    assert resolve_step_timeout_seconds(step_timeout_seconds=None, policy=policy) == 800
+    assert (
+        resolve_step_timeout_seconds(
+            step_order=1, step_timeout_seconds=None, policy=policy
+        )
+        == 800
+    )
 
     with pytest.raises(BadRequestException) as exc_info:
-        resolve_step_timeout_seconds(step_timeout_seconds=1500, policy=policy)
+        resolve_step_timeout_seconds(
+            step_order=3, step_timeout_seconds=1500, policy=policy
+        )
 
-    # The worker turns this refusal into a run error with its own generic code.
-    assert exc_info.value.code is None
+    assert exc_info.value.code == "flow_step_timeout_exceeds_tenant_max"
     assert exc_info.value.context == {
+        "step_order": 3,
         "timeout_seconds": 1500,
         "max_step_timeout_seconds": 1200,
     }
@@ -211,7 +218,10 @@ def test_invocation_ceiling_defines_the_effective_policy() -> None:
     assert policy.default_step_timeout_seconds == 14340
     assert policy.hard_ceiling_seconds == 14340
     assert (
-        resolve_step_timeout_seconds(step_timeout_seconds=7200, policy=policy) == 7200
+        resolve_step_timeout_seconds(
+            step_order=1, step_timeout_seconds=7200, policy=policy
+        )
+        == 7200
     )
     with pytest.raises(BadRequestException, match="deployment hard ceiling"):
         validate_flow_runtime_policy_object(

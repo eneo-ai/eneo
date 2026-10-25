@@ -4,7 +4,7 @@ This package provides:
 - LuaScripts: Owner-checked lease operations
 - redis_lease: Self-renewing, owner-checked distributed lock
 - r: Legacy lazy proxy for the Redis client (attribute access only)
-- get_redis: Factory function for Redis client — prefer this in new code
+- get_redis: The process's command client (eneo.redis.clients)
 - get_worker_health: Worker health check via Redis
 - WorkerHealth: Named tuple for health status
 - parse_arq_health_string: Parser for ARQ health check strings
@@ -18,7 +18,6 @@ from eneo.worker.redis.client import (
     r,
     read_crawl_scheduler_run,
     record_crawl_scheduler_run,
-    reset_redis_client,
 )
 from eneo.worker.redis.lease import redis_lease
 from eneo.worker.redis.lua_scripts import LuaScripts
@@ -32,6 +31,5 @@ __all__ = [
     "r",
     "read_crawl_scheduler_run",
     "record_crawl_scheduler_run",
-    "reset_redis_client",
     "redis_lease",
 ]

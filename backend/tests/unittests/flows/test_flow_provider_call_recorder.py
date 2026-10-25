@@ -300,6 +300,85 @@ async def test_completed_receipt_cannot_replace_accepted_identity(
     assert row.status == "started"
 
 
+def _record_started_calls(monkeypatch, events: list[str]):
+    from eneo.flows.infrastructure import flow_provider_call_recorder as module
+
+    class _Repository:
+        def __init__(self, session):
+            pass
+
+        async def start_call_for_execution(self, **kwargs):
+            events.append("persist")
+            return SimpleNamespace(id=uuid4(), ordinal=events.count("persist"))
+
+    @asynccontextmanager
+    async def transaction():
+        yield
+
+    @asynccontextmanager
+    async def connection():
+        yield SimpleNamespace(begin=transaction)
+
+    monkeypatch.setattr(module, "FlowProviderCallRepository", _Repository)
+    monkeypatch.setattr(module.sessionmanager, "session", connection)
+
+
+def _transcription_recorder(before_request) -> FlowProviderCallRecorder:
+    return FlowProviderCallRecorder(
+        run_id=uuid4(),
+        step_id=uuid4(),
+        attempt_no=1,
+        tenant_id=uuid4(),
+        principal_user_id=uuid4(),
+        principal_service_id=None,
+        completion_model_id=None,
+        mapped_call=None,
+        resolved_input_edge_indexes=(),
+        before_request=before_request,
+    )
+
+
+def _transcription_request():
+    from eneo.model_providers.domain.provider_call_observer import (
+        TranscriptionCallRequestFacts,
+    )
+
+    return TranscriptionCallRequestFacts(
+        request_schema_version=2,
+        provider_request_hash="c" * 64,
+        requested_model="whisper-1",
+        provider="openai",
+        audio_seconds=12.0,
+    )
+
+
+async def test_each_started_call_runs_its_before_request_hook_first(monkeypatch):
+    events: list[str] = []
+    _record_started_calls(monkeypatch, events)
+
+    async def before_request():
+        events.append("before_request")
+
+    recorder = _transcription_recorder(before_request)
+    await recorder.started(_transcription_request())
+    await recorder.started(_transcription_request())
+
+    assert events == ["before_request", "persist", "before_request", "persist"]
+
+
+async def test_a_failing_before_request_hook_records_no_call(monkeypatch):
+    events: list[str] = []
+    _record_started_calls(monkeypatch, events)
+    failure = RuntimeError("the read transaction could not end")
+
+    recorder = _transcription_recorder(AsyncMock(side_effect=failure))
+    with pytest.raises(RuntimeError) as exc_info:
+        await recorder.started(_transcription_request())
+
+    assert exc_info.value is failure
+    assert events == []
+
+
 def _facts() -> ProviderCallEvidenceGap:
     return ProviderCallEvidenceGap(
         call_id=None,

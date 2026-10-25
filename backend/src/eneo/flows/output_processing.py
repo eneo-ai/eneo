@@ -589,11 +589,16 @@ def _self_containment_issue(schema: dict[str, Any]) -> tuple[str, str, str] | No
     """Where a 2020-12 contract leaves itself first, as (pointer, keyword, reason)."""
     positions = list(_schema_nodes(schema))
     nodes = [(path, node) for path, node in positions if isinstance(node, dict)]
+    references = False
     for path, node in nodes:
         if "$id" in node:
             return f"{path}/$id", "$id", "$id is not allowed in a contract."
         if node.get("$schema", _SCHEMA_DIALECT) != _SCHEMA_DIALECT:
             return f"{path}/$schema", "$schema", f"$schema must be {_SCHEMA_DIALECT}."
+        references = references or "$ref" in node or "$dynamicRef" in node
+    if not references:
+        # Nothing can leave the contract, so there is nothing to crawl or resolve.
+        return None
     schema_nodes = {id(node) for _, node in nodes}
     # A boolean has no identity of its own: it is a schema by its pointer.
     boolean_pointers = {path for path, node in positions if isinstance(node, bool)}

@@ -82,8 +82,7 @@ export function createFlow(body: {
       body: {
         space_id: body.spaceId,
         name: body.name,
-        description: body.description,
-        steps: []
+        description: body.description
       }
     })
   );

@@ -1,8 +1,10 @@
 """Capability intent survives the complete provider lifecycle in PostgreSQL."""
 
+import re
 from unittest.mock import AsyncMock
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import select
 
 from eneo.database.tables.capabilities_table import (
@@ -15,16 +17,19 @@ from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.application.capability_resolver import resolve_capability_servers
 from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 
 
-async def provider(session, tenant_id, name):
+async def provider(
+    session, tenant_id, name, *, purpose="image_generation", is_enabled=False
+):
     row = MCPServers(
         tenant_id=tenant_id,
         name=name,
-        purpose="image_generation",
+        purpose=purpose,
         http_url="https://example.test/mcp",
         http_auth_type="none",
-        is_enabled=False,
+        is_enabled=is_enabled,
     )
     session.add(row)
     await session.flush()
@@ -201,3 +206,68 @@ async def test_create_and_activate_is_one_transaction(
                 )
             )
         ).all() == []
+
+
+_PROVIDER_SELECT = re.compile(
+    r"FROM mcp_servers\b.*\bmcp_servers\.purpose (=|IN)", re.S
+)
+
+
+async def test_space_and_ask_load_capability_providers_once(
+    db_container, admin_user, space_factory, assistant_factory
+):
+    async with db_container() as container:
+        session = container.session()
+        space = await space_factory(session, "Capability load")
+        assistant = await assistant_factory(session, "Search", None, space_id=space.id)
+        session.add(SpaceCapabilities(space_id=space.id, purpose="web_search"))
+        for purpose in ("web_search", "image_generation"):
+            await provider(
+                session, admin_user.tenant_id, purpose, purpose=purpose, is_enabled=True
+            )
+
+        statements: list[str] = []
+
+        def capture_statement(
+            _connection, _cursor, statement, _parameters, _context, _executemany
+        ) -> None:
+            statements.append(statement)
+
+        assert session.bind is not None
+        engine = session.bind.sync_engine
+        sa.event.listen(engine, "before_cursor_execute", capture_statement)
+        try:
+            loaded = await container.space_repo().get_space_by_assistant(assistant.id)
+            space_selects = sum(map(bool, map(_PROVIDER_SELECT.search, statements)))
+            statements.clear()
+            resolution = await resolve_capability_servers(
+                session,
+                admin_user.tenant_id,
+                [],
+                requested_capabilities=["web_search", "image_generation"],
+                supports_tool_calling=True,
+                in_space=lambda _server_id: True,
+            )
+            ask_selects = sum(map(bool, map(_PROVIDER_SELECT.search, statements)))
+        finally:
+            sa.event.remove(engine, "before_cursor_execute", capture_statement)
+
+        tenant_states = {s.purpose: s for s in loaded.available_capabilities}
+        assert tenant_states["web_search"].available
+        assert tenant_states["image_generation"].available
+        [loaded_assistant] = [a for a in loaded.assistants if a.id == assistant.id]
+        assert [s.purpose for s in loaded_assistant.available_capabilities] == list(
+            CAPABILITY_PURPOSES
+        )
+        assistant_states = {
+            s.purpose: s for s in loaded_assistant.available_capabilities
+        }
+        assert assistant_states["image_generation"].reason == "space_disabled"
+        assert [p.purpose for p in resolution.capability_servers] == [
+            "web_search",
+            "image_generation",
+        ]
+        # The tenant-wide and user-scoped availability share one provider
+        # load, and ask-time resolution loads every requested purpose at once.
+        assert space_selects == 1
+        assert ask_selects == 1

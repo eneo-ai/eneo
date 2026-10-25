@@ -2125,10 +2125,13 @@ async def test_models_used_are_the_models_that_answered_completed_calls(
         )
 
         models_by_step_id = await repo.list_models_used_by_step(
-            run_id=context.run_id, tenant_id=context.tenant_id
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=100
+        )
+        bounded = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=2
         )
         another_tenants_view = await repo.list_models_used_by_step(
-            run_id=context.run_id, tenant_id=uuid4()
+            run_id=context.run_id, tenant_id=uuid4(), limit=100
         )
 
     # The answer names the model when it can; the route it was sent to stands
@@ -2136,6 +2139,8 @@ async def test_models_used_are_the_models_that_answered_completed_calls(
     assert models_by_step_id == {
         context.step_id: ("azure/gpt-4.1", "gpt-4o-mini-2026-07-01", "whisper-1")
     }
+    # The read stops at the limit, in name order, rather than returning all.
+    assert bounded == {context.step_id: ("azure/gpt-4.1", "gpt-4o-mini-2026-07-01")}
     assert another_tenants_view == {}
 
 
@@ -2172,7 +2177,9 @@ async def test_an_attempt_s_own_model_fields_are_not_models_used(
 
         models_by_step_id = await FlowProviderCallRepository(
             session
-        ).list_models_used_by_step(run_id=context.run_id, tenant_id=context.tenant_id)
+        ).list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=100
+        )
 
     assert models_by_step_id == {}
 

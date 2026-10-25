@@ -85,6 +85,16 @@ _DISMISSAL_CONTAINER = get_container_for_explicit_transaction(
     with_user=True, with_module_user=True
 )
 
+
+async def _require_user_for_dismissal(
+    container: Container = Depends(_DISMISSAL_CONTAINER),
+) -> None:
+    """``require_user_for_creation`` on the user the route's one
+    authentication resolved: a service key cannot dismiss, and the flows
+    feature gate still runs inside that authentication."""
+    await require_user_for_creation(container.user())
+
+
 _SUGGESTION_STALE_EXAMPLE: dict[str, object] = {
     "summary": "The draft no longer has the suggestion",
     "value": {
@@ -488,7 +498,7 @@ _DISMISSAL_DESCRIPTION = (
             },
         ),
     },
-    dependencies=[Depends(require_user_for_creation)],
+    dependencies=[Depends(_require_user_for_dismissal)],
 )
 @endpoint_access(
     authentication=Authentication.USER,
