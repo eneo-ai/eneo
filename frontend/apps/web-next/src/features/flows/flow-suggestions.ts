@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -18,10 +18,36 @@ export type FlowSuggestionCode = Schema<"FlowSuggestionCode">;
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
+export type FlowSuggestionsApplied = Schema<"FlowSuggestionsAppliedPublic">;
+
 export const flowSuggestionKeys = {
+  /** Every revision's suggestions of a flow. */
+  all: (flowId: string) => ["flows", flowId, "suggestions"] as const,
   /** Keyed by the draft revision, so a save or a chat tool call refetches. */
   list: (flowId: string, revision: number) => ["flows", flowId, "suggestions", revision] as const
 };
+
+/** The suggestion is gone from the draft (a change since it was read). */
+export const SUGGESTION_STALE = "flow_suggestion_stale";
+
+/**
+ * Makes the fixes of the suggestions named by fingerprint on the draft at
+ * `expectedRevision`, all of them or none (`POST .../suggestions/apply/`):
+ * the core applies them in its own order and skips one an earlier fix made
+ * unnecessary.
+ */
+export function applyFlowSuggestions(
+  flowId: string,
+  expectedRevision: number,
+  fingerprints: string[]
+): Promise<FlowSuggestionsApplied> {
+  return unwrap(
+    browserApi.POST("/api/v1/flows/{id}/suggestions/apply/", {
+      params: { path: { id: flowId } },
+      body: { expected_revision: expectedRevision, fingerprints }
+    })
+  );
+}
 
 export function flowSuggestionsQueryOptions(flowId: string, revision: number) {
   return queryOptions({
@@ -29,7 +55,11 @@ export function flowSuggestionsQueryOptions(flowId: string, revision: number) {
     queryFn: (): Promise<FlowSuggestions> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/suggestions/", { params: { path: { id: flowId } } })
-      )
+      ),
+    // While a new revision's suggestions load, the last ones stay on the
+    // cards: nothing collapses or jumps, and a fixed one leaves when the
+    // answer comes.
+    placeholderData: keepPreviousData
   });
 }
 
