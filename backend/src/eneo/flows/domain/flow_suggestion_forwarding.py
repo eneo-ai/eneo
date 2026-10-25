@@ -762,6 +762,7 @@ def deterministic_candidates(
                 not measured.measures_output
                 or ratio is None
                 or facts.unmeasured_edge_indexes
+                or any(measured.edge(edge) is None for edge in facts.edges)
             ):
                 continue
             candidate = _candidate(measured, ratio)
