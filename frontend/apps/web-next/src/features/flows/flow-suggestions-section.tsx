@@ -2,17 +2,18 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Heading } from "@astryxdesign/core/Text";
+import { List } from "@astryxdesign/core/List";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
-import { Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, Lightbulb, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useCallback, useId, useState, type ReactNode } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { ReferenceText } from "./chat/reference-text";
 import type { FlowPublic, FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
-  FlowSuggestionItem,
+  SuggestionRow,
   useSuggestionFix,
   type SuggestionActions,
   type SuggestionFix
@@ -32,10 +33,58 @@ type ListActions = Pick<SuggestionActions, "onAskChat" | "onRemoveStep" | "fixBl
   fixPending?: boolean;
 };
 
-/** The suggestions of one step (or of the run form), as a list. */
-function SuggestionList({
+/**
+ * Which disclosures are open, by key (a step's list by `step:<id>`, a row
+ * by its fingerprint). Held by the component that outlives the cards, so a
+ * refetch or a fix that re-renders a card keeps what the person opened.
+ */
+export type OpenKeys = {
+  isOpen: (key: string) => boolean;
+  setOpen: (key: string, open: boolean) => void;
+};
+
+export function useOpenKeys(openByDefault = false): OpenKeys {
+  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const isOpen = useCallback(
+    (key: string) => chosen.get(key) ?? openByDefault,
+    [chosen, openByDefault]
+  );
+  const setOpen = useCallback(
+    (key: string, open: boolean) => setChosen((current) => new Map(current).set(key, open)),
+    []
+  );
+  return { isOpen, setOpen };
+}
+
+const LEVEL_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+/** By level (high, medium, low), then as the core ordered them. */
+export function byLevel<T extends { suggestion: FlowSuggestion }>(items: readonly T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort(
+      (left, right) =>
+        (LEVEL_ORDER[left.item.suggestion.impact.level] ?? 3) -
+          (LEVEL_ORDER[right.item.suggestion.impact.level] ?? 3) || left.index - right.index
+    )
+    .map(({ item }) => item);
+}
+
+/**
+ * Suggestions behind one quiet disclosure (the APG accordion pattern: a
+ * heading holding the button): "3 förslag · 2 kan åtgärdas" with a
+ * chevron, and open, a compact list with dividers, by level. Nothing is
+ * rendered while there are none.
+ */
+export function SuggestionSection({
   items,
   steps,
+  headingLevel,
+  openKey,
+  open,
+  rows,
+  summary,
+  note,
   onAskChat,
   onFix,
   fixPending,
@@ -44,48 +93,114 @@ function SuggestionList({
 }: ListActions & {
   items: readonly { suggestion: FlowSuggestion; step: FlowStep | null }[];
   steps: readonly FlowStep[];
+  headingLevel: 3 | 4;
+  /** This section's key in `open`. */
+  openKey: string;
+  open: OpenKeys;
+  /** The rows' own disclosures, by fingerprint. */
+  rows: OpenKeys;
+  /** What the button says instead of "3 förslag" (the run form's). */
+  summary?: string;
+  /** Shown above the rows (why "Åtgärda" waits). */
+  note?: ReactNode;
 }) {
+  const t = useTranslations();
+  const buttonId = useId();
+  const panelId = useId();
+  if (items.length === 0) return null;
+  const isOpen = open.isOpen(openKey);
+  const fixable = items.filter(({ suggestion }) => isPatchable(suggestion)).length;
+  const count = summary ?? t("flow_suggestions_count", { count: items.length });
+  const fixableText = fixable > 0 ? t("flow_suggestions_fixable", { count: fixable }) : null;
+
   return (
-    <ul className="m-0 flex list-none flex-col gap-3 p-0">
-      {items.map(({ suggestion, step }) => (
-        <FlowSuggestionItem
-          key={suggestion.fingerprint}
-          suggestion={suggestion}
-          step={step}
-          steps={steps}
-          onAskChat={onAskChat}
-          onFix={onFix ? (item) => onFix([item.fingerprint]) : undefined}
-          fixPending={fixPending}
-          fixBlockedBy={fixBlockedBy}
-          onRemoveStep={onRemoveStep}
-        />
-      ))}
-    </ul>
+    <div className="flex flex-col gap-1">
+      <Heading level={headingLevel} className="m-0 text-sm font-normal">
+        <Button
+          id={buttonId}
+          label={
+            fixableText
+              ? t("flow_suggestions_count_fixable", { count, fixable: fixableText })
+              : count
+          }
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          variant="ghost"
+          size="sm"
+          icon={<Lightbulb aria-hidden="true" className="size-4" />}
+          endContent={
+            isOpen ? (
+              <ChevronDown aria-hidden="true" className="size-4" />
+            ) : (
+              <ChevronRight aria-hidden="true" className="size-4" />
+            )
+          }
+          onClick={() => open.setOpen(openKey, !isOpen)}
+          className="-ml-2"
+        >
+          <span>
+            {count}
+            {fixableText ? (
+              <span className="text-ax-text-secondary font-normal"> · {fixableText}</span>
+            ) : null}
+          </span>
+        </Button>
+      </Heading>
+      <div id={panelId} hidden={!isOpen} className="flex flex-col gap-1">
+        {note}
+        <List hasDividers density="compact" edge="flush">
+          {byLevel(items).map(({ suggestion, step }) => (
+            <SuggestionRow
+              key={suggestion.fingerprint}
+              suggestion={suggestion}
+              step={step}
+              steps={steps}
+              isOpen={rows.isOpen(suggestion.fingerprint)}
+              onOpenChange={(next) => rows.setOpen(suggestion.fingerprint, next)}
+              onAskChat={onAskChat}
+              onFix={onFix ? (item) => onFix([item.fingerprint]) : undefined}
+              fixPending={fixPending}
+              fixBlockedBy={fixBlockedBy}
+              onRemoveStep={onRemoveStep}
+            />
+          ))}
+        </List>
+      </div>
+    </div>
   );
 }
 
 /**
- * A step card's suggestions, below what the step reads and produces: the
- * step's own, with their actions. Nothing is rendered while it has none.
+ * A step card's suggestions, below the card's facts and its divider,
+ * collapsed until the person opens them.
  */
 export function StepCardSuggestions({
+  stepId,
   items,
   steps,
+  open,
+  rows,
   ...actions
-}: ListActions & { items: readonly ShownSuggestion[]; steps: readonly FlowStep[] }) {
-  const t = useTranslations();
-  const headingId = useId();
+}: ListActions & {
+  stepId: string;
+  items: readonly ShownSuggestion[];
+  steps: readonly FlowStep[];
+  open: OpenKeys;
+  rows: OpenKeys;
+}) {
   if (items.length === 0) return null;
   return (
-    <section
-      aria-labelledby={headingId}
-      className="border-ax-border flex flex-col gap-2 border-t pt-3"
-    >
-      <Heading level={4} id={headingId} weight="semibold" className="text-sm">
-        {t("flow_suggestions_heading", { count: items.length })}
-      </Heading>
-      <SuggestionList items={items} steps={steps} {...actions} />
-    </section>
+    <div className="border-ax-border border-t pt-2">
+      <SuggestionSection
+        items={items}
+        steps={steps}
+        headingLevel={4}
+        openKey={`step:${stepId}`}
+        open={open}
+        rows={rows}
+        {...actions}
+      />
+    </div>
   );
 }
 
@@ -116,6 +231,9 @@ export function SuggestionsSummary({
   const t = useTranslations();
   const [confirming, setConfirming] = useState(false);
   const runFix = useSuggestionFix(fix, rescueTarget);
+  // The run form's suggestions start collapsed, and stay as the person left them.
+  const open = useOpenKeys(false);
+  const rows = useOpenKeys(false);
   const count = shown.length + formItems.length;
   if (count === 0) return null;
 
@@ -159,15 +277,18 @@ export function SuggestionsSummary({
           ) : undefined
         }
       >
-        {formItems.length > 0 ? (
-          <SuggestionList
-            items={formItems.map((suggestion) => ({ suggestion, step: null }))}
-            steps={steps}
-            onAskChat={onAskChat}
-            onFix={runFix}
-            fixPending={fix?.pending}
-          />
-        ) : null}
+        <SuggestionSection
+          items={formItems.map((suggestion) => ({ suggestion, step: null }))}
+          steps={steps}
+          headingLevel={3}
+          openKey="form"
+          open={open}
+          rows={rows}
+          summary={t("flow_suggestions_form_count", { count: formItems.length })}
+          onAskChat={onAskChat}
+          onFix={runFix}
+          fixPending={fix?.pending}
+        />
       </Banner>
       {runFix ? (
         <ConfirmDialogControlled
@@ -206,11 +327,10 @@ export function SuggestionsSummary({
 }
 
 /**
- * The open step's suggestions at the top of the step editor, which takes
- * the step list's place while a step is open: compact, with the same
- * actions as the step's card. It reads the same query as the step list.
- * Nothing is rendered while the step has none, or while they load or fail
- * (the step list says so).
+ * The open step's suggestions at the top of the step editor: the step
+ * card's section, open from the start. It reads the same query as the step
+ * list. Nothing is rendered while the step has none, or while they load or
+ * fail (the step list says so).
  */
 export function StepSuggestions({
   flow,
@@ -234,40 +354,37 @@ export function StepSuggestions({
   rescueTarget: () => HTMLElement | null;
 }) {
   const t = useTranslations();
-  const headingId = useId();
   const blockedId = useId();
   const query = useQuery(flowSuggestionsQueryOptions(flow.id, flow.draft_revision));
   const runFix = useSuggestionFix(fix, rescueTarget);
+  // The person opened the step on purpose: its suggestions start open.
+  const open = useOpenKeys(true);
+  const rows = useOpenKeys(false);
   const shown = shownSuggestions(query.data?.items, flow.steps).filter(
     ({ step }) => step.id === stepId
   );
-  if (shown.length === 0) return null;
+  const blocked =
+    runFix !== undefined && fixBlocked && shown.some(({ suggestion }) => isPatchable(suggestion));
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <Banner
-        status="info"
-        title={
-          <Heading level={3} id={headingId} weight="semibold" className="text-sm">
-            {t("flow_suggestions_step_heading", { count: shown.length })}
-          </Heading>
-        }
-        description={
-          runFix && fixBlocked && shown.some(({ suggestion }) => isPatchable(suggestion)) ? (
-            <span id={blockedId}>{t("flow_suggestions_fix_blocked_unsaved")}</span>
-          ) : undefined
-        }
-        collapsible={false}
-      >
-        <SuggestionList
-          items={shown}
-          steps={flow.steps}
-          onAskChat={onAskChat}
-          onFix={runFix}
-          fixPending={fix?.pending}
-          fixBlockedBy={fixBlocked ? blockedId : undefined}
-        />
-      </Banner>
-    </section>
+    <SuggestionSection
+      items={shown}
+      steps={flow.steps}
+      headingLevel={3}
+      openKey={`step:${stepId}`}
+      open={open}
+      rows={rows}
+      note={
+        blocked ? (
+          <Text id={blockedId} type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flow_suggestions_fix_blocked_unsaved")}
+          </Text>
+        ) : null
+      }
+      onAskChat={onAskChat}
+      onFix={runFix}
+      fixPending={fix?.pending}
+      fixBlockedBy={blocked ? blockedId : undefined}
+    />
   );
 }

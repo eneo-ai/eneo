@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -29,7 +29,11 @@ export function flowSuggestionsQueryOptions(flowId: string, revision: number) {
     queryFn: (): Promise<FlowSuggestions> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/suggestions/", { params: { path: { id: flowId } } })
-      )
+      ),
+    // While a new revision's suggestions load, the last ones stay on the
+    // cards: nothing collapses or jumps, and a fixed one leaves when the
+    // answer comes.
+    placeholderData: keepPreviousData
   });
 }
 

@@ -45,7 +45,7 @@ afterEach(() => {
 });
 
 /** A `duplicate_read` about `stepId` (its first step): step 1 as its input and in its prompt. */
-function suggestionAbout(stepId: string, fingerprint: string, kind = "assisted") {
+function suggestionAbout(stepId: string, fingerprint: string, kind = "assisted", level = "high") {
   return {
     code: "duplicate_read",
     fingerprint,
@@ -59,7 +59,7 @@ function suggestionAbout(stepId: string, fingerprint: string, kind = "assisted")
       ]
     },
     message: "Reads step 1 twice.",
-    impact: { basis: "definition", level: "high" },
+    impact: { basis: "definition", level },
     fix: { kind }
   };
 }
@@ -107,11 +107,11 @@ function renderList(
     onAdd: vi.fn()
   };
   // The page's one FlowReferences, so references show as the chat's pills.
-  const view = renderInApp(
+  const ui = (draftRevision: number) => (
     <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
       <FlowStepList
         flowId="flow-1"
-        draftRevision={4}
+        draftRevision={draftRevision}
         steps={steps}
         canEdit={canEdit}
         headingRef={createRef()}
@@ -121,7 +121,8 @@ function renderList(
       />
     </FlowReferences>
   );
-  return { ...view, actions };
+  const view = renderInApp(ui(4));
+  return { ...view, actions, ui };
 }
 
 describe("FlowStepList", () => {
@@ -206,47 +207,109 @@ describe("FlowStepList", () => {
     await waitFor(() => expect(actions.onRemove).toHaveBeenCalledWith(steps[0]));
   });
 
-  it("puts each suggestion on the card of its step, with the chat's pills", async () => {
+  it("folds each step's suggestions into one quiet row with their count", async () => {
     prompts.suggestions = [
-      suggestionAbout("step-2", "a".repeat(64)),
+      suggestionAbout("step-2", "a".repeat(64), "patch"),
+      suggestionAbout("step-2", "b".repeat(64), "assisted", "low"),
       suggestionAbout("step-3", "c".repeat(64)),
       // A step the draft no longer has shows nowhere.
       suggestionAbout("step-9", "d".repeat(64))
     ];
-    const onAskChat = vi.fn();
-    const { container } = renderList(true, null, { onAskChat });
+    const { container } = renderList();
 
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
-    const own = await within(second).findByRole("region", { name: "Förslag (1)" });
-    // The step it reads is a step pill; the prompt's read a value pill.
-    expect(within(own).getByRole("button", { name: "1 Sammanfatta" })).toBeTruthy();
-    fireEvent.click(within(own).getByRole("button", { name: /^Varför\?/ }));
-    const value = within(own).getByRole("button", { name: "1 Sammanfatta › text" });
-    fireEvent.click(value);
-    expect(await screen.findByRole("dialog", { name: "Referens" })).toBeTruthy();
-    // The disclosure is named in words, not in the references' syntax.
-    expect(
-      within(own).getByRole("button", {
-        name: "Varför? Svaret från 1 Sammanfatta skickas två gånger"
-      })
-    ).toBeTruthy();
-    expect(screen.getAllByRole("region", { name: "Förslag (1)" })).toHaveLength(2);
+    const toggle = await within(second).findByRole("button", {
+      name: "2 förslag, 1 kan åtgärdas"
+    });
+    // The APG accordion: the button sits in a heading below the card's own.
+    expect(toggle.closest("h4")).toBeTruthy();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "")!;
+    expect(panel.hidden).toBe(true);
+    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    expect(within(third).getByRole("button", { name: "1 förslag" })).toBeTruthy();
     const first = screen.getByRole("article", { name: "Steg 1 Sammanfatta" });
-    expect(within(first).queryByRole("region", { name: /^Förslag/ })).toBeNull();
+    expect(within(first).queryByRole("button", { name: /förslag/ })).toBeNull();
+    // One request for the whole list.
+    expect(
+      api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    ).toHaveLength(1);
+    await expectNoAxeViolations(container);
+  });
 
+  it("opens to rows by level, each with its own disclosure for why and what else", async () => {
+    prompts.suggestions = [
+      suggestionAbout("step-2", "a".repeat(64), "assisted", "low"),
+      suggestionAbout("step-2", "b".repeat(64), "patch", "high"),
+      { ...UNREAD_RESULT, steps: ["step-2"], fingerprint: "f".repeat(64) }
+    ];
+    const onAskChat = vi.fn();
+    const { container } = renderList(true, null, { onAskChat });
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(second).findByRole("button", { name: /^3 förslag/ }));
+
+    const rows = within(second).getAllByRole("listitem");
+    expect(rows.map((row) => within(row).getByText(/Stor|Medelstor|Liten/).textContent)).toEqual([
+      "Stor påverkan",
+      "Medelstor påverkan",
+      "Liten påverkan"
+    ]);
+    // Collapsed rows show the title and nothing else.
+    expect(within(second).queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
+
+    const more = within(rows[0]!).getByRole("button", {
+      name: "Mer om ”Svaret från 1 Sammanfatta skickas två gånger”"
+    });
+    fireEvent.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(within(rows[0]!).getByText(/Modellen läser den två gånger/)).toBeTruthy();
+    // Steps and values are the chat's pills; a pill opens the reference card.
+    fireEvent.click(within(rows[0]!).getByRole("button", { name: "1 Sammanfatta › text" }));
+    expect(await screen.findByRole("dialog", { name: "Referens" })).toBeTruthy();
     fireEvent.click(
-      within(own).getByRole("button", {
+      within(rows[0]!).getByRole("button", {
         name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
       })
     );
     expect(onAskChat).toHaveBeenCalledWith(
       expect.stringContaining("Steg: @[Skriv svar](step:step-2) @[Sammanfatta](step:step-1)")
     );
-    // One request for the whole list.
-    expect(
-      api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
-    ).toHaveLength(1);
+    // A step nothing reads offers the step list's own removal.
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: /^Mer om/ }));
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: "Ta bort Steg 2: Skriv svar" }));
+    expect(await screen.findByRole("alertdialog", { name: "Ta bort steget?" })).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps what was opened when the suggestions are read again", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64))];
+    const { rerender, ui } = renderList();
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(second).findByRole("button", { name: "1 förslag" }));
+    fireEvent.click(within(second).getByRole("button", { name: /^Mer om/ }));
+
+    // A new revision: read again, the same suggestion still there.
+    rerender(ui(5));
+    await waitFor(() =>
+      expect(
+        api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+      ).toHaveLength(2)
+    );
+    expect(
+      within(second).getByRole("button", { name: "1 förslag" }).getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(
+      within(second)
+        .getByRole("button", { name: /^Mer om/ })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+
+    // Gone from the draft, the step shows nothing.
+    prompts.suggestions = [];
+    rerender(ui(6));
+    await waitFor(() =>
+      expect(within(second).queryByRole("button", { name: "1 förslag" })).toBeNull()
+    );
   });
 
   it("sums the suggestions up above the list, with the run form's own there", async () => {
@@ -256,6 +319,11 @@ describe("FlowStepList", () => {
     expect(
       await screen.findByText("2 förslag kan göra flödet enklare eller billigare")
     ).toBeTruthy();
+    const form = screen.getByRole("button", {
+      name: "1 förslag om körningens formulär, 1 kan åtgärdas"
+    });
+    expect(form.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(form);
     expect(screen.getByText("Formulärfältet ”Diarienummer” används inte")).toBeTruthy();
     // Without a way to fix them, nothing offers to.
     expect(screen.queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
@@ -267,7 +335,7 @@ describe("FlowStepList", () => {
       expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything())
     );
     expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
-    expect(screen.queryByRole("region", { name: /^Förslag/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /förslag/ })).toBeNull();
   });
 
   it("fixes all patch suggestions after a confirmation that lists them by step", async () => {
@@ -292,25 +360,26 @@ describe("FlowStepList", () => {
     await waitFor(() => expect(state.announce).toHaveBeenCalledWith("2 förslag är åtgärdade"));
   });
 
-  it("fixes one suggestion from its card, and offers removal for a step nothing reads", async () => {
+  it("fixes one suggestion from its row, and offers no fix for an advice", async () => {
     prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64), "patch"), UNREAD_RESULT];
     const fix = { onFix: vi.fn(async () => true), pending: false };
     renderList(true, null, { suggestionFix: fix });
 
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
     fireEvent.click(
-      await within(second).findByRole("button", {
+      await within(second).findByRole("button", { name: "1 förslag, 1 kan åtgärdas" })
+    );
+    fireEvent.click(
+      within(second).getByRole("button", {
         name: "Åtgärda ”Svaret från 1 Sammanfatta skickas två gånger”"
       })
     );
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["a".repeat(64)]));
     await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Förslaget är åtgärdat"));
 
-    // An advice has no "Åtgärda"; the step list's own removal takes its place.
     const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    fireEvent.click(within(third).getByRole("button", { name: "1 förslag" }));
     expect(within(third).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
-    fireEvent.click(within(third).getByRole("button", { name: "Ta bort Steg 3: Granska" }));
-    expect(await screen.findByRole("alertdialog", { name: "Ta bort steget?" })).toBeTruthy();
   });
 
   it("only shows the steps to someone who cannot change them", () => {
