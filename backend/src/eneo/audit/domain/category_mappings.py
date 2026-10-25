@@ -107,6 +107,8 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_DELETED.value: "user_actions",
     ActionType.FLOW_PUBLISHED.value: "user_actions",
     ActionType.FLOW_UNPUBLISHED.value: "user_actions",
+    ActionType.FLOW_SUGGESTION_DISMISSED.value: "user_actions",
+    ActionType.FLOW_SUGGESTION_RESTORED.value: "user_actions",
     ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED.value: "admin_actions",
     ActionType.FLOW_RETENTION_HOLD_PLACED.value: "admin_actions",
     ActionType.FLOW_RETENTION_HOLD_RELEASED.value: "admin_actions",

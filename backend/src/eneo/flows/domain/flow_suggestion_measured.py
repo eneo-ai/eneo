@@ -24,6 +24,8 @@ from the step in the measured version says so (``step_changed_since``).
   ``model_relay``, ``overlapping_inputs`` (folded into the static
   suggestion about the same two reads where there is one) and
   ``deterministic_candidate``.
+- ``oversized_reasoning`` (``flow_suggestion_model_fit``): high reasoning
+  effort on a step whose calls were a small structured extraction.
 
 Tokens per run is an edge's ``byte_size`` times the tokens per byte of each
 call that sent it (``num_tokens_input`` over the bytes of the call's edges),
@@ -59,6 +61,7 @@ from eneo.flows.domain.flow_suggestion_model import (
     read_site_kind,
     uses_completion_model,
 )
+from eneo.flows.domain.flow_suggestion_model_fit import oversized_reasoning
 from eneo.flows.step_lineage import StepRead
 
 # `context_headroom`: the largest measured input reached this share of the
@@ -95,6 +98,7 @@ def measure_suggestions(
     measured = forwarding_suggestions(draft, measured, evidence)
     measured.extend(context_headroom(draft, evidence, related=measured))
     measured.extend(format_fallback(draft, evidence))
+    measured.extend(oversized_reasoning(draft, evidence))
     return measured
 
 

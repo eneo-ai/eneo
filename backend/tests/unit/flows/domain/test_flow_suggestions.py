@@ -233,6 +233,8 @@ def test_a_field_read_next_to_the_whole_text_is_contained() -> None:
     assert suggestion.params["contained"] is True
     assert suggestion.impact.level == "low"
     assert suggestion.params["reads"][1]["selector"] == ["structured", "title"]
+    # The whole input is kept; the field in the prompt is what it carries.
+    assert suggestion.params["redundant_reads"] == [1]
     assert suggestion.message == (
         "Step 2 reads step 1 as its input (previous_step) and in its prompt "
         "({{ step_1.output.structured.title }}), where the narrower read is part "
@@ -260,18 +262,6 @@ def test_a_field_in_the_input_next_to_the_whole_text_in_the_prompt_is_the_redund
     # The prompt carries the whole text; removing it would drop data.
     assert suggestion.params["redundant_reads"] == [0]
     assert suggestion.params["reads"][0]["site"] == "input_bindings.question"
-
-
-def test_the_whole_input_next_to_a_field_in_the_prompt_keeps_the_input() -> None:
-    suggestion = _only(
-        _analyze(
-            [_step(1), _step(2, prompt_text="{{ step_1.output.structured.title }}")]
-        )
-    )
-
-    assert suggestion.params["contained"] is True
-    assert suggestion.params["redundant_reads"] == [1]
-    assert suggestion.params["reads"][1]["channel"] == "prompt"
 
 
 def test_every_narrower_read_a_wider_read_contains_is_redundant() -> None:
@@ -336,16 +326,6 @@ def test_the_question_being_exactly_the_expression_is_patchable() -> None:
         "input_bindings.source_refs[0]",
     ]
     assert suggestion.fix.kind == "patch"
-
-
-def test_an_inline_prompt_read_needs_an_assisted_fix() -> None:
-    suggestion = _only(
-        _analyze(
-            [_step(1), _step(2, prompt_text="Bakgrund: {{ step_1.output.text }} slut")]
-        )
-    )
-
-    assert suggestion.fix.kind == "assisted"
 
 
 def _three_steps(

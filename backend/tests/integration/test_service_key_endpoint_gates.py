@@ -391,6 +391,12 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         f"/api/v1/conversations/{_STUB_ID}/documents/{_STUB_ID}/versions/",
         {"content": "# x\n"},
     ),
+    # A dismissal names the person who dismissed the suggestion.
+    (
+        "POST",
+        f"/api/v1/flows/{_STUB_ID}/suggestions/{'0' * 64}/dismissal/",
+        {"code": "duplicate_read"},
+    ),
 ]
 
 

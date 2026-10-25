@@ -3547,7 +3547,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 210 actions with their enabled status for the modal UI.
+     * @description Retrieve all 212 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -6186,9 +6186,11 @@ export interface paths {
      * Get Flow Suggestions
      * @description What the draft could do cheaper or simpler. By default it is judged from the saved definition alone: where a step's model receives the same earlier result twice (`duplicate_read`), takes more of the earlier results than it needs, carries data no later step reads, or relays a result another step could read directly. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at.
      *
-     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and the findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`, and from the forwarding facts the worker records for each model call, `model_relay` (most of a model step's output is an earlier result copied word for word, which a later step reads from it), `overlapping_inputs` (two inputs of a call share half or more of their text; added to the `duplicate_read` or `broad_all_previous_steps` about the same two reads as `params.measured_overlaps` when there is one) and `deterministic_candidate` (a model step whose output is its inputs copied word for word, which a `compose_text` step does without a model). A finding from the forwarding facts holds in half or more of the runs that measured it. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts, call reasons and the shares the worker measured), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted, how many it left out and how many of their attempts had forwarding facts, and is refused with 503 when that entry cannot be written.
+     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and the findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`, and from the forwarding facts the worker records for each model call, `model_relay` (most of a model step's output is an earlier result copied word for word, which a later step reads from it), `overlapping_inputs` (two inputs of a call share half or more of their text; added to the `duplicate_read` or `broad_all_previous_steps` about the same two reads as `params.measured_overlaps` when there is one) and `deterministic_candidate` (a model step whose output is its inputs copied word for word, which a `compose_text` step does without a model). A finding from the forwarding facts holds in half or more of the runs that measured it. From what the model catalogue knows, `oversized_reasoning`: a step asks its reasoning-capable model for high reasoning effort while, in half or more of the runs, its calls were a small extraction into a JSON result (a small share of the model's input limit, and a small output with the reasoning included); it names no price and no model. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts, call reasons and the shares the worker measured), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted, how many it left out and how many of their attempts had forwarding facts, and is refused with 503 when that entry cannot be written.
      *
      *     Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits and measurements, an `impact` and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
+     *
+     *     A suggestion an editor of the flow dismissed (`POST .../dismissal/`) is left out for every editor and counted in `dismissed_count`, static and measured alike; with `include_dismissed=true` it is listed in its place with `dismissed` saying who dismissed it and when. A dismissal hides only the fingerprint it names, so it lapses when the premise changes.
      */
     get: operations["get_flow_suggestions"];
     put?: never;
@@ -6214,6 +6216,30 @@ export interface paths {
      */
     post: operations["apply_flow_suggestions"];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Dismiss Flow Suggestion
+     * @description Hide one suggestion of the draft from the flow's suggestions, for example a finding the flow's editors decided to keep as it is. `code` is the suggestion's code. A suggestion the definition proves is checked against the draft's suggestions now and refused with `flow_suggestion_stale` when the draft no longer has it (or has it under another code); a suggestion only runs prove (`identical_inputs`, `context_headroom`, `format_fallback`, `model_relay`, `overlapping_inputs`, `deterministic_candidate`, `oversized_reasoning`) is taken as given, since checking it would read the runs' evidence. Dismissing a suggestion again answers with the dismissal as it was first made and writes nothing, so the request can be retried; the audit entry (`flow_suggestion_dismissed`) names the fingerprint and the code. Service API keys cannot dismiss: a dismissal names the person who made it. Dismissal is the flow's, not the caller's: a dismissed suggestion is left out of `GET .../suggestions/` for every editor of the flow, static and measured reads alike, and counted in its `dismissed_count`. It hides only the fingerprint it names, so it lapses by itself when a change to the draft changes the suggestion's premise. It changes nothing of the flow: not the draft or its revision, not publishing, and a flow package carries no dismissals. Applying a suggestion still works on a dismissed one, since apply names its fingerprints. It needs the permission to edit the flow. Each change writes one audit entry on the flow, saved with it: when the entry cannot be written, nothing is saved.
+     */
+    post: operations["dismiss_flow_suggestion"];
+    /**
+     * Restore Flow Suggestion
+     * @description Take back the dismissal of one suggestion, so it is listed again while the draft has it. Answers 204 with no content, and 404 when the flow has no dismissal of that fingerprint (it was never dismissed, or the dismissal was already taken back). The audit entry (`flow_suggestion_restored`) names the fingerprint and the code it was dismissed with. Dismissal is the flow's, not the caller's: a dismissed suggestion is left out of `GET .../suggestions/` for every editor of the flow, static and measured reads alike, and counted in its `dismissed_count`. It hides only the fingerprint it names, so it lapses by itself when a change to the draft changes the suggestion's premise. It changes nothing of the flow: not the draft or its revision, not publishing, and a flow package carries no dismissals. Applying a suggestion still works on a dismissed one, since apply names its fingerprints. It needs the permission to edit the flow. Each change writes one audit entry on the flow, saved with it: when the entry cannot be written, nothing is saved.
+     */
+    delete: operations["restore_flow_suggestion"];
     options?: never;
     head?: never;
     patch?: never;
@@ -12118,6 +12144,8 @@ export interface components {
       | "flow_deleted"
       | "flow_published"
       | "flow_unpublished"
+      | "flow_suggestion_dismissed"
+      | "flow_suggestion_restored"
       | "flow_run_retention_policy_changed"
       | "flow_run_history_purged"
       | "flow_retention_hold_placed"
@@ -14297,7 +14325,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 91,
+     *           "action_count": 93,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -27949,7 +27977,90 @@ export interface components {
       | "format_fallback"
       | "model_relay"
       | "overlapping_inputs"
-      | "deterministic_candidate";
+      | "deterministic_candidate"
+      | "oversized_reasoning";
+    /**
+     * FlowSuggestionDismissalPublic
+     * @description A dismissal of one suggestion of a flow.
+     * @example {
+     *       "code": "duplicate_read",
+     *       "dismissed_at": "2026-10-25T09:30:00Z",
+     *       "dismissed_by": "00000000-0000-0000-0000-000000000301",
+     *       "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001"
+     *     }
+     */
+    FlowSuggestionDismissalPublic: {
+      /**
+       * Code
+       * @description The code of the suggestion, as it was dismissed.
+       * @example duplicate_read
+       */
+      code: string;
+      /**
+       * Dismissed At
+       * Format: date-time
+       * @description When it was dismissed.
+       * @example 2026-10-25T09:30:00Z
+       */
+      dismissed_at: string;
+      /**
+       * Dismissed By
+       * @description The user who dismissed it; null when that user no longer exists.
+       * @example 00000000-0000-0000-0000-000000000301
+       */
+      dismissed_by: string | null;
+      /**
+       * Fingerprint
+       * @description The fingerprint of the suggestion dismissed.
+       * @example 9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a
+       */
+      fingerprint: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description The flow.
+       * @example 00000000-0000-0000-0000-000000000001
+       */
+      flow_id: string;
+    };
+    /**
+     * FlowSuggestionDismissalRequest
+     * @description The suggestion's code, as the suggestions answer names it.
+     * @example {
+     *       "code": "duplicate_read"
+     *     }
+     */
+    FlowSuggestionDismissalRequest: {
+      /**
+       * @description The `code` of the suggestion the fingerprint names. A code the definition proves must be the code of one of the draft's suggestions now; a code only runs prove is taken as given.
+       * @example duplicate_read
+       */
+      code: components["schemas"]["FlowSuggestionCode"];
+    };
+    /**
+     * FlowSuggestionDismissedPublic
+     * @description Who dismissed a suggestion of the flow and when.
+     * @example {
+     *       "dismissed_at": "2026-10-25T09:30:00Z",
+     *       "dismissed_by": "00000000-0000-0000-0000-000000000301"
+     *     }
+     */
+    FlowSuggestionDismissedPublic: {
+      /**
+       * Dismissed At
+       * Format: date-time
+       * @description When it was dismissed.
+       * @example 2026-10-25T09:30:00Z
+       */
+      dismissed_at: string;
+      /**
+       * Dismissed By
+       * @description The user who dismissed it; null when that user no longer exists.
+       * @example 00000000-0000-0000-0000-000000000301
+       */
+      dismissed_by: string | null;
+    };
     /** FlowSuggestionFixPublic */
     FlowSuggestionFixPublic: {
       /**
@@ -27992,7 +28103,7 @@ export interface components {
       basis: "definition" | "runs";
       /**
        * Level
-       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field). The measured codes: `high` for `identical_inputs`, `context_headroom` and `model_relay`, `medium` for `format_fallback`, `overlapping_inputs` and `deterministic_candidate`.
+       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field). The measured codes: `high` for `identical_inputs`, `context_headroom` and `model_relay`, `medium` for `format_fallback`, `overlapping_inputs` and `deterministic_candidate`, `low` for `oversized_reasoning`.
        * @example high
        * @enum {string}
        */
@@ -28011,7 +28122,7 @@ export interface components {
       step_changed_since?: boolean | null;
       /**
        * Tokens Per Run
-       * @description Measured: the tokens per run the duplicated or unused part cost, averaged over the runs that measured it. For a duplicate, the size of the redundant input times the tokens per byte of each call that sent it; for a step run once per item, the copies beyond the first item's; for an unread result, everything the step was billed. From the forwarding facts, averaged over the runs in which the finding held: for `model_relay`, the output tokens of the measured call times the share of its output that was copied; for `overlapping_inputs`, the shared bytes times the tokens per byte of each call that sent both inputs; for `deterministic_candidate`, everything the step was billed, which a step without a model does not cost. Null when the impact is from the definition, when the runs did not report the tokens, and for a measured finding without a token cost of its own (`context_headroom`, `format_fallback`).
+       * @description Measured: the tokens per run the duplicated or unused part cost, averaged over the runs that measured it. For a duplicate, the size of the redundant input times the tokens per byte of each call that sent it; for a step run once per item, the copies beyond the first item's; for an unread result, everything the step was billed. From the forwarding facts, averaged over the runs in which the finding held: for `model_relay`, the output tokens of the measured call times the share of its output that was copied; for `overlapping_inputs`, the shared bytes times the tokens per byte of each call that sent both inputs; for `deterministic_candidate`, everything the step was billed, which a step without a model does not cost. Null when the impact is from the definition, when the runs did not report the tokens, and for a measured finding without a token cost of its own (`context_headroom`, `format_fallback`, `oversized_reasoning`).
        * @example 1840
        */
       tokens_per_run?: number | null;
@@ -28081,13 +28192,16 @@ export interface components {
      */
     FlowSuggestionPublic: {
       /**
-       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format. From the forwarding facts the worker records for each model call, also only with `runs`: `model_relay`, most of a model step's output was an earlier result copied word for word, which a later step reads from it (that step can read the original); `overlapping_inputs`, two inputs of a step shared half or more of the shorter one's text without being identical; `deterministic_candidate`, a model step's output was its inputs copied word for word with little of its own, which a `compose_text` step does without a model.
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format. From the forwarding facts the worker records for each model call, also only with `runs`: `model_relay`, most of a model step's output was an earlier result copied word for word, which a later step reads from it (that step can read the original); `overlapping_inputs`, two inputs of a step shared half or more of the shorter one's text without being identical; `deterministic_candidate`, a model step's output was its inputs copied word for word with little of its own, which a `compose_text` step does without a model. Measured against what the model catalogue knows, also only with `runs`: `oversized_reasoning`, a step asks its reasoning-capable model for high reasoning effort while its calls were a small extraction into a JSON result.
        * @example duplicate_read
        * @example model_relay
        * @example overlapping_inputs
        * @example deterministic_candidate
+       * @example oversized_reasoning
        */
       code: components["schemas"]["FlowSuggestionCode"];
+      /** @description Who dismissed the suggestion and when, for a suggestion an editor of the flow dismissed (listed only with `include_dismissed`); null for one that is shown. */
+      dismissed?: components["schemas"]["FlowSuggestionDismissedPublic"] | null;
       /**
        * Fingerprint
        * @description The suggestion's identity: a hash of its code, the steps it is about and the reads that triggered it. The same across edits that do not touch them; gone when the premise is.
@@ -28103,7 +28217,7 @@ export interface components {
       message: string;
       /**
        * Params
-       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`. `identical_inputs`: `producer_step_ids`, `producer_step_orders`, `sites`, `byte_size`, `observed_runs`, `step_runs`. `context_headroom`: `peak_input_tokens`, `token_limit`, `limit_share`, `inline_cap_failures`, `duplicated_tokens_per_run` and `duplicated_share` (what the step's measured duplicates account for), `related_fingerprints` (those duplicates), `step_runs`. `format_fallback`: `fallback_runs`, `step_runs`. `model_relay`: `producer_step_order`, `producer_step_id`, `reads` (the step's reads of that result), `readers` (`step_order`, `step_id`, `sites` of the later steps that read the step), `copied_share` (the share of the output found in that result), `input_share` (the share of that result the copy holds), `copied_bytes`. `overlapping_inputs`: `inputs` (two, each `step_order`, `step_id` and `sites`), `shared_bytes`, `shared_share` (of the shorter input). `deterministic_candidate`: `output_verbatim_ratio`, `own_bytes` (the output's bytes not found in its inputs), `input_share` (the share of the copied inputs the output holds). The three carry `run_count` (runs that measured the finding) and `held_runs` (runs in which it held), their shares and sizes averaged over the latter. A measured overlap of the two reads a `duplicate_read` or `broad_all_previous_steps` names is added to it as `measured_overlaps`: a list of the `overlapping_inputs` params, each with `tokens_per_run`, `version` and `step_changed_since`. No param holds run content.
+       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`. `identical_inputs`: `producer_step_ids`, `producer_step_orders`, `sites`, `byte_size`, `observed_runs`, `step_runs`. `context_headroom`: `peak_input_tokens`, `token_limit`, `limit_share`, `inline_cap_failures`, `duplicated_tokens_per_run` and `duplicated_share` (what the step's measured duplicates account for), `related_fingerprints` (those duplicates), `step_runs`. `format_fallback`: `fallback_runs`, `step_runs`. `model_relay`: `producer_step_order`, `producer_step_id`, `reads` (the step's reads of that result), `readers` (`step_order`, `step_id`, `sites` of the later steps that read the step), `copied_share` (the share of the output found in that result), `input_share` (the share of that result the copy holds), `copied_bytes`. `overlapping_inputs`: `inputs` (two, each `step_order`, `step_id` and `sites`), `shared_bytes`, `shared_share` (of the shorter input). `deterministic_candidate`: `output_verbatim_ratio`, `own_bytes` (the output's bytes not found in its inputs), `input_share` (the share of the copied inputs the output holds). The three carry `run_count` (runs that measured the finding) and `held_runs` (runs in which it held), their shares and sizes averaged over the latter. `oversized_reasoning`: `reasoning_effort`, `peak_input_tokens` and `peak_output_tokens` (the largest call of the runs in which it held, the output with the model's reasoning), `token_limit`, `limit_share`, `run_count`, `held_runs`. A measured overlap of the two reads a `duplicate_read` or `broad_all_previous_steps` names is added to it as `measured_overlaps`: a list of the `overlapping_inputs` params, each with `tokens_per_run`, `version` and `step_changed_since`. No param holds run content.
        */
       params: {
         [key: string]: unknown;
@@ -28273,6 +28387,7 @@ export interface components {
     /**
      * FlowSuggestionsPublic
      * @example {
+     *       "dismissed_count": 1,
      *       "draft_revision": 4,
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "items": [
@@ -28391,6 +28506,13 @@ export interface components {
      */
     FlowSuggestionsPublic: {
       /**
+       * Dismissed Count
+       * @description How many of the draft's suggestions an editor of the flow dismissed: left out of `items`, unless `include_dismissed` lists them with their `dismissed`.
+       * @default 0
+       * @example 1
+       */
+      dismissed_count?: number;
+      /**
        * Draft Revision
        * @description The draft revision the suggestions judge.
        * @example 4
@@ -28405,7 +28527,7 @@ export interface components {
       flow_id: string;
       /**
        * Items
-       * @description The suggestions: those with a measured `impact.tokens_per_run` first, most tokens first, then by impact level (high, medium, low), then step order; at most 50. Empty when the draft gives none.
+       * @description The suggestions: those with a measured `impact.tokens_per_run` first, most tokens first, then by impact level (high, medium, low), then step order; at most 50, dismissed ones counted among them. Empty when the draft gives none.
        */
       items: components["schemas"]["FlowSuggestionPublic"][];
       /** @description Which runs were measured, when `runs` asked for them; null for the definition alone. */
@@ -64716,6 +64838,8 @@ export interface operations {
       query?: {
         /** @description How many of the newest finished runs to measure; 0, the default, judges the definition alone. Above 0 it needs the permission to view flow traces. */
         runs?: number;
+        /** @description List the suggestions an editor of the flow dismissed too, each with `dismissed`; by default they are left out and counted in `dismissed_count`. */
+        include_dismissed?: boolean;
       };
       header?: never;
       path: {
@@ -64734,6 +64858,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "dismissed_count": 1,
            *       "draft_revision": 4,
            *       "flow_id": "00000000-0000-0000-0000-000000000001",
            *       "items": [
@@ -64993,6 +65118,164 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  dismiss_flow_suggestion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+        /** @description The `fingerprint` of the suggestion, as the suggestions answer gives it: 64 lowercase hex characters. */
+        fingerprint: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowSuggestionDismissalRequest"];
+      };
+    };
+    responses: {
+      /** @description The suggestion is dismissed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "duplicate_read",
+           *       "dismissed_at": "2026-10-25T09:30:00Z",
+           *       "dismissed_by": "00000000-0000-0000-0000-000000000301",
+           *       "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+           *       "flow_id": "00000000-0000-0000-0000-000000000001"
+           *     }
+           */
+          "application/json": components["schemas"]["FlowSuggestionDismissalPublic"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `service_key_cannot_create_resources` for a service API key, `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller may not edit flows in the space, and `flow_owner_required` when another member owns the draft. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The draft does not have the suggestion the fingerprint and a code the definition proves name (`flow_suggestion_stale`, with the `fingerprint` in `context`). Nothing is saved. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  restore_flow_suggestion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+        /** @description The `fingerprint` of the suggestion, as the suggestions answer gives it: 64 lowercase hex characters. */
+        fingerprint: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope, or the flow has no dismissal of that fingerprint. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "This suggestion is not dismissed."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

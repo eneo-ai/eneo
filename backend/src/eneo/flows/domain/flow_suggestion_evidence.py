@@ -184,19 +184,26 @@ class StepDefinitionFacts:
     """A step's definition as far as measurements depend on it: the
     canonical hash of what decides what reaches its model, its completion
     model and its output type. Built the same way for a draft step and for
-    a step of a published version, so equal hashes mean an unchanged step."""
+    a step of a published version, so equal hashes mean an unchanged step.
+
+    ``reasoning_effort`` is the effort its assistant asks the model for
+    (None when it asks for none). It decides nothing of what reaches the
+    model, so it is outside the comparison: a rule whose measurement depends
+    on it compares it itself (``RunEvidence.same_model_setup``)."""
 
     definition_hash: str
     completion_model_id: UUID | None
     output_type: str
+    reasoning_effort: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
 class RunEvidence:
     """What the counted runs measured, newest run first, with the facts of
     each step in each of their versions (by version and step id), the same
-    facts for the draft's steps (by step id) and the input token limits the
-    completion model catalogue knows (by model id; unknown limits absent)."""
+    facts for the draft's steps (by step id), and what the completion model
+    catalogue knows: the input token limits (by model id; unknown limits
+    absent) and the models it marks as reasoning-capable."""
 
     runs: tuple[EvidenceRun, ...]
     published_steps: Mapping[tuple[int, UUID], StepDefinitionFacts] = field(
@@ -208,6 +215,7 @@ class RunEvidence:
     model_input_limits: Mapping[UUID, int] = field(
         default_factory=lambda: dict[UUID, int]()
     )
+    reasoning_models: frozenset[UUID] = frozenset()
 
     def step_changed_since(self, step_id: UUID, version: int) -> bool:
         """Whether the draft's step differs from the step in ``version``; a
@@ -228,6 +236,20 @@ class RunEvidence:
             and draft.output_type == published.output_type
         )
 
+    def same_model_setup(self, step_id: UUID, version: int) -> bool:
+        """Whether the draft's step has the model, output type and reasoning
+        effort it had in ``version``: what a measurement of how much its
+        model writes needs, since the output it is billed includes what it
+        spends reasoning."""
+        draft = self.draft_steps.get(step_id)
+        published = self.published_steps.get((version, step_id))
+        return (
+            self.same_model_and_output(step_id, version)
+            and draft is not None
+            and published is not None
+            and draft.reasoning_effort == published.reasoning_effort
+        )
+
 
 def step_definition_facts(
     *,
@@ -242,12 +264,14 @@ def step_definition_facts(
     output_config: Mapping[str, object] | None,
     prompt_text: str | None,
     completion_model_id: UUID | None,
+    reasoning_effort: str | None = None,
 ) -> StepDefinitionFacts:
     """The facts of a step, draft or published. The hash covers its input,
     output, prompt and model; not its name, order, timeout or review, which
     change no measurement. Two settings publish rewrites by design are left
     out: a tool step's pinned tool (``input_config.tool``) and a template
-    fill's ``output_config``. An empty configuration is no configuration."""
+    fill's ``output_config``. An empty configuration is no configuration,
+    and an empty reasoning effort none."""
 
     config = {
         key: value
@@ -278,6 +302,7 @@ def step_definition_facts(
         ),
         completion_model_id=completion_model_id,
         output_type=output_type,
+        reasoning_effort=reasoning_effort or None,
     )
 
 

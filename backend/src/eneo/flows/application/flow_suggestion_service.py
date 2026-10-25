@@ -193,23 +193,26 @@ async def list_measured_flow_suggestions(
         tenant_id=tenant_id,
     )
     stored = await container.flow_service().get_flow_assistant_prompts(flow)
-    models = await repo.assistant_completion_models(
+    settings = await repo.assistant_model_settings(
         assistant_ids={step.assistant_id for step in flow.steps}, tenant_id=tenant_id
     )
-    draft = {
-        step.id: draft_step_facts(
+    draft: dict[UUID, StepDefinitionFacts] = {}
+    for step in flow.steps:
+        if step.id is None:
+            continue
+        setting = settings.get(step.assistant_id)
+        draft[step.id] = draft_step_facts(
             step,
             prompt=stored.get(step.assistant_id),
-            completion_model_id=models.get(step.assistant_id),
+            completion_model_id=setting.completion_model_id if setting else None,
+            reasoning_effort=setting.reasoning_effort if setting else None,
         )
-        for step in flow.steps
-        if step.id is not None
-    }
     model_ids = {
         facts.completion_model_id
         for facts in (*draft.values(), *published.values())
         if facts.completion_model_id is not None
     }
+    catalogue = await repo.model_catalogue(model_ids=model_ids, tenant_id=tenant_id)
     evidence = RunEvidence(
         runs=tuple(
             EvidenceRun(
@@ -221,9 +224,8 @@ async def list_measured_flow_suggestions(
         ),
         published_steps=published,
         draft_steps=draft,
-        model_input_limits=await repo.model_input_limits(
-            model_ids=model_ids, tenant_id=tenant_id
-        ),
+        model_input_limits=catalogue.input_limits,
+        reasoning_models=catalogue.reasoning_models,
     )
     suggestions = flow_suggestions(flow, prompts=stored, evidence=evidence)
     measured = MeasuredRuns(
@@ -258,6 +260,7 @@ def draft_step_facts(
     *,
     prompt: StoredAssistantPrompt | None,
     completion_model_id: UUID | None,
+    reasoning_effort: str | None = None,
 ) -> StepDefinitionFacts:
     """A draft step's facts, built as a published step's are, so an
     unchanged step has the facts of its version."""
@@ -273,6 +276,7 @@ def draft_step_facts(
         output_config=step.output_config,
         prompt_text=prompt.text if prompt is not None else None,
         completion_model_id=completion_model_id,
+        reasoning_effort=reasoning_effort,
     )
 
 

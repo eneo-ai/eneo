@@ -361,6 +361,24 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "suggestion; a refused batch emits none"
         ),
     ),
+    "dismiss_flow_suggestion": _required_transaction(
+        ActionType.FLOW_SUGGESTION_DISMISSED,
+        owner="flow_suggestion_dismissals.dismiss_flow_suggestion",
+        metadata_keys=("flow_id", "suggestion_fingerprint", "suggestion_code"),
+        idempotency=(
+            "one event when the dismissal is saved; dismissing the same "
+            "suggestion again finds it saved and emits none"
+        ),
+    ),
+    "restore_flow_suggestion": _required_transaction(
+        ActionType.FLOW_SUGGESTION_RESTORED,
+        owner="flow_suggestion_dismissals.restore_flow_suggestion",
+        metadata_keys=("flow_id", "suggestion_fingerprint", "suggestion_code"),
+        idempotency=(
+            "a dismissal is taken back once; a second restore is refused with "
+            "404 and no event"
+        ),
+    ),
     "get_or_create_flow_authoring_chat": _configurable(
         ActionType.FLOW_AUTHORING_CHAT_CREATED,
         owner="flow_authoring_chat.get_or_create_authoring_chat",

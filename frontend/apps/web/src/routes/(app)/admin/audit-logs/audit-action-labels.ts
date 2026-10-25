@@ -677,6 +677,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_review_checkpoint_expired,
     description: m.audit_action_flow_run_review_checkpoint_expired_description
   },
+  flow_suggestion_dismissed: {
+    name: m.audit_action_flow_suggestion_dismissed,
+    description: m.audit_action_flow_suggestion_dismissed_description
+  },
+  flow_suggestion_restored: {
+    name: m.audit_action_flow_suggestion_restored,
+    description: m.audit_action_flow_suggestion_restored_description
+  },
   ai_builder_client_error_reported: {
     name: m.audit_action_ai_builder_client_error_reported,
     description: m.audit_action_ai_builder_client_error_reported_description
