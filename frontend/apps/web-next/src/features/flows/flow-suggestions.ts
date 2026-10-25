@@ -7,6 +7,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { reasoningEffortLabel } from "@/features/chat/reasoning-effort";
 import type { FlowStep } from "./flows-api";
 import { stepMention, valueReference } from "./chat/references";
 
@@ -459,6 +460,25 @@ export function suggestionText(
           kind: t("flow_step_editor_kind_compose")
         })
       };
+    // Measured against what the model catalogue knows, only with `runs`.
+    case "oversized_reasoning": {
+      const share = numberOr(params.limit_share, 0);
+      return {
+        title: t("flow_suggestion_oversized_reasoning_title", {
+          effort: reasoningEffortLabel(
+            typeof params.reasoning_effort === "string" ? params.reasoning_effort : "high",
+            t
+          )
+        }),
+        explanation: t("flow_suggestion_oversized_reasoning_explanation", {
+          ...heldRuns(params),
+          share,
+          // A share that rounds to 0 % is said as "under 1 %".
+          small: share < 0.005 ? "yes" : "no",
+          output: numberOr(params.peak_output_tokens, 0)
+        })
+      };
+    }
     default:
       return {
         title: t("flow_suggestion_unknown_title"),

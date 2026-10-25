@@ -488,6 +488,22 @@ describe("suggestionText with the draft's steps", () => {
       "I 3 av de 4 senaste körningarna var 96\u00a0% av stegets svar hämtat ord för ord ur " +
         "underlaget, med bara lite egen text. Ett steg av typen ”Sätt ihop text utan AI” kan " +
         "göra samma sak utan modell"
+    ],
+    [
+      suggestion("oversized_reasoning", ["step-2"], {
+        reasoning_effort: "high",
+        peak_input_tokens: 3800,
+        peak_output_tokens: 900,
+        token_limit: 128_000,
+        limit_share: 0.03,
+        run_count: 5,
+        held_runs: 4
+      }),
+      "Steget ber om resonemangsnivån ”Hög” för ett litet svar i fast format",
+      "I 4 av de 5 senaste körningarna var stegets anrop små: modellen fick som mest " +
+        "3\u00a0% av vad den kan ta emot och skrev som mest 900 tokens, resonemanget " +
+        "inräknat. Att plocka ut ett litet svar i fast format kräver sällan så mycket " +
+        "resonemang, så en lägre nivå gör troligen samma arbete för mindre."
     ]
   ])("renders %#: %s", (item, title, explanation) => {
     const step = STEPS.find((candidate) => candidate.id === item.steps[0]);
@@ -496,6 +512,59 @@ describe("suggestionText with the draft's steps", () => {
     expect(text.explanation).toContain(explanation);
     // Every code has English too.
     expect(suggestionText(item, tEn, step, STEPS).title).not.toBe(title);
+  });
+});
+
+describe("oversized_reasoning", () => {
+  const params = {
+    reasoning_effort: "xhigh",
+    peak_input_tokens: 400,
+    peak_output_tokens: 3400,
+    token_limit: 200_000,
+    limit_share: 0,
+    run_count: 1,
+    held_runs: 1
+  };
+
+  it("names the effort as the editor does, a share under 1 % as such, and one run as the latest", () => {
+    const text = suggestionText(
+      suggestion("oversized_reasoning", ["step-2"], params),
+      t,
+      STEPS[1],
+      STEPS
+    );
+    expect(text.title).toBe(
+      "Steget ber om resonemangsnivån ”Extra hög” för ett litet svar i fast format"
+    );
+    expect(text.explanation).toContain(
+      "I den senaste körningen var stegets anrop små: modellen fick som mest under 1\u00a0% av vad " +
+        "den kan ta emot och skrev som mest 3\u00a0400 tokens, resonemanget inräknat."
+    );
+    expect(text.explanation).toContain("Det är bara ett råd");
+    // Plain words: no field names, no model, no price.
+    expect(`${text.title} ${text.explanation}`).not.toMatch(/reasoning_effort|token_limit|_/);
+  });
+
+  it("renders in English too", () => {
+    const text = suggestionText(
+      suggestion("oversized_reasoning", ["step-2"], {
+        ...params,
+        reasoning_effort: "high",
+        limit_share: 0.03,
+        run_count: 5,
+        held_runs: 4
+      }),
+      tEn,
+      STEPS[1],
+      STEPS
+    );
+    expect(text.title).toBe(
+      "The step asks for the reasoning effort “High” for a small answer in a fixed format"
+    );
+    expect(text.explanation).toContain(
+      "In 4 of the latest 5 runs, the step's calls were small: the model got at most 3% of " +
+        "what it can take in and wrote at most 3,400 tokens, its reasoning included."
+    );
   });
 });
 
