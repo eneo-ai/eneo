@@ -89,7 +89,13 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
+from eneo.websites.presentation.website_models import (
+    CrawlRunPublic,
+    WebsiteCrawlProgress,
+    WebsiteCrawlProgressList,
+    WebsiteCreate,
+    WebsitePublic,
+)
 
 if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
@@ -105,6 +111,9 @@ _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
 )
 _INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
+_WEBSITE_CRAWL_PROGRESS_ACCESS_REASON = (
+    "WebsiteCrudService enforces the space actor's read permissions for this operation."
+)
 # A rename or delete answers at once while a sync holds the item.
 _SYNCING_RESPONSE = {
     409: {
@@ -842,6 +851,34 @@ async def create_space_groups(
     )
 
     return CollectionPublic.from_domain(created_collection)
+
+
+@router.get(
+    "/{id}/knowledge/websites/crawl-progress/",
+    response_model=WebsiteCrawlProgressList,
+    description="The running crawls of the websites a space shows, with each "
+    "website's latest crawl run. Websites that are not crawling are absent. "
+    "Cheap enough to poll while a crawl runs; the space itself is not loaded.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_CRAWL_PROGRESS_ACCESS_REASON,
+)
+async def get_website_crawl_progress(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    runs = await container.website_crud_service().get_crawl_progress(space_id=id)
+    return WebsiteCrawlProgressList(
+        items=[
+            WebsiteCrawlProgress(
+                website_id=run.website_id, latest_crawl=CrawlRunPublic.from_domain(run)
+            )
+            for run in runs
+        ]
+    )
 
 
 @router.post(

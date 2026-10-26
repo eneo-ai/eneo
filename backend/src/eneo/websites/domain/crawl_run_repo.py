@@ -795,6 +795,23 @@ class CrawlRunRepository:
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
 
+    async def get_active_for_websites(
+        self, website_ids: Sequence[UUID]
+    ) -> list[CrawlRun]:
+        """The running crawl of each of the websites that has one: at most one
+        each (``uq_crawl_runs_active_website``), read through that index."""
+        if not website_ids:
+            return []
+        records = await self.session.scalars(
+            sa.select(CrawlRunsTable)
+            .where(
+                CrawlRunsTable.website_id.in_(website_ids),
+                CrawlRunsTable.phase != CrawlPhase.TERMINAL.value,
+            )
+            .order_by(CrawlRunsTable.created_at, CrawlRunsTable.id)
+        )
+        return [CrawlRun.to_domain(record=record) for record in records]
+
     async def get_latest_for_website(self, website_id: UUID) -> CrawlRun | None:
         record = await self.session.scalar(
             sa.select(CrawlRunsTable)

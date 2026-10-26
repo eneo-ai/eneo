@@ -333,6 +333,19 @@ class WebsiteCRUDService:
             website_id=website_id, limit=limit, cursor=cursor
         )
 
+    async def get_crawl_progress(self, space_id: UUID) -> list["CrawlRun"]:
+        """The running crawls of the websites a space shows, without the space
+        aggregate: what the websites tab polls while a crawl runs. Refused like
+        reading the space; a caller who may not read its websites sees none, as
+        in the space itself."""
+        access = await self.space_service.get_space_access_facts(space_id)
+        if not self.actor_manager.get_space_actor(access).can_read_websites():
+            return []
+        website_ids = await self.space_repo.get_visible_website_ids(
+            space_id, access.tenant_space_id
+        )
+        return await self.crawl_run_repo.get_active_for_websites(website_ids)
+
     async def get_latest_crawl_run(self, website_id: UUID) -> "CrawlRun | None":
         access = await self.space_repo.get_website_access_facts(website_id)
         actor = self.actor_manager.get_space_actor(access)

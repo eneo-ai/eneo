@@ -2334,6 +2334,23 @@ class SpaceRepository:
                 setattr(record, "document_count", counts.get(record.id, 0))
         return records
 
+    async def get_visible_website_ids(
+        self, space_id: UUID, tenant_space_id: UUID | None
+    ) -> list[UUID]:
+        """Ids of the websites a space shows, as the space aggregate selects them."""
+        user = self._require_user()
+        ids = await self.session.scalars(
+            sa.select(WebsitesTable.id)
+            .where(
+                WEBSITE_SOURCE.visible_to(
+                    effective_space_ids_for(space_id, tenant_space_id)
+                ),
+                WebsitesTable.tenant_id == user.tenant_id,
+            )
+            .order_by(WebsitesTable.created_at)
+        )
+        return list(ids.all())
+
     async def get_visible_integration_knowledge_ids(
         self, space_id: UUID, tenant_space_id: UUID | None
     ) -> list[UUID]:

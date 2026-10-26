@@ -145,6 +145,17 @@ class CrawlRunPublic(InDB):
         )
 
 
+class WebsiteCrawlProgress(BaseModel):
+    website_id: UUID
+    latest_crawl: CrawlRunPublic
+
+
+class WebsiteCrawlProgressList(BaseModel):
+    """Running crawls of the websites a space shows; websites not crawling are absent."""
+
+    items: list[WebsiteCrawlProgress]
+
+
 class CrawlResourceFailurePublic(BaseModel):
     id: UUID
     url: str

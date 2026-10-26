@@ -41,12 +41,13 @@ import {
   websiteQueryOptions,
   type CrawlRun
 } from "@/features/knowledge/knowledge";
+import {
+  ACTIVE_CRAWL_REFRESH_MS,
+  IDLE_CRAWL_REFRESH_MS
+} from "@/features/knowledge/crawl-progress";
 import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
-
-const ACTIVE_CRAWL_REFRESH_MS = 2_000;
-const IDLE_RUNS_REFRESH_MS = 30_000;
 
 type WebsiteTab = "crawls" | "blobs";
 
@@ -237,7 +238,7 @@ export function WebsiteDetail({
     refetchInterval: (query) =>
       query.state.data && isActiveCrawlRun(query.state.data)
         ? ACTIVE_CRAWL_REFRESH_MS
-        : IDLE_RUNS_REFRESH_MS
+        : IDLE_CRAWL_REFRESH_MS
   });
   const runPages = useSuspenseInfiniteQuery(websiteCrawlRunsQueryOptions(browserApi, websiteId));
   const blobPages = useSuspenseInfiniteQuery(websiteBlobPagesQueryOptions(browserApi, websiteId));

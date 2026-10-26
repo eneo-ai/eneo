@@ -9913,6 +9913,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/websites/crawl-progress/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Website Crawl Progress
+     * @description The running crawls of the websites a space shows, with each website's latest crawl run. Websites that are not crawling are absent. Cheap enough to poll while a crawl runs; the space itself is not loaded.
+     */
+    get: operations["get_website_crawl_progress_api_v1_spaces__id__knowledge_websites_crawl_progress__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/members/": {
     parameters: {
       query?: never;
@@ -41351,6 +41371,23 @@ export interface components {
       items: components["schemas"]["WebsiteContentFolderPublic"][];
       /** Next Cursor */
       next_cursor: string | null;
+    };
+    /** WebsiteCrawlProgress */
+    WebsiteCrawlProgress: {
+      latest_crawl: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+    };
+    /**
+     * WebsiteCrawlProgressList
+     * @description Running crawls of the websites a space shows; websites not crawling are absent.
+     */
+    WebsiteCrawlProgressList: {
+      /** Items */
+      items: components["schemas"]["WebsiteCrawlProgress"][];
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -77522,6 +77559,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_website_crawl_progress_api_v1_spaces__id__knowledge_websites_crawl_progress__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteCrawlProgressList"];
         };
       };
       /** @description Forbidden */
