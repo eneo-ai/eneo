@@ -1,19 +1,24 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Assistant } from "./use-assistant";
 
 const update = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
+const autosaveKeys = vi.hoisted(() => new Set<string>());
 vi.mock("./use-assistant", () => ({
   useUpdateAssistant: () => useMutation({ mutationFn: (body: unknown) => update(body) })
 }));
 vi.mock("@/features/spaces/use-space", () => ({ useSpace: () => ({ space: { id: "space-1" } }) }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+// The autosave contract: a failed save resolves to undefined.
 vi.mock("@/components/composites/use-autosave", () => ({
-  useAutosave: () => (operation: () => Promise<unknown>) => operation()
+  useAutosave: (key: string) => {
+    autosaveKeys.add(key);
+    return (operation: () => Promise<unknown>) => operation().catch(() => undefined);
+  }
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 
@@ -75,6 +80,31 @@ describe("result ranking", () => {
     expect(open().textContent).toContain("Reranker a");
     fireEvent.click(await screen.findByRole("option", { name: "material_reranker_none" }));
     await waitFor(() => expect(update).toHaveBeenCalledWith({ rerank_model_id: null }));
+  });
+
+  it("returns to the saved model when quick changes fail to save", async () => {
+    const rejects: Array<() => void> = [];
+    update.mockImplementation(
+      () => new Promise((_, reject) => rejects.push(() => reject(new Error("down"))))
+    );
+    show("a", [rerankModel("a"), rerankModel("b"), rerankModel("c")]);
+    open();
+    fireEvent.click(await screen.findByRole("option", { name: "Reranker b" }));
+    open();
+    fireEvent.click(await screen.findByRole("option", { name: "Reranker c" }));
+    await waitFor(() => expect(rejects).toHaveLength(2));
+
+    await act(async () => rejects.forEach((reject) => reject()));
+    expect(screen.getByRole("combobox", { name: "material_reranker" }).textContent).toContain(
+      "Reranker a"
+    );
+  });
+
+  it("reports its saves under its own key, apart from the knowledge pickers", () => {
+    show(null, [rerankModel("a")]);
+    expect(autosaveKeys).toContain("reranker");
+    expect(autosaveKeys).not.toContain("knowledge");
+    expect(document.getElementById("reranker")).toBeTruthy();
   });
 
   it("is not shown without selectable models or a saved choice", () => {

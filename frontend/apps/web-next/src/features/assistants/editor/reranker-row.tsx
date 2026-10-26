@@ -22,7 +22,7 @@ export function RerankerRow({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
-  const autosave = useAutosave("knowledge");
+  const autosave = useAutosave("reranker");
   const { data: models } = useQuery({
     queryKey: ["ai-models", space.id],
     queryFn: () =>
@@ -49,16 +49,20 @@ export function RerankerRow({ assistant }: { assistant: Assistant }) {
 
   function handleChange(value: string) {
     const next = value === NO_RERANKER ? null : value;
-    const previous = choice;
     setChoice(next);
     void autosave(() => update.mutateAsync({ rerank_model_id: next })).then((result) => {
       if (result !== undefined) return;
-      setChoice((current) => (current === next ? previous : current));
+      // Back to what the server has, unless a newer choice is on its way.
+      setChoice((current) => (current === next ? savedRef.current : current));
     });
   }
 
   return (
-    <SettingsRow title={t("material_reranker")} description={t("material_reranker_description")}>
+    <SettingsRow
+      id="reranker"
+      title={t("material_reranker")}
+      description={t("material_reranker_description")}
+    >
       <Selector
         label={t("material_reranker")}
         isLabelHidden
