@@ -30,7 +30,9 @@ jobs:
         working-directory: backend
         run: |
           uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt" >/dev/null
-          uvx --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/requirements.txt" --format json -o "$RUNNER_TEMP/backend-audit.json"
+          uvx --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/requirements.txt" --format json -o "$RUNNER_TEMP/backend-audit.json" || echo "pip-audit exited with $?; the report is evaluated next."
+      - name: Evaluate backend audit
+        run: node .github/scripts/evaluate-backend-audit.mjs "$RUNNER_TEMP/backend-audit.json"
       - name: Install frontend lock without lifecycle scripts
         working-directory: frontend
         run: bun install --frozen-lockfile --ignore-scripts
