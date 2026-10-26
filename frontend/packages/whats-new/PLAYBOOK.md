@@ -201,8 +201,8 @@ else derives from it or is checked against it:
 | Labels in the app (sv/en)             | `apps/web/src/lib/features/whats-new/labels.ts`  | typed exhaustively + the same test                               |
 | Labels on docs.eneo.ai (en)           | `apps/docs-site/src/components/ReleaseNotes.tsx` | typed exhaustively; unknown values render raw, never crash       |
 | Content rules                         | `scripts/check_whats_new.py`                     | CI (frontend job) + `scripts/tests/test_check_whats_new.py`      |
-| Raw material at release time          | `scripts/collect_user_facing.mjs`                | `--self-test` in the script-tests CI job                         |
-| The `## User-facing` section on PRs   | `.github/scripts/check-user-facing.mjs`          | `--self-test` in the script-tests CI job; shared parser          |
+| Raw material at release time          | `scripts/collect_user_facing.mjs`                | `--self-test` in the CI scope job                                |
+| The `## User-facing` section on PRs   | `.github/scripts/check-user-facing.mjs`          | `--self-test` in the CI scope job; shared parser                 |
 | Version ordering (all three runtimes) | `version-order.cases.json`                       | package, backend and script tests consume the same ordered cases |
 | Backend version pattern               | `backend/src/eneo/whats_new/whats_new_models.py` | mirrors the schema's `version` pattern; unit test                |
 

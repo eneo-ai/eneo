@@ -37,7 +37,9 @@ The [contributor CI contract](../frontend/apps/docs-site/src/content/contributin
 describes which changes require which checks. `.github/scripts/ci-change-scope.mjs`
 owns the event policy, changed-file classification, Docker matrix and required-job
 plan. `.github/scripts/ci-gate.mjs` verifies actual job results against that plan.
-Do not add separate path-selection rules to individual workflow steps.
+Do not add separate path-selection rules to individual workflow steps. Each merge
+candidate is classified by its own diff onto the preceding candidate; the whole
+candidate tree is still built and tested.
 
 The first job combines scope detection, branch naming, route metadata, naming
 guards and script tests. Expensive jobs start only after it succeeds. Both E2E
@@ -69,10 +71,11 @@ local build/test directories are excluded from its Docker context.
 
 ### Validation
 
-The focused contract tests cover both event types, combined queue candidates,
-renames/deletions, missing history, shared inputs, filtered images, and gate
-failure/skip semantics. They also ensure that every CI worker is covered by the
-aggregate. Run from the repository root:
+The focused contract tests cover both event types, candidates that touch several
+areas, a candidate's diff onto the preceding candidate, renames/deletions,
+missing history, the Playwright install deadline, shared inputs, filtered
+images, and gate failure/skip semantics. They also ensure that every CI worker
+is covered by the aggregate. Run from the repository root:
 
 ```bash
 node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs

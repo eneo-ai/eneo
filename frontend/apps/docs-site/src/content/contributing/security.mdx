@@ -15,10 +15,11 @@ Pull requests into `develop` run the following security and quality gates:
 ### CI
 
 `CI / CI` is the main app check. Pull requests and merge-queue candidates run
-the checks selected by `.github/scripts/ci-change-scope.mjs`. A merge candidate
-uses the complete diff from its event's base SHA to its head, including earlier
-queued changes. Missing history, an empty diff, unknown runtime paths, and
-changes to CI workflows or local actions select full validation.
+the checks selected by `.github/scripts/ci-change-scope.mjs`. Each merge
+candidate is classified by its own diff onto the preceding candidate; the whole
+candidate tree is still built and tested. Missing history, an empty diff,
+unknown runtime paths, and changes to CI workflows or local actions select full
+validation.
 
 Backend changes require backend quality checks, all six test shards, schema
 checks, and both frontend E2E suites. Each frontend's changes require that

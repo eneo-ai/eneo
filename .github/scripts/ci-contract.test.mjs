@@ -61,6 +61,17 @@ test("workflow, local action, scope and gate changes force full validation", () 
   }
 });
 
+test("Playwright system libraries outlast a slow mirror and fit the shortest job limit", () => {
+  const action = fs.readFileSync(path.join(root, ".github/actions/setup-playwright/action.yml"), "utf8");
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const deadline = Number(action.match(/timeout --kill-after=15s (\d+)s bun run --bun playwright install-deps chromium/)?.[1]);
+  const frontendLimit = Number(workflow.split("\n  frontend:\n")[1]?.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+  // A slow mirror that kept progressing needed about 590 s (develop run 40352666820).
+  assert.ok(deadline >= 600, `install-deps deadline: ${deadline}s`);
+  // The rest of the Frontend checks job takes about five minutes.
+  assert.ok(deadline + 5 * 60 <= frontendLimit * 60, `deadline ${deadline}s, job limit ${frontendLimit} min`);
+});
+
 test("push, tag and manual callers keep full validation even with only docs changed", () => {
   for (const event of ["push", "workflow_dispatch", "workflow_call", "unknown"]) {
     const plan = planCi([docsFile], event);
@@ -176,7 +187,7 @@ test("workflow selection matches the required-job plan for each kind of change",
   }
 });
 
-test("real candidate diffs include earlier PRs, deletions and both sides of renames", () => {
+test("each candidate is classified by its own diff onto the preceding candidate, and a bad base runs everything", () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-diff-"));
   const git = (...args) => execFileSync("git", args, {
     cwd, encoding: "utf8", timeout: 5_000,
@@ -190,30 +201,37 @@ test("real candidate diffs include earlier PRs, deletions and both sides of rena
     git("init", "--quiet");
     git("config", "user.name", "CI contract test");
     git("config", "user.email", "ci@example.invalid");
+    const scope = (baseSha, head) => {
+      const eventPath = path.join(cwd, "event.json");
+      fs.writeFileSync(eventPath, JSON.stringify({ merge_group: { base_sha: baseSha } }));
+      return spawnSync(process.execPath, [path.join(root, ".github/scripts/ci-change-scope.mjs"), "--github-event"], {
+        cwd, encoding: "utf8", timeout: 5_000,
+        env: { ...process.env, GITHUB_EVENT_NAME: "merge_group", GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
+      });
+    };
     write(backendFile, "original\n");
-    git("add", "."); git("commit", "--quiet", "-m", "base");
-    const base = git("rev-parse", "HEAD");
+    git("add", "."); git("commit", "--quiet", "-m", "develop");
     write(backendFile, "earlier queued PR\n");
-    git("add", "."); git("commit", "--quiet", "-m", "first PR");
+    git("add", "."); git("commit", "--quiet", "-m", "preceding candidate");
+    const preceding = git("rev-parse", "HEAD");
     write(appFile, "later queued PR\n");
-    git("add", "."); git("commit", "--quiet", "-m", "second PR");
+    git("add", "."); git("commit", "--quiet", "-m", "candidate");
     let head = git("rev-parse", "HEAD");
-    assert.deepEqual(changedFiles(base, head, cwd).sort(), [backendFile, appFile].sort());
-    const plan = planCi(changedFiles(base, head, cwd), "merge_group");
-    assert.equal(plan.backend && plan.frontend, true);
+    // merge_group.base_sha is the preceding candidate's head, not the develop tip.
+    assert.deepEqual(changedFiles(preceding, head, cwd), [appFile]);
+    let run = scope(preceding, head);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^full=false$/m);
+    assert.match(run.stdout, /^frontend=true$/m);
+    assert.match(run.stdout, /^backend=false$/m);
     fs.mkdirSync(path.join(cwd, "docs"));
     git("mv", backendFile, "docs/moved.md");
     git("commit", "--quiet", "-m", "move out of backend");
-    head = git("rev-parse", "HEAD");
-    assert.ok(changedFiles(base, head, cwd).includes(backendFile));
-    assert.throws(() => changedFiles("", head, cwd));
+    const moved = git("rev-parse", "HEAD");
+    assert.deepEqual(changedFiles(head, moved, cwd).sort(), [backendFile, "docs/moved.md"].sort());
+    assert.throws(() => changedFiles("", moved, cwd));
     // Missing history is a full-run fallback at the CLI boundary.
-    const eventPath = path.join(cwd, "event.json");
-    fs.writeFileSync(eventPath, JSON.stringify({ merge_group: { base_sha: "f".repeat(40) } }));
-    const run = spawnSync(process.execPath, [path.join(root, ".github/scripts/ci-change-scope.mjs"), "--github-event"], {
-      cwd, encoding: "utf8", timeout: 5_000,
-      env: { ...process.env, GITHUB_EVENT_NAME: "merge_group", GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
-    });
+    run = scope("f".repeat(40), moved);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /^full=true$/m);
     assert.match(run.stdout, /^docker=true$/m);

@@ -25,12 +25,14 @@ runs:
       run: |
         # Retry transient downloads inside apt. Do not blindly rerun an apt
         # transaction after a timeout: dpkg may have been interrupted.
+        # The apt timeouts only catch a stalled connection. A slow mirror that
+        # keeps progressing has taken almost ten minutes, so the deadline is 12.
         sudo tee /etc/apt/apt.conf.d/80-eneo-ci-network >/dev/null <<'APT'
         Acquire::Retries "2";
         Acquire::http::Timeout "30";
         Acquire::https::Timeout "30";
         APT
-        timeout --kill-after=15s 240s bun run --bun playwright install-deps chromium
+        timeout --kill-after=15s 720s bun run --bun playwright install-deps chromium
     - name: Install Chromium
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
