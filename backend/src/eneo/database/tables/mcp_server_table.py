@@ -19,7 +19,7 @@ from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
-    from eneo.database.tables.ai_models_table import ImageModels
+    from eneo.database.tables.ai_models_table import ForecastModels, ImageModels
     from eneo.database.tables.security_classifications_table import (
         SecurityClassification,
     )
@@ -52,6 +52,13 @@ class MCPServers(BasePublic):
         CheckConstraint(
             "http_auth_type <> 'internal' OR security_classification_id IS NULL",
             name="ck_mcp_servers_internal_no_classification",
+        ),
+        # The bundled Forecast source runs on exactly one catalog forecast
+        # model; no other row references one.
+        CheckConstraint(
+            "(http_auth_type = 'bundled' AND purpose = 'forecast')"
+            " = (forecast_model_id IS NOT NULL)",
+            name="ck_mcp_servers_forecast_model",
         ),
         Index(
             "uq_mcp_servers_tenant_active_capability",
@@ -91,6 +98,12 @@ class MCPServers(BasePublic):
         ForeignKey("image_models.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     image_model: Mapped[Optional["ImageModels"]] = relationship()
+    # The bundled Forecast source only: the catalog forecast model its tool
+    # service runs. RESTRICT, as for image_model_id.
+    forecast_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("forecast_models.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    forecast_model: Mapped[Optional["ForecastModels"]] = relationship()
 
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(

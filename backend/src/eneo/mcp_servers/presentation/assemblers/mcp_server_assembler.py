@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING, Any, cast
 
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerBackingModel,
+)
 from eneo.mcp_servers.presentation.models import (
     MCPServerAudience,
     MCPServerAudienceGroupPublic,
@@ -51,9 +54,8 @@ def _compute_credential_preview(
 
 
 def _backing_model_public(
-    mcp_server: MCPServer,
+    model: MCPServerBackingModel | None,
 ) -> MCPServerBackingModelPublic | None:
-    model = mcp_server.image_model
     if model is None:
         return None
     return MCPServerBackingModelPublic(
@@ -130,7 +132,9 @@ class MCPServerAssembler:
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
             image_model_id=mcp_server.image_model_id,
-            image_model=_backing_model_public(mcp_server),
+            image_model=_backing_model_public(mcp_server.image_model),
+            forecast_model_id=mcp_server.forecast_model_id,
+            forecast_model=_backing_model_public(mcp_server.forecast_model),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups
@@ -206,7 +210,9 @@ class MCPServerSettingsAssembler:
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
             image_model_id=mcp_server.image_model_id,
-            image_model=_backing_model_public(mcp_server),
+            image_model=_backing_model_public(mcp_server.image_model),
+            forecast_model_id=mcp_server.forecast_model_id,
+            forecast_model=_backing_model_public(mcp_server.forecast_model),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups

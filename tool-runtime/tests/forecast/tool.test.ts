@@ -41,7 +41,7 @@ function setup(result: ForecastResult, withView = false) {
 }
 
 describe("create_forecast", () => {
-  function rpc(tool: ReturnType<typeof setup>["tool"], method: string, params: unknown) {
+  function rpc(tool: ReturnType<typeof setup>["tool"], method: string, params: unknown, headers: Record<string, string> = {}) {
     const handler = createHandler({ token: "forecast-test", maxConcurrency: 1, endpoints: [{ slug: "forecast", tools: [tool], toolTimeoutMs: 1000 }] });
     return handler(
       new Request("http://runtime/mcp/forecast", {
@@ -51,6 +51,7 @@ describe("create_forecast", () => {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
           "x-eneo-file-origin": ORIGIN,
+          ...headers,
         },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       }),
@@ -171,6 +172,28 @@ describe("create_forecast", () => {
     );
     // Each forecast value reads back as the same single-precision number the model returned.
     expect(f32(1.2345679)).toBe(f32(1.2345678806304932));
+  });
+
+  test("runs the model Eneo selected, and refuses one this runtime does not have", async () => {
+    const { tool, run, download } = setup(outcome(3));
+    await tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, model: "default" });
+    expect(run).toHaveBeenCalledTimes(1);
+    await expect(tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, model: "timestral-200m" })).rejects.toMatchObject({
+      code: "MODEL_UNAVAILABLE",
+    });
+    // Refused before the file is fetched, and never served by another model.
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("reads the selected model from Eneo's x-eneo-model header", async () => {
+    const { tool, run } = setup(outcome(3));
+    const call = { name: "create_forecast", arguments: { source, ...columns, horizon: 3 } };
+    expect((await rpc(tool, "tools/call", call, { "x-eneo-model": "default" })).result.isError).toBeFalsy();
+    const refused = await rpc(tool, "tools/call", call, { "x-eneo-model": "../../models/other" });
+    expect(refused.result.isError).toBe(true);
+    expect(JSON.stringify(refused.result)).toContain("MODEL_UNAVAILABLE");
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   test("refuses a horizon beyond the limit before downloading anything", async () => {

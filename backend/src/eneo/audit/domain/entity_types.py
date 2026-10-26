@@ -32,6 +32,7 @@ class EntityType(str, Enum):
     TRANSCRIPTION_MODEL = "transcription_model"
     IMAGE_MODEL = "image_model"
     RERANK_MODEL = "rerank_model"
+    FORECAST_MODEL = "forecast_model"
     AUDIT_LOG = "audit_log"
     SESSION = "session"
     MCP_SERVER = "mcp_server"

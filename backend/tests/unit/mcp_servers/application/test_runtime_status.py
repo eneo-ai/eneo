@@ -191,3 +191,55 @@ async def test_an_endpoint_that_cannot_run_is_known_without_a_warning(
     assert "unavailable" not in result.model_dump()
     # The cached copy keeps it.
     assert (await module.runtime_status()).cannot_run("forecast") is forecast
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "models,state,name",
+    [
+        (None, "ready", None),  # A runtime from before models were reported.
+        (
+            {"forecast": [{"id": "default", "name": "Timestral 28M"}]},
+            "ready",
+            "Timestral 28M",
+        ),
+        ({"forecast": [{"id": "gpu", "name": "Timestral 120M"}]}, "ready", None),
+        # Bounded like the rest of the diagnostic: an oversized name is refused.
+        ({"forecast": [{"id": "default", "name": "x" * 81}]}, "unreachable", None),
+    ],
+)
+async def test_the_name_of_an_endpoints_model_is_known_but_not_shown(
+    monkeypatch, models, state, name
+):
+    settings = SimpleNamespace(
+        tool_runtime_url="http://tools:3010",
+        tool_runtime_token="secret",
+        app_version="2.3.0",
+        app_revision="a" * 40,
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module, "file_reference_base_url", lambda _: None)
+    monkeypatch.setattr(module, "_cache", None)
+    diagnostic = {
+        "version": "2.3.0",
+        "revision": "a" * 40,
+        "confinement": {"files": True, "tcp": True},
+        "execution": {"active": 0, "queued": 0},
+        "file_origin": "reachable",
+    }
+    if models is not None:
+        diagnostic["models"] = models
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=diagnostic)
+        )
+    )
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_: client)
+
+    result = await module.runtime_status()
+
+    assert result.state == state
+    assert result.model_name("forecast", "default") == name
+    assert "models" not in result.model_dump()
+    # The cached copy keeps it.
+    assert (await module.runtime_status()).model_name("forecast", "default") == name

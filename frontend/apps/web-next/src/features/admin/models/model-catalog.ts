@@ -1,6 +1,6 @@
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { ModelKind } from "./models";
+import type { TenantModelKind } from "./models";
 import type { ProviderCapabilities } from "./model-providers";
 
 /**
@@ -69,7 +69,7 @@ export interface CatalogResult {
 export async function listProviderModels(
   api: EneoClient,
   providerId: string,
-  mode: ModelKind
+  mode: TenantModelKind
 ): Promise<CatalogResult> {
   try {
     const result = (await unwrap(
@@ -92,7 +92,7 @@ export async function listProviderModels(
 export function staticCatalogModels(
   caps: ProviderCapabilities | undefined,
   providerType: string,
-  mode: ModelKind
+  mode: TenantModelKind
 ): CatalogModel[] {
   if (NO_SUGGESTIONS_PROVIDERS.has(providerType)) return [];
   const capability = caps?.providers[providerType];

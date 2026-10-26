@@ -11,6 +11,8 @@ export type CallContext = {
   fileOrigin?: string;
   /** Eneo shows tool views to the reader, so a tool can say what the reader already sees. */
   showsViews?: boolean;
+  /** The catalog model Eneo selected for this call, for a tool that runs a model (forecast). */
+  model?: string;
 };
 
 /** A file a tool produced, returned as a standard MCP embedded resource (base64 blob). */

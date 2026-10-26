@@ -217,3 +217,17 @@ test("a check that throws or hangs counts as cannot run, and the diagnostic stil
   expect(((await response.json()) as any).unavailable).toEqual(["throws", "hangs"]);
   expect(performance.now() - started).toBeLessThan(2500);
 });
+test("diagnostics list each endpoint's models by the identifier Eneo selects them with", async () => {
+  const handler = createHandler({
+    token,
+    maxConcurrency: 1,
+    endpoints: [
+      { slug: "compute", tools: [], toolTimeoutMs: 1000 },
+      { slug: "forecast", tools: [], toolTimeoutMs: 1000, models: [{ id: "default", name: "Timestral 28M" }] },
+    ],
+  });
+  const diagnostic = (await (
+    await handler(new Request("http://runtime/diagnostics", { headers: { authorization: "Bearer " + token } }))
+  ).json()) as any;
+  expect(diagnostic.models).toEqual({ forecast: [{ id: "default", name: "Timestral 28M" }] });
+});

@@ -100,6 +100,10 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.forecast_models.application.forecast_model_crud_service import (
+    ForecastModelCRUDService,
+)
+from eneo.forecast_models.domain.forecast_model_repo import ForecastModelRepository
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -723,6 +727,9 @@ class Container(containers.DeclarativeContainer):
     rerank_model_repo = providers.Factory(
         RerankModelRepository, session=session, user=user
     )
+    forecast_model_repo = providers.Factory(
+        ForecastModelRepository, session=session, user=user
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -967,6 +974,13 @@ class Container(containers.DeclarativeContainer):
         user=user,
         rerank_model_repo=rerank_model_repo,
         security_classification_repo=security_classification_repo,
+    )
+    forecast_model_crud_service = providers.Factory(
+        ForecastModelCRUDService,
+        user=user,
+        forecast_model_repo=forecast_model_repo,
+        security_classification_repo=security_classification_repo,
+        audit_service=audit_service,
     )
     rerank_service = providers.Factory(
         RerankService,

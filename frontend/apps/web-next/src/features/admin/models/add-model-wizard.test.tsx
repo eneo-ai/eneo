@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -90,11 +90,13 @@ const liveImageModels = [
 function renderWizard({
   initialProviderId,
   models = [],
+  providers = [existing],
   providersLoaded = true,
   caps = capabilities
 }: {
   initialProviderId?: string;
   models?: AdminModel[];
+  providers?: ModelProvider[];
   providersLoaded?: boolean;
   caps?: {
     providers: Record<string, typeof capabilities.providers.openai>;
@@ -107,7 +109,7 @@ function renderWizard({
         return ok(options?.params?.query?.mode === "image" ? liveImageModels : liveModels);
       }
       if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
-      if (path === "/api/v1/admin/model-providers/") return ok([existing]);
+      if (path === "/api/v1/admin/model-providers/") return ok(providers);
       return ok([]);
     }
   );
@@ -117,7 +119,7 @@ function renderWizard({
     return ok({});
   });
   const queryClient = testQueryClient();
-  if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, [existing]);
+  if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, providers);
   queryClient.setQueryData(CAPABILITIES_KEY, caps);
   queryClient.setQueryData(FAVORITES_KEY, []);
   queryClient.setQueryData(MODELS_KEY, {
@@ -289,6 +291,30 @@ describe("the add-provider wizard's credentials", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
     expect(await within(dialog).findByRole("checkbox", { name: /gpt-5/ })).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("never offers the provider that comes with the installation", () => {
+    // Eneo's tool service takes no models from an admin.
+    const tools: ModelProvider = {
+      ...existing,
+      id: "p-tools",
+      name: "Eneo tool service",
+      provider_type: "eneo_tool_service",
+      masked_api_key: null,
+      is_managed: true
+    };
+    const { dialog } = renderWizard({ providers: [tools, existing] });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Välj en befintlig leverantör" }));
+    // The first provider an admin can add models to is preselected.
+    const picker = within(dialog).getByRole("combobox", { name: /^Leverantör/ });
+    expect(picker.textContent).toContain("Kommunens vLLM");
+    cleanup();
+
+    // With only that one, there is no existing provider to choose.
+    const alone = renderWizard({ providers: [tools] }).dialog;
+    expect(
+      within(alone).queryByRole("button", { name: "Välj en befintlig leverantör" })
+    ).toBeNull();
   });
 
   it("asks for an existing provider at its picker instead of disabling Nästa", async () => {

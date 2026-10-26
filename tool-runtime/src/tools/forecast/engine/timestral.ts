@@ -15,7 +15,6 @@ export const FORECAST_PYTHON = forecastPython();
 
 const SCRIPT = fileURLToPath(new URL("../../../../scripts/forecast.py", import.meta.url));
 const SIDECAR_TIMEOUT_MS = 25_000;
-const MAX_STDERR = 2_000;
 /** The script's exit status for a refusal it explains on stdout. */
 const REFUSED = 3;
 
@@ -73,7 +72,8 @@ export function timestralEngine(options: { modelPath: string; threads: number })
       child.kill("SIGKILL");
     }, SIDECAR_TIMEOUT_MS);
     try {
-      const [stdout, stderr, code] = await Promise.all([
+      // stderr is drained so a chatty sidecar cannot block on a full pipe; it is not reported.
+      const [stdout, , code] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
@@ -87,13 +87,13 @@ export function timestralEngine(options: { modelPath: string; threads: number })
         const refusal = refusalSchema.safeParse(json(stdout));
         if (refusal.success) throw new ToolError(refusal.data.error.code, refusal.data.error.message);
       }
-      if (code !== 0) {
-        const detail = stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, MAX_STDERR);
+      if (code !== 0)
+        // The sidecar's stderr can hold paths and library internals; the model and the user
+        // read this message, so it says only that the model failed.
         throw new ToolError(
           "ENGINE_FAILED",
-          `The forecast model failed${detail ? `: ${detail}` : ""}.`,
+          `The forecast model failed (exit status ${code}). Ask the operator to check the tool runtime.`,
         );
-      }
       return engineResult(stdout, request.horizon, request.holdout);
     } finally {
       clearTimeout(timer);

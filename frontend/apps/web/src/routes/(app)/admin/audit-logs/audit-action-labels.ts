@@ -497,6 +497,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_rerank_model_deleted,
     description: m.audit_action_rerank_model_deleted_description
   },
+  forecast_model_updated: {
+    name: m.audit_action_forecast_model_updated,
+    description: m.audit_action_forecast_model_updated_description
+  },
   template_created: {
     name: m.audit_action_template_created,
     description: m.audit_action_template_created_description

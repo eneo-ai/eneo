@@ -1,7 +1,10 @@
 import { useTranslations } from "next-intl";
 import type { ModelKind } from "./models";
 
-/** Translated model type for UI labels ("Chatt", "Inbäddning", "Transkription", "Bildgenerering"). */
+/**
+ * Translated model type for UI labels ("Chatt", "Inbäddning", "Transkription",
+ * "Bildgenerering", "Prognos").
+ */
 export function useModelTypeLabel() {
   const t = useTranslations();
   return (kind: ModelKind) => {
@@ -14,6 +17,8 @@ export function useModelTypeLabel() {
         return t("admin_model_type_transcription");
       case "image":
         return t("admin_model_type_image");
+      case "forecast":
+        return t("admin_model_type_forecast");
     }
   };
 }

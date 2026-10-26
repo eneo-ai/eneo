@@ -36,7 +36,13 @@ import {
   isImageSize,
   useImageOptionLabels
 } from "./image-model-options";
-import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
+import {
+  type AdminModel,
+  MODELS_KEY,
+  type ModelKind,
+  updateForecastModel,
+  updateTenantModel
+} from "./models";
 
 /** Stored cost is per-token (tiny); the form edits the friendlier per-1M value. */
 function perTokenToPerMillion(value: number | string | null | undefined): string {
@@ -68,6 +74,8 @@ const TOKEN_PRICED: ReadonlySet<ModelKind> = new Set(["completion", "embedding"]
  * Full metadata edit for a tenant (custom) model: the fields of its kind
  * (token limits and prices, per-minute price, or an image model's per-image
  * price and request defaults) plus hosting, stability and classification.
+ * A forecast model comes with the installation: Eneo sets its metadata, so
+ * only its display name and classification are edited.
  */
 type EditModelDialogProps = {
   model: AdminModel;
@@ -94,12 +102,18 @@ function EditModelForm({
   const queryClient = useQueryClient();
   const imageLabels = useImageOptionLabels();
 
+  // A forecast model carries none of these; its form does not show them.
+  const metadata = model as {
+    family?: string | null;
+    hosting?: string | null;
+    stability?: string | null;
+  };
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
   const [litellmName, setLitellmName] = useState(model.name);
   const [description, setDescription] = useState(model.description ?? "");
-  const [family, setFamily] = useState(model.family ?? "");
-  const [hosting, setHosting] = useState(model.hosting ?? "");
-  const [stability, setStability] = useState(model.stability ?? "");
+  const [family, setFamily] = useState(metadata.family ?? "");
+  const [hosting, setHosting] = useState(metadata.hosting ?? "");
+  const [stability, setStability] = useState(metadata.stability ?? "");
   const [openSource, setOpenSource] = useState(model.open_source ?? false);
   const [maxInput, setMaxInput] = useState(
     "max_input_tokens" in model
@@ -144,11 +158,27 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
+  // What the form opened with, kept while it stays open: the model prop follows
+  // refetches, so comparing with it would count a newer value as the admin's edit.
+  const [opened] = useState(() => ({ displayName, classificationId }));
 
   const save = useMutation({
     mutationFn: () => {
       const security_classification =
         securityEnabled && classificationId !== "__none__" ? { id: classificationId } : null;
+      if (kind === "forecast") {
+        // Only the fields the admin changed: a field left out keeps its value, so
+        // a rename never undoes a class another admin set while this dialog was
+        // open, and the reverse.
+        return updateForecastModel(browserApi, model.id, {
+          ...(displayName.trim() !== opened.displayName.trim()
+            ? { display_name: displayName.trim() }
+            : {}),
+          ...(securityEnabled && classificationId !== opened.classificationId
+            ? { security_classification }
+            : {})
+        });
+      }
       if (kind === "embedding") {
         return updateTenantModel(browserApi, "embedding", model.id, {
           display_name: displayName.trim(),
@@ -248,49 +278,53 @@ function EditModelForm({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="model-description">{t("description")}</Label>
-            <Textarea
-              id="model-description"
-              value={description}
-              rows={3}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </div>
+          {kind !== "forecast" && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="model-description">{t("description")}</Label>
+                <Textarea
+                  id="model-description"
+                  value={description}
+                  rows={3}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-family">{t("model_family")}</Label>
-              <Input
-                id="model-family"
-                value={family}
-                onChange={(event) => setFamily(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-hosting">{t("hosting_region")}</Label>
-              <Input
-                id="model-hosting"
-                value={hosting}
-                onChange={(event) => setHosting(event.target.value)}
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-family">{t("model_family")}</Label>
+                  <Input
+                    id="model-family"
+                    value={family}
+                    onChange={(event) => setFamily(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-hosting">{t("hosting_region")}</Label>
+                  <Input
+                    id="model-hosting"
+                    value={hosting}
+                    onChange={(event) => setHosting(event.target.value)}
+                  />
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-stability">{t("stability")}</Label>
-              <Input
-                id="model-stability"
-                value={stability}
-                onChange={(event) => setStability(event.target.value)}
-              />
-            </div>
-            <Label className="flex items-center justify-between gap-2 self-end font-normal">
-              {t("open_source")}
-              <Switch checked={openSource} onCheckedChange={setOpenSource} />
-            </Label>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-stability">{t("stability")}</Label>
+                  <Input
+                    id="model-stability"
+                    value={stability}
+                    onChange={(event) => setStability(event.target.value)}
+                  />
+                </div>
+                <Label className="flex items-center justify-between gap-2 self-end font-normal">
+                  {t("open_source")}
+                  <Switch checked={openSource} onCheckedChange={setOpenSource} />
+                </Label>
+              </div>
+            </>
+          )}
 
           {TOKEN_PRICED.has(kind) && (
             <div className="grid grid-cols-2 gap-4">

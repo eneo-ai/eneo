@@ -47,6 +47,9 @@ from eneo.embedding_models.presentation.tenant_embedding_models_router import (
     router as tenant_embedding_models_router,
 )
 from eneo.files.file_router import router as files_router
+from eneo.forecast_models.presentation.forecast_models_router import (
+    router as forecast_models_router,
+)
 from eneo.governance_policy.presentation.governance_policy_router import (
     router as governance_policy_router,
 )
@@ -413,6 +416,12 @@ router.include_router(
     rerank_models_router,
     prefix="/rerank-models",
     tags=["rerank-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    forecast_models_router,
+    prefix="/forecast-models",
+    tags=["forecast-models"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

@@ -19,7 +19,11 @@ from eneo.model_providers.domain.connection_check import (
     ConnectionCheckError,
 )
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
-from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.model_provider import (
+    ENEO_TOOL_SERVICE_PROVIDER_TYPE,
+    MANAGED_PROVIDER_MESSAGE,
+    ModelProvider,
+)
 from eneo.model_providers.domain.outbound_header_destinations import (
     DestinationProblem,
     destination_problem,
@@ -526,6 +530,8 @@ class ModelProviderService:
         outbound_headers: Sequence[OutboundHeaderWrite] = (),
     ) -> ModelProvider:
         """Create a new provider."""
+        if provider_type == ENEO_TOOL_SERVICE_PROVIDER_TYPE:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         # Check for duplicate names
         existing = await self.repository.get_by_name(name)
         if existing is not None:
@@ -582,6 +588,8 @@ class ModelProviderService:
         """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id, for_update=True)
+        if provider.is_managed:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         connection_settings_changed = False
         # Captured before the edit: kept secrets were entered for this destination.
         kept_secrets = retained_secret_headers(
@@ -746,6 +754,8 @@ class ModelProviderService:
         Raises:
             BadRequestException: If the provider has models attached to it
         """
+        if (await self.repository.get_by_id(provider_id)).is_managed:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         # Check if provider has any models
         model_count = await self.repository.count_models_for_provider(provider_id)
         if model_count > 0:

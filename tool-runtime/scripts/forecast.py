@@ -86,9 +86,10 @@ def load(checkpoint: Path):
     try:
         missing = [name for name in CHECKPOINT_FILES if not (checkpoint / name).is_file()]
         if missing:
+            # The message reaches the model and the user: it names what is missing, not where.
             raise Refusal(
                 "MODEL_UNAVAILABLE",
-                f"The forecast model is not installed: {checkpoint} has no {' or '.join(missing)}.",
+                f"The forecast model is not installed: the checkpoint has no {' or '.join(missing)}.",
             )
         from timestral import TimestralForecaster
 
@@ -96,10 +97,11 @@ def load(checkpoint: Path):
     except Refusal:
         raise
     except Exception as error:  # noqa: BLE001 - every loading failure is the checkpoint's
+        # Only the kind of failure: library messages carry paths inside the image.
         raise Refusal(
             "MODEL_UNAVAILABLE",
-            f"The forecast model at {checkpoint} could not be loaded as a Timestral checkpoint: "
-            f"{type(error).__name__}: {str(error)[:300]}",
+            "The forecast model could not be loaded as a Timestral checkpoint "
+            f"({type(error).__name__}). Ask the operator to check the mounted model.",
         ) from error
     if not all(level in forecaster.quantile_levels for level in LEVELS):
         raise Refusal("MODEL_UNAVAILABLE", "The forecast model does not predict P10, P50 and P90.")

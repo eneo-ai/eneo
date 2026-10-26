@@ -15,8 +15,44 @@ from eneo.security_classifications.domain.entities.security_classification impor
 )
 
 if TYPE_CHECKING:
+    from eneo.database.tables.ai_models_table import ForecastModels, ImageModels
     from eneo.database.tables.mcp_server_table import (
         MCPServerTools as MCPServerToolsTable,
+    )
+
+
+def _backing_model(
+    model: "ImageModels | ForecastModels | None",
+) -> MCPServerBackingModel | None:
+    """Project a catalog model (image or forecast) the reader eager-loaded.
+
+    Its own relationships are read the same way, so an unloaded
+    classification or provider never triggers a lazy load.
+    """
+    if model is None:
+        return None
+    model_inspector = inspect(model)
+    model_sc = None
+    provider_name = None
+    provider_is_active = False
+    if model_inspector is not None:
+        sc_value = model_inspector.attrs.security_classification.loaded_value
+        if sc_value is not NEVER_SET and sc_value is not None:
+            model_sc = SecurityClassification.to_domain(sc_value)
+        provider_value = model_inspector.attrs.provider.loaded_value
+        if provider_value is not NEVER_SET and provider_value is not None:
+            provider_name = provider_value.name
+            provider_is_active = provider_value.is_active
+    return MCPServerBackingModel(
+        id=model.id,
+        name=model.name,
+        nickname=model.nickname,
+        provider_name=provider_name,
+        is_enabled=model.is_enabled,
+        is_deleted=model.deleted_at is not None,
+        is_deprecated=model.is_deprecated,
+        provider_is_active=provider_is_active,
+        security_classification=model_sc,
     )
 
 
@@ -106,38 +142,18 @@ class MCPServerMapper:
                     for group in groups_loaded
                 ]
 
-        # The backing image model (built-in providers) is projected only when
-        # the reader eager-loaded it; its own relationships are read the same
-        # way so an unloaded classification never triggers a lazy load.
+        # The backing models (a built-in provider's image model, the Forecast
+        # source's forecast model) are projected only when the reader
+        # eager-loaded them.
         image_model = None
+        forecast_model = None
         if inspector is not None:
-            model_loaded = inspector.attrs.image_model.loaded_value
-            if model_loaded is not NEVER_SET and model_loaded is not None:
-                model_inspector = inspect(model_loaded)
-                model_sc = None
-                provider_name = None
-                provider_is_active = False
-                if model_inspector is not None:
-                    sc_value = (
-                        model_inspector.attrs.security_classification.loaded_value
-                    )
-                    if sc_value is not NEVER_SET and sc_value is not None:
-                        model_sc = SecurityClassification.to_domain(sc_value)
-                    provider_value = model_inspector.attrs.provider.loaded_value
-                    if provider_value is not NEVER_SET and provider_value is not None:
-                        provider_name = provider_value.name
-                        provider_is_active = provider_value.is_active
-                image_model = MCPServerBackingModel(
-                    id=model_loaded.id,
-                    name=model_loaded.name,
-                    nickname=model_loaded.nickname,
-                    provider_name=provider_name,
-                    is_enabled=model_loaded.is_enabled,
-                    is_deleted=model_loaded.deleted_at is not None,
-                    is_deprecated=model_loaded.is_deprecated,
-                    provider_is_active=provider_is_active,
-                    security_classification=model_sc,
-                )
+            loaded = inspector.attrs.image_model.loaded_value
+            if loaded is not NEVER_SET:
+                image_model = _backing_model(loaded)
+            loaded = inspector.attrs.forecast_model.loaded_value
+            if loaded is not NEVER_SET:
+                forecast_model = _backing_model(loaded)
 
         return MCPServer(
             id=db_model.id,  # type: ignore[arg-type]
@@ -156,6 +172,8 @@ class MCPServerMapper:
             user_groups=user_groups,
             image_model_id=db_model.image_model_id,
             image_model=image_model,
+            forecast_model_id=db_model.forecast_model_id,
+            forecast_model=forecast_model,
             forward_identity=db_model.forward_identity,
             tool_catalog_max_count=db_model.tool_catalog_max_count,
             tool_catalog_max_bytes=db_model.tool_catalog_max_bytes,
@@ -189,6 +207,7 @@ class MCPServerMapper:
             "audience": entity.audience,
             "audience_priority": entity.audience_priority,
             "image_model_id": entity.image_model_id,
+            "forecast_model_id": entity.forecast_model_id,
             "forward_identity": entity.forward_identity,
             "tool_catalog_max_count": entity.tool_catalog_max_count,
             "tool_catalog_max_bytes": entity.tool_catalog_max_bytes,

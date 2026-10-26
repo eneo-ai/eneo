@@ -825,6 +825,10 @@ class MCPClient:
             # tell the model what the reader already sees beside the answer.
             if settings.mcp_apps_enabled and settings.mcp_app_content_base_url:
                 headers["X-Eneo-Tool-Views"] = "shown"
+            # The catalog key of the model the Forecast source runs on, from
+            # the row Eneo loaded; never a value a model or tool argument set.
+            if self.mcp_server.forecast_model is not None:
+                headers["X-Eneo-Model"] = self.mcp_server.forecast_model.name
         elif self.mcp_server.http_auth_type == "api_key_header":
             # Admin-chosen header (e.g. X-Api-Key). The name is validated at
             # configuration time against HTTP token syntax and a deny-list of

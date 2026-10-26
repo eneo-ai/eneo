@@ -66,6 +66,9 @@
 
   const eneo = getEneo();
 
+  // The provider that comes with the installation takes no models from an admin.
+  const addableProviders = $derived(providers.filter((provider) => !provider.is_managed));
+
   // --- Open state bridging ------------------------------------------------
   // The host page passes a `Writable<boolean>` (legacy contract). We bridge
   // that to a runes-friendly local boolean so shadcn Dialog's `bind:open`
@@ -553,7 +556,7 @@
             >
               {#if currentStep === "provider"}
                 <StepProvider
-                  {providers}
+                  providers={addableProviders}
                   {favoriteProviders}
                   {capabilities}
                   selectedProviderId={wizardData.selectedProviderId}

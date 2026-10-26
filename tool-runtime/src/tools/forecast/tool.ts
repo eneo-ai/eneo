@@ -2,11 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { ToolError } from "../../errors";
 import { exportFilename, toCsv } from "../files/csv";
 import { fetchReference, fileReference, type ReferenceAccess } from "../files/reference";
 import type { ChartConfig } from "../charts/config";
 import { RichResult, type EmbeddedFile, type ToolDefinition, type ToolView } from "../types";
-import type { ForecastConfig } from "./config";
+import { DEFAULT_FORECAST_MODEL, type ForecastConfig } from "./config";
 import { HOLDOUT_REASONS } from "./evaluate";
 import type { ForecastJob, ForecastResult } from "./ports";
 import { DAY_MS, isoDay } from "./series";
@@ -101,6 +102,12 @@ export function forecastTools(
       readOnly: true,
       async execute(raw, ctx) {
         const args = input.parse(raw);
+        // The model Eneo selected; without one (an older Eneo), the one this runtime has.
+        if ((ctx.model ?? DEFAULT_FORECAST_MODEL) !== DEFAULT_FORECAST_MODEL)
+          throw new ToolError(
+            "MODEL_UNAVAILABLE",
+            "The forecast model selected in Eneo is not installed in this tool service. Ask the operator to install it or select another model.",
+          );
         const interactive =
           !!resultView && ctx.showsViews === true && args.format === "auto" && args.display !== "none";
         const file = await fetchReference(args.source, ctx, access);

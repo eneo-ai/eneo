@@ -630,3 +630,55 @@ class TestDestinationChangeAudit:
         assert [
             call.kwargs["action"] for call in audit.log_async.await_args_list
         ] == audited
+
+
+class TestProviderThatComesWithTheDeployment:
+    """Eneo's own tool service is a provider Eneo creates; its connection stays
+    in the deployment's settings, so an admin can neither edit nor delete it."""
+
+    def test_says_it_is_managed(self):
+        managed = _provider("eneo_tool_service", credentials={})
+
+        assert managed.is_managed is True
+        assert managed.to_dict()["is_managed"] is True
+        assert _provider().is_managed is False
+        assert _provider().to_dict()["is_managed"] is False
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"name": "Renamed"},
+            {"credentials": {"api_key": "sk-new"}},
+            {"config": {"endpoint": "https://elsewhere.example"}},
+            {"is_active": False},
+        ],
+    )
+    async def test_cannot_be_edited(self, edit: dict[str, Any]):
+        service, repository = _service(_provider("eneo_tool_service", credentials={}))
+
+        with pytest.raises(BadRequestException, match="comes with the deployment"):
+            await service.update(uuid4(), **edit)
+
+        repository.update.assert_not_called()
+
+    async def test_cannot_be_deleted(self):
+        service, repository = _service(_provider("eneo_tool_service", credentials={}))
+
+        with pytest.raises(BadRequestException, match="comes with the deployment"):
+            await service.delete(uuid4())
+
+        repository.delete.assert_not_called()
+
+    async def test_cannot_be_added_by_hand(self):
+        service, repository = _service(_provider())
+
+        with pytest.raises(BadRequestException, match="comes with the deployment"):
+            await service.create(
+                tenant_id=uuid4(),
+                name="My tool service",
+                provider_type="eneo_tool_service",
+                credentials={"api_key": "sk"},
+                config={},
+            )
+
+        repository.create.assert_not_called()

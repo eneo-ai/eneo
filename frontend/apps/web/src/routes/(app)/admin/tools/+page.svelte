@@ -9,6 +9,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import {
@@ -386,6 +387,8 @@
                 {#each sources as source (source.mcp_server_id)}
                   {@const expanded = reviewing === source.mcp_server_id}
                   {@const kind = sourceKind(source.http_auth_type)}
+                  <!-- A bundled source is named after its function, also for screen readers. -->
+                  {@const shownName = bundledIdentity(source)?.name ?? source.name}
                   <div class="border-dimmer border-b p-5 last:border-b-0">
                     <div
                       class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
@@ -393,7 +396,7 @@
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
+                        aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${shownName}`}
                         aria-expanded={expanded}
                         aria-controls={"source-tools-" + source.mcp_server_id}
                         onclick={() => (reviewing = expanded ? null : source.mcp_server_id)}
@@ -408,7 +411,7 @@
                       <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
                           <h3 class="text-default text-sm font-medium">
-                            {bundledIdentity(source)?.name ?? source.name}
+                            {shownName}
                           </h3>
                           <!-- Every source carries its kind: Eneo itself, Eneo's tool service, or an external server. -->
                           <span
@@ -425,10 +428,18 @@
                           {#if source !== active}{@render statusChip(source)}{/if}
                         </div>
                         {#if source.http_auth_type === "internal"}
+                          <!-- The model links to its type under Admin > Models, where it is governed. -->
                           <p class="text-secondary mt-1 text-sm break-words">
-                            {m.tools_source_model()} · {source.image_model?.nickname ||
-                              source.image_model?.name ||
-                              m.tools_readiness_model_missing()}
+                            {m.tools_source_model()} ·
+                            {#if source.image_model}
+                              <a
+                                href={resolve("/admin/models?tab=image_models")}
+                                class="text-default font-medium underline underline-offset-2"
+                                >{source.image_model.nickname || source.image_model.name}</a
+                              >
+                            {:else}
+                              {m.tools_readiness_model_missing()}
+                            {/if}
                             {#if source.image_model?.provider_name}
                               · {source.image_model.provider_name}{/if}
                           </p>
@@ -436,6 +447,19 @@
                           <!-- The runtime address is deployment plumbing; say what the provider does, in one line. -->
                           {#if capability.bundledSummary}
                             <p class="text-secondary mt-1 text-sm">{capability.bundledSummary()}</p>
+                          {/if}
+                          <!-- And which model it runs where: a bundled source's model runs in Eneo's tool
+                               service, named in the reader's language (the provider's stored name is English). -->
+                          {#if source.forecast_model}
+                            <p class="text-secondary mt-1 text-sm break-words">
+                              {m.model()} ·
+                              <a
+                                href={resolve("/admin/models?tab=forecast_models")}
+                                class="text-default font-medium underline underline-offset-2"
+                                >{source.forecast_model.nickname || source.forecast_model.name}</a
+                              >
+                              · {m.mcp_auth_bundled()}
+                            </p>
                           {/if}
                         {:else}
                           <p class="text-secondary mt-1 text-sm break-words">{source.http_url}</p>
@@ -472,7 +496,7 @@
                                 variant="ghost"
                                 size="icon"
                                 class="hover:bg-hover-on-fill hover:text-primary"
-                                aria-label={`${m.actions()}: ${source.name}`}
+                                aria-label={`${m.actions()}: ${shownName}`}
                               >
                                 <IconEllipsis />
                               </Button>
@@ -516,7 +540,7 @@
                         {:else}
                           <MCPToolsPanel
                             mcpServerId={source.mcp_server_id}
-                            serverName={source.name}
+                            serverName={shownName}
                             tools={source.tools ?? []}
                             eneoClient={data.eneo}
                           />

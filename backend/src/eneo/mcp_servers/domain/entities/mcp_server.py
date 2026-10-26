@@ -168,9 +168,20 @@ def bundled_tool_name(http_url: str) -> str | None:
     return tool if tool in BUNDLED_TOOLS else None
 
 
+# The bundled Forecast source runs on a catalog forecast model
+# (``forecast_model_id``), the way a built-in provider runs on an image model;
+# the database requires one on exactly these rows.
+FORECAST_PURPOSE = "forecast"
+
+
+def runs_forecast_model(http_auth_type: str | None, purpose: str | None) -> bool:
+    return is_bundled_server(http_auth_type) and purpose == FORECAST_PURPOSE
+
+
 @dataclass(frozen=True)
 class MCPServerBackingModel:
-    """Read-only projection of the catalog model a built-in provider runs on."""
+    """Read-only projection of the catalog model a server runs on: the image
+    model of a built-in provider, the forecast model of the Forecast source."""
 
     id: UUID
     name: str
@@ -382,6 +393,8 @@ class MCPServer(Entity):
         user_groups: Optional[list[MCPServerAudienceGroup]] = None,
         image_model_id: Optional[UUID] = None,
         image_model: Optional[MCPServerBackingModel] = None,
+        forecast_model_id: Optional[UUID] = None,
+        forecast_model: Optional[MCPServerBackingModel] = None,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -414,6 +427,8 @@ class MCPServer(Entity):
         self.user_groups = list(user_groups or [])
         self.image_model_id = image_model_id
         self.image_model = image_model
+        self.forecast_model_id = forecast_model_id
+        self.forecast_model = forecast_model
         self.forward_identity = forward_identity
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes
@@ -453,17 +468,29 @@ class MCPServer(Entity):
         return [group.id for group in self.user_groups]
 
     @property
+    def backing_model(self) -> MCPServerBackingModel | None:
+        """The catalog model the server runs on, as the reader loaded it.
+
+        A built-in provider runs on an image model and the Forecast source on
+        a forecast model; the database allows each only on such rows.
+        """
+        if self.image_model is not None:
+            return self.image_model
+        return self.forecast_model
+
+    @property
     def effective_security_classification(self) -> "SecurityClassification | None":
         """The row's own classification, else that of the model it runs on.
 
         A built-in provider never stores its own classification, so for it
-        this is always the image model's; an external server has no backing
-        model, so this is always its own.
+        this is always the image model's; the Forecast source's own, when an
+        admin set one, wins over its forecast model's; an external server has
+        no backing model, so this is always its own.
         """
         if self.security_classification is not None:
             return self.security_classification
-        if self.image_model is not None:
-            return self.image_model.security_classification
+        if self.backing_model is not None:
+            return self.backing_model.security_classification
         return None
 
     @property
@@ -473,9 +500,12 @@ class MCPServer(Entity):
 
     @property
     def backing_model_blocker(self) -> str | None:
-        if not is_builtin_provider(self.http_auth_type):
+        if not (
+            is_builtin_provider(self.http_auth_type)
+            or runs_forecast_model(self.http_auth_type, self.purpose)
+        ):
             return None
-        model = self.image_model
+        model = self.backing_model
         if model is None or model.is_deleted:
             return "model_missing"
         if not model.is_enabled:

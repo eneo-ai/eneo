@@ -240,6 +240,16 @@ says "This function needs a model that your operator adds to the tool
 runtime." and the provider built into Eneo cannot be turned on. Every other
 tool keeps working.
 
+The forecast model is governed like every other model. Turning Forecast on adds
+it under **Admin > Models** as a model of the type **Forecast** (_Prognos_),
+under the provider **Eneo tool service** (_Eneos verktygstjänst_), which comes
+with the installation and cannot be edited or removed. There you switch the
+model on or off, set the security classification it is approved for and
+change its display name; the row also shows which Function source uses it.
+While the model is off, the Forecast source shows "The model is disabled."
+and is not offered to assistants. The source's line on the Forecast card
+names the model it runs.
+
 A bundled source is an ordinary source in other respects: audiences,
 permissions and classification apply unchanged, and an external MCP server can
 replace it at any time. Its tools and views are Eneo's own code, so they follow

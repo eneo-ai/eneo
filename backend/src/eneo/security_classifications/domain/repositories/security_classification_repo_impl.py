@@ -154,14 +154,15 @@ class SecurityClassificationRepoImpl(BaseRepository):
         from eneo.database.tables.ai_models_table import (
             CompletionModels,
             EmbeddingModels,
+            ForecastModels,
             RerankModels,
             TranscriptionModels,
         )
         from eneo.database.tables.mcp_server_table import MCPServers
         from eneo.database.tables.spaces_table import Spaces
 
-        # Soft-deleted completion and rerank models still carry their FK to
-        # the classification, but they're not active anymore — counting them
+        # Soft-deleted completion, rerank and forecast models still carry their
+        # FK to the classification, but they're not active anymore — counting them
         # produces an "in use" error the admin can't act on. Embedding /
         # transcription models have no soft-delete column today.
         counts = await self.session.execute(
@@ -189,6 +190,13 @@ class SecurityClassificationRepoImpl(BaseRepository):
                 .scalar_subquery()
                 .label("rerank_models"),
                 sa.select(sa.func.count())
+                .where(
+                    ForecastModels.security_classification_id == id,
+                    ForecastModels.deleted_at.is_(None),
+                )
+                .scalar_subquery()
+                .label("forecast_models"),
+                sa.select(sa.func.count())
                 .where(Spaces.security_classification_id == id)
                 .scalar_subquery()
                 .label("spaces"),
@@ -204,6 +212,7 @@ class SecurityClassificationRepoImpl(BaseRepository):
             "embedding_models": row.embedding_models,
             "transcription_models": row.transcription_models,
             "rerank_models": row.rerank_models,
+            "forecast_models": row.forecast_models,
             "spaces": row.spaces,
             "mcp_servers": row.mcp_servers,
         }
