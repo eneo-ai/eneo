@@ -42,7 +42,12 @@ export default defineConfig({
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",
-      strategy: ["url", "cookie", "baseLocale"]
+      strategy: ["url", "cookie", "baseLocale"],
+      // One module per message (paraglide's default) means ~15k modules for
+      // our catalog and pushed the production build past an 8 GB heap. Rollup
+      // merges them into one chunk that every page loads anyway, so per-locale
+      // modules cost no extra bytes.
+      outputStructure: "locale-modules"
     }) as PluginOption,
     tailwindcss() as PluginOption,
     eneoIcons() as PluginOption,
