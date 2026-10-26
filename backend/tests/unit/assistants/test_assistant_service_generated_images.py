@@ -94,10 +94,8 @@ async def test_non_streaming_answer_hands_back_the_files_its_tools_made():
         user_id=uuid4(),
         tenant_id=uuid4(),
     )
-    service = AssistantService.__new__(AssistantService)
-    service.user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+    service = _service()
     service.session_service = AsyncMock()
-    service.file_service = AsyncMock()
     service.file_service.save_image_from_bytes = AsyncMock(return_value=saved)
     response = SimpleNamespace(
         completion=SimpleNamespace(
