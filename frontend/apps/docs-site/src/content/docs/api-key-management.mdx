@@ -273,7 +273,7 @@ Keys with an `expires_at` timestamp are checked at runtime:
 
 ### Purge
 
-Revoked and expired keys stay listed until they are purged. `POST /api/v1/api-keys/{id}/purge` permanently deletes such a key while preserving its audit history; active or suspended keys cannot be purged, revoke them first.
+Revoked and expired keys stay listed until they are purged. `POST /api/v1/api-keys/{id}/purge` permanently deletes such a key while preserving its audit history; active or suspended keys cannot be purged, revoke them first. Purging a service key also deletes the conversations started with it, because the key is their only owner. Conversations started with a user key belong to that user and are kept.
 
 ### Usage
 

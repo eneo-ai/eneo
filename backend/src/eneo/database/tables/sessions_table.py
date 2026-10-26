@@ -18,12 +18,14 @@ if TYPE_CHECKING:
 class Sessions(BasePublic):
     # user_id is nullable so service-key sessions (which authenticate via an
     # API key, not a real user) can be persisted. api_key_id carries the
-    # owning principal in that case. Exactly one of the two is set per row.
+    # owning principal in that case. Exactly one of the two is set per row,
+    # so both cascade: SET NULL would leave a row without a principal, which
+    # ck_sessions_user_xor_api_key rejects.
     user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
     )
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
+        ForeignKey(ApiKeysV2.id, ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
