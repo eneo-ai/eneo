@@ -13,13 +13,19 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 
 import asyncio
+import contextlib
 import faulthandler
+import gc
 import sys
 import threading
+import traceback
+import types
 import warnings
+from collections.abc import Generator, Iterator
 from typing import TYPE_CHECKING
 
 import pytest
+from _pytest.faulthandler import fault_handler_stderr_fd_key
 
 from tests.warning_filters import IGNORED_WARNINGS
 
@@ -139,6 +145,116 @@ def pytest_sessionfinish(
     threading.Thread(
         target=_watchdog, name="pytest-shutdown-watchdog", daemon=True
     ).start()
+
+
+# pytest's faulthandler plugin dumps on the same fd at faulthandler_timeout;
+# starting later keeps the two dumps from interleaving.
+_ASYNCIO_DUMP_DELAY_SECONDS = 1.0
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
+    """Show where a test that outlives faulthandler_timeout is awaiting.
+
+    faulthandler_timeout dumps every thread, which pinpoints a hung sync test.
+    A hung async test shows only the event loop blocked in ``select``: neither
+    the test nor the await it is stuck on. Shortly after that dump, this writes
+    the nodeid and the await chain of every pending task on each running event
+    loop to the same fd, which xdist workers share with the CI log.
+
+    No-op when faulthandler_timeout is unset, and silent for a test that ends
+    in time. faulthandler_exit_on_timeout ends the process before it fires.
+    """
+    config = item.config
+    if fault_handler_stderr_fd_key not in config.stash:
+        return (yield)
+    timeout = float(config.getini("faulthandler_timeout") or 0)
+    if timeout <= 0:
+        return (yield)
+
+    timer = threading.Timer(
+        timeout + _ASYNCIO_DUMP_DELAY_SECONDS,
+        _dump_asyncio_tasks,
+        args=(item.nodeid, timeout, config.stash[fault_handler_stderr_fd_key]),
+    )
+    timer.daemon = True
+    timer.start()
+    try:
+        return (yield)
+    finally:
+        timer.cancel()
+
+
+def _dump_asyncio_tasks(nodeid: str, timeout: float, fd: int) -> None:
+    """Write the await chain of each pending task on every running event loop.
+
+    Runs on the timer thread while the loop's thread is blocked, so it only
+    reads coroutine and frame state. It must not raise: pytest would report a
+    thread exception as a warning, which pytest.ini turns into a test error.
+    """
+    out = [f"\n[pytest asyncio watchdog] {nodeid} exceeded {timeout:g}s\n"]
+    try:
+        names = {thread.ident: thread.name for thread in threading.enumerate()}
+        loops = 0
+        for thread_id, frame in sys._current_frames().items():
+            loop = _running_loop(frame)
+            if loop is None:
+                continue
+            loops += 1
+            tasks = asyncio.all_tasks(loop)
+            thread_name = names.get(thread_id, thread_id)
+            out.append(
+                f"{len(tasks)} pending task(s) on the event loop in thread "
+                f"{thread_name}:\n"
+            )
+            for task in tasks:
+                out.append(f"Task {task.get_name()!r} (innermost await last):\n")
+                chain = _await_chain(task.get_coro())
+                out.extend(traceback.StackSummary.extract(chain).format())
+        if not loops:
+            out.append("No asyncio event loop is running.\n")
+    except Exception as exc:
+        out.append(f"Task dump failed: {exc!r}\n")
+    with contextlib.suppress(OSError):
+        os.write(fd, "".join(out).encode(errors="backslashreplace"))
+
+
+def _running_loop(frame: types.FrameType | None) -> asyncio.AbstractEventLoop | None:
+    """Return the event loop whose run_forever() is on this thread's stack."""
+    while frame is not None:
+        if frame.f_code.co_name == "run_forever":
+            loop = frame.f_locals.get("self")
+            if isinstance(loop, asyncio.AbstractEventLoop):
+                return loop
+        frame = frame.f_back
+    return None
+
+
+def _await_chain(awaitable: object) -> Iterator[tuple[types.FrameType, int]]:
+    """Yield each frame from a task's coroutine down to the await it blocks on.
+
+    Task.get_stack() stops at the outermost coroutine. The anext() wrappers that
+    async generator fixtures and asynccontextmanager await have no frame, so
+    the chain continues into the async generator they reference.
+    """
+    while awaitable is not None:
+        frame = getattr(awaitable, "cr_frame", None) or getattr(
+            awaitable, "ag_frame", None
+        )
+        if frame is None:
+            awaitable = next(
+                (
+                    ref
+                    for ref in gc.get_referents(awaitable)
+                    if isinstance(ref, types.AsyncGeneratorType)
+                ),
+                None,
+            )
+            continue
+        yield frame, frame.f_lineno
+        awaitable = getattr(awaitable, "cr_await", None) or getattr(
+            awaitable, "ag_await", None
+        )
 
 
 def pytest_terminal_summary(
