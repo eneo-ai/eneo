@@ -7,6 +7,7 @@ from eneo.files.transcript import (
     TranscriptSegment,
     TranscriptWord,
 )
+from eneo.flows.runtime import recording_parts
 from eneo.flows.runtime.recording_parts import (
     PartBounds,
     RecordingSplitError,
@@ -105,14 +106,20 @@ def test_a_wordless_segment_inside_one_part_is_kept_whole():
     )
 
 
-def test_a_wordless_segment_across_the_seam_is_refused():
+def test_a_wordless_segment_across_the_seam_moves_whole_to_the_part_it_starts_in():
+    # Nothing says where in it the seam fell: it stays whole where it starts, as a word
+    # spoken across the seam does, rather than failing the run.
     wordless = TranscriptSegment("Nästa punkt.", 9.0, 12.0, "SPEAKER_02")
 
-    with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(wordless), BOUNDS)
+    first, second = split_recording(_labelled(wordless), BOUNDS)
+
+    assert first.transcript_segments == (
+        TranscriptSegment("Nästa punkt.", 9.0, 10.0, "SPEAKER_02"),
+    )
+    assert second.transcript_segments == ()
 
 
-def test_words_that_do_not_spell_the_split_segment_are_refused():
+def test_words_that_do_not_spell_a_seam_segment_leave_it_whole_without_them():
     mismatched = TranscriptSegment(
         "Vi ses snart.",
         9.0,
@@ -121,8 +128,12 @@ def test_words_that_do_not_spell_the_split_segment_are_refused():
         _words(("Vi", 9.0, 9.5), ("snart", 10.2, 11.0)),
     )
 
-    with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(mismatched), BOUNDS)
+    first, second = split_recording(_labelled(mismatched), BOUNDS)
+
+    assert first.transcript_segments == (
+        TranscriptSegment("Vi ses snart.", 9.0, 10.0, "SPEAKER_00"),
+    )
+    assert second.transcript_segments == ()
 
 
 def test_an_overlap_is_clipped_into_every_part_it_touches():
@@ -205,14 +216,18 @@ def test_labelled_text_without_segments_is_refused():
         split_recording(labelled, BOUNDS)
 
 
-def test_a_seam_crossing_segment_with_partial_words_is_refused():
+def test_a_seam_crossing_segment_with_partial_words_stays_whole_where_it_starts():
     # The service may time only some words; they must not decide where all the text goes.
     partial = TranscriptSegment(
         "Vi ses snart igen.", 8.0, 11.5, "SPEAKER_00", _words(("Vi", 8.0, 8.4))
     )
 
-    with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(partial), BOUNDS)
+    first, second = split_recording(_labelled(partial), BOUNDS)
+
+    assert first.transcript_segments == (
+        TranscriptSegment("Vi ses snart igen.", 8.0, 10.0, "SPEAKER_00"),
+    )
+    assert second.transcript_segments == ()
 
 
 def test_partial_words_inside_one_part_keep_the_whole_segment():
@@ -239,45 +254,100 @@ def test_a_short_wordless_segment_just_after_the_seam_stays_in_its_part():
 
 
 @pytest.mark.parametrize(
-    "segment",
+    ("segment", "placed"),
     [
-        TranscriptSegment("Sent.", 24.0, 26.0, "SPEAKER_00"),
-        TranscriptSegment("Baklänges.", 5.0, 4.0, "SPEAKER_00"),
-        TranscriptSegment(
-            "Hej.", 1.0, 2.0, "SPEAKER_00", _words(("Hej.", float("nan"), 2.0))
+        # Past the recording's end: held to it.
+        (
+            TranscriptSegment("Sent.", 24.0, 26.0, "SPEAKER_00"),
+            (1, TranscriptSegment("Sent.", 14.0, 15.0, "SPEAKER_00")),
+        ),
+        # Ending before it starts: a moment where it starts.
+        (
+            TranscriptSegment("Baklänges.", 5.0, 4.0, "SPEAKER_00"),
+            (0, TranscriptSegment("Baklänges.", 5.0, 5.0, "SPEAKER_00")),
+        ),
+        # A word that is no moment: the segment keeps its own time, without its words.
+        (
+            TranscriptSegment(
+                "Hej.", 1.0, 2.0, "SPEAKER_00", _words(("Hej.", float("nan"), 2.0))
+            ),
+            (0, TranscriptSegment("Hej.", 1.0, 2.0, "SPEAKER_00")),
         ),
     ],
 )
-def test_times_outside_the_recording_are_refused(segment):
+def test_times_outside_the_recording_are_held_to_it(segment, placed):
+    parts = split_recording(_labelled(segment), BOUNDS)
+
+    index, expected = placed
+    assert parts[index].transcript_segments == (expected,)
+    assert parts[1 - index].transcript_segments == ()
+
+
+def test_a_segment_whose_times_are_no_times_is_refused():
+    # Nothing says where in the recording it was said, or in which part.
+    nowhere = TranscriptSegment("Hej.", float("nan"), 2.0, "SPEAKER_00")
+
     with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(segment), BOUNDS)
+        split_recording(_labelled(nowhere), BOUNDS)
 
 
 @pytest.mark.parametrize(
-    "segment",
+    ("segment", "placed"),
     [
         # A word timed in the other part than the segment it belongs to.
-        TranscriptSegment("Hej.", 1.0, 2.0, "SPEAKER_00", _words(("Hej.", 11.0, 12.0))),
-        # Complete words across the seam, but out of time order.
-        TranscriptSegment(
-            "Vi ses.",
-            9.0,
-            11.0,
-            "SPEAKER_00",
-            _words(("Vi", 10.5, 11.0), ("ses.", 9.0, 9.5)),
+        (
+            TranscriptSegment(
+                "Hej.", 1.0, 2.0, "SPEAKER_00", _words(("Hej.", 11.0, 12.0))
+            ),
+            TranscriptSegment("Hej.", 1.0, 2.0, "SPEAKER_00"),
+        ),
+        # Complete words across the seam, but out of time order: whole, where it starts.
+        (
+            TranscriptSegment(
+                "Vi ses.",
+                9.0,
+                11.0,
+                "SPEAKER_00",
+                _words(("Vi", 10.5, 11.0), ("ses.", 9.0, 9.5)),
+            ),
+            TranscriptSegment("Vi ses.", 9.0, 10.0, "SPEAKER_00"),
         ),
     ],
 )
-def test_words_must_lie_in_their_segment_in_time_order(segment):
-    with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(segment), BOUNDS)
+def test_words_out_of_their_segment_or_order_are_left_out_and_the_segment_kept(
+    segment, placed
+):
+    first, second = split_recording(_labelled(segment), BOUNDS)
+
+    assert first.transcript_segments == (placed,)
+    assert second.transcript_segments == ()
 
 
-def test_a_word_past_the_recording_is_refused_even_inside_its_segment():
+def test_a_word_past_the_recording_is_left_out_and_its_segment_kept():
     # The segment ends at the edge the tolerance allows; its word ends past it.
     edge = TranscriptSegment(
         "Slut.", 24.0, 25.05, "SPEAKER_00", _words(("Slut.", 24.0, 25.1))
     )
 
-    with pytest.raises(RecordingSplitError):
-        split_recording(_labelled(edge), BOUNDS)
+    _, second = split_recording(_labelled(edge), BOUNDS)
+
+    assert second.transcript_segments == (
+        TranscriptSegment("Slut.", 14.0, 15.0, "SPEAKER_00"),
+    )
+
+
+def test_a_recording_placed_approximately_says_so_with_its_reasons(caplog):
+    # Placement that is not exact is logged by count and reason, never by its text.
+    wordless = TranscriptSegment("Nästa punkt.", 9.0, 12.0, "SPEAKER_02")
+
+    recording_parts.logger.addHandler(caplog.handler)
+    try:
+        split_recording(_labelled(wordless), BOUNDS)
+    finally:
+        recording_parts.logger.removeHandler(caplog.handler)
+
+    (record,) = [
+        r for r in caplog.records if "recording_split_approximated" in r.message
+    ]
+    assert "seam_segment_without_words=1" in record.message
+    assert "Nästa punkt" not in record.message

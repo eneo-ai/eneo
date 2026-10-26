@@ -50,6 +50,7 @@ from eneo.flows.runtime.audio_spool import (
 )
 from eneo.flows.runtime.recording_parts import (
     RecordingAudio,
+    RecordingSplitError,
     RecordingTranscriber,
     part_bounds,
     split_recording,
@@ -753,8 +754,11 @@ def _transcription_failures(step_order: int, subject: str) -> Generator[None]:
     except SpeakerServiceFailed as exc:
         # The model's text was written; the speaker service failed on it.
         cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+        # Labels that could not be placed in a recording's parts: which check refused them,
+        # in the split's own words (never transcript content), for whoever reads the run's error.
+        reason = f" {cause}" if isinstance(cause, RecordingSplitError) else ""
         raise TranscriptionFailure(
-            f"Step {step_order}: speaker identification failed for {subject}.",
+            f"Step {step_order}: speaker identification failed for {subject}.{reason}",
             cause=cause,
             code=FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED,
         ) from cause
@@ -817,7 +821,12 @@ async def _transcribe_recording(
             observer=observer,
             max_speakers=max_speakers,
         )
-        return split_recording(labelled, recording.bounds)
+        try:
+            return split_recording(labelled, recording.bounds)
+        except RecordingSplitError as exc:
+            # Every part was transcribed; it is the speaker labels that cannot be
+            # returned to the parts, so the step fails as the speaker service's.
+            raise SpeakerServiceFailed() from exc
     finally:
         for spool in (*parts, joined):
             await spool.aclose()

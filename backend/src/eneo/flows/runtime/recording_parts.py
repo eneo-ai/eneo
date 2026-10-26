@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from itertools import accumulate
@@ -24,9 +25,12 @@ from eneo.files.transcript import (
 )
 from eneo.flows.domain.speaker_labels import render_segments
 from eneo.flows.runtime.audio_spool import SpooledAudio
+from eneo.main.logging import get_logger
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
 )
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from eneo.model_providers.domain.provider_call_observer import (
@@ -136,15 +140,20 @@ def split_recording(
     """Per-part transcripts, times relative to each part, labels unchanged.
 
     A segment inside one part moves there whole. One across a boundary is
-    split by its words, which must spell all of its text; a word belongs to the
-    part its start falls in, so a word spoken across a seam stays whole.
+    split by its words when they spell all of its text; a word belongs to the
+    part its start falls in, so a word spoken across a seam stays whole, and
+    so does a segment whose words cannot say where the seam fell. Times are
+    held to the recording, and words that do not fit their segment are left
+    out. Only a result with nothing to place by is refused; every
+    approximation is logged by reason and count.
     """
     if labelled.transcript_segments is None and labelled.text.strip():
         raise RecordingSplitError(
             "The labelled recording came back without segments to place in its parts."
         )
-    _check_times(labelled, bounds[-1].end)
+    duration = bounds[-1].end
     starts = [bound.start for bound in bounds]
+    notes: Counter[str] = Counter()
 
     def part_of(time: float) -> int:
         return max(0, bisect_right(starts, time) - 1)
@@ -154,7 +163,8 @@ def split_recording(
 
     segments: list[list[TranscriptSegment]] = [[] for _ in bounds]
     for segment in labelled.transcript_segments or ():
-        for index, piece in _pieces(segment, part_of):
+        placeable = _placeable(segment, duration, notes)
+        for index, piece in _pieces(placeable, part_of, notes):
             segments[index].append(
                 replace(
                     piece,
@@ -172,6 +182,11 @@ def split_recording(
                     else piece.words,
                 )
             )
+    if notes:
+        logger.warning(
+            "flow_transcription.recording_split_approximated %s",
+            " ".join(f"{reason}={count}" for reason, count in sorted(notes.items())),
+        )
 
     return [
         TranscribedAudio(
@@ -195,8 +210,34 @@ def split_recording(
     ]
 
 
+def _placeable(
+    segment: TranscriptSegment, duration: float, notes: Counter[str]
+) -> TranscriptSegment:
+    """The segment held to the recording, without words that would misplace it."""
+    if not (math.isfinite(segment.start) and math.isfinite(segment.end)):
+        raise RecordingSplitError(
+            "A segment of the labelled recording has no time in it."
+        )
+    if not _within(segment.start, segment.end, 0.0, duration):
+        notes["segment_times_held"] += 1
+    start = min(max(segment.start, 0.0), duration)
+    held = replace(segment, start=start, end=min(max(segment.end, start), duration))
+    previous_start = held.start - WINDOW_TOLERANCE_SECONDS
+    for word in held.words or ():
+        if not (
+            _within(word.start, word.end, held.start, held.end)
+            and word.start >= previous_start
+        ):
+            notes["words_out_of_place"] += 1
+            return replace(held, words=None)
+        previous_start = word.start
+    return held
+
+
 def _pieces(
-    segment: TranscriptSegment, part_of: Callable[[float], int]
+    segment: TranscriptSegment,
+    part_of: Callable[[float], int],
+    notes: Counter[str],
 ) -> list[tuple[int, TranscriptSegment]]:
     first = part_of(segment.start)
     if part_of(max(segment.start, segment.end - WINDOW_TOLERANCE_SECONDS)) == first:
@@ -204,9 +245,8 @@ def _pieces(
     # Only words that spell the whole segment can say where each part of it was said.
     words = segment.words or ()
     if " ".join(segment.text.split()) != " ".join(word.word.strip() for word in words):
-        raise RecordingSplitError(
-            "A segment across a part boundary lacks word timings for all its text."
-        )
+        notes["seam_segment_without_words"] += 1
+        return [(first, replace(segment, words=None))]
     groups: list[tuple[int, list[TranscriptWord]]] = []
     for word in words:
         index = part_of(word.start)
@@ -231,30 +271,6 @@ def _pieces(
     ]
 
 
-def _check_times(labelled: TranscribedAudio, duration: float) -> None:
-    """Every time must be a real moment of the recording, and every word must
-    lie in its segment in spoken order, before anything is routed by it."""
-    overlaps = (labelled.speaker_review or {}).get("overlaps", [])
-    spans = [(float(overlap["start"]), float(overlap["end"])) for overlap in overlaps]
-    for segment in labelled.transcript_segments or ():
-        spans.append((segment.start, segment.end))
-        previous_start = segment.start - WINDOW_TOLERANCE_SECONDS
-        for word in segment.words or ():
-            if not (
-                _within(word.start, word.end, segment.start, segment.end)
-                and word.start >= previous_start
-            ):
-                raise RecordingSplitError(
-                    "A word lies outside its segment or out of spoken order."
-                )
-            previous_start = word.start
-            spans.append((word.start, word.end))
-    if not all(_within(start, end, 0.0, duration) for start, end in spans):
-        raise RecordingSplitError(
-            "The labelled recording has times outside the recording."
-        )
-
-
 def _within(start: float, end: float, low: float, high: float) -> bool:
     return (
         math.isfinite(start)
@@ -266,7 +282,8 @@ def _within(start: float, end: float, low: float, high: float) -> bool:
 
 def _clip(start: float, end: float, bound: PartBounds) -> tuple[float, float] | None:
     clipped_start, clipped_end = max(start, bound.start), min(end, bound.end)
-    if clipped_end <= clipped_start:
+    # NaN compares false either way: a time that is no time touches no part.
+    if not clipped_start < clipped_end:
         return None
     return clipped_start - bound.start, clipped_end - bound.start
 
