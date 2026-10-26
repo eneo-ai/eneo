@@ -101,8 +101,19 @@ class IconRepository:
         )
         return None if row is None else IconMetadata.model_validate(row)
 
-    async def get_for_lifecycle(self, icon_id: UUID) -> IconMetadata | None:
-        row = await self.session.get(Icons, icon_id)
+    async def get_for_lifecycle(
+        self, icon_id: UUID, *, lock: bool = False
+    ) -> IconMetadata | None:
+        """With ``lock``, wait for a concurrent delete, so a deleted icon reads as gone."""
+        if lock:
+            row = await self.session.scalar(
+                sa.select(Icons)
+                .where(Icons.id == icon_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        else:
+            row = await self.session.get(Icons, icon_id)
         return None if row is None else IconMetadata.model_validate(row)
 
     async def get_primary_reference(

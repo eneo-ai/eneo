@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
 from eneo.icons.icon import IconInUseError
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import ErrorCodes, NotFoundException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -235,20 +235,44 @@ async def test_deleting_the_last_resource_that_shows_an_icon_deletes_it(
     assert await _icon_status(client, icon_id) == 404
 
 
+def _deleting(db_container, icon_id: str, tenant_id: UUID):
+    """Start ``delete_icon`` in its own session; the future resolves to its backend pid."""
+    pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def delete() -> None:
+        async with db_container() as deleting:
+            pid.set_result(
+                await deleting.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            )
+            await deleting.icon_service().delete_icon(UUID(icon_id), tenant_id)
+
+    return asyncio.create_task(delete()), pid
+
+
+async def _wait_until_blocked(session, racer: asyncio.Task, racer_pid) -> None:
+    """Return once ``racer`` waits on a lock this session's backend holds."""
+    holder_pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+    await asyncio.wait(
+        {racer, racer_pid}, timeout=10, return_when=asyncio.FIRST_COMPLETED
+    )
+    assert racer_pid.done(), "the racer finished before it reported its backend"
+    for _ in range(200):
+        assert not racer.done(), "the racer did not wait for the lock"
+        blocked = await session.scalar(
+            sa.text("SELECT :holder = ANY(pg_blocking_pids(:racer))"),
+            {"holder": holder_pid, "racer": racer_pid.result()},
+        )
+        if blocked:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("the racer never waited on the lock")
+
+
 async def test_an_attach_committing_during_the_delete_keeps_the_icon(
     client, owner, admin_user, db_container
 ):
     icon_id = await _upload(client, owner)
     assistant_id = await _create(client, owner, "assistant")
-    deleter_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
-
-    async def delete() -> None:
-        async with db_container() as deleting:
-            pid = await deleting.session().scalar(sa.text("SELECT pg_backend_pid()"))
-            deleter_pid.set_result(pid)
-            await deleting.icon_service().delete_icon(
-                UUID(icon_id), admin_user.tenant_id
-            )
 
     async with db_container() as attaching:
         session = attaching.session()
@@ -258,25 +282,24 @@ async def test_an_attach_committing_during_the_delete_keeps_the_icon(
             .where(Assistants.id == UUID(assistant_id))
             .values(icon_id=UUID(icon_id))
         )
-        attacher_pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
-        deleting = asyncio.create_task(delete())
-        await asyncio.wait(
-            {deleting, deleter_pid}, timeout=10, return_when=asyncio.FIRST_COMPLETED
-        )
-        assert deleter_pid.done(), "the delete finished before it reported its backend"
-        for _ in range(200):
-            assert not deleting.done(), "the delete did not wait for the attach"
-            blocked = await session.scalar(
-                sa.text("SELECT :attacher = ANY(pg_blocking_pids(:deleter))"),
-                {"attacher": attacher_pid, "deleter": deleter_pid.result()},
-            )
-            if blocked:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("the delete never waited on the attach")
+        deleting, deleter_pid = _deleting(db_container, icon_id, admin_user.tenant_id)
+        await _wait_until_blocked(session, deleting, deleter_pid)
 
     with pytest.raises(IconInUseError):
         await deleting
     assert await _shown_icon(client, owner, assistant_id) == icon_id
     assert await _icon_status(client, icon_id) == 200
+
+
+async def test_a_delete_that_waited_for_another_delete_finds_nothing(
+    client, owner, admin_user, db_container
+):
+    icon_id = await _upload(client, owner)
+
+    async with db_container() as first:
+        await first.icon_service().delete_icon(UUID(icon_id), admin_user.tenant_id)
+        second, second_pid = _deleting(db_container, icon_id, admin_user.tenant_id)
+        await _wait_until_blocked(first.session(), second, second_pid)
+
+    with pytest.raises(NotFoundException):
+        await second

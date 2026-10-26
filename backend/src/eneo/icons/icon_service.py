@@ -246,7 +246,7 @@ class IconService:
         from a resource is authorized by that resource's own update.
         """
         async with self._write_transaction():
-            icon = await self.icon_repo.get_for_lifecycle(icon_id)
+            icon = await self.icon_repo.get_for_lifecycle(icon_id, lock=True)
             if icon is None:
                 raise NotFoundException(f"Icon with id {icon_id} not found")
             if icon.tenant_id != tenant_id:
