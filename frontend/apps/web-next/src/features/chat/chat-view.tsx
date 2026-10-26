@@ -34,7 +34,7 @@ import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
 import { documentDraft } from "./side-panel/document-draft";
-import { documentExport } from "./side-panel/document-export";
+import { documentExport, isExportableDocument } from "./side-panel/document-export";
 import { saveDocumentVersion, type DocumentSaver } from "./side-panel/document-saver";
 import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
 import {
@@ -47,7 +47,6 @@ import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
-import { isExportableDocument } from "./side-panel/file-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";

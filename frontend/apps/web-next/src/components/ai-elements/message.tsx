@@ -4,13 +4,12 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { cjk } from "@streamdown/cjk";
 import { createCodePlugin } from "@streamdown/code";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ComponentType } from "react";
 import { useTranslations } from "next-intl";
-import { memo, useCallback, useMemo } from "react";
-import { Streamdown } from "streamdown";
+import { lazy, memo, Suspense, useCallback, useMemo } from "react";
+import { CodeBlock, Streamdown, type CustomRendererProps } from "streamdown";
 import { answerRehypePlugins, answerRemarkPlugins } from "./answer-markdown";
 import { mathPlugin } from "./math";
-import { AnswerDiagram } from "./diagram";
 import "katex/dist/katex.min.css";
 import "./message.css";
 import {
@@ -29,6 +28,34 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
  * (Source Serif 4, `--font-voice` in globals.css) and nothing else moves.
  */
 export const ANSWER_TEXT_CLASS = "font-sans text-ax-text text-base leading-[1.7]";
+
+function DiagramSource({ code }: CustomRendererProps) {
+  return <CodeBlock code={code} language="mermaid" isIncomplete />;
+}
+
+// Mermaid loads with the first finished diagram, not with every page that shows
+// an answer. Until then the fence shows as code, as it does while it streams. A
+// failed load also leaves the code, and the next diagram rendered tries again.
+const lazyDiagram = (): ComponentType<CustomRendererProps> =>
+  lazy(() =>
+    import("./diagram").then(
+      (module) => ({ default: module.AnswerDiagram }),
+      () => {
+        LazyAnswerDiagram = lazyDiagram();
+        return { default: DiagramSource };
+      }
+    )
+  );
+let LazyAnswerDiagram = lazyDiagram();
+
+function AnswerDiagram(props: CustomRendererProps) {
+  if (props.isIncomplete) return <DiagramSource {...props} />;
+  return (
+    <Suspense fallback={<DiagramSource {...props} />}>
+      <LazyAnswerDiagram {...props} />
+    </Suspense>
+  );
+}
 
 const code = createCodePlugin({
   themes: ["github-light-high-contrast", "github-dark-high-contrast"]
