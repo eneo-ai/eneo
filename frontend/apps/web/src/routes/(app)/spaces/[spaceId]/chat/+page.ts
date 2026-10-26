@@ -1,4 +1,4 @@
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
@@ -6,6 +6,14 @@ import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerTyp
 export const load: PageLoad = async (event) => {
   const { eneo, currentSpace } = await event.parent();
   const partnerType = event.url.searchParams.get("type") ?? "default-assistant";
+
+  // Group chats were migrated into assistants with the same id, so an old link
+  // keeps working by opening the assistant instead.
+  if (partnerType === "group-chat") {
+    const target = new URL(event.url);
+    target.searchParams.set("type", "assistant");
+    redirect(307, `${target.pathname}${target.search}`);
+  }
 
   if (!isValidChatPartnerType(partnerType)) {
     throw new Error("Unknown chat type!");
@@ -33,10 +41,6 @@ export const load: PageLoad = async (event) => {
     switch (partnerType) {
       case "assistant":
         return eneo.assistants.get({
-          id: partnerId
-        });
-      case "group-chat":
-        return eneo.groupChats.get({
           id: partnerId
         });
       // instead of case "default-assistant"

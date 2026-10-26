@@ -219,12 +219,8 @@ export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
-export type GroupChat = components["schemas"]["GroupChatPublic"];
-export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
-  | { id: string; type: "assistant" }
-  | { id: string; type: "group-chat" }
-  | { id: string; type: "default-assistant" };
+  { id: string; type: "assistant" } | { id: string; type: "default-assistant" };
 
 export type Paginated<T> = {
   items: T[];

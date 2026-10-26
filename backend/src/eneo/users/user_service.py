@@ -43,7 +43,6 @@ from eneo.authentication.endpoint_access import authorize_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.prompts_table import PromptsAssistants
@@ -115,7 +114,6 @@ def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
 _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.ASSISTANTS,
-        Permission.GROUP_CHATS,
         Permission.APPS,
         Permission.SERVICES,
         Permission.COLLECTIONS,
@@ -1484,17 +1482,10 @@ class UserService:
         elif resource_type == "service":
             stmt = sa.select(Services.space_id).where(Services.id == resource_id)
             return await session.scalar(stmt)
-        elif resource_type == "group_chat":
-            stmt = sa.select(GroupChatsTable.space_id).where(
-                GroupChatsTable.id == resource_id
-            )
-            return await session.scalar(stmt)
         elif resource_type == "conversation":
-            # Session → assistant_id or group_chat_id → space_id
+            # Session → assistant_id → space_id
             row = await session.execute(
-                sa.select(Sessions.assistant_id, Sessions.group_chat_id).where(
-                    Sessions.id == resource_id
-                )
+                sa.select(Sessions.assistant_id).where(Sessions.id == resource_id)
             )
             result = row.one_or_none()
             if result is None:
@@ -1502,11 +1493,6 @@ class UserService:
             if result.assistant_id is not None:
                 stmt = sa.select(Assistants.space_id).where(
                     Assistants.id == result.assistant_id
-                )
-                return await session.scalar(stmt)
-            if result.group_chat_id is not None:
-                stmt = sa.select(GroupChatsTable.space_id).where(
-                    GroupChatsTable.id == result.group_chat_id
                 )
                 return await session.scalar(stmt)
             return None

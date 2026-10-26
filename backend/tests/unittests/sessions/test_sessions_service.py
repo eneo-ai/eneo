@@ -206,7 +206,7 @@ async def test_message_partner_is_resolved_for_the_request_principal(
     service: SessionService,
 ):
     session_id, message_id = uuid4(), uuid4()
-    partner = OwnedChatPartner(assistant_id=uuid4(), group_chat_id=None)
+    partner = OwnedChatPartner(assistant_id=uuid4())
     service.session_repo.get_owned_message_partner.return_value = partner
 
     resolved = await service.get_message_partner(

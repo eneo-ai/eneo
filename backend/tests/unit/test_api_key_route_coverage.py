@@ -144,6 +144,7 @@ INTENTIONALLY_UNGUARDED = {
     "/whats-new": "Per-user What's new read state; session-only (Authentication.SESSION) and scoped to the caller's own row",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
+    "/group-chats": "Retired group chat API: every route answers 410 Gone for signed-in users (Authentication.USER) and touches no resource",
     "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
     "assistant (in the request body) and run-actor identity (in the URL path), so the "
     "router-level resource_permission_for_method check would be a no-op here — there is "
@@ -167,6 +168,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/module-auth": "Module auth handoff uses bearer-session ticket issue and service API-key token exchange",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
+    "/group-chats": "Retired group chat API: every route answers 410 Gone before any resource lookup, so there is no space to scope against",
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
@@ -857,6 +859,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/group-chats/": "Retired group chat API — every method answers 410 Gone and mutates nothing",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission
@@ -991,7 +994,6 @@ SCOPE_CHECK_VOCABULARY: frozenset[str] = frozenset(
         "conversation",
         "crawl_run",
         "file",
-        "group_chat",
         "info_blob",
         "prompt",
         "service",

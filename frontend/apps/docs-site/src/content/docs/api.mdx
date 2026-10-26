@@ -49,7 +49,7 @@ the tenant's favorite provider types also requires `admin`. The shared model
 catalogue at `/api/v1/ai-models/` remains available to authenticated users.
 
 Polling `GET /api/v1/analysis/conversation-insights/jobs/{job_id}/` checks the
-caller's current insight access to the job's assistant or group chat. A caller
+caller's current insight access to the job's assistant. A caller
 whose access was revoked after starting the job receives `403`; a missing job
 returns `404`. Knowing the job ID alone does not grant access to its answer.
 
@@ -130,7 +130,7 @@ The backend applies three guards on top of ordinary authentication. Each returns
 | -------------------------- | -------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Session required           | every API key, including tenant-admin service keys | `session_auth_required`               | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, and the logging endpoints behind Admin Insights |
 | User identity required     | service keys (`ownership: "service"`)              | `user_identity_required`              | Endpoints scoped to the caller as a person, such as `GET /api/v1/users/me/`                                                                                                                                                                                                                                                                     |
-| User required for creation | service keys                                       | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, group chats, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys)                                                                                                                                            |
+| User required for creation | service keys                                       | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys)                                                                                                                                            |
 
 Session tokens pass all three guards; user-owned API keys pass the second and third. Scoped keys are additionally checked against the resource they target and receive `403` with `code: "insufficient_scope"` when it lies outside the key's scope.
 
@@ -138,7 +138,7 @@ Session tokens pass all three guards; user-owned API keys pass the second and th
 
 ## Chat
 
-A single endpoint starts or continues a conversation with an assistant or a group chat:
+A single endpoint starts or continues a conversation with an assistant:
 
 ```http
 POST /api/v1/conversations/
@@ -151,17 +151,17 @@ POST /api/v1/conversations/
 | `question`                | string                 | Required.                                                                                                                                                                                                            |
 | `session_id`              | UUID                   | Continue an existing conversation.                                                                                                                                                                                   |
 | `assistant_id`            | UUID                   | Start a new conversation with an assistant.                                                                                                                                                                          |
-| `group_chat_id`           | UUID                   | Start a new conversation with a group chat.                                                                                                                                                                          |
+| `group_chat_id`           | UUID                   | Retired: group chats became assistants with the same id, use `assistant_id`. Sending it answers `410` with `code: "group_chats_retired"`.                                                                           |
 | `stream`                  | boolean                | Default `false`. `true` returns Server-Sent Events.                                                                                                                                                                  |
 | `files`                   | list of `{"id": UUID}` | Previously uploaded files to attach.                                                                                                                                                                                 |
-| `tools`                   | object                 | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise).                                                                                |
-| `require_tool_approval`   | boolean                | Default `false`. Requires `stream: true`. Supported for assistants with specialists, including specialist tool calls; not supported for group chats.                                                                                                   |
+| `tools`                   | object                 |  `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific tool assistant.                                                                                                                               |
+| `require_tool_approval`   | boolean                |  Default `false`. Requires `stream: true`. Applies to the assistant's own tools and, for an assistant with specialists, to the specialists' tools.                                                                                                     |
 | `disabled_mcp_server_ids` | list of UUID           | MCP servers to switch off for this message. It can only narrow the active set.                                                                                                                                       |
 | `disabled_capabilities`   | list of string         | Capabilities to switch off for this message: `web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`. Like the list above, it can only narrow what the assistant is configured with. |
 
-Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
+Exactly one of `session_id` or `assistant_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
-Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`.
 
 ### Assistants with specialists
 
@@ -201,6 +201,13 @@ consultations are kept in both cases. A question whose specialists are all
 unavailable to the caller returns `400` with `code: "no_available_specialists"`
 before anything is saved. See [Assistant Specialists](../guides/assistant-specialists)
 for limits, access checks and cancellation behaviour.
+
+Group chats are retired. Each group became an assistant with the same id and its
+members became that assistant's specialists, so sessions and insights continued
+under the assistant. Every `/api/v1/group-chats/...` call and
+`POST /api/v1/spaces/{id}/applications/group-chats/` answer `410` with
+`code: "group_chats_retired"`; the space applications payload no longer has a
+`group_chats` list; the `group_chats` role permission is gone.
 
 ### Non-streaming response
 
@@ -288,7 +295,7 @@ console.log(conversation.session_id, conversation.answer);
 
 ### Other conversation endpoints
 
-- `GET /api/v1/conversations/?assistant_id=...` or `?group_chat_id=...` lists conversations (cursor-paginated, see below). Exactly one of the two filters is required.
+- `GET /api/v1/conversations/?assistant_id=...` lists conversations (cursor-paginated, see below). The retired `group_chat_id` filter answers `410` with `code: "group_chats_retired"`.
 - `GET /api/v1/conversations/{session_id}/` returns a conversation with its messages.
 - `DELETE /api/v1/conversations/{session_id}/` deletes it (`204`).
 - `PATCH /api/v1/conversations/{session_id}/name/` renames it with `{"name": "..."}`.
@@ -433,8 +440,8 @@ endpoint. Repairs retain the resource ID, history and relationships, and log the
 tenant/resource IDs and before/after fingerprints without option values.
 
 Reload the Space after repair. An assistant that was hidden because of invalid
-model options becomes loadable again, and its existing group chat seats reappear.
-Group chats have no model-options field of their own. Other loader validation
+model options becomes loadable again, and it reappears as a specialist where it
+was configured. Other loader validation
 failures are identified by the structured `Skipping invalid ... row while loading
 space` log, including `space_item_kind`, `space_item_id` and
 `space_item_space_id`; this inspector specifically covers model-option validation.

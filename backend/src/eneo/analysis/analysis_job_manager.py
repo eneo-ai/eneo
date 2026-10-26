@@ -31,7 +31,6 @@ class AnalysisJobManager:
         tenant_id: UUID,
         question: str,
         assistant_id: UUID | None,
-        group_chat_id: UUID | None,
     ) -> AnalysisJob:
         now = datetime.now(timezone.utc)
         job = AnalysisJob(
@@ -40,7 +39,6 @@ class AnalysisJobManager:
             status=AnalysisJobStatus.QUEUED,
             question=question,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             created_at=now,
             updated_at=now,
         )

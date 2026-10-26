@@ -12,12 +12,10 @@ from eneo.collections.domain.collection import Collection
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.files.file_models import File
-from eneo.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -31,7 +29,6 @@ from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import (
     AppApplicationsProjection,
     AssistantApplicationsProjection,
-    GroupChatApplicationsProjection,
     ServiceApplicationsProjection,
     SpaceApplicationsProjection,
 )
@@ -136,7 +133,6 @@ class SpaceFactory:
             mcp_servers=[],
             default_assistant=None,
             assistants=[],
-            group_chats=[],
             apps=[],
             services=[],
             websites=[],
@@ -153,7 +149,6 @@ class SpaceFactory:
         member_roles: Mapping[UUID, str],
         group_member_roles: Mapping[UUID, str],
         assistants_in_db: Sequence[Assistants],
-        group_chats_in_db: Sequence[GroupChatsTable],
         apps_in_db: Sequence[Apps],
         services_in_db: Sequence[Services],
         completion_models: Sequence["CompletionModel"],
@@ -269,20 +264,6 @@ class SpaceFactory:
                 app_ids=frozenset(item.id for item in apps),
             ),
             assistants=assistants,
-            group_chats=tuple(
-                GroupChatApplicationsProjection(
-                    id=group_chat.id,
-                    created_at=group_chat.created_at,
-                    updated_at=group_chat.updated_at,
-                    name=group_chat.name,
-                    user_id=group_chat.user_id,
-                    published=group_chat.published,
-                    metadata_json=group_chat.metadata_json,
-                    icon_id=group_chat.icon_id,
-                    insight_enabled=group_chat.insight_enabled,
-                )
-                for group_chat in group_chats_in_db
-            ),
             apps=apps,
             services=services,
         )
@@ -299,7 +280,6 @@ class SpaceFactory:
         mcp_servers: Sequence["MCPServer"] | None = None,
         assistants_in_db: Sequence["Assistants"] | None = None,
         assistant_attachments: Mapping[UUID, Sequence[File]] | None = None,
-        group_chats_in_db: Sequence["GroupChatsTable"] | None = None,
         apps_in_db: Sequence["Apps"] | None = None,
         app_attachments: Mapping[UUID, Sequence[File]] | None = None,
         services_in_db: Sequence[Services] | None = None,
@@ -315,7 +295,6 @@ class SpaceFactory:
         mcp_servers = list(mcp_servers or [])
         assistants_in_db = list(assistants_in_db or [])
         assistant_attachments = assistant_attachments or {}
-        group_chats_in_db = list(group_chats_in_db or [])
         apps_in_db = list(apps_in_db or [])
         app_attachments = app_attachments or {}
         services_in_db = list(services_in_db or [])
@@ -573,14 +552,6 @@ class SpaceFactory:
                 transcription_models=transcription_models,
             ),
         )
-        space_group_chats = _build_or_skip(
-            group_chats_in_db,
-            item_kind="group_chat",
-            build_fn=lambda group_chat: GroupChatFactory.create_group_chat_from_db(
-                group_chat_db=group_chat,
-                assistants=all_assistants,
-            ),
-        )
 
         def _build_service(service: "Services") -> Service:
             return Service(
@@ -641,7 +612,6 @@ class SpaceFactory:
             default_assistant=default_assistant,
             default_assistant_load_failed=default_assistant_load_failed,
             assistants=space_assistants,
-            group_chats=space_group_chats,
             apps=space_apps,
             services=space_services,
             integration_knowledge_list=integration_knowledge_list,

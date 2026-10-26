@@ -26,9 +26,8 @@ import { DeleteSpaceDialog } from "./delete-space-dialog";
 function spaceMeta(space: SpaceSparse, t: ReturnType<typeof useTranslations>): string[] {
   const applications = space.applications;
   if (!applications) return [];
-  const assistants = applications.assistants.count + applications.group_chats.count;
   return [
-    t("space_assistants_count", { count: assistants }),
+    t("space_assistants_count", { count: applications.assistants.count }),
     t("space_apps_count", { count: applications.apps.count })
   ];
 }

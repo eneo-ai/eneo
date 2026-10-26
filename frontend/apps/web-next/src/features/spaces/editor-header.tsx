@@ -10,7 +10,7 @@ import { spaceLandingHref, spaceSections, type SpaceSectionId } from "./frame/sp
 import { useSpace } from "./use-space";
 
 /**
- * The sticky header of an assistant, app or group-chat editor, which owns the
+ * The sticky header of an assistant or app editor, which owns the
  * page surface (the space frame renders no header above it): a breadcrumb back
  * to the space and the tab the resource lives under, the resource's name as
  * the h1, the save state and the editor's actions ("Testa", "Klar").

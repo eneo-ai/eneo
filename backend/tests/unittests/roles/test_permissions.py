@@ -198,7 +198,6 @@ class TestPermissionSemantics:
             "skills",
             "skills_management",
             "personal_chat",
-            "group_chats",
             "apps",
             "services",
             "collections",

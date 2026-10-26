@@ -24,7 +24,7 @@ import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./in
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 250;
 
-type Partner = ChatPartner & { type: "assistant" | "group-chat" };
+type Partner = ChatPartner & { type: "assistant" };
 
 function SessionList({
   partner,

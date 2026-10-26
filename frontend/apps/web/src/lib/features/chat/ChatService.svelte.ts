@@ -11,7 +11,6 @@ import {
   type ConversationSparse,
   type Assistant,
   type Conversation,
-  type GroupChat,
   type Eneo,
   type Paginated,
   type UploadedFile,
@@ -92,18 +91,13 @@ export type ToolCallOutcome = {
   isError: boolean;
 };
 
-export type ChatPartner = GroupChat | Assistant;
+export type ChatPartner = Assistant;
 type SparseCompletionModel = NonNullable<Assistant["completion_model"]>;
 
 export class ChatService {
   #chatPartner = $state<ChatPartner>() as ChatPartner; // Needs typecast to get rid of undefined
   partner = $derived(this.#chatPartner);
-  hasCompletionModel = $derived.by(() => {
-    const partner = this.#chatPartner;
-    if (!partner) return false;
-    if ("completion_model" in partner) return this.#partnerEffectiveModel() !== undefined;
-    return "tools" in partner && partner.tools?.assistants?.length > 0;
-  });
+  hasCompletionModel = $derived(this.#partnerEffectiveModel() !== undefined);
   #eneo: Eneo;
   #toolCallResultCache = new SvelteMap<string, Promise<ToolCallOutcome>>();
   currentConversation = $state<Conversation>(emptyConversation());
@@ -266,12 +260,11 @@ export class ChatService {
   #preflightGen = 0;
   // Resolution order for the active model's context window:
   //   1. preflight (server-resolved current model, set while composing)
-  //   2. for a single assistant, the partner's own model — it is global and
-  //      authoritative for the next turn, so it must win over history (opening
-  //      an old conversation must reflect the model that will actually answer,
-  //      i.e. what the picker shows, not whatever model answered last time)
-  //   3. the most recent message's model — only meaningful for group chats,
-  //      where the active model varies per turn
+  //   2. the partner's own model — it is global and authoritative for the next
+  //      turn, so it must win over history (opening an old conversation must
+  //      reflect the model that will actually answer, i.e. what the picker
+  //      shows, not whatever model answered last time)
+  //   3. the most recent message's model, when the partner resolves no model
   contextLimit = $derived<number>(
     this.pendingContextWindow ||
       this.#partnerModelTokenLimit() ||
@@ -282,8 +275,7 @@ export class ChatService {
   // The name of the model that will answer the next turn. Single source of
   // truth for any "active model" label (e.g. the context bar) so it can never
   // disagree with contextLimit — same precedence: live preflight, then the
-  // single assistant's own (global) model, then the latest message's model
-  // for group chats where the active model varies per turn.
+  // assistant's own (global) model, then the latest message's model.
   activeModelName = $derived<string>(
     this.pendingModelName || this.#partnerModelName() || this.#latestMessageModelName() || ""
   );
@@ -295,14 +287,12 @@ export class ChatService {
       this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
   );
 
-  // The current partner's effective model — set only for single assistants
-  // (group chats carry no single model, so this is undefined and the caller
-  // falls back to the latest-message model). Mirrors backend governance
+  // The current partner's effective model. Mirrors backend governance
   // resolution: keep an allowed current model, otherwise use policy default,
   // then the first allowed model.
   #partnerEffectiveModel(): SparseCompletionModel | undefined {
     const partner = this.#chatPartner;
-    if (!partner || !("completion_model" in partner)) return undefined;
+    if (!partner) return undefined;
 
     return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
   }
@@ -320,7 +310,7 @@ export class ChatService {
     conversation: Conversation = this.currentConversation
   ): boolean {
     if (conversation.id) return false;
-    if (!partner || !("completion_model" in partner)) return false;
+    if (!partner) return false;
 
     return (
       selectEffectiveChatModel(partner.completion_model, partner.effective_config) !== undefined
@@ -1387,40 +1377,31 @@ export const [getChatService, initChatService] = createClassContext("Chat servic
 function partnerRuntimeSignature(partner: ChatPartner | undefined) {
   if (!partner) return "";
 
-  if ("completion_model" in partner) {
-    const effectiveConfig = partner.effective_config;
-    return JSON.stringify({
-      id: partner.id,
-      type: partner.type,
-      name: partner.name,
-      completion_model_id: partner.completion_model?.id ?? null,
-      models_enforced: effectiveConfig?.models_enforced ?? false,
-      default_model_id: effectiveConfig?.default_model?.id ?? null,
-      locked_model_id: effectiveConfig?.locked_model?.id ?? null,
-      available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? [],
-      // Include the MCP and prompt dimensions: a policy edit that touches only
-      // these (same id + model) must still replace the partner, or the composer
-      // keeps listing stale MCP servers / a stale enforced-prompt state.
-      mcp_enforced: effectiveConfig?.mcp_enforced ?? false,
-      available_mcp_server_ids:
-        effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
-      default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
-      enabled_capabilities: partner.enabled_capabilities ?? [],
-      available_capabilities: partner.available_capabilities ?? [],
-      effective_capabilities: effectiveConfig?.enabled_capabilities ?? [],
-      effective_capability_availability: effectiveConfig?.available_capabilities ?? [],
-      default_disabled_capabilities: effectiveConfig?.default_disabled_capabilities ?? [],
-      prompt_locked: effectiveConfig?.prompt_locked ?? false,
-      prompt_tokens: partner.model_info?.prompt_tokens ?? null,
-      attachment_ids: partner.attachments?.map((attachment) => attachment.id) ?? []
-    });
-  }
-
+  const effectiveConfig = partner.effective_config;
   return JSON.stringify({
     id: partner.id,
     type: partner.type,
     name: partner.name,
-    assistant_ids: partner.tools?.assistants.map((assistant) => assistant.id) ?? []
+    completion_model_id: partner.completion_model?.id ?? null,
+    models_enforced: effectiveConfig?.models_enforced ?? false,
+    default_model_id: effectiveConfig?.default_model?.id ?? null,
+    locked_model_id: effectiveConfig?.locked_model?.id ?? null,
+    available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? [],
+    // Include the MCP and prompt dimensions: a policy edit that touches only
+    // these (same id + model) must still replace the partner, or the composer
+    // keeps listing stale MCP servers / a stale enforced-prompt state.
+    mcp_enforced: effectiveConfig?.mcp_enforced ?? false,
+    available_mcp_server_ids:
+      effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
+    default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
+    enabled_capabilities: partner.enabled_capabilities ?? [],
+    available_capabilities: partner.available_capabilities ?? [],
+    effective_capabilities: effectiveConfig?.enabled_capabilities ?? [],
+    effective_capability_availability: effectiveConfig?.available_capabilities ?? [],
+    default_disabled_capabilities: effectiveConfig?.default_disabled_capabilities ?? [],
+    prompt_locked: effectiveConfig?.prompt_locked ?? false,
+    prompt_tokens: partner.model_info?.prompt_tokens ?? null,
+    attachment_ids: partner.attachments?.map((attachment) => attachment.id) ?? []
   });
 }
 

@@ -109,11 +109,6 @@ from eneo.governance_policy.infrastructure.governance_policy_repo_impl import (
 from eneo.governance_policy.presentation.governance_policy_assembler import (
     GovernancePolicyAssembler,
 )
-from eneo.group_chat.application.group_chat_service import GroupChatService
-from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
-from eneo.group_chat.presentation.assemblers.group_chat_assembler import (
-    GroupChatAssembler,
-)
 from eneo.groups_legacy.group_repo import GroupRepository
 from eneo.groups_legacy.group_service import GroupService
 from eneo.help_assistants.application.helper_run_service import HelperRunService
@@ -593,7 +588,6 @@ class Container(containers.DeclarativeContainer):
     assistant_assembler = providers.Factory(
         AssistantAssembler, user=user, prompt_assembler=prompt_assembler
     )
-    group_chat_assembler = providers.Factory(GroupChatAssembler)
     completion_model_assembler = providers.Factory(CompletionModelAssembler)
     integration_knowledge_assembler = providers.Factory(IntegrationKnowledgeAssembler)
     space_assembler = providers.Factory(
@@ -841,7 +835,6 @@ class Container(containers.DeclarativeContainer):
         embedding_model_repo=embedding_model_repo2,
         http_auth_encryption=http_auth_encryption_service,
     )
-    group_chat_repo = providers.Factory(GroupChatRepository, session=session)
     website_repo = providers.Factory(
         WebsiteRepository,
         session=session,
@@ -1351,18 +1344,6 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         rerank_service=rerank_service,
     )
-    group_chat_service = providers.Factory(
-        GroupChatService,
-        user=user,
-        space_service=space_service,
-        space_repo=space_repo,
-        group_chat_repo=group_chat_repo,
-        actor_manager=actor_manager,
-        assistant_service=assistant_service,
-        session_service=session_service,
-        completion_service=completion_service,
-        icon_repo=icon_repo,
-    )
     app_template_service = providers.Factory(
         AppTemplateService,
         repo=app_template_repo,
@@ -1636,14 +1617,12 @@ class Container(containers.DeclarativeContainer):
         question_repo=question_repo,
         space_service=space_service,
         session_service=session_service,
-        group_chat_service=group_chat_service,
         completion_service=completion_service,
     )
 
     conversation_service = providers.Factory(
         ConversationService,
         assistant_service=assistant_service,
-        group_chat_service=group_chat_service,
         session_service=session_service,
         completion_service=completion_service,
         space_service=space_service,

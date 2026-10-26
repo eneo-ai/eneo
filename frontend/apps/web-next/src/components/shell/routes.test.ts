@@ -74,7 +74,7 @@ describe("navTarget", () => {
       otherwise: { kind: "space", routeId: "abc" }
     });
     expect(
-      navTarget("/spaces/personal/chat", params("type=group-chat&id=g-1&session_id=s-3"))
+      navTarget("/spaces/personal/chat", params("type=assistant&id=a-1&session_id=s-3"))
     ).toEqual({
       kind: "conversation",
       sessionId: "s-3",
@@ -148,8 +148,8 @@ describe("conversationHref", () => {
       "/spaces/abc/chat?type=assistant&id=a-1&session_id=s-1"
     );
     expect(
-      conversationHref({ id: "s-2", partner: { type: "group-chat", id: "g-1" }, space: personal })
-    ).toBe("/spaces/personal/chat?type=group-chat&id=g-1&session_id=s-2");
+      conversationHref({ id: "s-2", partner: { type: "assistant", id: "a-2" }, space: personal })
+    ).toBe("/spaces/personal/chat?type=assistant&id=a-2&session_id=s-2");
     expect(
       conversationHref({ id: "s-3", partner: { type: "default-assistant", id: "d-2" }, space })
     ).toBe("/spaces/abc/chat?session_id=s-3");

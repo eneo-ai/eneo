@@ -50,7 +50,6 @@ from eneo.files.file_router import router as files_router
 from eneo.governance_policy.presentation.governance_policy_router import (
     router as governance_policy_router,
 )
-from eneo.group_chat.presentation.group_chat_router import router as group_chat_router
 from eneo.groups_legacy.api.group_router import router as groups_router
 from eneo.help_assistants.api.admin_router import (
     router as help_assistants_admin_router,
@@ -112,6 +111,9 @@ from eneo.rerank_models.presentation.tenant_rerank_models_router import (
 )
 from eneo.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
+)
+from eneo.server.retired_group_chats_router import (
+    router as retired_group_chats_router,
 )
 from eneo.server.websockets.websocket_router import router as websocket_router
 from eneo.services.service_router import router as services_router
@@ -286,15 +288,9 @@ router.include_router(
     ],
 )
 router.include_router(
-    group_chat_router,
+    retired_group_chats_router,
     prefix="/group-chats",
     tags=["group-chats"],
-    dependencies=[
-        Depends(require_resource_permission_for_method("assistants")),
-        Depends(
-            require_api_key_scope_check(resource_type="group_chat", path_param="id")
-        ),
-    ],
 )
 router.include_router(
     conversations_router,

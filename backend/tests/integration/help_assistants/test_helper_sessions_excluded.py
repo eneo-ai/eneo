@@ -19,11 +19,7 @@ Fixture layout: a single tenant with
   * a regular assistant, with one regular session (one question), and
   * a helper assistant + role assignment, with one helper-backed session
     (one question) plus a ``help_assistant_runs`` row pointing at that
-    session,
-  * a group chat with one regular group-chat session and one synthetic
-    helper-backed group-chat session (also pinned by a ``help_assistant_runs``
-    row) — needed to exercise the group-chat code paths without changing
-    the production data model.
+    session.
 """
 
 from __future__ import annotations
@@ -36,7 +32,6 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
@@ -80,36 +75,12 @@ async def _insert_assistant(
     return assistant_id
 
 
-async def _insert_group_chat(
-    session: sa.ext.asyncio.AsyncSession,
-    *,
-    owner_user_id: UUID,
-    space_id: UUID,
-) -> UUID:
-    group_chat_id = uuid4()
-    await session.execute(
-        sa.insert(GroupChatsTable).values(
-            id=group_chat_id,
-            name=f"gc-{group_chat_id.hex[:8]}",
-            user_id=owner_user_id,
-            space_id=space_id,
-            allow_mentions=False,
-            show_response_label=False,
-            published=False,
-            insight_enabled=True,
-            type="group-chat",
-        )
-    )
-    return group_chat_id
-
-
 async def _insert_session(
     session: sa.ext.asyncio.AsyncSession,
     *,
     name: str,
     user_id: UUID,
-    assistant_id: UUID | None = None,
-    group_chat_id: UUID | None = None,
+    assistant_id: UUID,
 ) -> UUID:
     session_id = uuid4()
     await session.execute(
@@ -118,7 +89,6 @@ async def _insert_session(
             name=name,
             user_id=user_id,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
         )
     )
     return session_id
@@ -255,49 +225,6 @@ async def _seed(container, admin_user) -> dict[str, UUID]:
         actor_user_id=admin_user.id,
     )
 
-    # Group-chat parallel: a real group chat with one regular session and one
-    # synthetic helper-tagged session. Real helpers don't use group chats, but
-    # we still want to prove the filter works on every group-chat code path,
-    # so the helper-tagging is constructed explicitly here.
-    group_chat = await _insert_group_chat(
-        session, owner_user_id=admin_user.id, space_id=space_id
-    )
-    regular_gc_session = await _insert_session(
-        session,
-        name="regular-gc-session",
-        user_id=admin_user.id,
-        group_chat_id=group_chat,
-    )
-    helper_gc_session = await _insert_session(
-        session,
-        name="helper-gc-session",
-        user_id=admin_user.id,
-        group_chat_id=group_chat,
-    )
-    await _insert_question(
-        session,
-        tenant_id=admin_user.tenant_id,
-        session_id=regular_gc_session,
-        assistant_id=None,
-        text="regular gc question",
-    )
-    await _insert_question(
-        session,
-        tenant_id=admin_user.tenant_id,
-        session_id=helper_gc_session,
-        assistant_id=None,
-        text="helper gc question",
-    )
-    await _record_helper_run(
-        container,
-        tenant_id=admin_user.tenant_id,
-        org_space_id=space_id,
-        helper_assistant_id=helper_assistant,
-        target_id=regular_assistant,
-        session_id=helper_gc_session,
-        actor_user_id=admin_user.id,
-    )
-
     await session.flush()
 
     return {
@@ -309,9 +236,6 @@ async def _seed(container, admin_user) -> dict[str, UUID]:
         "helper_session": helper_session,
         "regular_question": regular_question,
         "helper_question": helper_question,
-        "group_chat": group_chat,
-        "regular_gc_session": regular_gc_session,
-        "helper_gc_session": helper_gc_session,
     }
 
 
@@ -359,30 +283,6 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         "list_then_total",
     ),
     (
-        "get_by_group_chat_excludes_helper",
-        lambda repo, s: repo.get_by_group_chat(group_chat_id=s["group_chat"]),
-        "list_then_total",
-    ),
-    (
-        "get_by_group_chat_with_tenant_excludes_helper",
-        lambda repo, s: repo.get_by_group_chat(
-            group_chat_id=s["group_chat"], tenant_id=s["tenant_id"]
-        ),
-        "list_then_total",
-    ),
-    (
-        "get_metadata_by_group_chat_excludes_helper",
-        lambda repo, s: repo.get_metadata_by_group_chat(group_chat_id=s["group_chat"]),
-        "list_then_total",
-    ),
-    (
-        "get_metadata_by_group_chat_with_tenant_excludes_helper",
-        lambda repo, s: repo.get_metadata_by_group_chat(
-            group_chat_id=s["group_chat"], tenant_id=s["tenant_id"]
-        ),
-        "list_then_total",
-    ),
-    (
         "get_by_tenant_excludes_helper",
         lambda repo, s: repo.get_by_tenant(tenant_id=s["tenant_id"]),
         "list",
@@ -392,7 +292,6 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         lambda repo, s: repo.get_recent_for_user(
             user_id=s["user_id"],
             assistant_ids=[s["regular_assistant"], s["helper_assistant"]],
-            group_chat_ids=[s["group_chat"]],
             limit=50,
         ),
         "list",
@@ -431,9 +330,6 @@ async def test_sessions_repo_excludes_helper(
             assert setup["helper_session"] not in ids, (
                 f"{case_id}: helper session leaked"
             )
-            assert setup["helper_gc_session"] not in ids, (
-                f"{case_id}: helper group-chat session leaked"
-            )
         elif shape == "partners":
             partner_ids = {partner.id for partner in result}
             assert setup["helper_assistant"] not in partner_ids, (
@@ -444,9 +340,6 @@ async def test_sessions_repo_excludes_helper(
             ids = _ids(items)
             assert setup["helper_session"] not in ids, (
                 f"{case_id}: helper session leaked"
-            )
-            assert setup["helper_gc_session"] not in ids, (
-                f"{case_id}: helper group-chat session leaked"
             )
             # total_count must agree with the filtered list. If the count
             # query forgets the filter, ``total`` would be larger than ``items``
@@ -477,32 +370,20 @@ async def test_sessions_repo_returns_regular_sessions(db_container, admin_user):
         assert setup["regular_session"] in _ids(sessions)
         assert total >= 1
 
-        sessions, total = await repo.get_by_group_chat(
-            group_chat_id=setup["group_chat"]
-        )
-        assert setup["regular_gc_session"] in _ids(sessions)
-        assert total >= 1
-
         all_for_tenant = await repo.get_by_tenant(tenant_id=setup["tenant_id"])
-        ids = _ids(all_for_tenant)
-        assert setup["regular_session"] in ids
-        assert setup["regular_gc_session"] in ids
+        assert setup["regular_session"] in _ids(all_for_tenant)
 
         recent = await repo.get_recent_for_user(
             user_id=setup["user_id"],
             assistant_ids=[setup["regular_assistant"]],
-            group_chat_ids=[setup["group_chat"]],
             limit=50,
         )
-        assert _ids(recent) == {setup["regular_session"], setup["regular_gc_session"]}
+        assert _ids(recent) == {setup["regular_session"]}
 
         partners = await repo.get_chat_partners_of_user(
             user_id=setup["user_id"], tenant_id=setup["tenant_id"], user_group_ids=[]
         )
-        assert {partner.id for partner in partners} == {
-            setup["regular_assistant"],
-            setup["group_chat"],
-        }
+        assert {partner.id for partner in partners} == {setup["regular_assistant"]}
 
 
 # ---------------------------------------------------------------------------
@@ -520,13 +401,13 @@ ANALYSIS_REPO_CASES: list[
     (
         "get_session_count_excludes_helper",
         lambda repo, s: repo.get_session_count(tenant_id=s["tenant_id"]),
-        # Two regular sessions (assistant + group-chat) — helpers must be hidden.
-        lambda result, s: _assert_eq(result, 2, "get_session_count"),
+        # One regular session — the helper one must be hidden.
+        lambda result, s: _assert_eq(result, 1, "get_session_count"),
     ),
     (
         "get_question_count_excludes_helper",
         lambda repo, s: repo.get_question_count(tenant_id=s["tenant_id"]),
-        lambda result, s: _assert_eq(result, 2, "get_question_count"),
+        lambda result, s: _assert_eq(result, 1, "get_question_count"),
     ),
     (
         "get_tenant_counts_excludes_helper",
@@ -543,13 +424,6 @@ ANALYSIS_REPO_CASES: list[
         ),
     ),
     (
-        "get_group_chat_sessions_since_excludes_helper",
-        lambda repo, s: repo.get_group_chat_sessions_since(
-            group_chat_id=s["group_chat"], tenant_id=s["tenant_id"]
-        ),
-        lambda result, s: _assert_no_helper_gc_session(result, s),
-    ),
-    (
         "get_assistant_question_texts_since_helper_returns_empty",
         lambda repo, s: repo.get_assistant_question_texts_since(
             assistant_id=s["helper_assistant"],
@@ -559,17 +433,6 @@ ANALYSIS_REPO_CASES: list[
             tenant_id=s["tenant_id"],
         ),
         lambda result, s: _assert_eq(result, [], "get_assistant_question_texts_since"),
-    ),
-    (
-        "get_group_chat_question_texts_since_excludes_helper",
-        lambda repo, s: repo.get_group_chat_question_texts_since(
-            group_chat_id=s["group_chat"],
-            from_date=_FROM,
-            to_date=_TO,
-            include_followups=True,
-            tenant_id=s["tenant_id"],
-        ),
-        lambda result, s: _assert_only_regular_gc_question_text(result, s),
     ),
     (
         "get_assistant_question_history_page_helper_returns_empty",
@@ -617,33 +480,14 @@ ANALYSIS_REPO_CASES: list[
         lambda repo, s: repo.get_session_counts_by_hour_for_tenant(
             tenant_id=s["tenant_id"]
         ),
-        lambda result, s: _assert_total_buckets(result, 2, "session bucket"),
+        lambda result, s: _assert_total_buckets(result, 1, "session bucket"),
     ),
     (
         "get_question_counts_by_hour_for_tenant_excludes_helper",
         lambda repo, s: repo.get_question_counts_by_hour_for_tenant(
             tenant_id=s["tenant_id"]
         ),
-        lambda result, s: _assert_total_buckets(result, 2, "question bucket"),
-    ),
-    (
-        "get_group_chat_conversation_counts_excludes_helper",
-        lambda repo, s: repo.get_group_chat_conversation_counts(
-            group_chat_id=s["group_chat"], tenant_id=s["tenant_id"]
-        ),
-        lambda result, s: _assert_eq(
-            result, (1, 1), "get_group_chat_conversation_counts"
-        ),
-    ),
-    (
-        "count_group_chat_questions_since_excludes_helper",
-        lambda repo, s: repo.count_group_chat_questions_since(
-            group_chat_id=s["group_chat"],
-            from_date=_FROM,
-            to_date=_TO,
-            tenant_id=s["tenant_id"],
-        ),
-        lambda result, s: _assert_eq(result, 1, "count_group_chat_questions_since"),
+        lambda result, s: _assert_total_buckets(result, 1, "question bucket"),
     ),
     (
         "get_active_user_count_for_tenant_excludes_helper_only_users",
@@ -668,26 +512,14 @@ def _assert_tenant_counts(result, s) -> None:
     # Two assistants exist; we don't gate assistants in this filter (step 012
     # owns that), but sessions/questions must hide helper-backed rows.
     assert assistants >= 2
-    assert sessions == 2, f"get_tenant_counts session_count leaked helper: {sessions}"
-    assert questions == 2, (
+    assert sessions == 1, f"get_tenant_counts session_count leaked helper: {sessions}"
+    assert questions == 1, (
         f"get_tenant_counts question_count leaked helper: {questions}"
     )
 
 
 def _assert_empty_sessions(result, name: str) -> None:
     assert result == [], f"{name}: expected empty, got {result!r}"
-
-
-def _assert_no_helper_gc_session(result, s) -> None:
-    ids = {row.id for row in result}
-    assert s["helper_gc_session"] not in ids, "group_chat sessions leaked helper"
-    assert s["regular_gc_session"] in ids
-
-
-def _assert_only_regular_gc_question_text(result, s) -> None:
-    texts = {row.question for row in result}
-    assert "helper gc question" not in texts
-    assert "regular gc question" in texts
 
 
 def _assert_empty_history_page(result) -> None:
@@ -700,17 +532,13 @@ def _assert_empty_history_page(result) -> None:
 def _assert_no_helper_in_session_metadata(result, s) -> None:
     ids = {row.id for row in result}
     assert s["helper_session"] not in ids
-    assert s["helper_gc_session"] not in ids
     assert s["regular_session"] in ids
-    assert s["regular_gc_session"] in ids
 
 
 def _assert_no_helper_in_question_metadata(result, s) -> None:
     session_ids = {row.session_id for row in result}
     assert s["helper_session"] not in session_ids
-    assert s["helper_gc_session"] not in session_ids
     assert s["regular_session"] in session_ids
-    assert s["regular_gc_session"] in session_ids
 
 
 def _assert_total_buckets(result, expected_total: int, name: str) -> None:
@@ -743,8 +571,8 @@ async def test_analysis_repo_excludes_helper(
 # ---------------------------------------------------------------------------
 
 ANALYSIS_HTTP_CASES = [
-    ("/api/v1/analysis/counts/", "sessions", 2),
-    ("/api/v1/analysis/counts/", "questions", 2),
+    ("/api/v1/analysis/counts/", "sessions", 1),
+    ("/api/v1/analysis/counts/", "questions", 1),
 ]
 
 

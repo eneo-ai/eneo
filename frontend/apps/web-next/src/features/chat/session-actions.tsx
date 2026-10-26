@@ -18,7 +18,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 
 /** Query key of a partner's conversation history (an infinite, cursor-paged list). */
 export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {
-  return ["conversations", partner.type === "group-chat" ? "group-chat" : "assistant", partner.id];
+  return ["conversations", "assistant", partner.id];
 }
 
 /** Rename and delete for conversations of one partner. */
