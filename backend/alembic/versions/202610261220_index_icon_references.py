@@ -8,9 +8,9 @@ Most rows have no icon, so the indexes are partial.
 The tables are small, so the indexes are built inside the migration
 transaction instead of ``CONCURRENTLY``.
 
-Revision ID: 202610261200
-Revises: 202610221000
-Create Date: 2026-10-26 12:00:00.000000
+Revision ID: 202610261220
+Revises: 202610261210
+Create Date: 2026-10-26 12:20:00.000000
 """
 
 from collections.abc import Sequence
@@ -19,8 +19,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202610261200"
-down_revision: str | None = "202610221000"
+revision: str = "202610261220"
+down_revision: str | None = "202610261210"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
