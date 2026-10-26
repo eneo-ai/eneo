@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -414,7 +415,12 @@ async def test_validator_refresh_updates_several_pages_in_one_batch(
     }
 
 
-async def test_user_quota_query_can_use_the_active_size_index_in_generic_plans(
+def _plan_scans(node: dict) -> list[dict]:
+    children = [scan for child in node.get("Plans", []) for scan in _plan_scans(child)]
+    return [node, *children] if node.get("Relation Name") else children
+
+
+async def test_user_quota_query_uses_the_active_size_index_in_generic_plans(
     db_session,
     admin_user,
 ) -> None:
@@ -428,27 +434,49 @@ async def test_user_quota_query_can_use_the_active_size_index_in_generic_plans(
         )
     )
     compiled = statement.compile(dialect=asyncpg_dialect())
-    values = {**compiled.params, "user_id": str(admin_user.id)}
-    arguments = ", ".join(f"'{values[name]}'" for name in compiled.positiontup or ())
-    async with db_session() as session:
-        connection = await session.connection()
-        await connection.exec_driver_sql(
-            "SET LOCAL plan_cache_mode = force_generic_plan"
-        )
-        # Allow only index-only scans: the covering partial index is the one
-        # index that can serve them, and only if the predicate is provable.
-        for scan in ("seqscan", "indexscan", "bitmapscan"):
-            await connection.exec_driver_sql(f"SET LOCAL enable_{scan} = off")
-        await connection.exec_driver_sql(f"PREPARE user_quota AS {compiled}")
-        plan = "\n".join(
-            row[0]
-            for row in await connection.exec_driver_sql(
-                f"EXPLAIN EXECUTE user_quota({arguments})"
-            )
-        )
-        await connection.exec_driver_sql("DEALLOCATE user_quota")
+    # 'active' is part of the SQL text, so only the user is a parameter.
+    assert list(compiled.positiontup or ()) == ["user_id"]
+    name = f"user_quota_{uuid4().hex}"
 
-    assert "Index Only Scan using ix_info_blobs_active_user_size" in plan, plan
+    async with db_session() as session:
+        # Plan against statistics from this test's own rows, then roll them
+        # back so the shared database keeps its statistics.
+        savepoint = await session.begin_nested()
+        try:
+            session.add_all(
+                InfoBlobs(
+                    text="x",
+                    size=1,
+                    source_id=uuid4(),
+                    version_state=state.value,
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                )
+                for state in [InfoBlobVersionState.ACTIVE] * 200
+                + [InfoBlobVersionState.SUPERSEDED] * 200
+            )
+            await session.flush()
+            connection = await session.connection()
+            await connection.exec_driver_sql("ANALYZE info_blobs")
+            await connection.exec_driver_sql(
+                "SET LOCAL plan_cache_mode = force_generic_plan"
+            )
+            await connection.exec_driver_sql("SET LOCAL enable_seqscan = off")
+            await connection.exec_driver_sql("SET LOCAL enable_bitmapscan = off")
+            await connection.exec_driver_sql(f"PREPARE {name} AS {compiled}")
+            explained = await connection.exec_driver_sql(
+                f"EXPLAIN (FORMAT JSON) EXECUTE {name}('{admin_user.id}')"
+            )
+            # asyncpg decodes the JSON plan.
+            (document,) = explained.scalar_one()
+            await connection.exec_driver_sql(f"DEALLOCATE {name}")
+        finally:
+            await savepoint.rollback()
+
+    scans = _plan_scans(document["Plan"])
+    assert [(scan["Node Type"], scan.get("Index Name")) for scan in scans] == [
+        ("Index Only Scan", "ix_info_blobs_active_user_size")
+    ], scans
 
 
 async def _add_history_from_an_earlier_release(session, active, *, text: str):
