@@ -198,18 +198,18 @@ async def test_no_later_part_is_downloaded_once_the_recording_is_over_the_limit(
 async def test_a_result_that_cannot_return_to_its_parts_fails_the_step(
     spool_contract, ffmpeg
 ):
-    wordless_across = TranscribedAudio(
+    timeless = TranscribedAudio(
         text="",
         duration_seconds=20.0,
         transcript_segments=(
-            TranscriptSegment("Över skarven.", 9.0, 12.0, "SPEAKER_00"),
+            TranscriptSegment("Någon gång.", float("nan"), 12.0, "SPEAKER_00"),
         ),
         diarization="external",
     )
     files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
 
     with pytest.raises(Exception) as failed:
-        await _run(spool_contract, files, _engine(wordless_across))
+        await _run(spool_contract, files, _engine(timeless))
 
     # The parts were transcribed; it is their speakers that could not be placed, and the
     # failure says which check refused them, so the run's error tells support what happened.
@@ -219,7 +219,7 @@ async def test_a_result_that_cannot_return_to_its_parts_fails_the_step(
     )
     assert str(failed.value) == (
         "Step 1: speaker identification failed for the recording. "
-        "A segment across a part boundary lacks word timings for all its text."
+        "A segment of the labelled recording has no time in it."
     )
     spool_contract.assert_finished()
 
