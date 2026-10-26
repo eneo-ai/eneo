@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { checkBuildMemory, readPeakRssMb } from "./ci-build-memory.mjs";
 import { changedFiles, planCi } from "./ci-change-scope.mjs";
 import { evaluateCi } from "./ci-gate.mjs";
 
@@ -76,6 +77,50 @@ test("only the job limit bounds Playwright system libraries from a slow mirror",
   for (const block of jobs) {
     const limit = Number(block.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
     assert.ok(limit >= 30, `${block.match(/^  ([a-z0-9-]+):/)[1]}: ${limit} min`);
+  }
+});
+
+test("the Svelte build is checked against a memory budget below its heap limit", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
+  const build = stepBody("Build web app for E2E");
+  const check = stepBody("Check build memory budget");
+  const heapMb = Number(build?.match(/--max-old-space-size=(\d+)/)?.[1]);
+  const budgetMb = Number(check?.match(/BUILD_MEMORY_BUDGET_MB: "(\d+)"/)?.[1]);
+  assert.ok(budgetMb > 0 && budgetMb < heapMb, `budget ${budgetMb} MB, heap ${heapMb} MB`);
+  const report = build.match(/\/usr\/bin\/time -v -o "([^"]+)"/)?.[1];
+  assert.ok(report && check.includes(`node .github/scripts/ci-build-memory.mjs "${report}"`));
+  assert.ok(workflow.indexOf("- name: Check build memory budget") > workflow.indexOf("- name: Build web app for E2E"));
+});
+
+test("the memory check passes within budget and fails above it or without a measurement", () => {
+  const report = (kb) => `\tCommand being timed: "bun run build"\n\tMaximum resident set size (kbytes): ${kb}\n\tExit status: 0\n`;
+  assert.equal(readPeakRssMb(report(6_291_456)), 6144);
+  assert.equal(checkBuildMemory(6144, 7680).ok, true);
+  assert.equal(checkBuildMemory(7681, 7680).ok, false);
+  assert.throws(() => readPeakRssMb("\tExit status: 0\n"));
+  assert.throws(() => checkBuildMemory(6144, Number(undefined)));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-memory-"));
+  try {
+    const summary = path.join(dir, "summary.md");
+    const run = (file) => spawnSync(process.execPath, [path.join(root, ".github/scripts/ci-build-memory.mjs"), file], {
+      encoding: "utf8", timeout: 5_000,
+      env: { ...process.env, BUILD_MEMORY_BUDGET_MB: "7680", GITHUB_STEP_SUMMARY: summary },
+    });
+    const within = path.join(dir, "within.txt");
+    const over = path.join(dir, "over.txt");
+    fs.writeFileSync(within, report(6_291_456));
+    // A successful build of 2026-10-26 that was close to crashing.
+    fs.writeFileSync(over, report(9_752_000));
+    assert.equal(run(within).status, 0);
+    assert.match(fs.readFileSync(summary, "utf8"), /peak 6\.00 GB of a 7\.50 GB budget/);
+    const failed = run(over);
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /::error::Svelte production build: peak 9\.30 GB/);
+    assert.equal(run(path.join(dir, "missing.txt")).status, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

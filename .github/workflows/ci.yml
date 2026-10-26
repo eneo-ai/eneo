@@ -431,6 +431,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # Below the 8 GB heap: a successful build at about 9.2 GB RSS was already
+      # on the edge of a random out-of-memory crash.
+      - name: Check build memory budget
+        env:
+          BUILD_MEMORY_BUDGET_MB: "7680"
+        run: node .github/scripts/ci-build-memory.mjs "$RUNNER_TEMP/frontend-build-resources.txt"
+
       - name: Wait for the E2E stack
         run: |
           for _ in $(seq 1 300); do

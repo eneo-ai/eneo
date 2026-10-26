@@ -75,8 +75,8 @@ local build/test directories are excluded from its Docker context.
 
 The focused contract tests cover both event types, candidates that touch several
 areas, a candidate's diff onto the preceding candidate, renames/deletions,
-missing history, Playwright jobs' time limits, shared inputs, filtered
-images, and gate failure/skip semantics. They also ensure that every CI worker
+missing history, Playwright jobs' time limits, the Svelte build's memory
+budget, shared inputs, filtered images, and gate failure/skip semantics. They also ensure that every CI worker
 is covered by the aggregate. Run from the repository root:
 
 ```bash
@@ -99,9 +99,13 @@ and the aggregate has five. A backend integration test still running after ten
 minutes dumps every thread's stack to the job log before that limit, and its
 start line is the one without a result line. The Svelte E2E build uploads
 `frontend-build-resources` with GNU time's wall time, peak RSS and exit status,
-including on build failure. Its Node heap limit remains unchanged. These
-measurements help investigate the adapter-node OOM; removing the duplicate
-standalone build is not a fix for that underlying memory demand.
+including on build failure. `Check build memory budget` then fails the E2E job
+when that peak exceeds `BUILD_MEMORY_BUDGET_MB` (7.5 GB, below the 8 GB Node
+heap), and writes the peak to the job summary. A build that grows past the
+budget fails in the PR that grew it, instead of surfacing later as a random
+out-of-memory crash. Find what grew before raising the budget: per-message
+translation modules (fixed by compiling paraglide per locale) and the full
+Lucide set behind the template icon picker have been the large items.
 
 Compare runner-minutes per merge, completed merges per hour, and median/p95
 runner wait before and after rollout. Separate dependency and workflow
