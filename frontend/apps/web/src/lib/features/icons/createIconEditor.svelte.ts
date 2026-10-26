@@ -37,12 +37,15 @@ export function createIconEditor(options: {
       uploading = true;
       error = null;
       const replaced = options.iconId();
+      let uploaded: string | undefined;
       try {
-        const icon = await eneo.icons.upload({ file });
-        await options.setIconId(icon.id);
+        uploaded = (await eneo.icons.upload({ file })).id;
+        await options.setIconId(uploaded);
       } catch (e) {
         console.error("Failed to upload icon:", e);
         error = m.avatar_upload_failed();
+        // Nothing shows an upload whose id could not be set, and nothing else would delete it.
+        if (uploaded) await eneo.icons.delete({ id: uploaded }).catch(() => {});
         return;
       } finally {
         uploading = false;

@@ -5,6 +5,7 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
 async function uploadIcon(file: File): Promise<{ id: string }> {
@@ -44,10 +45,17 @@ export function IconField({
   async function replaceIcon(file: File) {
     if (busy) return;
     setBusy("upload");
+    let uploaded: string | undefined;
     try {
-      const uploaded = await uploadIcon(file);
-      await onSave(uploaded.id);
+      uploaded = (await uploadIcon(file)).id;
+      await onSave(uploaded);
     } catch {
+      // Nothing shows an upload whose id could not be saved, and nothing else would delete it.
+      if (uploaded) {
+        await browserApi
+          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: uploaded } } })
+          .catch(() => {});
+      }
       toast.error(t("avatar_upload_failed"));
     } finally {
       setBusy(null);

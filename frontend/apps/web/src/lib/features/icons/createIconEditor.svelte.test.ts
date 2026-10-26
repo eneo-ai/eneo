@@ -91,6 +91,20 @@ describe("createIconEditor", () => {
     expect(editor.error).toBeNull();
   });
 
+  it("deletes an upload whose id cannot be set", async () => {
+    const { editor, calls } = editorFor({
+      setIconId: async () => {
+        throw new Error("refused");
+      }
+    });
+
+    await editor.upload(new File(["x"], "icon.png"));
+
+    expect(calls).toEqual(["delete upload-2"]);
+    expect(editor.url).toBe("/icons/icon-1/");
+    expect(editor.error).toBe(m.avatar_upload_failed());
+  });
+
   it("keeps the icon and deletes nothing when it cannot be cleared", async () => {
     const { editor } = editorFor({
       iconId: "upload-1",
