@@ -6,16 +6,23 @@ FROM node:22.23.4-bookworm-slim AS builder
 COPY --from=oven/bun:1.4.4-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
+# Match the existing web-next image's workspace install contract. Keep app
+# source and release identity out of the expensive dependency layer.
+COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/web-next/package.json apps/web-next/package.json
+COPY apps/docs-site/package.json apps/docs-site/package.json
+COPY packages ./packages
+COPY patches ./patches
+# The two workspace prepare hooks need app source. Run them below, after COPY.
+RUN bun install --frozen-lockfile --ignore-scripts
+
+COPY . .
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
-COPY . .
-
 ENV NODE_OPTIONS=--max-old-space-size=8192
-
-# Install dependencies with Bun (uses frozen lockfile)
-RUN bun install --frozen-lockfile
-
+RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
 # This image ships apps/web; web-next has its own Dockerfile and build context.
 RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 

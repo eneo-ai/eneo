@@ -31,6 +31,81 @@ task deadcode   # all advisory dead-code analysis (backend + frontend)
 > cover what those *cannot* see — whole unused files, exports, dependencies and
 > dead functions/classes.
 
+## CI execution and recovery
+
+The [contributor CI contract](../frontend/apps/docs-site/src/content/contributing/security.mdx)
+describes which changes require which checks. `.github/scripts/ci-change-scope.mjs`
+owns the event policy, changed-file classification, Docker matrix and required-job
+plan. `.github/scripts/ci-gate.mjs` verifies actual job results against that plan.
+Do not add separate path-selection rules to individual workflow steps.
+
+The first job combines scope detection, branch naming, route metadata, naming
+guards and script tests. Expensive jobs start only after it succeeds. Both E2E
+suites remain required for backend changes, including the optional Next beta.
+Develop publication calls full CI once; there is no second standalone CI run
+for that push. Release branch pushes, tags and manual publication keep full
+validation. Release bundle identity, attestations, scans and smoke tests are
+unchanged.
+
+Frontend jobs use the same pinned Node version as the production Docker images
+and one Bun download-cache policy. Playwright still installs its system
+dependencies: apt network operations have bounded retries, and the entire
+installation has a deadline. Chromium downloads may retry once. Test failures
+and OOM failures are not automatically retried. The selected Ubuntu release is
+explicit rather than following `ubuntu-latest`.
+
+CI image builds import matching Buildx caches with a two-minute timeout. Only
+branch pushes export CI caches: PR/queue caches cannot be shared with later
+candidates and would consume upload time and cache storage. CI exports use a
+separate `ci-<image>` scope, a two-minute limit and non-fatal cache-export
+failures; release publication retains its own cache namespace. The Svelte image installs
+workspace dependencies before copying app source, then runs the workspace
+prepare hooks. Generated local build/test directories are excluded from its
+Docker context.
+
+### Validation
+
+The focused contract tests cover both event types, combined queue candidates,
+renames/deletions, missing history, shared inputs, filtered images, and gate
+failure/skip semantics. They also ensure that every CI worker is covered by the
+aggregate. Run from the repository root:
+
+```bash
+node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
+actionlint .github/workflows/ci.yml
+python3 -m unittest discover -s scripts/tests -p test_release_bundle.py
+```
+
+On the shared development Mac, run each command through
+`python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 90 --`.
+Full builds, full suites, and browser/E2E runs require explicit local execution
+approval; use the PR's GitHub Actions runs to validate the complete pipeline.
+
+### Diagnosis and rollback
+
+Use the first job's summary to see the selected jobs and images. An unexpectedly
+skipped required job fails `CI`, even if GitHub treats that skipped job as green.
+Missing or invalid scope output also fails the aggregate.
+
+Heavy jobs have explicit 20–30 minute limits; repository checks have ten minutes
+and the aggregate has five. The Svelte E2E build uploads
+`frontend-build-resources` with GNU time's wall time, peak RSS and exit status,
+including on build failure. Its Node heap limit remains unchanged. These
+measurements help investigate the adapter-node OOM; removing the duplicate
+standalone build is not a fix for that underlying memory demand.
+
+Compare runner-minutes per merge, completed merges per hour, and median/p95
+runner wait before and after rollout. Separate dependency and workflow
+concurrency waits from time actually awaiting an available runner. Ruleset build
+concurrency is a separate capacity setting; tune it against observed load after
+the workflow changes, without weakening required checks.
+
+If selection is wrong, temporarily make `planCi` return the full scope or revert
+the scoping change. Keep the aggregate check required. A full revert restores
+the previous triggers, jobs and image build; no persisted application data or
+deployment format changes need recovery. Do not bypass the CI gate to unblock
+publication.
+
 ## Advisory dead-code analysis
 
 Run with `task deadcode` (or the per-area tasks). All three are intentionally

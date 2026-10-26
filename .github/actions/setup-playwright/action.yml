@@ -1,0 +1,38 @@
+name: Set up Playwright Chromium
+description: Install lockfile-matched Chromium and its system libraries with bounded network retries.
+inputs:
+  working-directory:
+    description: Workspace containing the installed Playwright CLI.
+    default: frontend/apps/web
+runs:
+  using: composite
+  steps:
+    - name: Install system libraries
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Retry transient downloads inside apt. Do not blindly rerun an apt
+        # transaction after a timeout: dpkg may have been interrupted.
+        sudo tee /etc/apt/apt.conf.d/80-eneo-ci-network >/dev/null <<'APT'
+        Acquire::Retries "2";
+        Acquire::http::Timeout "30";
+        Acquire::https::Timeout "30";
+        APT
+        timeout --kill-after=15s 240s bun run --bun playwright install-deps chromium
+    - name: Install Chromium
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "30000"
+      run: |
+        for attempt in 1 2; do
+          if timeout --kill-after=15s 120s bun run --bun playwright install chromium; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 2 ]; then
+            echo "::warning::Chromium download failed; retrying once in 10 seconds."
+            sleep 10
+          fi
+        done
+        echo "::error::Chromium installation failed after two bounded attempts."
+        exit 1
