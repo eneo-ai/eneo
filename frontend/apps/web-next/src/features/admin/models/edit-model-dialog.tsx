@@ -3,6 +3,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,6 +39,11 @@ import {
   useImageOptionLabels
 } from "./image-model-options";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
+import {
+  isCandidateSetting,
+  RERANK_CANDIDATE_FACTOR,
+  RERANK_MAX_CANDIDATES
+} from "./rerank-model-options";
 
 /** Stored cost is per-token (tiny); the form edits the friendlier per-1M value. */
 function perTokenToPerMillion(value: number | string | null | undefined): string {
@@ -66,8 +73,9 @@ const TOKEN_PRICED: ReadonlySet<ModelKind> = new Set(["completion", "embedding"]
 
 /**
  * Full metadata edit for a tenant (custom) model: the fields of its kind
- * (token limits and prices, per-minute price, or an image model's per-image
- * price and request defaults) plus hosting, stability and classification.
+ * (token limits and prices, per-minute price, an image model's per-image
+ * price and request defaults, or a rerank model's candidate settings) plus
+ * hosting, stability and classification.
  */
 type EditModelDialogProps = {
   model: AdminModel;
@@ -134,6 +142,20 @@ function EditModelForm({
       ? model.default_quality
       : "auto"
   );
+  const [candidateFactor, setCandidateFactor] = useState(
+    "candidate_factor" in model ? String(model.candidate_factor) : ""
+  );
+  const [maxCandidates, setMaxCandidates] = useState(
+    "max_candidates" in model ? String(model.max_candidates) : ""
+  );
+  // Out-of-range values are explained at the fields once a save was tried.
+  const [saveTried, setSaveTried] = useState(false);
+  const candidateProblem = (value: string, bounds: { min: number; max: number }) =>
+    kind === "rerank" && saveTried && !isCandidateSetting(value, bounds)
+      ? t("form_problem_whole_number_between", bounds)
+      : null;
+  const factorProblem = candidateProblem(candidateFactor, RERANK_CANDIDATE_FACTOR);
+  const capProblem = candidateProblem(maxCandidates, RERANK_MAX_CANDIDATES);
   const [vision, setVision] = useState("vision" in model ? (model.vision ?? false) : false);
   const [reasoning, setReasoning] = useState(
     "reasoning" in model ? (model.reasoning ?? false) : false
@@ -174,6 +196,18 @@ function EditModelForm({
           cost_per_image: numericOrNull(costPerImage),
           default_size: defaultSize,
           default_quality: defaultQuality,
+          security_classification
+        });
+      }
+      if (kind === "rerank") {
+        return updateTenantModel(browserApi, "rerank", model.id, {
+          display_name: displayName.trim(),
+          description: description.trim() || null,
+          hosting: hosting.trim() || null,
+          open_source: openSource,
+          stability: stability.trim() || null,
+          candidate_factor: Number(candidateFactor),
+          max_candidates: Number(maxCandidates),
           security_classification
         });
       }
@@ -224,6 +258,19 @@ function EditModelForm({
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
+            if (kind === "rerank") {
+              const firstInvalid = !isCandidateSetting(candidateFactor, RERANK_CANDIDATE_FACTOR)
+                ? "model-candidate-factor"
+                : !isCandidateSetting(maxCandidates, RERANK_MAX_CANDIDATES)
+                  ? "model-max-candidates"
+                  : null;
+              if (firstInvalid) {
+                // Rendered before focus moves, so the field is read with its problem.
+                flushSync(() => setSaveTried(true));
+                document.getElementById(firstInvalid)?.focus();
+                return;
+              }
+            }
             if (!save.isPending) save.mutate();
           }}
         >
@@ -418,6 +465,52 @@ function EditModelForm({
                     {t("image_default_quality_help")}
                   </p>
                 </div>
+              </div>
+            </>
+          )}
+
+          {kind === "rerank" && (
+            <>
+              {/* step="any": whole numbers and the range are checked on save, at the field. */}
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="model-candidate-factor">{t("rerank_candidate_factor")}</Label>
+                <Input
+                  id="model-candidate-factor"
+                  type="number"
+                  step="any"
+                  inputMode="numeric"
+                  value={candidateFactor}
+                  onChange={(event) => setCandidateFactor(event.target.value)}
+                  {...fieldProblemProps(
+                    "model-candidate-factor",
+                    factorProblem,
+                    "model-candidate-factor-help"
+                  )}
+                />
+                <FieldProblem id="model-candidate-factor" problem={factorProblem} />
+                <p id="model-candidate-factor-help" className="text-muted-foreground text-xs">
+                  {t("rerank_candidate_factor_help")}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="model-max-candidates">{t("rerank_max_candidates")}</Label>
+                <Input
+                  id="model-max-candidates"
+                  type="number"
+                  step="any"
+                  inputMode="numeric"
+                  value={maxCandidates}
+                  onChange={(event) => setMaxCandidates(event.target.value)}
+                  {...fieldProblemProps(
+                    "model-max-candidates",
+                    capProblem,
+                    "model-max-candidates-help"
+                  )}
+                />
+                <FieldProblem id="model-max-candidates" problem={capProblem} />
+                <p id="model-max-candidates-help" className="text-muted-foreground text-xs">
+                  {t("rerank_max_candidates_help")}
+                </p>
               </div>
             </>
           )}
