@@ -2,13 +2,13 @@ import { goto, preloadData } from "$app/navigation";
 import { createContext } from "$lib/core/context";
 import { localizeHref } from "$lib/paraglide/runtime";
 import { visibleEntries } from "@eneo/whats-new";
-import type { Locale, Release } from "@eneo/whats-new";
+import type { PermissionCheck, Locale, Release } from "@eneo/whats-new";
 import { writable } from "svelte/store";
 import { spotlight, type SpotlightLabels, type SpotlightStep } from "./spotlight";
 
 /** The release entries own the walkthrough's content and order. */
-export function tourSteps(release: Release, isAdmin: boolean, locale: Locale): SpotlightStep[] {
-  return visibleEntries(release, isAdmin).flatMap((entry) =>
+export function tourSteps(release: Release, can: PermissionCheck, locale: Locale): SpotlightStep[] {
+  return visibleEntries(release, can).flatMap((entry) =>
     entry.showMe
       ? [{ ...entry.showMe, title: entry.title[locale], description: entry.body[locale] }]
       : []

@@ -161,12 +161,42 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
 
 
 def _extract_request_id(request: Request) -> str | None:
+    # Documented contract: a caller-sent correlation/request header is echoed
+    # as ``request_id`` in the error body.
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"
     )
     if request_id:
         return request_id
     return get_request_context().get("correlation_id")
+
+
+def correlation_headers() -> dict[str, str] | None:
+    """``X-Correlation-ID`` for an error response, or ``None``.
+
+    Carries the request context's id: the trace id when a span is active,
+    otherwise the caller's legacy header. That is the value every log line
+    of the request carries, so support can go from the header to the logs.
+    The trace middleware sets the same header when a span exists; this covers
+    deployments without tracing.
+    """
+    correlation_id = get_request_context().get("correlation_id")
+    if not correlation_id:
+        return None
+    return {"X-Correlation-ID": str(correlation_id)}
+
+
+def has_registered_handler(app: FastAPI, exc: BaseException) -> bool:
+    """Whether ``exc`` gets a canonical response from a handler on ``app``.
+
+    Resolved the way Starlette resolves handlers, by ``isinstance``. The
+    ``Exception`` and status-code catch-alls do not count: they are what an
+    unexpected failure falls into.
+    """
+    return any(
+        isinstance(key, type) and key is not Exception and isinstance(exc, key)
+        for key in app.exception_handlers
+    )
 
 
 def _exception_context(
@@ -381,7 +411,11 @@ def add_exception_handlers(app: FastAPI):
             }
             for error in validation_exc.errors()
         ]
-        return JSONResponse(status_code=422, content={"detail": details})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": details},
+            headers=correlation_headers(),
+        )
 
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
@@ -425,6 +459,7 @@ def add_exception_handlers(app: FastAPI):
 
             return JSONResponse(
                 status_code=status_code,
+                headers=correlation_headers(),
                 content=GeneralError(
                     message=message,
                     eneo_error_code=error_code,

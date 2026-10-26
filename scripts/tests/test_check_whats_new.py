@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import shutil
@@ -68,6 +69,43 @@ class _RepoCase(unittest.TestCase):
 
 
 class CheckWhatsNewTests(_RepoCase):
+    def test_permission_vocabulary_matches_backend_contract(self) -> None:
+        source = REPO_ROOT / "backend/src/eneo/roles/permissions.py"
+        permission_class = next(
+            node
+            for node in ast.parse(source.read_text()).body
+            if isinstance(node, ast.ClassDef) and node.name == "Permission"
+        )
+        permissions = {
+            node.value.value
+            for node in permission_class.body
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        }
+        self.assertEqual(
+            set(json.loads(SCHEMA.read_text())["$defs"]["permission"]["enum"]), permissions
+        )
+
+    def test_accepts_feature_permission_requirements(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["permissions"] = {
+            "allOf": ["file_creation"],
+            "anyOf": ["personal_chat", "assistants"],
+        }
+        result = self.run_check(self.make_repo(data))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_invalid_permission_requirements(self) -> None:
+        for permissions in [
+            None, [], {}, "admin", {"any": ["assistants"]},
+            {"allOf": []}, {"anyOf": []}, {"allOf": "admin"},
+            {"allOf": ["administrator"]}, {"anyOf": [None]},
+            {"allOf": [{}]}, {"allOf": ["admin", "admin"]},
+        ]:
+            with self.subTest(permissions=permissions):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["permissions"] = permissions
+                self.assert_rejected(data, ".permissions")
+
     def test_release_order_matches_the_shared_cross_runtime_contract(self) -> None:
         cases = SCHEMA.parent / "version-order.cases.json"
         versions = json.loads(cases.read_text())["ordered"]
