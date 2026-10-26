@@ -9,13 +9,21 @@ only an icon the caller uploaded in their tenant can be attached.
 """
 
 import asyncio
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
 import sqlalchemy as sa
 
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
+from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
+from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconInUseError
 from eneo.main.exceptions import ErrorCodes, NotFoundException
 from eneo.main.models import ModelId
@@ -398,3 +406,46 @@ async def test_a_delete_that_waited_for_another_delete_finds_nothing(
 
     with pytest.raises(NotFoundException):
         await second
+
+
+def _upgrade(connection, revision: str) -> None:
+    backend = Path(__file__).resolve().parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    script = ScriptDirectory.from_config(config).get_revision(revision)
+    assert script is not None
+    with Operations.context(MigrationContext.configure(connection)):
+        script.module.upgrade()
+
+
+async def test_the_upgrade_clears_icons_borrowed_from_another_tenant(
+    client, owner, other_tenant, apps_enabled, db_container
+):
+    tables = {
+        "assistant": Assistants,
+        "app": Apps,
+        "space": Spaces,
+        "group_chat": GroupChatsTable,
+    }
+    borrowing = {kind: await _create(client, owner, kind) for kind in tables}
+    foreign_icon = await _upload(client, other_tenant)
+    keeping, own_icon = await _with_icon(client, owner)
+
+    async with db_container() as container:
+        session = container.session()
+        # Before #1228 an update accepted any icon id, so write those rows directly.
+        for kind, resource_id in borrowing.items():
+            table = tables[kind]
+            await session.execute(
+                sa.update(table)
+                .where(table.id == UUID(resource_id))
+                .values(icon_id=UUID(foreign_icon))
+            )
+        connection = await session.connection()
+        await connection.run_sync(_upgrade, "202610261300")
+
+    assert {
+        kind: await _shown_icon(client, owner, resource_id, kind)
+        for kind, resource_id in borrowing.items()
+    } == dict.fromkeys(tables)
+    assert await _shown_icon(client, owner, keeping) == own_icon
