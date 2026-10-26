@@ -91,6 +91,32 @@ const CAPABILITY_STEPS: Record<string, { label: string; server: string }> = {
   compute: { label: "tool_compute", server: "compute" }
 };
 
+/**
+ * The tools of Eneo's own flows server (the flow authoring chat). Each has a
+ * label `tool_flows_<tool>` with a `_done` form; reading the suggestions
+ * with the latest runs has its own (`tool_flows_read_flow_suggestions_runs`).
+ */
+const FLOW_TOOLS = new Set([
+  "read_flow",
+  "update_flow_settings",
+  "read_step_assistant",
+  "update_step",
+  "add_step",
+  "move_step",
+  "remove_step",
+  "publish_flow",
+  "unpublish_flow",
+  "read_tool_options",
+  "read_flow_suggestions",
+  "apply_flow_suggestions",
+  "dismiss_flow_suggestion",
+  "run_flow",
+  "read_run",
+  "cancel_run",
+  "read_review",
+  "review_run"
+]);
+
 function argumentsOf(part: ToolLike): Record<string, unknown> {
   return part.input && typeof part.input === "object" && !Array.isArray(part.input)
     ? (part.input as Record<string, unknown>)
@@ -138,6 +164,13 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
   }
   if (ownServer && serverName === "files" && part.toolName === "read_file") {
     return { label: t(`tool_read_file${suffix}`), server: t("internal_files_server") };
+  }
+  if (ownServer && serverName === "flows" && FLOW_TOOLS.has(part.toolName)) {
+    const runs = part.toolName === "read_flow_suggestions" && args.include_runs === true;
+    return {
+      label: t(`tool_flows_${part.toolName}${runs ? "_runs" : ""}${suffix}`),
+      server: t("flows")
+    };
   }
   // An external provider's own name stays visible as the source; one of
   // Eneo's own (loopback or built in) is not named, the label says it all.
@@ -198,8 +231,11 @@ export function readableArguments(args: Record<string, unknown>): string | null 
 
 /**
  * What a call acted on, for the row under its label: the file and position
- * for a read of an attachment, the query for a search, else the readable
- * arguments. A signed download url never shows; the attachment's name does.
+ * for a read of an attachment, the query for a search, the new step's name
+ * for a flow step added in the authoring chat, else the readable arguments.
+ * A signed download url never shows; the attachment's name does. The flows
+ * server's other arguments (revisions, offsets, ids) say nothing to a person,
+ * so its calls show none.
  */
 export function toolTarget(
   part: ToolLike,
@@ -221,6 +257,10 @@ export function toolTarget(
   }
   if (query && (purpose === "web_search" || (ownServer && serverName === "knowledge"))) {
     return query;
+  }
+  if (ownServer && serverName === "flows") {
+    const name = part.toolName === "add_step" && typeof args.name === "string" ? args.name : "";
+    return name.trim() || null;
   }
   return readableArguments(args);
 }
