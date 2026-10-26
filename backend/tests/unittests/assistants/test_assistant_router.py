@@ -35,7 +35,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId
-from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.sessions.session import (
+    SessionFeedback,
+    SessionInDB,
+    SessionMetadataPublic,
+)
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillActivationMode,
@@ -504,10 +508,9 @@ class TestAssistantSessionPagination:
         self, mock_container
     ):
         assistant_id = uuid.uuid4()
-        session = SessionInDB(
+        session = SessionMetadataPublic(
             id=uuid.uuid4(),
             name="Session",
-            user_id=uuid.uuid4(),
             created_at=None,
         )
         session_service = AsyncMock()
