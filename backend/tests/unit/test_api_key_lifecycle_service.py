@@ -23,6 +23,7 @@ from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from eneo.sessions.sessions_repo import OwnedSessionCounts
 from tests.unit.api_key_test_utils import make_api_key
 
 
@@ -53,6 +54,7 @@ async def test_suspend_logs_audit(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -82,6 +84,7 @@ async def test_revoke_logs_audit(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -115,6 +118,7 @@ async def test_rotate_logs_audit(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -146,6 +150,7 @@ async def test_rotate_disable_grace_period_collapses_grace_window(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -188,6 +193,7 @@ async def test_update_revoked_key_allows_metadata_only(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -219,6 +225,7 @@ async def test_update_revoked_key_rejects_policy_fields(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -251,6 +258,7 @@ async def test_double_revoke_is_idempotent(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -283,6 +291,7 @@ async def test_rotate_key_with_existing_grace_period(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -317,6 +326,7 @@ async def test_rotate_key_uses_default_when_policy_grace_period_is_null(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
     service.settings = SimpleNamespace(
@@ -362,6 +372,7 @@ async def test_rotate_serializes_resource_permissions_for_repo_create(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -396,6 +407,7 @@ async def test_extend_expiration_updates_and_logs(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -433,6 +445,7 @@ async def test_extend_expiration_to_null_when_policy_permits(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -457,6 +470,7 @@ async def test_extend_expiration_no_change_is_noop(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -484,6 +498,7 @@ async def test_extend_expiration_rejects_revoked_key(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -511,6 +526,7 @@ async def test_extend_expiration_rejects_expired_key(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -538,6 +554,7 @@ async def test_extend_expiration_rejects_past_date(user):
         api_key_repo=repo,
         policy_service=_extend_policy_mock(),
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -573,6 +590,7 @@ async def test_extend_expiration_propagates_policy_violation(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -612,6 +630,7 @@ async def test_rotate_with_update_expiration_logs_two_audits(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -656,6 +675,7 @@ async def test_purge_revoked_key_deletes_and_audits(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -667,6 +687,53 @@ async def test_purge_revoked_key_deletes_and_audits(user):
     assert call["action"] == ActionType.API_KEY_PURGED
     metadata = call["metadata"]
     assert metadata["extra"]["previous_state"] == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_purge_audits_owned_session_counts_then_deletes_sessions_before_key(
+    user,
+):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        revoked_at=datetime.now(timezone.utc),
+        state=ApiKeyState.REVOKED,
+    )
+    steps: list[str] = []
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.delete.side_effect = lambda **_: steps.append("delete key")
+    session_repo = AsyncMock()
+    session_repo.count_owned_by_api_key.return_value = OwnedSessionCounts(
+        sessions=2, questions=5
+    )
+    session_repo.delete_owned_by_api_key.side_effect = lambda _: steps.append(
+        "delete sessions"
+    )
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+    )
+    audit = AsyncMock()
+    audit.log_async.side_effect = lambda **_: steps.append("audit")
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        session_repo=session_repo,
+        user=user,
+    )
+
+    await service.purge_key(key_id=key.id)
+
+    assert steps == ["audit", "delete sessions", "delete key"]
+    repo.get.assert_awaited_once_with(
+        key_id=key.id, tenant_id=user.tenant_id, for_update=True
+    )
+    session_repo.delete_owned_by_api_key.assert_awaited_once_with(key.id)
+    extra = audit.log_async.call_args.kwargs["metadata"]["extra"]
+    assert extra["sessions_deleted"] == 2
+    assert extra["questions_deleted"] == 5
 
 
 @pytest.mark.asyncio
@@ -688,6 +755,7 @@ async def test_purge_expired_key_deletes(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -703,6 +771,7 @@ async def test_purge_active_key_rejected(user):
     key = _make_key(tenant_id=user.tenant_id)
     repo = AsyncMock()
     repo.get.return_value = key
+    session_repo = AsyncMock()
     policy = SimpleNamespace(
         ensure_manage_authorized=AsyncMock(),
         ensure_ownership_authorized=AsyncMock(),
@@ -713,6 +782,7 @@ async def test_purge_active_key_rejected(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=session_repo,
         user=user,
     )
 
@@ -721,6 +791,7 @@ async def test_purge_active_key_rejected(user):
 
     assert "revoked or expired" in exc.value.message
     repo.delete.assert_not_awaited()
+    session_repo.delete_owned_by_api_key.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -732,6 +803,7 @@ async def test_purge_suspended_key_rejected(user):
     )
     repo = AsyncMock()
     repo.get.return_value = key
+    session_repo = AsyncMock()
     policy = SimpleNamespace(
         ensure_manage_authorized=AsyncMock(),
         ensure_ownership_authorized=AsyncMock(),
@@ -742,12 +814,14 @@ async def test_purge_suspended_key_rejected(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=session_repo,
         user=user,
     )
 
     with pytest.raises(ApiKeyValidationError):
         await service.purge_key(key_id=key.id)
     repo.delete.assert_not_awaited()
+    session_repo.delete_owned_by_api_key.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -775,6 +849,7 @@ async def test_rotate_with_update_expiration_but_same_date_skips_extension_event
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -810,6 +885,7 @@ async def test_rotate_without_update_expiration_preserves_existing(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 

@@ -38,6 +38,7 @@ from eneo.main.config import get_settings
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
+    from eneo.sessions.sessions_repo import SessionRepository
     from eneo.users.user import UserInDB
 
 
@@ -76,12 +77,14 @@ class ApiKeyLifecycleService:
         api_key_repo: ApiKeysV2Repository,
         policy_service: ApiKeyPolicyService,
         audit_service: "AuditService | None",
+        session_repo: "SessionRepository",
         user: "UserInDB | None" = None,
     ):
         super().__init__()
         self.api_key_repo = api_key_repo
         self.policy_service = policy_service
         self.audit_service = audit_service
+        self.session_repo = session_repo
         self.user = user
         self.settings = get_settings()
 
@@ -844,7 +847,10 @@ class ApiKeyLifecycleService:
         user = self._require_user()
         key: ApiKeyV2InDB | None = None
         try:
-            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            # Locked so no new session can reference the key before it is deleted.
+            key = await self._get_key_or_404(
+                key_id=key_id, tenant_id=user.tenant_id, for_update=True
+            )
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
                 await self.policy_service.ensure_ownership_authorized(key=key)
@@ -888,6 +894,7 @@ class ApiKeyLifecycleService:
 
         # Log before deletion so the audit row references a still-valid key snapshot.
         if self.audit_service is not None:
+            owned = await self.session_repo.count_owned_by_api_key(key.id)
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
                 user=user,
@@ -902,6 +909,8 @@ class ApiKeyLifecycleService:
                         "previous_state": effective_state.value,
                         "key_prefix": key.key_prefix,
                         "key_suffix": key.key_suffix,
+                        "sessions_deleted": owned.sessions,
+                        "questions_deleted": owned.questions,
                     },
                 ),
                 ip_address=ip_address,
@@ -909,6 +918,9 @@ class ApiKeyLifecycleService:
                 user_agent=user_agent,
             )
 
+        # sessions.api_key_id is ON DELETE SET NULL, and a session without an
+        # owner violates ck_sessions_user_xor_api_key.
+        await self.session_repo.delete_owned_by_api_key(key.id)
         await self.api_key_repo.delete(key_id=key.id, tenant_id=key.tenant_id)
 
     async def expire_key(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2 | None:
@@ -947,8 +959,12 @@ class ApiKeyLifecycleService:
 
         return ApiKeyV2.model_validate(updated_key)
 
-    async def _get_key_or_404(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2InDB:
-        key = await self.api_key_repo.get(key_id=key_id, tenant_id=tenant_id)
+    async def _get_key_or_404(
+        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
+    ) -> ApiKeyV2InDB:
+        key = await self.api_key_repo.get(
+            key_id=key_id, tenant_id=tenant_id, for_update=for_update
+        )
         if key is None:
             raise ApiKeyValidationError(
                 status_code=404,

@@ -1101,6 +1101,7 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_v2_repo,
         policy_service=api_key_policy_service,
         audit_service=audit_service,
+        session_repo=session_repo,
         user=user,
     )
     api_key_maintenance_service = providers.Factory(

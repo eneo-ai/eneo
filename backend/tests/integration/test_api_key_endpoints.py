@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    CompletionModelResponse,
+)
 from eneo.allowed_origins import get_origin_callback as origin_callback
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.main.config import get_settings, set_settings
@@ -1734,6 +1742,108 @@ async def test_purge_revoked_key(client, default_user_token):
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert get_after.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_revoked_service_key_deletes_its_sessions(
+    client, db_container, default_user_token, monkeypatch
+):
+    async def fake_get_response(self, *, model, **kwargs):
+        return CompletionModelResponse(
+            completion=Completion(text="stub answer"),
+            model=model,
+            total_token_count=1,
+        )
+
+    monkeypatch.setattr(CompletionService, "get_response", fake_get_response)
+    audit_calls = AsyncMock(return_value=None)
+    monkeypatch.setattr(AuditService, "log_async", audit_calls)
+
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Purge Target With Sessions",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+            "ownership": "service",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+    secret = create_response.json()["secret"]
+
+    key_ask = await client.post(
+        f"/api/v1/assistants/{assistant_id}/sessions/",
+        json={"question": "hello", "stream": False},
+        headers={"X-API-Key": secret},
+    )
+    assert key_ask.status_code == 200, key_ask.text
+    key_session_id = key_ask.json()["session_id"]
+    user_ask = await client.post(
+        f"/api/v1/assistants/{assistant_id}/sessions/",
+        json={"question": "hello", "stream": False},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert user_ask.status_code == 200, user_ask.text
+    user_session_id = user_ask.json()["session_id"]
+
+    async with db_container() as container:
+        owner = (
+            await container.session().execute(
+                sa.text("SELECT user_id, api_key_id FROM sessions WHERE id = :id"),
+                {"id": key_session_id},
+            )
+        ).one()
+    assert owner.user_id is None
+    assert str(owner.api_key_id) == key_id
+
+    revoke = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 204, purge.text
+
+    async with db_container() as container:
+        db = container.session()
+        remaining = set(
+            await db.scalars(
+                sa.text("SELECT id::text FROM sessions WHERE id IN (:key, :user)"),
+                {"key": key_session_id, "user": user_session_id},
+            )
+        )
+        ownerless = await db.scalar(
+            sa.text(
+                "SELECT count(*) FROM sessions "
+                "WHERE user_id IS NULL AND api_key_id IS NULL"
+            )
+        )
+    assert remaining == {user_session_id}
+    assert ownerless == 0
+
+    purge_audits = [
+        call.kwargs
+        for call in audit_calls.await_args_list
+        if call.kwargs["action"] == ActionType.API_KEY_PURGED
+    ]
+    assert len(purge_audits) == 1
+    extra = purge_audits[0]["metadata"]["extra"]
+    assert extra["sessions_deleted"] == 1
+    assert extra["questions_deleted"] == 1
 
 
 @pytest.mark.integration

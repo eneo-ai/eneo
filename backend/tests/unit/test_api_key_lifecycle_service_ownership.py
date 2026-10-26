@@ -42,6 +42,7 @@ async def test_create_service_key_sets_null_owner(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 
@@ -72,6 +73,7 @@ async def test_create_user_key_sets_owner(user):
         api_key_repo=repo,
         policy_service=policy,
         audit_service=audit,
+        session_repo=AsyncMock(),
         user=user,
     )
 

@@ -275,6 +275,8 @@ Keys with an `expires_at` timestamp are checked at runtime:
 
 Revoked and expired keys stay listed until they are purged. `POST /api/v1/api-keys/{id}/purge` permanently deletes such a key while preserving its audit history; active or suspended keys cannot be purged, revoke them first.
 
+Purging a service key also deletes the conversations it owns, together with the files that only those conversations used, such as generated images. Conversations started with a user key belong to the user and are kept. The purge audit event records how many conversations (`sessions_deleted`) and questions (`questions_deleted`) were deleted, without their content. Nothing that a purge deletes can be recovered.
+
 ### Usage
 
 `GET /api/v1/api-keys/{id}/usage` returns the usage and authentication-failure audit events for a key you manage, cursor-paginated with `limit` (1 to 200) and `cursor`.

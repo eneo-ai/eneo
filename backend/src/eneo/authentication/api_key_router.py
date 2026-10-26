@@ -1345,8 +1345,10 @@ async def extend_api_key_expiration(
     tags=["API Keys"],
     summary="Permanently delete API key",
     description=(
-        "Permanently delete a revoked or expired API key. Audit history is "
-        "preserved. Active or suspended keys cannot be deleted — revoke them first."
+        "Permanently delete a revoked or expired API key. A service key's "
+        "conversations are deleted with it, including files only they used. "
+        "Audit history is preserved. Active or suspended keys cannot be "
+        "deleted — revoke them first."
     ),
     responses={
         204: {"description": "API key permanently deleted."},

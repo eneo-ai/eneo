@@ -420,7 +420,7 @@ export interface paths {
     put?: never;
     /**
      * Permanently delete API key
-     * @description Permanently delete a revoked or expired API key. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
+     * @description Permanently delete a revoked or expired API key. A service key's conversations are deleted with it, including files only they used. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
      */
     post: operations["purge_api_key_api_v1_api_keys__id__purge_post"];
     delete?: never;
@@ -2955,7 +2955,7 @@ export interface paths {
     put?: never;
     /**
      * Permanently delete tenant API key
-     * @description Permanently delete a revoked or expired API key. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
+     * @description Permanently delete a revoked or expired API key. A service key's conversations are deleted with it, including files only they used. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
      */
     post: operations["purge_api_key_admin_api_v1_admin_api_keys__id__purge_post"];
     delete?: never;

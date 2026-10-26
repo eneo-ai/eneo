@@ -82,6 +82,11 @@ class RecentSessionRow(NamedTuple):
     group_chat_id: UUID | None
 
 
+class OwnedSessionCounts(NamedTuple):
+    sessions: int
+    questions: int
+
+
 class SessionRepository:
     def __init__(
         self,
@@ -990,3 +995,33 @@ class SessionRepository:
         deleted = await self.delegate.delete(id)
         await delete_unused_root_files(self.session, file_ids)
         return await self._hydrate_optional(deleted)
+
+    async def count_owned_by_api_key(self, api_key_id: UUID) -> OwnedSessionCounts:
+        """Count the sessions a service API key owns and the questions in them."""
+        sessions, questions = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(sa.distinct(Sessions.id)),
+                    sa.func.count(Questions.id),
+                )
+                .select_from(Sessions)
+                .outerjoin(Questions, Questions.session_id == Sessions.id)
+                .where(Sessions.api_key_id == api_key_id)
+            )
+        ).one()
+        return OwnedSessionCounts(sessions=sessions, questions=questions)
+
+    async def delete_owned_by_api_key(self, api_key_id: UUID) -> None:
+        """Delete every session a service API key owns, as ``delete`` does one."""
+        owned = Sessions.api_key_id == api_key_id
+        file_ids = list(
+            await self.session.scalars(
+                sa.select(QuestionsFiles.file_id)
+                .join(Questions, Questions.id == QuestionsFiles.question_id)
+                .join(Sessions, Sessions.id == Questions.session_id)
+                .where(owned)
+                .distinct()
+            )
+        )
+        await self.session.execute(sa.delete(Sessions).where(owned))
+        await delete_unused_root_files(self.session, file_ids)
