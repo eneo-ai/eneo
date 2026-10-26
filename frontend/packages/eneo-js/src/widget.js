@@ -25,7 +25,13 @@ export function createWidgetClient({ baseUrl, publicId, getToken, fetch }) {
   /** A fresh client per call so a rotated visitor token is always the one sent. */
   const client = () => {
     const token = getToken?.() ?? undefined;
-    return createClient({ baseUrl, token: token ?? undefined, fetch });
+    return createClient({
+      baseUrl,
+      token,
+      // Visitor and preview tokens are explicit headers. Neither ordinary
+      // requests nor answer streams may inherit a signed-in user's cookies.
+      fetch: (input, init) => (fetch ?? globalThis.fetch)(input, { ...init, credentials: "omit" })
+    });
   };
 
   /**

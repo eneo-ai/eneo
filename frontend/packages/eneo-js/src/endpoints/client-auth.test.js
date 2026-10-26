@@ -26,6 +26,7 @@ describe("createClient authentication headers", () => {
 
     assert.equal(recorder.calls.length, 1);
     assert.deepEqual(recorder.calls[0].init.headers, { "X-API-Key": "sk_secret" });
+    assert.equal(recorder.calls[0].init.credentials, "include");
   });
 
   it("supports an installation-specific header name", async () => {
@@ -75,3 +76,27 @@ describe("createClient authentication headers", () => {
     });
   });
 });
+
+for (const transport of ["stream", "download"]) {
+  it(`signed-in ${transport} requests retain cookies and bearer authentication`, async () => {
+    const requests = [];
+    const client = createClient({
+      baseUrl: "https://eneo.example",
+      token: "user-token",
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return new Response("");
+      }
+    });
+
+    if (transport === "stream") {
+      await client.stream("/api/v1/conversations/", {}, {});
+    } else {
+      await client.download("/api/v1/files/file-1/", { method: "get" });
+    }
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].credentials, "include");
+    assert.equal(requests[0].headers.get("Authorization"), "Bearer user-token");
+  });
+}

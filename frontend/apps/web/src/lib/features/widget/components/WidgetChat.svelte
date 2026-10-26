@@ -598,7 +598,12 @@
         auto="off"
         display="invisible"
         workers="2"
-        configuration={JSON.stringify({ hideFooter: true, hideLogo: true, workers: 2 })}
+        configuration={JSON.stringify({
+          hideFooter: true,
+          hideLogo: true,
+          workers: 2,
+          credentials: "omit"
+        })}
       ></altcha-widget>
     </div>
   {/if}
