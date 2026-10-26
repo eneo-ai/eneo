@@ -25,9 +25,14 @@ from collections.abc import Generator, Iterator
 from typing import TYPE_CHECKING
 
 import pytest
-from _pytest.faulthandler import fault_handler_stderr_fd_key
 
 from tests.warning_filters import IGNORED_WARNINGS
+
+try:
+    from _pytest.faulthandler import fault_handler_stderr_fd_key
+except ImportError:
+    # Private pytest API: if it moves, only the asyncio watchdog switches off.
+    fault_handler_stderr_fd_key = None
 
 if TYPE_CHECKING:
     from _pytest.terminal import TerminalReporter
@@ -162,11 +167,15 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
     the nodeid and the await chain of every pending task on each running event
     loop to the same fd, which xdist workers share with the CI log.
 
-    No-op when faulthandler_timeout is unset, and silent for a test that ends
-    in time. faulthandler_exit_on_timeout ends the process before it fires.
+    No-op when faulthandler_timeout is unset, the faulthandler plugin is off
+    or pytest no longer exposes its fd key, and silent for a test that ends in
+    time. faulthandler_exit_on_timeout ends the process before it fires.
     """
     config = item.config
-    if fault_handler_stderr_fd_key not in config.stash:
+    if (
+        fault_handler_stderr_fd_key is None
+        or fault_handler_stderr_fd_key not in config.stash
+    ):
         return (yield)
     timeout = float(config.getini("faulthandler_timeout") or 0)
     if timeout <= 0:
