@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from datetime import date, datetime, timezone
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -37,9 +36,10 @@ from eneo.model_providers.presentation.model_provider_router import (
     get_model_provider_service,
     router,
 )
-from eneo.roles.permissions import Permission
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.settings.encryption_service import EncryptionService
+from eneo.users.user import UserInDB
+from tests.fixtures import TEST_USER
 
 KEY = "sk-live-secret-1234"
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
@@ -286,16 +286,12 @@ def _client(service: Any, *, admin: bool = True) -> TestClient:
     app = FastAPI(dependencies=[Depends(require_endpoint_access)])
     app.include_router(router, prefix="/model-providers")
     add_exception_handlers(app)
-    user = SimpleNamespace(
-        tenant_id=uuid4(),
-        permissions=[Permission.ADMIN] if admin else [],
-        active_api_key=None,
-    )
+    user = TEST_USER.model_copy(update={"roles": TEST_USER.roles if admin else []})
 
-    def current_user(request: Request) -> SimpleNamespace:
+    def current_user(request: Request) -> UserInDB:
         # The routes carry their admission in @endpoint_access; production
         # authentication enforces it, so this stand-in does the same.
-        authorize_user(request, user)  # type: ignore[arg-type]
+        authorize_user(request, user)
         return user
 
     app.dependency_overrides[get_current_active_user] = current_user

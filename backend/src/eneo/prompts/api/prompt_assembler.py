@@ -1,6 +1,4 @@
 # Copyright (c) 2024 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 
 from eneo.main.models import ResourcePermission

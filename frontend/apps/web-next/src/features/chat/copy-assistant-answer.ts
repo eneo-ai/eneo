@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { renderAnswerForClipboard } from "@/components/ai-elements/answer-markdown";
 import { stripInrefs } from "@/lib/chat/inref";
 import type { Schema } from "@/lib/api/models";
 
@@ -9,36 +9,6 @@ const COPY_FORMAT_SETTING_KEY = "preferred_text_format";
 
 type SettingsWithChatWidget = Pick<Schema<"SettingsPublic">, "chatbot_widget">;
 type ChatbotWidgetSettings = NonNullable<SettingsWithChatWidget["chatbot_widget"]>;
-
-function sanitizeHtml(html: string): string {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-
-  template.content.querySelectorAll("script, style, iframe, object, embed").forEach((node) => {
-    node.remove();
-  });
-
-  template.content.querySelectorAll("*").forEach((element) => {
-    for (const attr of Array.from(element.attributes)) {
-      const name = attr.name.toLowerCase();
-      const value = attr.value.trim().toLowerCase();
-
-      if (name.startsWith("on")) {
-        element.removeAttribute(attr.name);
-        continue;
-      }
-
-      if (
-        (name === "href" || name === "src" || name === "xlink:href") &&
-        value.startsWith("javascript:")
-      ) {
-        element.removeAttribute(attr.name);
-      }
-    }
-  });
-
-  return template.innerHTML;
-}
 
 export function getPreferredAssistantCopyFormat(
   settings?: SettingsWithChatWidget | null
@@ -61,16 +31,7 @@ export function assistantRichTextClipboardPayload(answer: string): {
   html: string;
   plainText: string;
 } {
-  const markdown = stripInrefs(answer);
-  const html = sanitizeHtml(
-    marked.parse(markdown, {
-      gfm: true,
-      breaks: true
-    }) as string
-  );
-  const container = document.createElement("div");
-  container.innerHTML = html;
-  return { html, plainText: (container.innerText || container.textContent || "").trim() };
+  return renderAnswerForClipboard(stripInrefs(answer));
 }
 
 /**

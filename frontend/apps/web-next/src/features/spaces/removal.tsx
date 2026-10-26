@@ -2,20 +2,28 @@
 
 import { useMutation, type MutationKey } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { createContext, use, useRef, type RefObject } from "react";
+import { createContext, use, useMemo, useRef, type RefObject } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue, type FocusRescueTarget } from "@/lib/focus-rescue";
 
 type FocusTarget = RefObject<HTMLElement | null>;
 
-const RemovalFocusContext = createContext<FocusTarget | null>(null);
+type RemovalFocus = {
+  target: FocusTarget;
+  /** The scope's own rescue: it outlives the row, its menu and its dialog. */
+  rescue: (target: FocusRescueTarget) => void;
+};
+
+const RemovalFocusContext = createContext<RemovalFocus | null>(null);
 
 /**
  * Marks where focus goes when an item of the list inside is deleted or moved
  * to another space: the list's heading or tab panel (an element with
- * `tabIndex={-1}`, e.g. `PageHeader`'s `headingRef`). Outside any scope focus
- * goes to the page panel, `main#main-content`.
+ * `tabIndex={-1}`, e.g. `PageHeader`'s `headingRef`), and owns the rescue
+ * that takes it there, since the component that asked (a row's menu or
+ * dialog) is gone by then. Outside any scope focus goes to the page panel,
+ * `main#main-content`.
  */
 export function RemovalFocusScope({
   target,
@@ -24,7 +32,9 @@ export function RemovalFocusScope({
   target: FocusTarget;
   children: React.ReactNode;
 }) {
-  return <RemovalFocusContext value={target}>{children}</RemovalFocusContext>;
+  const rescue = useFocusRescue();
+  const value = useMemo(() => ({ target, rescue }), [target, rescue]);
+  return <RemovalFocusContext value={value}>{children}</RemovalFocusContext>;
 }
 
 /**
@@ -36,8 +46,10 @@ export function RemovalFocusScope({
  * until the item is gone), then runs `onRemoved` (close the dialog) and moves
  * focus to the row that took the removed one's place when `anchor` (a control
  * in the row) is given, else to `focusTarget` or the nearest
- * `RemovalFocusScope` target; `rescueFocus` only acts when focus was actually
- * lost. Errors are toasted unless `onError` is given.
+ * `RemovalFocusScope` target; the rescue only acts when focus was actually
+ * lost. Outside any scope the calling component owns the rescue, so it must
+ * be the list or page, not a row. Errors are toasted unless `onError` is
+ * given.
  */
 export function useRemovalMutation<TData = unknown, TVariables = void>({
   mutationKey,
@@ -60,8 +72,10 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
   anchor?: FocusTarget;
 }) {
   const t = useTranslations();
-  const scopeTarget = use(RemovalFocusContext);
-  const target = focusTarget ?? scopeTarget;
+  const scope = use(RemovalFocusContext);
+  const ownRescue = useFocusRescue();
+  const rescue = scope?.rescue ?? ownRescue;
+  const target = focusTarget ?? scope?.target;
   const neighbour = useRef<() => HTMLElement | null>(() => null);
   return useMutation({
     mutationKey,
@@ -73,7 +87,9 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
       await refresh();
       onRemoved?.(data, variables);
       const next = neighbour.current;
-      rescueFocus(() => next() ?? target?.current ?? document.getElementById("main-content"));
+      // Keep the fallback on this page if it unmounts before the delayed checks.
+      const page = document.getElementById("main-content");
+      rescue(() => next() ?? target?.current ?? page);
     },
     onError: onError ?? ((error) => toastApiError(error, t))
   });

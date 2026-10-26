@@ -24,8 +24,8 @@ from pydantic import (
     model_validator,
 )
 
-from eneo.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelPublicLegacy,
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
 )
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.domain.entities.sync_log import SyncLog as SyncLogEntity
@@ -346,7 +346,7 @@ class IntegrationKnowledgePublic(BaseModel):
     tenant_id: UUID
     space_id: UUID
     user_integration_id: UUID
-    embedding_model: EmbeddingModelPublicLegacy
+    embedding_model: EmbeddingModelPublic
     site_id: Optional[str] = None
     drive_id: Optional[str] = None  # For OneDrive direct access
     resource_type: Optional[str] = (

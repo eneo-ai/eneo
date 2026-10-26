@@ -1,0 +1,551 @@
+{
+  "cases": [
+    {
+      "name": "arrow between bold menu names",
+      "input": "Klicka på **Arkiv** $\\rightarrow$ **Alternativ**.",
+      "math": [
+        {
+          "display": false,
+          "tex": "\\rightarrow"
+        }
+      ],
+      "literal": ["Arkiv", "Alternativ"]
+    },
+    {
+      "name": "single dollar",
+      "input": "Låt $x$ vara talet.",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ]
+    },
+    {
+      "name": "paren delimiters",
+      "input": "Värdet \\(x^2\\) växer.",
+      "math": [
+        {
+          "display": false,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "adjacent paren formulas stay apart",
+      "input": "\\(x\\)\\(y\\)",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        },
+        {
+          "display": false,
+          "tex": "y"
+        }
+      ]
+    },
+    {
+      "name": "spaces inside a formula",
+      "input": "Se \\(a b\\) här.",
+      "math": [
+        {
+          "display": false,
+          "tex": "a b"
+        }
+      ]
+    },
+    {
+      "name": "bracket display alone",
+      "input": "\\[x^2 + 1\\]",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2 + 1"
+        }
+      ]
+    },
+    {
+      "name": "bracket display over lines",
+      "input": "\\[\na + b\n\\]",
+      "math": [
+        {
+          "display": true,
+          "tex": "a + b"
+        }
+      ]
+    },
+    {
+      "name": "dollar fence",
+      "input": "$$\nx^2\n$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "dollar fence with CRLF",
+      "input": "$$\r\nx^2\r\n$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "dollar fence right after a line of text",
+      "input": "Formel:\n$$\nx^2\n$$\nKlart.",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ],
+      "literal": ["Formel:", "Klart."]
+    },
+    {
+      "name": "dollar fence with text on the opening line",
+      "input": "$$E = mc^2\n$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "E = mc^2"
+        }
+      ]
+    },
+    {
+      "name": "longer closing fence",
+      "input": "$$\nx^2\n$$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "triple dollar fence",
+      "input": "$$$\nx^2\n$$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "escaped braces on the opening line",
+      "input": "$$\\{x\\}\n$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "\\{x\\}"
+        }
+      ]
+    },
+    {
+      "name": "formula across lines with text on both delimiter lines",
+      "input": "$$\\frac{a}{b}\n= c$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "\\frac{a}{b} = c"
+        }
+      ]
+    },
+    {
+      "name": "math code fence",
+      "input": "```math\nx^2\n```",
+      "math": [
+        {
+          "display": true,
+          "tex": "x^2"
+        }
+      ]
+    },
+    {
+      "name": "latex code fence stays code",
+      "input": "```latex\n\\frac{a}{b}\n```",
+      "math": [],
+      "literal": ["\\frac{a}{b}"]
+    },
+    {
+      "name": "double dollar alone on its line",
+      "input": "$$E = mc^2$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "E = mc^2"
+        }
+      ]
+    },
+    {
+      "name": "display delimiters inside a sentence render inline",
+      "input": "före \\[x\\] och $$y$$ efter",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        },
+        {
+          "display": false,
+          "tex": "y"
+        }
+      ],
+      "literal": ["före", "efter"]
+    },
+    {
+      "name": "display formula inside a quote and a list",
+      "input": "> \\[x\\]\n\n- punkt\n\n  $$\n  y\n  $$",
+      "math": [
+        {
+          "display": true,
+          "tex": "x"
+        },
+        {
+          "display": true,
+          "tex": "y"
+        }
+      ]
+    },
+    {
+      "name": "math in a table cell",
+      "input": "| Värde |\n| --- |\n| $x$ |",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ]
+    },
+    {
+      "name": "math in emphasis",
+      "input": "*$x$* och **$y$**",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        },
+        {
+          "display": false,
+          "tex": "y"
+        }
+      ]
+    },
+    {
+      "name": "math next to punctuation",
+      "input": "($x$), $y$.",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        },
+        {
+          "display": false,
+          "tex": "y"
+        }
+      ]
+    },
+    {
+      "name": "math in a link label",
+      "input": "[$x$](https://example.test/)",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ],
+      "href": "https://example.test/"
+    },
+    {
+      "name": "two prices",
+      "input": "Det kostar $5 och $10.",
+      "math": [],
+      "literal": ["$5 och $10"]
+    },
+    {
+      "name": "prices after the number",
+      "input": "100 $ och 200 $",
+      "math": [],
+      "literal": ["100 $ och 200 $"]
+    },
+    {
+      "name": "one price",
+      "input": "kostar $5",
+      "math": [],
+      "literal": ["$5"]
+    },
+    {
+      "name": "price range",
+      "input": "$5–$10",
+      "math": [],
+      "literal": ["$5–$10"]
+    },
+    {
+      "name": "price before a formula",
+      "input": "Kostar $5; använd $x$.",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ],
+      "literal": ["$5;"]
+    },
+    {
+      "name": "dollar glued to a word",
+      "input": "a$x$ och å$y$",
+      "math": [],
+      "literal": ["a$x$", "å$y$"]
+    },
+    {
+      "name": "space after the opener",
+      "input": "$ x$",
+      "math": [],
+      "literal": ["$ x$"]
+    },
+    {
+      "name": "space before the closer",
+      "input": "$x $",
+      "math": [],
+      "literal": ["$x $"]
+    },
+    {
+      "name": "digit after the closer",
+      "input": "$x$2",
+      "math": [],
+      "literal": ["$x$2"]
+    },
+    {
+      "name": "escaped dollars",
+      "input": "\\$x\\$",
+      "math": [],
+      "literal": ["$x$"]
+    },
+    {
+      "name": "escaped dollar inside a formula",
+      "input": "$x+\\$y$",
+      "math": [
+        {
+          "display": false,
+          "tex": "x+\\$y"
+        }
+      ]
+    },
+    {
+      "name": "escaped backslash before the closer",
+      "input": "$a\\\\$",
+      "math": [
+        {
+          "display": false,
+          "tex": "a\\\\"
+        }
+      ]
+    },
+    {
+      "name": "backslash line break inside a dollar",
+      "input": "$x\\\n+y$",
+      "math": [],
+      "literal": ["$x +y$"]
+    },
+    {
+      "name": "inline code",
+      "input": "Kör `$x$` och ``a `$y$` b``",
+      "math": [],
+      "literal": ["$x$", "a `$y$` b"]
+    },
+    {
+      "name": "fenced code",
+      "input": "```text\n$x$ \\(y\\)\n```",
+      "math": [],
+      "literal": ["$x$ \\(y\\)"]
+    },
+    {
+      "name": "tilde fence",
+      "input": "~~~\n\\[x\\]\n~~~",
+      "math": [],
+      "literal": ["\\[x\\]"]
+    },
+    {
+      "name": "indented code",
+      "input": "Kod:\n\n    $x$",
+      "math": [],
+      "literal": ["$x$"]
+    },
+    {
+      "name": "quoted fenced code",
+      "input": "> ```\n> $x$\n> ```",
+      "math": [],
+      "literal": ["$x$"]
+    },
+    {
+      "name": "link destination",
+      "input": "[a](https://example.test/$x$)",
+      "math": [],
+      "href": "https://example.test/$x$"
+    },
+    {
+      "name": "blank line inside brackets",
+      "input": "\\[\na\n\n+b\n\\]",
+      "math": [],
+      "literal": ["+b"]
+    },
+    {
+      "name": "unfinished dollar",
+      "input": "Pilen $\\rig",
+      "math": [],
+      "literal": ["$\\rig"]
+    },
+    {
+      "name": "unfinished paren",
+      "input": "Värdet \\(x",
+      "math": [],
+      "literal": ["(x"]
+    },
+    {
+      "name": "shorter closing fence",
+      "input": "$$$\nx^2\n$$",
+      "math": [],
+      "literal": ["x^2"]
+    },
+    {
+      "name": "empty dollar fence",
+      "input": "$$\n$$",
+      "math": [],
+      "literal": ["$$ $$"]
+    },
+    {
+      "name": "unfinished fence with text on its line",
+      "input": "Formel:\n\n$$E = mc^2",
+      "math": [],
+      "literal": ["$$E = mc^2"]
+    },
+    {
+      "name": "letters outside the basic plane",
+      "input": "𝑎$x$ och $y$𝟚",
+      "math": [],
+      "literal": ["𝑎$x$", "$y$𝟚"]
+    },
+    {
+      "name": "unfinished fence right after a line of text",
+      "input": "Formel:\n$$\nx^2",
+      "math": [],
+      "literal": ["Formel:", "$$", "x^2"]
+    },
+    {
+      "name": "empty fence right before a whole one",
+      "input": "$$\n$$\nVanlig text.\n$$",
+      "math": [
+        {
+          "display": true,
+          "tex": "Vanlig text."
+        }
+      ],
+      "literal": ["$$"]
+    },
+    {
+      "name": "closing line indented four spaces",
+      "input": "$$\nx\n    $$\n\nSvar",
+      "math": [
+        {
+          "display": true,
+          "tex": "x"
+        }
+      ],
+      "literal": ["Svar"]
+    },
+    {
+      "name": "closing line indented with a tab",
+      "input": "$$\nx\n\t$$\n\nSvar",
+      "math": [
+        {
+          "display": true,
+          "tex": "x"
+        }
+      ],
+      "literal": ["Svar"]
+    },
+    {
+      "name": "empty formulas in emphasis and a link label",
+      "input": "**$$ $$** och [$$ $$](https://example.test/)",
+      "math": [],
+      "literal": ["$$ $$ och $$ $$"]
+    },
+    {
+      "name": "unfinished dollar fence",
+      "input": "Formel:\n\n$$\nx^2",
+      "math": [],
+      "literal": ["$$", "x^2"]
+    },
+    {
+      "name": "star inside math in italics",
+      "input": "*$x*y$*",
+      "math": [
+        {
+          "display": false,
+          "tex": "x*y"
+        }
+      ]
+    },
+    {
+      "name": "stars inside math in bold",
+      "input": "**Svar: $a**b$**",
+      "math": [
+        {
+          "display": false,
+          "tex": "a**b"
+        }
+      ],
+      "literal": ["Svar:"]
+    },
+    {
+      "name": "tildes inside math in strikethrough",
+      "input": "~~$a~~b$~~",
+      "math": [
+        {
+          "display": false,
+          "tex": "a~~b"
+        }
+      ]
+    },
+    {
+      "name": "underscores inside math in italics",
+      "input": "_$x_1$ och $y_1$_",
+      "math": [
+        {
+          "display": false,
+          "tex": "x_1"
+        },
+        {
+          "display": false,
+          "tex": "y_1"
+        }
+      ],
+      "literal": ["och"]
+    },
+    {
+      "name": "star inside paren math in italics",
+      "input": "*\\(x*y\\)*",
+      "math": [
+        {
+          "display": false,
+          "tex": "x*y"
+        }
+      ]
+    },
+    {
+      "name": "empty pair before a formula",
+      "input": "$$ $$ och $$x$$",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ],
+      "literal": ["$$ $$ och"]
+    }
+  ]
+}

@@ -17,9 +17,14 @@ const NOTHING_RUNS: ProgressById = {};
  * polls only while the space has integration knowledge of its own, fast while
  * a queued sync waits. When a sync finishes, the space (its items' counts,
  * statuses and sync revisions) is refreshed, and the lists keyed by an item's
- * revision follow.
+ * revision follow. `loaded` is false until the first poll has answered: until
+ * then `progress` says nothing runs only for want of knowing.
  */
-export function useSyncProgress(): { progress: ProgressById; queued: QueuedIds } {
+export function useSyncProgress(): {
+  progress: ProgressById;
+  queued: QueuedIds;
+  loaded: boolean;
+} {
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
   const ownItems = space.knowledge.integration_knowledge_list.items.filter(
@@ -32,7 +37,7 @@ export function useSyncProgress(): { progress: ProgressById; queued: QueuedIds }
     const ids = new Set(ownIds.split(" "));
     return allPending.filter((entry) => ids.has(entry.knowledgeId));
   }, [allPending, ownIds]);
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     ...syncProgressQueryOptions(
       browserApi,
       space.id,
@@ -65,5 +70,5 @@ export function useSyncProgress(): { progress: ProgressById; queued: QueuedIds }
     );
   }, [pending, progress]);
 
-  return { progress, queued };
+  return { progress, queued, loaded: !hasOwnKnowledge || !isPending };
 }

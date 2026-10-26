@@ -452,7 +452,7 @@ describe("source page", () => {
     // The page body has no height outside the app shell, so act on the elements directly.
     (
       folders
-        .getByRole("button", { name: m.integration_source_collapse_folder({ name: "Arkiv" }) })
+        .getByRole("button", { name: m.source_tree_collapse({ name: "Arkiv" }) })
         .element() as HTMLElement
     ).click();
     await expect.poll(() => folders.getByRole("link", { name: /2024/ }).elements().length).toBe(0);

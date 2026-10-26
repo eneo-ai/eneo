@@ -121,6 +121,23 @@ MCP tools, ask for an app or know which file format Eneo uses internally.
 
 ---
 
+## Formatted answers in the React beta
+
+The optional React beta displays Markdown headings, lists, tables, highlighted
+code and Mermaid diagrams directly in answers. Code blocks have copy and
+download actions. Diagrams also have zoom and fullscreen controls.
+
+Mathematical expressions can use `$…$` or `\(...\)` inline, and `$$…$$`,
+`\[...\]` or a fenced `math` block for a separate formula. A fenced `latex`
+block displays the source. Currency amounts such as `$5` and `$10` remain text.
+Wide formulas and tables scroll inside the answer instead of widening the page.
+
+Use the answer's copy menu to choose **Markdown** or **Rich text**. Rich text
+preserves headings, lists and tables; equations use MathML, whose appearance
+depends on the application receiving the paste. Code and Mermaid diagrams copy
+as source text. Copying Markdown preserves the formula notation. To obtain a
+document file instead, ask an assistant with **Create a file** enabled.
+
 ## Administrator setup
 
 Open **Admin → Tools** (`/admin/tools`). Two tabs are shown:

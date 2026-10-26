@@ -29,7 +29,7 @@
   const { releases, markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
   const { start, running } = getWhatsNewTour();
   const developerTools = settings.developer_tools_available === true;
-  const isAdmin = user.hasPermission("admin");
+  const can = user.hasPermission;
   const locale = getLocale();
 
   // Snapshot before this visit marks the newest release as seen, so "read"
@@ -40,18 +40,18 @@
   let selectedVersion = $state<string | null>(releases[0]?.version ?? null);
   const current = $derived(releases.find((r) => r.version === selectedVersion) ?? null);
   const currentRead = $derived(current ? isReadRelease(current, seenAtOpen) : false);
-  const areas = $derived(current ? areasPresent([current], isAdmin) : []);
-  const total = $derived(current ? countEntries([current], isAdmin) : 0);
+  const areas = $derived(current ? areasPresent([current], can) : []);
+  const total = $derived(current ? countEntries([current], can) : 0);
 
   let filters = $state<WhatsNewFilters>({ area: null, showMeOnly: false });
-  const entries = $derived(current ? filterEntries(current, filters, isAdmin) : []);
+  const entries = $derived(current ? filterEntries(current, filters, can) : []);
 
   function selectRelease(version: string) {
     selectedVersion = version;
     // An area from the previous release may not exist in this one.
     if (
       filters.area &&
-      !areasPresent([releases.find((r) => r.version === version)!], isAdmin).includes(filters.area)
+      !areasPresent([releases.find((r) => r.version === version)!], can).includes(filters.area)
     ) {
       filters.area = null;
     }
@@ -96,7 +96,7 @@
   }
 
   function handleTour(release: Release) {
-    start(tourSteps(release, isAdmin, locale), {
+    start(tourSteps(release, can, locale), {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
@@ -110,7 +110,7 @@
   }
 
   function tourLength(release: Release): number {
-    return tourSteps(release, isAdmin, locale).length;
+    return tourSteps(release, can, locale).length;
   }
 
   let resetting = $state(false);

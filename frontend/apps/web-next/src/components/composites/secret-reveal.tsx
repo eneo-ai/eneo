@@ -24,23 +24,30 @@ import {
 export function SecretRevealDialog({
   title,
   secret,
-  onClose
+  onClose,
+  warning,
+  copyFailedMessage
 }: {
   title: string;
   secret: string | null;
   onClose: () => void;
+  /** What to do with the secret; an API key's by default. */
+  warning?: string;
+  /** Said when the clipboard refuses; names an API key by default. */
+  copyFailedMessage?: string;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
   const [copyFailed, setCopyFailed] = useState(false);
   const failureId = useId();
+  const copyFailedText = copyFailedMessage ?? t("ui_copy_failed_copy_by_hand");
 
   async function copySecret() {
     if (!secret) return;
     const copied = await copy(secret);
     setCopyFailed(!copied);
-    if (!copied) announce(t("ui_copy_failed_copy_by_hand"));
+    if (!copied) announce(copyFailedText);
   }
 
   function close() {
@@ -56,7 +63,7 @@ export function SecretRevealDialog({
         </DialogHeader>
         <Alert>
           <AlertTitle>{t("api_keys_important")}</AlertTitle>
-          <AlertDescription>{t("api_keys_copy_warning")}</AlertDescription>
+          <AlertDescription>{warning ?? t("api_keys_copy_warning")}</AlertDescription>
         </Alert>
         <div className="flex items-start gap-2">
           <code className="bg-muted min-w-0 flex-1 rounded-md px-3 py-2 font-mono text-sm break-all select-all">
@@ -72,7 +79,7 @@ export function SecretRevealDialog({
         </div>
         {copyFailed ? (
           <p id={failureId} className="text-destructive text-sm">
-            {t("ui_copy_failed_copy_by_hand")}
+            {copyFailedText}
           </p>
         ) : null}
         <DialogFooter>

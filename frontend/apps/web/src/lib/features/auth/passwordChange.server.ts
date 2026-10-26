@@ -4,6 +4,7 @@ import {
   type ZitadelPasswordChangeCapability
 } from "$lib/core/Zitadel";
 import { normalizeLocalPasswordCapability, type PasswordChangeCapability } from "./passwordChange";
+import { readPasswordChangeReason, type PasswordChangeReason } from "./passwordChangeRequired";
 
 type RequestContext = Readonly<{
   backendUrl?: string;
@@ -15,6 +16,17 @@ type RequestContext = Readonly<{
 
 type LocalPasswordChangeResponse = Readonly<{
   password_change?: unknown;
+  password_status?: unknown;
+  username?: unknown;
+  email?: unknown;
+}>;
+
+export type LocalPasswordState = Readonly<{
+  capability: PasswordChangeCapability;
+  /** Why the local password must be replaced before normal use, or null. */
+  changeReason: PasswordChangeReason | null;
+  /** Account identifier for password managers; null when unknown. */
+  username: string | null;
 }>;
 
 export type PasswordChangeFailure =
@@ -100,9 +112,27 @@ export async function discoverPasswordChangeCapability(
     }
   }
 
-  if (!context.eneoToken || !context.backendUrl) {
-    return { source: "unavailable", policy: null };
-  }
+  return (await fetchLocalPasswordState(context)).capability;
+}
+
+/**
+ * The local account's password capability and lifecycle in one read of
+ * /users/me/, which stays reachable while a password change is pending.
+ */
+export async function discoverLocalPasswordState(
+  context: RequestContext
+): Promise<LocalPasswordState> {
+  return fetchLocalPasswordState(context);
+}
+
+const UNAVAILABLE_STATE: LocalPasswordState = {
+  capability: { source: "unavailable", policy: null },
+  changeReason: null,
+  username: null
+};
+
+async function fetchLocalPasswordState(context: RequestContext): Promise<LocalPasswordState> {
+  if (!context.eneoToken || !context.backendUrl) return UNAVAILABLE_STATE;
 
   try {
     const response = await context.fetch(endpoint(context.backendUrl, "/api/v1/users/me/"), {
@@ -112,13 +142,20 @@ export async function discoverPasswordChangeCapability(
         Authorization: `Bearer ${context.eneoToken}`
       }
     });
-    if (!response.ok) return { source: "unavailable", policy: null };
+    if (!response.ok) return UNAVAILABLE_STATE;
 
     const body: unknown = await response.json().catch(() => null);
-    if (!isRecord(body)) return { source: "unavailable", policy: null };
-    return normalizeEneoCapability(body);
+    if (!isRecord(body)) return UNAVAILABLE_STATE;
+    const user = body as LocalPasswordChangeResponse;
+    const username = typeof user.username === "string" && user.username ? user.username : null;
+    const email = typeof user.email === "string" && user.email ? user.email : null;
+    return {
+      capability: normalizeEneoCapability(user),
+      changeReason: readPasswordChangeReason(user.password_status),
+      username: username ?? email
+    };
   } catch {
-    return { source: "unavailable", policy: null };
+    return UNAVAILABLE_STATE;
   }
 }
 

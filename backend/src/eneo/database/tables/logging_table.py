@@ -1,5 +1,3 @@
-# MIT License
-
 from sqlalchemy import UUID, Column, MetaData, String, Table, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import registry

@@ -69,6 +69,7 @@ function list(
         groups={[{ key: "all", heading: null, sources }]}
         progress={progress}
         queued={queued}
+        progressLoaded
         labelledBy="sources"
       />
     </>

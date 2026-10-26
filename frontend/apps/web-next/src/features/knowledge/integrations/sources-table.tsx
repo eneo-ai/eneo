@@ -20,7 +20,7 @@ import { Table } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import type { IntegrationKnowledge } from "../knowledge";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
@@ -293,12 +293,15 @@ export function SourcesList({
   groups,
   progress,
   queued,
+  progressLoaded,
   labelledBy
 }: {
   groups: SourceGroup[];
   progress: ProgressById;
   /** Items whose sync was queued from here and that no worker has reported on yet. */
   queued: QueuedIds;
+  /** Whether the progress poll has answered; nothing is announced before. */
+  progressLoaded: boolean;
   labelledBy: string;
 }) {
   const t = useTranslations();
@@ -306,6 +309,7 @@ export function SourcesList({
   const bannerRef = useRef<HTMLDivElement>(null);
   const allFilterRef = useRef<HTMLButtonElement>(null);
   const chosenFilterRef = useRef<HTMLButtonElement>(null);
+  const rescue = useFocusRescue();
   const [filter, setFilter] = useState<SourceFilter>("all");
   // Once a filter has been chosen the bar stays, so the pressed segment never vanishes under focus.
   const [filterUsed, setFilterUsed] = useState(false);
@@ -321,7 +325,7 @@ export function SourcesList({
     }))
   }));
   const rows = grouped.flatMap((group) => group.rows);
-  useSourceListAnnouncements(rows);
+  useSourceListAnnouncements(progressLoaded ? rows : null);
   const counts = countSourceFilters(rows.map((row) => row.summary));
   const needle = query.trim().toLocaleLowerCase();
   const isVisible = (row: SourceRow) =>
@@ -342,8 +346,8 @@ export function SourcesList({
   useAnnounceChange(noMatch ? t("integration_filter_no_match") : null);
   // The tables went, and focus with them if it was in one: the filter in use takes it.
   useEffect(() => {
-    if (noMatch) rescueFocus(chosenFilterRef.current);
-  }, [noMatch]);
+    if (noMatch) rescue(chosenFilterRef.current);
+  }, [noMatch, rescue]);
 
   function chooseFilter(next: SourceFilter) {
     setFilter(next);
@@ -364,7 +368,7 @@ export function SourcesList({
         filter={filter}
         onShowThem={() => {
           chooseFilter("attention");
-          rescueFocus(bannerRef.current);
+          rescue(bannerRef.current);
         }}
       />
       {rows.length > 1 || filterUsed ? (

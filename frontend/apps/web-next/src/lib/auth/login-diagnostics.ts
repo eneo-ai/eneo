@@ -6,6 +6,8 @@ export type LoginDiagnostics = {
   rawDetail?: string;
 };
 
+/** Informational `?message=` values the login page renders itself; not failures. */
+const INFORMATIONAL_MESSAGES = new Set(["logout", "expired", "password_changed"]);
 const OIDC_FORBIDDEN_CODES = new Set(["access_denied", "forbidden", "oidc_forbidden"]);
 const OIDC_UNAUTHORIZED_CODES = new Set(["unauthorized", "invalid_grant", "oidc_unauthorized"]);
 
@@ -16,7 +18,8 @@ function appendIfPresent(params: URLSearchParams, key: string, value: string | u
 export function loginDiagnosticsFromSearchParams(
   params: Pick<URLSearchParams, "get">
 ): LoginDiagnostics | null {
-  const message = params.get("message") ?? undefined;
+  const rawMessage = params.get("message") ?? undefined;
+  const message = rawMessage && INFORMATIONAL_MESSAGES.has(rawMessage) ? undefined : rawMessage;
   const legacyError = params.get("error") ?? undefined;
   const detailCode = params.get("detailCode") ?? legacyError ?? undefined;
   const diagnostics: LoginDiagnostics = {

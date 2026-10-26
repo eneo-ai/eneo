@@ -85,10 +85,8 @@ describe("SharePointSubscriptions", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Förnya alla utgångna (1)" })).toBeNull()
     );
-    await waitFor(
-      () =>
-        expect(document.activeElement).toBe(screen.getByText("SharePoint Webhook-prenumerationer")),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByText("SharePoint Webhook-prenumerationer"))
     );
     expect(toast.success).toHaveBeenCalledWith("1 prenumeration förnyad");
   });

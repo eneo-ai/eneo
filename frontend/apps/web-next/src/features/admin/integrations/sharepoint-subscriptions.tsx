@@ -19,7 +19,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { toast } from "@/lib/toast";
 import {
   SHAREPOINT_SUBSCRIPTIONS_KEY,
@@ -87,6 +87,7 @@ export function SharePointSubscriptions() {
 
   const titleId = useId();
   const titleRef = useRef<HTMLSpanElement>(null);
+  const rescue = useFocusRescue();
   const items = subscriptions ?? [];
   const expiredCount = items.filter((sub) => sub.is_expired).length;
   const activeCount = items.length - expiredCount;
@@ -123,7 +124,7 @@ export function SharePointSubscriptions() {
             onClick={() => {
               if (renewAll.isPending) return;
               // Once nothing has expired the button goes; focus moves to the title.
-              renewAll.mutate(undefined, { onSuccess: () => rescueFocus(titleRef.current) });
+              renewAll.mutate(undefined, { onSuccess: () => rescue(titleRef.current) });
             }}
           >
             {!renewAll.isPending && <RefreshCw className="size-4" />}

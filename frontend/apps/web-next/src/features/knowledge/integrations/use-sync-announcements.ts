@@ -14,7 +14,9 @@ import {
 
 // Spoken through Astryx's one polite live region (ACCESSIBILITY.md, status
 // messages). The effects follow a serialised snapshot, so a poll that changes
-// nothing they speak of does not run them.
+// nothing they speak of does not run them. Nothing is fed before the progress
+// poll has answered: the announcers take their first snapshot as what was
+// already so, and a sync running at page open would otherwise sound started.
 
 /**
  * Feeds the sources to their announcers and speaks what they say, with `also`.
@@ -46,20 +48,22 @@ function speak(
  * sync being queued, starting, its count at most every 10 s or on reaching the
  * last step, how it ended once the source's rows record it (else that it is no
  * longer running), and changes to the problem count (null while the lists
- * load). A change notification's background sync stays quiet.
+ * load). A change notification's background sync stays quiet. `summary` is
+ * null until the progress poll has answered.
  */
 export function useSourceAnnouncements(
   name: string,
-  summary: SourceSummary,
+  summary: SourceSummary | null,
   problemCount: number | null
 ) {
   const t = useTranslations();
   const announce = useAnnounce();
   const [announcers] = useState(() => new SourceAnnouncers());
   const previousProblems = useRef<number | null>(null);
-  const key = JSON.stringify(sourceSnapshot(summary));
+  const key = summary && JSON.stringify(sourceSnapshot(summary));
 
   useEffect(() => {
+    if (key === null) return;
     const sources = [{ id: "source", name, snapshot: JSON.parse(key) }] as AnnouncedSource[];
     const problems = announceProblemCount(previousProblems.current, problemCount, t);
     if (problemCount !== null) previousProblems.current = problemCount;
@@ -70,26 +74,28 @@ export function useSourceAnnouncements(
 /**
  * A list's sources: only a sync started from the list is spoken, its being
  * queued, starting and how it ended, without counts; the rest belongs to each
- * source's own page.
+ * source's own page. `sources` is null until the progress poll has answered.
  */
 export function useSourceListAnnouncements(
-  sources: readonly { id: string; name: string; summary: SourceSummary }[]
+  sources: readonly { id: string; name: string; summary: SourceSummary }[] | null
 ) {
   const t = useTranslations();
   const announce = useAnnounce();
   const [announcers] = useState(
     () => new SourceAnnouncers({ speakProgress: false, onlyStartedHere: true })
   );
-  const key = JSON.stringify(
-    sources.map((source): AnnouncedSource => ({
-      id: source.id,
-      name: source.name,
-      snapshot: sourceSnapshot(source.summary)
-    }))
-  );
+  const key =
+    sources &&
+    JSON.stringify(
+      sources.map((source): AnnouncedSource => ({
+        id: source.id,
+        name: source.name,
+        snapshot: sourceSnapshot(source.summary)
+      }))
+    );
 
-  useEffect(
-    () => speak(announcers, JSON.parse(key) as AnnouncedSource[], t, announce),
-    [announce, announcers, key, t]
-  );
+  useEffect(() => {
+    if (key === null) return;
+    return speak(announcers, JSON.parse(key) as AnnouncedSource[], t, announce);
+  }, [announce, announcers, key, t]);
 }

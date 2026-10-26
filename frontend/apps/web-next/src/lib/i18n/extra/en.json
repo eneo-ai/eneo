@@ -1611,5 +1611,16 @@
   "file_preview_next_version": "Next version",
   "templates": "Templates",
   "integration_activity_reconcile_warning": "<label>Reconciliation warning:</label> {warning}",
-  "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}"
+  "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}",
+  "integration_source_collapse_folder": "Collapse {name}",
+  "integration_source_expand_folder": "Expand {name}",
+  "duration": "Duration",
+  "pages_succeeded": "{count} pages succeeded",
+  "files_succeeded": "{count} files succeeded",
+  "pages_and_files_succeeded": "{pages} pages and {files} files succeeded",
+  "pages_unchanged_count": "{count} pages unchanged",
+  "chat_md_formula_label": "Formula",
+  "chat_md_download_diagram_format": "Download diagram as {format}",
+  "chat_md_diagram_label": "Diagram",
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
 }

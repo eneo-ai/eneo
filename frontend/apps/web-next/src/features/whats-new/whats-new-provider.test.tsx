@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderInApp } from "@/test/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const put = vi.hoisted(() => vi.fn());
@@ -42,7 +43,7 @@ afterEach(() => {
 
 describe("What's new markers", () => {
   it("keeps the unseen dot after recording the one-time announcement", async () => {
-    render(
+    renderInApp(
       <WhatsNewProvider enabled initialSeen={null} initialAnnounced={null}>
         <Probe />
       </WhatsNewProvider>
@@ -57,7 +58,7 @@ describe("What's new markers", () => {
   });
 
   it("does not treat an unavailable state endpoint as a first visit", () => {
-    render(
+    renderInApp(
       <WhatsNewProvider enabled initialSeen={undefined} initialAnnounced={undefined}>
         <Probe />
       </WhatsNewProvider>

@@ -1611,5 +1611,16 @@
   "file_preview_next_version": "Nästa version",
   "templates": "Mallar",
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
-  "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}"
+  "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}",
+  "integration_source_collapse_folder": "Fäll ihop {name}",
+  "integration_source_expand_folder": "Fäll ut {name}",
+  "duration": "Varaktighet",
+  "pages_succeeded": "{count} sidor lyckades",
+  "files_succeeded": "{count} filer lyckades",
+  "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
+  "pages_unchanged_count": "{count} sidor oförändrade",
+  "chat_md_formula_label": "Formel",
+  "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
+  "chat_md_diagram_label": "Diagram",
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
 }

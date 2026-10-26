@@ -24,7 +24,7 @@ import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { BlobPreviewDialog } from "../../blobs";
@@ -242,6 +242,7 @@ export function FolderDocuments({
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { space } = useSpace();
   const sectionRef = useRef<HTMLElement>(null);
+  const rescue = useFocusRescue();
   const [view, setView] = useState<DocumentsView>("searchable");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
@@ -298,7 +299,7 @@ export function FolderDocuments({
     setPage(next);
     // The pressed button stays focused, except "next"/"previous" at the last
     // or first page, which becomes disabled: then focus moves to the folder.
-    rescueFocus(sectionRef.current);
+    rescue(sectionRef.current);
   }
 
   const emptyText =

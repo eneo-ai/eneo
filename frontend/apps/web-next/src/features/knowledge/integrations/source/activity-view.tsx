@@ -15,7 +15,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatDuration } from "@/lib/format";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
@@ -321,6 +321,7 @@ export function ActivityView({
   const queryClient = useQueryClient();
   const totalsId = useId();
   const eventsRef = useRef<HTMLElement>(null);
+  const rescue = useFocusRescue();
 
   const multiple = items.length > 1;
   const shown = selectedId ? items.filter((item) => item.id === selectedId) : items;
@@ -357,7 +358,7 @@ export function ActivityView({
       }
       setOlderError((current) => (current?.selection === selection ? null : current));
       // The button goes once nothing older is left, the banner once a retry worked.
-      rescueFocus(eventsRef.current);
+      rescue(eventsRef.current);
     },
     onError: (error, { selection }) => setOlderError({ selection, error })
   });

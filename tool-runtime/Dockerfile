@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Eneo tool runtime: the bundled, isolated MCP provider. No database, no console, no
 # configuration files; everything comes from the environment (see README.md).
-FROM oven/bun:1.3.14-slim AS deps
+FROM oven/bun:1.4.4-slim AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 
 # The tool views (MCP Apps) are built into single pages here; the runtime only reads them, so
 # React, Astryx and the bundler never reach the final image.
-FROM oven/bun:1.3.14-slim AS views
+FROM oven/bun:1.4.4-slim AS views
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOARCH=$TARGETARCH \
     go install github.com/zouuup/landrun/cmd/landrun@v0.1.17 \
     && find /go/bin -name landrun -type f -exec cp {} /landrun \;
 
-FROM oven/bun:1.3.14-slim
+FROM oven/bun:1.4.4-slim
 ARG VERSION=0.0.0-dev
 ARG GIT_SHA=unknown
 ARG SOURCE_URL=
@@ -36,7 +36,6 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.url="${SOURCE_URL}" \
       org.opencontainers.image.title="Eneo tool runtime" \
       org.opencontainers.image.description="Bundled isolated MCP tools for Eneo" \
-      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_SHA}"
 USER root

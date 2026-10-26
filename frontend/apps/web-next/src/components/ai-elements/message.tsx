@@ -1,14 +1,18 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
+import { createCodePlugin } from "@streamdown/code";
 import type { ComponentProps } from "react";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useMemo } from "react";
-import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
+import { Streamdown } from "streamdown";
+import { answerRehypePlugins, answerRemarkPlugins } from "./answer-markdown";
+import { mathPlugin } from "./math";
+import { AnswerDiagram } from "./diagram";
+import "katex/dist/katex.min.css";
+import "./message.css";
 import {
   markdownComponents,
   rehypeCodeBlockRegions,
@@ -26,39 +30,59 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
  */
 export const ANSWER_TEXT_CLASS = "font-sans text-ax-text text-base leading-[1.7]";
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const code = createCodePlugin({
+  themes: ["github-light-high-contrast", "github-dark-high-contrast"]
+});
+const streamdownPlugins = {
+  cjk,
+  code,
+  math: mathPlugin,
+  renderers: [{ language: "mermaid", component: AnswerDiagram }]
+};
 
-// Streamdown REPLACES its defaults when `remarkPlugins`/`rehypePlugins` are
-// passed. The defaults carry GFM (tables, strikethrough, autolinks), code meta
-// and the sanitize/harden pipeline, so dropping them rendered tables as raw
-// `| a | b |` text. MessageResponse therefore always keeps them and appends the
-// caller's plugins.
-const DEFAULT_REMARK_PLUGINS = Object.values(defaultRemarkPlugins);
-const DEFAULT_REHYPE_PLUGINS = Object.values(defaultRehypePlugins);
+// Streamdown closes an unfinished `$$` while text streams in; math stays as
+// written until the model closes it, the same as in the web app.
+const REMEND_OPTIONS = { katex: false };
 
 /**
  * Assistant markdown (Streamdown) with Eneo defaults: GFM always on, accessible
  * tables/headings/lists/code regions (markdown-components.tsx) and Streamdown's
  * UI strings in the user's language. `remarkPlugins`, `rehypePlugins` and
  * `components` ADD to those defaults; memoize them in the caller so blocks are
- * not re-parsed on every render.
+ * not re-parsed on every render. Streamdown otherwise replaces its defaults:
+ * dropping those loses GFM tables and the sanitize/harden pipeline.
  */
 export const MessageResponse = memo(
   ({ className, remarkPlugins, rehypePlugins, components, ...props }: MessageResponseProps) => {
     const t = useTranslations();
     const translations = useStreamdownTranslations();
+    const copyFeedback = useMemo(
+      () => ({
+        onCopy: () => toast.success(t("copied")),
+        onError: () => toast.error(t("chat_copy_failed"))
+      }),
+      [t]
+    );
+    const controls = useMemo(
+      () => ({
+        table: false,
+        code: { copy: copyFeedback, download: true },
+        mermaid: { copy: copyFeedback, download: true, fullscreen: true, panZoom: true }
+      }),
+      [copyFeedback]
+    );
     const codeRegionLabel = useCallback(
       (language: string | null) =>
         language ? t("chat_md_code_label", { language }) : t("chat_md_code_label_plain"),
       [t]
     );
     const remark = useMemo(
-      () => [...DEFAULT_REMARK_PLUGINS, ...(remarkPlugins ?? [])],
+      () => [...answerRemarkPlugins, ...(remarkPlugins ?? [])],
       [remarkPlugins]
     );
     const rehype = useMemo(
       () => [
-        ...DEFAULT_REHYPE_PLUGINS,
+        ...answerRehypePlugins,
         rehypeCodeBlockRegions(codeRegionLabel),
         ...(rehypePlugins ?? [])
       ],
@@ -71,9 +95,13 @@ export const MessageResponse = memo(
 
     return (
       <Streamdown
-        className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
+        className={cn(
+          "eneo-answer size-full min-w-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
         plugins={streamdownPlugins}
-        controls={{ table: false }}
+        controls={controls}
+        remend={REMEND_OPTIONS}
         remarkPlugins={remark}
         rehypePlugins={rehype}
         components={mergedComponents}

@@ -1,5 +1,7 @@
 import createClient, { type Client } from "openapi-fetch";
+import { errorCodeFromResponse } from "./errors";
 import type { paths } from "./schema";
+import { passwordChangeUrl } from "@/lib/auth/password-change-path";
 
 /** A typed Eneo API client, regardless of transport (direct or proxied). */
 export type EneoClient = Client<paths>;
@@ -12,9 +14,22 @@ export type EneoClient = Client<paths>;
  */
 export const browserApi: EneoClient = createClient<paths>({ baseUrl: "/api/eneo" });
 
+const PASSWORD_CHANGE_REQUIRED = 9070;
+
 browserApi.use({
-  onResponse({ request, response }) {
-    if (response.status !== 401 || typeof window === "undefined") return;
+  async onResponse({ request, response }) {
+    if (typeof window === "undefined") return;
+    if (response.status === 403) {
+      // The session must replace its local password before anything else;
+      // the server client sends renders there too (see server.ts).
+      if ((await errorCodeFromResponse(response)) === PASSWORD_CHANGE_REQUIRED) {
+        window.location.assign(
+          passwordChangeUrl(window.location.pathname + window.location.search)
+        );
+      }
+      return;
+    }
+    if (response.status !== 401) return;
     // Audit endpoints return 401 to mean "open an access session", not "your
     // session died" — the audit page renders the justification gate from that
     // 401 itself, so reloading here would loop. Everywhere else a 401 means

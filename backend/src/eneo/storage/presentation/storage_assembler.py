@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 
 from eneo.spaces.api.space_models import SpaceMember

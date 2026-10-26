@@ -15,6 +15,7 @@ from fastapi.dependencies.models import Dependant
 from starlette.requests import HTTPConnection
 
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.users.password_lifecycle import enforce_password_change
 
 if TYPE_CHECKING:
     from eneo.users.user import UserInDB
@@ -74,6 +75,9 @@ class EndpointAccess:
     authentication: Authentication
     authorization: Permission | Authorization
     reason: str
+    # Reachable by a session that must still replace its local password
+    # (eneo.users.password_lifecycle): only what that replacement needs.
+    reachable_before_password_change: bool = False
 
     def __post_init__(self) -> None:
         if not self.reason.strip():
@@ -93,13 +97,19 @@ def endpoint_access(
     authentication: Authentication,
     authorization: Permission | Authorization,
     reason: str,
+    reachable_before_password_change: bool = False,
 ) -> Callable[[_Endpoint], _Endpoint]:
     """Declare both decisions on an endpoint, immediately below @router.*.
 
     No defaults and no router-wide inheritance: adding an endpoint requires a
     new decision. The decorator preserves the callable/signature for FastAPI.
     """
-    policy = EndpointAccess(authentication, authorization, reason)
+    policy = EndpointAccess(
+        authentication,
+        authorization,
+        reason,
+        reachable_before_password_change=reachable_before_password_change,
+    )
 
     def declare(endpoint: _Endpoint) -> _Endpoint:
         if access_for(endpoint) is not None:
@@ -177,6 +187,8 @@ def authorize_user(connection: HTTPConnection | None, user: "UserInDB") -> None:
         )
     if policy.authentication is Authentication.API_KEY and user.active_api_key is None:
         raise HTTPException(403, "This endpoint requires an API key")
+    if not policy.reachable_before_password_change:
+        enforce_password_change(user)
     if isinstance(policy.authorization, Permission):
         validate_permission(user, policy.authorization)
 

@@ -1,0 +1,25 @@
+{
+  "name": "@eneo/markdown-math",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LaTeX math rules shared by the chat renderers of the web app and web-next",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./cases.json": "./cases.json"
+  },
+  "scripts": {
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "bun test src"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.4"
+  },
+  "sideEffects": false
+}

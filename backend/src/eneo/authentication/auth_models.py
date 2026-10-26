@@ -52,6 +52,10 @@ class JWTCreds(BaseModel):
     user_id: UUID
     tenant_id: UUID
     credential_version: int = Field(ge=0, strict=True)
+    # Minted only by the local password login ("password"); decoded as a
+    # plain string so a value added by a newer deployment never makes an
+    # older one reject the token. See eneo.users.password_lifecycle.
+    auth_method: Optional[str] = None
     # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None

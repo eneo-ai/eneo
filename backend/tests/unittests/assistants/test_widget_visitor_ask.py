@@ -76,7 +76,7 @@ async def test_visitor_gets_the_knowledge_tool_under_its_own_identity():
 
     build_server.assert_awaited_once()
     service.auth_service.create_scoped_mcp_token.assert_called_once_with(
-        visitor, assistant_id=assistant.id
+        visitor, assistant_id=assistant.id, table_tools=False
     )
     assert (
         assistant.ask.await_args.kwargs["knowledge_mcp_server"]

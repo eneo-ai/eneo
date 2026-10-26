@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@d946e76fc385
+translationSource: guides/deployment.mdx@fb0ebb3c501a
 ---
 
 import { Callout } from "nextra/components";
@@ -150,7 +150,11 @@ innehåll fungerar medan objektlagringen är degraderad.
 
 Öppna den domän du har konfigurerat. Referensstacken har ingen localhost-route.
 Standardkontot är `user@example.com` med lösenordet `ChangeMePassword1!`.
-**Byt lösenord omedelbart efter första inloggningen.**
+`DEFAULT_USER_PASSWORD` måste innehålla minst 12 tecken, annars stoppar
+`db-init` med ett fel. Lösenordet är ett engångslösenord: kontot måste välja
+ett eget vid första inloggningen. `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED`
+är `true` som standard; sätt det till `false` endast i testmiljöer där det
+förvalda lösenordet behöver fortsätta fungera.
 
 Lägg sedan till en leverantör och aktivera modeller under **Admin → Modeller**.
 Se [Konfigurera AI-leverantörer](/guides/ai-providers). Skapa därefter en yta och
