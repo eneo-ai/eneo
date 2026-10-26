@@ -10,7 +10,7 @@ its default avatar. References within a tenant are kept: older icons do not
 record their uploader, and the owner's tenant can clear those itself.
 
 Revision ID: 202610261300
-Revises: 202610261200
+Revises: 202610261220
 Create Date: 2026-10-26 13:00:00.000000
 """
 
@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202610261300"
-down_revision: str | None = "202610261200"
+down_revision: str | None = "202610261220"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
