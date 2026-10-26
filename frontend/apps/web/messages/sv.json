@@ -4768,6 +4768,7 @@
   "eneo_error_9064": "Synkroniseringen har stoppats, men crawlertjänstens rensning pågår fortfarande. Försök ta bort källan igen om en liten stund.",
   "eneo_error_9069": "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den där först, och ta sedan bort den.",
   "eneo_error_9075": "Ikonen visas fortfarande på en assistent, app, yta eller gruppchatt. Ta bort den där först.",
+  "eneo_error_9076": "Bara en ikon som du själv har laddat upp kan visas. Ladda upp bilden först.",
   "whats_new": "Nyheter",
   "whats_new_unseen": "Nya uppdateringar",
   "whats_new_intro": "Vad som har ändrats i Eneo, en version i taget. Den senaste är vald.",

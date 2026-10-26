@@ -412,7 +412,8 @@ Assistants, apps, spaces and group chats show an uploaded icon through their
 with the resource's own update endpoint. Icon ids are public:
 `GET /api/v1/icons/{id}/` needs no authentication, so an id proves nothing about
 who may change the icon. A resource therefore accepts a new `icon_id` only for
-an icon the caller uploaded in their own tenant; any other id returns `400`.
+an icon the caller uploaded in their own tenant; any other id returns `400` with
+`eneo_error_code` `9076`.
 Sending the resource's current `icon_id` again is always accepted.
 
 `DELETE /api/v1/icons/{id}/` deletes an icon only when no assistant, app, space

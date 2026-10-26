@@ -13,8 +13,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.spaces_table import Spaces
-from eneo.icons.icon import IconMetadata, IconMetadataCreate
-from eneo.main.exceptions import BadRequestException
+from eneo.icons.icon import IconMetadata, IconMetadataCreate, IconNotAttachableError
 from eneo.main.models import NotProvided, is_provided
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
@@ -230,9 +229,7 @@ class IconRepository:
             )
         )
         if uploaded is None:
-            raise BadRequestException(
-                "Only an icon you uploaded can be shown. Upload the image first."
-            )
+            raise IconNotAttachableError()
 
     async def release_replaced(
         self, previous: UUID | None, requested: UUID | None | NotProvided

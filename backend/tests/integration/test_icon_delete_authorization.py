@@ -261,6 +261,7 @@ async def test_a_resource_refuses_an_icon_the_caller_did_not_upload(
     response = await _set_icon(client, owner, kind, resource_id, foreign_icon)
 
     assert response.status_code == 400, response.text
+    assert response.json()["eneo_error_code"] == ErrorCodes.ICON_NOT_ATTACHABLE == 9076
     assert await _shown_icon(client, owner, resource_id, kind) is None
     assert await _icon_status(client, foreign_icon) == 200
 
@@ -271,6 +272,7 @@ async def test_a_resource_refuses_an_unknown_icon(client, owner):
     response = await _set_icon(client, owner, "assistant", assistant_id, str(uuid4()))
 
     assert response.status_code == 400, response.text
+    assert response.json()["eneo_error_code"] == 9076
 
 
 async def test_another_editor_may_send_the_current_icon_again(
