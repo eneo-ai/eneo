@@ -56,6 +56,16 @@ COPY scripts/requirements-pdf.txt /tmp/requirements-pdf.txt
 RUN python3 -m venv /opt/pdf \
     && /opt/pdf/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-pdf.txt \
     && rm /tmp/requirements-pdf.txt
+# Forecasts run Timestral (scripts/forecast.py) with CPU-only torch in its own venv at
+# /opt/forecast. The image holds no model weights: the operator mounts a checkpoint they may
+# use at FORECAST_MODEL_PATH (default /models/forecast), read-only.
+# Its build backend is installed first, with hashes, and the archive built without isolation,
+# so no unpinned package is fetched during the build.
+COPY scripts/requirements-forecast-build.txt scripts/requirements-forecast.txt /tmp/
+RUN python3 -m venv /opt/forecast \
+    && /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-forecast-build.txt \
+    && /opt/forecast/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r /tmp/requirements-forecast.txt \
+    && rm /tmp/requirements-forecast-build.txt /tmp/requirements-forecast.txt
 WORKDIR /app
 ENV NODE_ENV=production \
     APP_VERSION=${VERSION} \
@@ -65,6 +75,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
 COPY scripts/render_pdf.py ./scripts/render_pdf.py
+COPY scripts/forecast.py ./scripts/forecast.py
 COPY --from=views /app/dist ./dist
 USER bun
 EXPOSE 3010

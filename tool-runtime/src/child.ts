@@ -7,6 +7,7 @@ import type { ComputeJob } from "./tools/compute/ports";
 import type { IngestJob, QueryJob } from "./tools/tabular/ports";
 import type { BuiltinTemplateJob, InspectJob, RenderJob } from "./tools/documents/ports";
 import type { ChartJob } from "./tools/charts/ports";
+import type { ForecastJob } from "./tools/forecast/ports";
 
 export type SandboxJob =
   | { job: ComputeJob; config: ComputeConfig }
@@ -16,6 +17,7 @@ export type SandboxJob =
   | { job: InspectJob }
   | { job: BuiltinTemplateJob }
   | { job: ChartJob }
+  | { job: ForecastJob }
   | { job: { kind: "env" } }
   | { job: { kind: "confinement" } };
 
@@ -53,6 +55,13 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
     case "render_chart": {
       const { executeChart } = await import("./tools/charts/execute");
       return { ...(await executeChart(input.job)) };
+    }
+    case "forecast": {
+      const { executeForecast } = await import("./tools/forecast/execute");
+      const { timestralEngine } = await import("./tools/forecast/engine/timestral");
+      const { model_path, threads } = input.job.config;
+      const engine = timestralEngine({ modelPath: model_path, threads });
+      return { ...(await executeForecast(input.job, engine)) };
     }
     case "env":
       // Test probe: the variable names the child inherited, never their values.

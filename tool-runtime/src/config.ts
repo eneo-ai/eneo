@@ -2,9 +2,14 @@ import { z } from "zod";
 import { computeConfigSchema, type ComputeConfig } from "./tools/compute/config";
 import { tabularConfigSchema, type TabularConfig } from "./tools/tabular/config";
 import { documentConfigSchema, type DocumentConfig } from "./tools/documents/config";
+import { forecastConfigSchema, type ForecastConfig } from "./tools/forecast/config";
 
 // Everything comes from the environment: the runtime has no database, no tenant state and no
 // operator API. Eneo decides who may call a tool; this process only checks the shared bearer.
+/** An empty value (`FORECAST_MODEL_NAME=` from a Compose default) means unset, not invalid. */
+const unsetIfEmpty = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema);
+
 const environmentSchema = z.object({
   TOOL_RUNTIME_TOKEN: z
     .string()
@@ -56,6 +61,14 @@ const environmentSchema = z.object({
   DOCUMENT_MAX_CONTENT_CHARS: z.coerce.number().int().min(5000).max(1_000_000).optional(),
   // PDF renders run a Python sidecar each, a few hundred MB apiece: run few at a time.
   DOCUMENT_PDF_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
+  // A forecast checkpoint (config.json + model.safetensors) the operator mounted read-only.
+  // The runtime ships no weights: the operator chooses a model they may use.
+  FORECAST_MODEL_PATH: unsetIfEmpty(z.string().min(1).default("/models/forecast")),
+  // How the model is named to users, for example "Timestral 28M".
+  FORECAST_MODEL_NAME: unsetIfEmpty(z.string().min(1).max(80).optional()),
+  // Each forecast runs a Python sidecar with torch, several hundred MB: run few at a time.
+  FORECAST_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
+  FORECAST_THREADS: z.coerce.number().int().min(1).max(16).default(2),
 });
 
 export type RuntimeConfig = {
@@ -69,6 +82,8 @@ export type RuntimeConfig = {
   tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
   documents: DocumentConfig;
   pdfConcurrency: number;
+  forecast: ForecastConfig;
+  forecastConcurrency: number;
   /** Request bodies up to this size; room for the largest document, JSON-escaped. */
   maxBodyBytes: number;
 };
@@ -95,6 +110,12 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
         : {}),
     }),
     pdfConcurrency: parsed.DOCUMENT_PDF_CONCURRENCY,
+    forecast: forecastConfigSchema.parse({
+      model_path: parsed.FORECAST_MODEL_PATH,
+      ...(parsed.FORECAST_MODEL_NAME ? { model_name: parsed.FORECAST_MODEL_NAME } : {}),
+      threads: parsed.FORECAST_THREADS,
+    }),
+    forecastConcurrency: parsed.FORECAST_CONCURRENCY,
     // Swedish text escapes to at most a few bytes per character; images travel by reference.
     maxBodyBytes: Math.max(
       256 * 1024,

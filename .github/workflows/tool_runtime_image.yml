@@ -70,6 +70,14 @@ jobs:
           sudo python3 -m venv /opt/pdf
           sudo /opt/pdf/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-pdf.txt
 
+      # The forecast engine tests need the Timestral sidecar as the image installs it; they build
+      # a tiny random checkpoint, so no published weights are downloaded.
+      - name: Install forecast sidecar
+        run: |
+          sudo python3 -m venv /opt/forecast
+          sudo /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-forecast-build.txt
+          sudo /opt/forecast/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r scripts/requirements-forecast.txt
+
       - name: Typecheck
         run: bun run typecheck
 

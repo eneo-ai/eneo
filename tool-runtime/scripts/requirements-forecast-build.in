@@ -1,0 +1,3 @@
+# The build backend timestral's source archive declares (setuptools>=77), installed with hashes
+# before the sidecar's own lock so pip never fetches an unpinned one into an isolated build.
+setuptools>=77
