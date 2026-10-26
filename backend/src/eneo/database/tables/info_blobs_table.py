@@ -83,6 +83,14 @@ class InfoBlobs(BasePublic):
                 "version_state = 'active' AND website_source_url IS NOT NULL"
             ),
         ),
+        # Serves a user's active-size sum (`/users/me` quota) as an
+        # index-only scan instead of a bitmap scan over every version.
+        Index(
+            "ix_info_blobs_active_user_size",
+            "user_id",
+            postgresql_include=["size"],
+            postgresql_where=text("version_state = 'active'"),
+        ),
     )
 
     text: Mapped[str] = mapped_column()
@@ -140,7 +148,11 @@ class InfoBlobs(BasePublic):
 
 
 def active_info_blob_version() -> ColumnElement[bool]:
-    return InfoBlobs.version_state == InfoBlobVersionState.ACTIVE.value
+    # A constant in the SQL text, not a bound parameter: PostgreSQL can then
+    # prove the partial indexes' predicate even in generic prepared plans.
+    return InfoBlobs.version_state == literal_column(
+        f"'{InfoBlobVersionState.ACTIVE.value}'", String(16)
+    )
 
 
 def website_source_url_equals(url: str | ColumnElement[str]) -> ColumnElement[bool]:

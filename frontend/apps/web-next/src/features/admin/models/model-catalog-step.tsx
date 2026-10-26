@@ -53,7 +53,8 @@ const MODEL_LISTS = {
   completion: "completion_models",
   embedding: "embedding_models",
   transcription: "transcription_models",
-  image: "image_models"
+  image: "image_models",
+  rerank: "rerank_models"
 } as const satisfies Record<ModelKind, keyof ModelsPresentation>;
 
 type ExistingModel = Pick<AdminModel, "name" | "nickname" | "provider_id" | "is_deprecated">;
@@ -325,6 +326,17 @@ export function ModelCatalogStep({
               // The request defaults are edited afterwards; "auto" lets the model decide.
               default_size: "auto",
               default_quality: "auto",
+              security_classification: selectedClassification
+            });
+          }
+          if (mode === "rerank") {
+            // Candidate factor and cap keep the backend's defaults until edited.
+            return createTenantModel(browserApi, "rerank", {
+              provider_id: providerId,
+              name: model.name,
+              display_name: displayName,
+              family: providerType,
+              hosting: "swe",
               security_classification: selectedClassification
             });
           }

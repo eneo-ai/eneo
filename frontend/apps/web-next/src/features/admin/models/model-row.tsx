@@ -74,6 +74,10 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
     await unwrap(
       browserApi.POST("/api/v1/image-models/{id}/", { params: { path: { id } }, body: flags })
     );
+  } else if (kind === "rerank") {
+    await unwrap(
+      browserApi.POST("/api/v1/rerank-models/{id}/", { params: { path: { id } }, body: flags })
+    );
   } else {
     await unwrap(
       browserApi.POST("/api/v1/embedding-models/{id}/", {
