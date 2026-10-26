@@ -116,6 +116,26 @@ async def test_a_task_already_running_has_a_deadline_of_its_own():
     assert elsewhere_deadline != here
 
 
+@pytest.mark.asyncio
+async def test_a_task_created_inside_a_frame_gets_a_budget_of_its_own():
+    """A child task inherits the context, not the ownership: the frame's
+    deadline must not bound, nor be forgotten by, what the child finalizes."""
+
+    async def child() -> float | None:
+        with finalizing("child step"):
+            return finalization_deadline()
+
+    with finalization_owner(), finalizing("parent step"):
+        parent = finalization_deadline()
+        await anyio.sleep(0.01)
+        child_deadline = await asyncio.create_task(child())
+        still_parent = finalization_deadline()
+
+    assert child_deadline is not None and parent is not None
+    assert child_deadline > parent
+    assert still_parent == parent
+
+
 def _source(events: list[str]) -> AsyncGenerator[str, None]:
     async def generator() -> AsyncGenerator[str, None]:
         try:

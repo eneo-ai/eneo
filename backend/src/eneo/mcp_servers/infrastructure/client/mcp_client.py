@@ -745,6 +745,7 @@ class _ConnectionHost:
         self._message_handler = message_handler
         self._ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._stop = asyncio.Event()
+        self._cancel_timer: asyncio.TimerHandle | None = None
         self.task = asyncio.create_task(
             self._run(), name=f"mcp-connection:{client.mcp_server.name}"
         )
@@ -753,6 +754,8 @@ class _ConnectionHost:
 
     def _settle(self, task: asyncio.Task[None]) -> None:
         _connection_hosts.discard(task)
+        if self._cancel_timer is not None:
+            self._cancel_timer.cancel()
         if not self._ready.done():
             # The host ended before its handshake: cancelled before it ran
             # at all (a shutdown drain), or on a path that reported nothing.
@@ -771,9 +774,17 @@ class _ConnectionHost:
         await asyncio.shield(self._ready)
 
     def request_stop(self) -> None:
-        """Ask the host to leave its contexts; it does so without being awaited."""
+        """Ask the host to leave its contexts; it does so without being awaited.
+
+        Arms the disconnect deadline too: a host that has not left them by
+        then is cancelled, whether or not anyone is still waiting for it.
+        """
         self._stop.set()
-        # Nobody will await the handshake any more; a failure it still reports
+        if self._cancel_timer is None:
+            self._cancel_timer = asyncio.get_running_loop().call_later(
+                MCP_DISCONNECT_TIMEOUT_SECONDS, self.task.cancel
+            )
+        # Nobody may await the handshake any more; a failure it still reports
         # must not surface as an unretrieved future exception.
         self._ready.add_done_callback(_retrieve_exception)
 
@@ -785,7 +796,7 @@ class _ConnectionHost:
         cancellation unwinds the same contexts, only without the transport's
         graceful session termination.
         """
-        self._stop.set()
+        self.request_stop()
         try:
             async with asyncio.timeout(timeout):
                 await asyncio.wait({self.task})
