@@ -50,18 +50,22 @@ unchanged.
 Frontend jobs use the same pinned Node version as the production Docker images
 and one Bun download-cache policy. Playwright still installs its system
 dependencies: apt network operations have bounded retries, and the entire
-installation has a deadline. Chromium downloads may retry once. Test failures
+installation has a deadline. Chromium is cached per Playwright version; a cache
+miss downloads it with a deadline and one retry. Test failures
 and OOM failures are not automatically retried. The selected Ubuntu release is
 explicit rather than following `ubuntu-latest`.
 
-CI image builds import matching Buildx caches with a two-minute timeout. Only
-branch pushes export CI caches: PR/queue caches cannot be shared with later
-candidates and would consume upload time and cache storage. CI exports use a
-separate `ci-<image>` scope, a two-minute limit and non-fatal cache-export
-failures; release publication retains its own cache namespace. The Svelte image installs
-workspace dependencies before copying app source, then runs the workspace
-prepare hooks. Generated local build/test directories are excluded from its
-Docker context.
+CI image builds import matching Buildx caches with a two-minute timeout. The
+application images import the cache that release publication exports under
+`<image>` on every `develop` push; CI never exports those images again, since
+a second `mode=max` export of the same layers would double cache storage and
+evict other caches. Only the devcontainer image, which has no publication
+build, exports a CI cache, and only on branch pushes: PR/queue caches cannot
+be shared with later candidates. That export uses the separate
+`ci-devcontainer` scope, a two-minute limit and a non-fatal failure mode. The
+Svelte image installs workspace dependencies from the package manifests alone
+before copying any source, then runs the workspace prepare hooks. Generated
+local build/test directories are excluded from its Docker context.
 
 ### Validation
 
@@ -76,10 +80,8 @@ actionlint .github/workflows/ci.yml
 python3 -m unittest discover -s scripts/tests -p test_release_bundle.py
 ```
 
-On the shared development Mac, run each command through
-`python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 90 --`.
-Full builds, full suites, and browser/E2E runs require explicit local execution
-approval; use the PR's GitHub Actions runs to validate the complete pipeline.
+Full builds, full suites and browser/E2E runs are slow locally; use the PR's
+GitHub Actions runs to validate the complete pipeline.
 
 ### Diagnosis and rollback
 

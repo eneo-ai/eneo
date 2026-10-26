@@ -1,5 +1,5 @@
 name: Set up Playwright Chromium
-description: Install lockfile-matched Chromium and its system libraries with bounded network retries.
+description: Install lockfile-matched Chromium from a per-version cache and its system libraries with bounded network retries.
 inputs:
   working-directory:
     description: Workspace containing the installed Playwright CLI.
@@ -7,6 +7,18 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Read the installed Playwright version
+      id: playwright
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+    # The cache holds the browser builds, not the system libraries they need.
+    - name: Restore cached browsers
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
     - name: Install system libraries
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -20,6 +32,7 @@ runs:
         APT
         timeout --kill-after=15s 240s bun run --bun playwright install-deps chromium
     - name: Install Chromium
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:

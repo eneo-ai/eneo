@@ -713,14 +713,15 @@ jobs:
           file: ${{ matrix.file }}
           pull: true
           push: false
-          # CI never exports into the release cache namespace. Default-branch
-          # publication warms the matching image's cache for later PRs.
+          # Default-branch publication exports each application image's cache
+          # under its own scope; a second export of the same layers here would
+          # only double cache storage. The devcontainer has no publication
+          # build, so CI warms its cache itself, on branch pushes only:
+          # PR/queue refs cannot share exported caches with later candidates.
           cache-from: |
             type=gha,scope=ci-${{ matrix.image }},timeout=2m
             type=gha,scope=${{ matrix.image }},timeout=2m
-          # PR/queue refs cannot share their exported caches with later
-          # candidates. Warm caches on branch pushes, not on every candidate.
-          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=ci-{0},timeout=2m,ignore-error=true', matrix.image) || '' }}
+          cache-to: ${{ github.event_name == 'push' && matrix.image == 'devcontainer' && 'type=gha,mode=max,scope=ci-devcontainer,timeout=2m,ignore-error=true' || '' }}
 
   ci:
     name: CI
