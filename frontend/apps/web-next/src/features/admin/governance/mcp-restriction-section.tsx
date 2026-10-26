@@ -159,7 +159,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                         aria-expanded={isExpanded}
                       >
                         <ChevronRight
-                          className={`size-4 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                          className={`size-4 transition-transform ${isExpanded ? "rotate-90" : ""}`}
                         />
                       </button>
                       <Switch

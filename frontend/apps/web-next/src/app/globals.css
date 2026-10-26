@@ -48,6 +48,11 @@
  *      the shadcn meanings used across the app.
  */
 @theme inline {
+  /* Motion: the shadcn layer's transition-* and ease-out move on Astryx's
+     scale (125 ms, its strong ease-out), like the Astryx components. */
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-standard);
+  --ease-out: var(--ease-standard);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -324,11 +329,11 @@
   }
 
   .space-model-collapse[data-state="open"] {
-    animation: space-model-open var(--duration-fast-max) ease-out;
+    animation: space-model-open var(--duration-fast-max) var(--ease-standard);
   }
 
   .space-model-collapse[data-state="closed"] {
-    animation: space-model-close var(--duration-fast-max) ease-in;
+    animation: space-model-close var(--duration-fast-min) var(--ease-standard);
   }
 }
 

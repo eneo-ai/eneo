@@ -5,9 +5,13 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
 const api = vi.hoisted(() => ({
+  installations: [] as object[],
   GET: vi.fn((path: string) =>
     Promise.resolve({
-      data: path === "/api/v1/admin/api-keys" ? { items: [], next_cursor: null } : { items: [] },
+      data:
+        path === "/api/v1/admin/api-keys"
+          ? { items: [], next_cursor: null }
+          : { items: path === "/api/v1/admin/modules/" ? api.installations : [] },
       response: new Response("{}")
     })
   ),
@@ -17,7 +21,11 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { ModulesPage } from "./modules-page";
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  api.installations = [];
+});
 
 const problemOf = (control: HTMLElement) =>
   document.getElementById(control.getAttribute("aria-describedby")!.split(" ")[0]!)?.textContent;
@@ -55,3 +63,28 @@ it("shows each problem at its field on install, and moves focus to the first", a
   expect(document.activeElement).toBe(urls);
   expect(api.PUT).not.toHaveBeenCalled();
 });
+
+it.each([
+  [false, "smooth"],
+  [true, "auto"]
+])(
+  "brings the form into view on edit, smoothly unless motion is reduced (reduce: %s)",
+  async (reduce, behavior) => {
+    api.installations = [
+      { module_id: "m1", module_key: "registrator", configured: true, redirect_uris: [] }
+    ];
+    const media = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(prefers-reduced-motion: reduce)"
+        ? ({ ...media(query), matches: reduce } as MediaQueryList)
+        : media(query)
+    );
+    const scroll = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scroll;
+    renderInApp(<ModulesPage title="Moduler" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Redigera" }));
+
+    expect(scroll).toHaveBeenCalledWith({ behavior, block: "start" });
+  }
+);
