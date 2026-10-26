@@ -2,12 +2,13 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import type { Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
-const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
+const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -392,4 +393,44 @@ it("rolls back only unsaved model selections and explains a failed save", async 
   expect(aurora.getAttribute("data-state")).toBe("checked");
   expect(borealis.getAttribute("data-state")).toBe("unchecked");
   expect(api.PATCH).toHaveBeenCalledTimes(2);
+});
+
+it("deletes the space once its name is confirmed: the list refreshes, the deleted space is not read again", async () => {
+  api.DELETE.mockResolvedValue({ data: null, response: new Response(null, { status: 204 }) });
+  const { queryClient } = showSettings();
+  const space = ["spaces", "space-1"];
+  const applications = ["spaces", "space-1", "applications"];
+  queryClient.setQueryData(["spaces"], { items: [] });
+  queryClient.setQueryData(applications, {});
+  const reads = queryClient.getQueryState(space)!.dataUpdateCount;
+  // A read of the space that started before the delete answers after it.
+  let answerLate!: (space: Space) => void;
+  const lateRead = queryClient
+    .fetchQuery({
+      queryKey: space,
+      queryFn: () => new Promise<Space>((resolve) => (answerLate = resolve)),
+      staleTime: 0
+    })
+    .catch(() => undefined);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Radera denna yta" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Radera yta" });
+  fireEvent.change(within(dialog).getByLabelText(/Ange ytnamnet/), {
+    target: { value: "Upphandling" }
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+
+  await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/list"));
+  answerLate(state.space);
+  await act(() => lateRead);
+  expect(api.DELETE).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
+    params: { path: { id: "space-1" } }
+  });
+  expect(queryClient.getQueryState(["spaces"])?.isInvalidated).toBe(true);
+  // Coming back to it reads it again; nothing reads it now.
+  expect(queryClient.getQueryState(space)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(applications)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(space)?.dataUpdateCount).toBe(reads);
+  expect(queryClient.getQueryState(space)?.fetchStatus).toBe("idle");
+  expect(queryClient.getQueryCache().find({ queryKey: space, exact: true })?.isStale()).toBe(true);
 });
