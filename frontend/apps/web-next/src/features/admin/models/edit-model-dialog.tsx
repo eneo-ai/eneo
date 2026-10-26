@@ -312,6 +312,7 @@ function EditModelForm({
                 id="model-family"
                 value={family}
                 onChange={(event) => setFamily(event.target.value)}
+                readOnly={kind === "rerank"}
               />
             </div>
             <div className="flex flex-col gap-1.5">

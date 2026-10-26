@@ -115,6 +115,7 @@ const rerankModel = {
   name: "Qwen/Qwen3-Reranker-4B",
   nickname: "Qwen Reranker",
   description: null,
+  family: "qwen",
   hosting: "swe",
   stability: "stable",
   open_source: true,
@@ -147,6 +148,9 @@ describe("EditModelDialog for a rerank model", () => {
     expect(
       (within(dialog).getByLabelText("Modellidentifierare") as HTMLInputElement).readOnly
     ).toBe(true);
+    // The rerank API takes no family, so the field cannot promise a change.
+    const family = within(dialog).getByLabelText("Modellfamilj") as HTMLInputElement;
+    expect([family.value, family.readOnly]).toEqual(["qwen", true]);
     await expectNoAxeViolations(dialog);
 
     const factor = within(dialog).getByLabelText(
