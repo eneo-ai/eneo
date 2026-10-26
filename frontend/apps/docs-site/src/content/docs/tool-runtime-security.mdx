@@ -219,6 +219,13 @@ inside the render directory for PNG, JPEG, CSS and HTML, and a 20 s kill. All
 text is HTML-escaped before layout; external images in templates are dropped
 and only `http(s)` hyperlinks are kept.
 
+Template font names are serialized as CSS strings, and theme colors must be
+six-digit RGB values. Template logos and body pictures pass the same PNG/JPEG
+header and dimension checks as document images before entering the render
+directory: at most 16 megapixels and 12,000 pixels per side. A file extension
+alone does not admit a resource. Unsupported or oversized bitmap data fails
+the render; recognized PNG/JPEG bytes retain their printed template size.
+
 **Forecasts** read their source as text and accept only one ISO date per row,
 in order, with no missing days, and numbers or empty cells as values, so a
 reader's guess at a date format, a formula error or a formula without a saved

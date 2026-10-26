@@ -157,6 +157,19 @@ them first, and the image builds them in its own stage, so React, Astryx and
 Vite are development dependencies only. A page larger than the 2 MB a host
 reads fails the build.
 
+The MCP Apps client/core peers are pinned together as development dependencies
+so view builds use the fixed MCP client. The `package.json` resolutions keep
+the indirect Hono and UUID dependencies on security-fixed releases. Remove each
+resolution once its parent requires a fixed version. ExcelJS uses only UUID's
+CommonJS `v4()` API; UUID 11.1.1 retains that API while fixing the buffer checks
+in other UUID methods.
+
+`bun audit` still reports GHSA-vfj7-8cjw-p6xm for `braces` 3.0.3, which has no
+published fixed release. Here it is a development-only dependency of
+`vite-plugin-singlefile` through `micromatch`. Our `build-views.ts` leaves
+`inlinePattern` empty, so the plugin never calls the affected matcher. Reassess
+this boundary before configuring inline patterns; no audit exception is added.
+
 The runtime reads the built pages when it starts. Eneo stores its own copy of
 each view and replaces it by itself when the runtime's catalog changes; the
 backend caches that catalog for up to five minutes. To see a changed view in
