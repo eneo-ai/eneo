@@ -867,6 +867,7 @@
   "login_process_interrupted": "Inloggningsprocessen avbröts",
   "login_too_many_attempts": "För många misslyckade inloggningsförsök. Försök igen om {minutes} min.",
   "login_unavailable": "Inloggningen kunde inte genomföras just nu. Försök igen om en stund, och kontakta er administratör om det fortsätter.",
+  "login_account_deactivated": "Det här kontot kan inte logga in. Kontot har avaktiverats, eller så är er organisations åtkomst pausad. Kontakta er administratör.",
   "authentication_incomplete": "Autentiseringsprocessen var ofullständig. Se till att cookies är aktiverade och försök igen.",
   "login_failed_general": "Inloggning misslyckades",
   "authentication_error_occurred": "Ett fel uppstod under autentiseringen. Försök igen eller kontakta support.",

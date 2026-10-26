@@ -13,8 +13,8 @@
 # copied in for install. The version is pinned because a floating `oven/bun:1`
 # drifts ahead of the committed bun.lock (generated with bun@1.3.x, see root
 # package.json "packageManager") and breaks `bun install --frozen-lockfile`.
-FROM node:22-bookworm-slim AS builder
-COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
+FROM node:22.23.4-bookworm-slim AS builder
+COPY --from=oven/bun:1.4.4 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /repo
 
 # Workspace manifests first for a cached install layer. Bun validates the
@@ -45,7 +45,11 @@ ENV ENEO_BACKEND_URL=http://build.invalid \
 RUN npm run build
 
 # ---- runner -----------------------------------------------------------------
-FROM node:22-bookworm-slim AS runner
+FROM node:22.23.4-bookworm-slim AS runner
+# The runtime only executes node. Drop the bundled package managers: their vendored
+# dependencies lag behind advisories and would fail the release image vulnerability gate.
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \

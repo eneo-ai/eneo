@@ -37,6 +37,7 @@ from eneo.server.endpoint_routes import (
 )
 from eneo.server.exception_handlers import (
     add_exception_handlers,
+    correlation_headers,
     default_error_code_for_status,
 )
 from eneo.server.middleware.cors import CORSMiddleware
@@ -270,7 +271,9 @@ def get_application():
         request: Request, exc: HTTPException
     ) -> JSONResponse:
         detail = exc.detail
-        headers = exc.headers or None
+        # The raiser's headers win; otherwise carry the request's correlation
+        # id like the canonical handlers do, so the header matches the logs.
+        headers = {**(correlation_headers() or {}), **(exc.headers or {})}
         request_id = request.headers.get("x-correlation-id") or request.headers.get(
             "x-request-id"
         )

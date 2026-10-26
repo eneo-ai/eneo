@@ -80,6 +80,7 @@
           "default": "all",
           "description": "admin entries are hidden from users without the admin permission."
         },
+        "permissions": { "$ref": "#/$defs/permissions" },
         "title": { "$ref": "#/$defs/localized" },
         "body": { "$ref": "#/$defs/localized" },
         "showMe": {
@@ -101,6 +102,59 @@
           }
         }
       }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "Additional effective user permissions: allOf AND anyOf. Admin does not bypass them. Omit for general news.",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "allOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/permission"
+          }
+        },
+        "anyOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/permission"
+          }
+        }
+      }
+    },
+    "permission": {
+      "enum": [
+        "assistants",
+        "skills",
+        "skills_management",
+        "personal_chat",
+        "group_chats",
+        "apps",
+        "services",
+        "collections",
+        "insights",
+        "AI",
+        "editor",
+        "admin",
+        "websites",
+        "integrations",
+        "shared_spaces",
+        "api_keys",
+        "storage",
+        "modules",
+        "assistant_debug",
+        "web_search",
+        "image_generation",
+        "file_analysis",
+        "file_creation",
+        "charts",
+        "compute"
+      ]
     }
   }
 }
