@@ -104,7 +104,8 @@
   // The icon id is staged in the editor and saved or discarded with the other changes.
   const icon = createIconEditor({
     iconId: () => $update.icon_id,
-    setIconId: (id) => ($update.icon_id = id)
+    setIconId: (id) => ($update.icon_id = id),
+    staged: true
   });
 
   async function deleteSpace() {

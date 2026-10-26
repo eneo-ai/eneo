@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
 
 async function uploadIcon(file: File): Promise<{ id: string }> {
@@ -59,12 +58,14 @@ export function IconField({
     if (busy) return;
     setBusy("remove");
     try {
-      if (iconId) {
-        await unwrap(
-          browserApi.DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
-        );
-      }
       await onSave(null);
+      // The server only deletes an icon no resource shows any more, so this follows the saved
+      // removal and is cleanup: an icon another resource still shows is kept.
+      if (iconId) {
+        await browserApi
+          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
+          .catch(() => {});
+      }
       // Delete goes with the icon: focus moves to Upload instead of the page.
       uploadButton.current?.focus();
     } catch {

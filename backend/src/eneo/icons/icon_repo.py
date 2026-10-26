@@ -4,14 +4,27 @@ from uuid import UUID
 import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.object_content_table import (
     IconContentReferences,
     ObjectContents,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
+
+# Every column that shows an icon. Their foreign keys are ON DELETE SET NULL and
+# icon ids are public, so an icon is only deleted once none of them references it.
+ICON_REFERENCES = (
+    Assistants.icon_id,
+    Apps.icon_id,
+    Spaces.icon_id,
+    GroupChatsTable.icon_id,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,16 +159,22 @@ class IconRepository:
             media_type=row.legacy_mimetype,
         )
 
-    async def delete_by_tenant(self, icon_id: UUID, tenant_id: UUID) -> bool:
+    async def delete(self, icon_id: UUID) -> bool:
+        """Delete an icon after its owning aggregate has authorized removal.
+
+        An icon that any resource still shows is kept; returns whether it was deleted.
+        """
         deleted_id = (
             await self.session.execute(
                 sa.delete(Icons)
-                .where(Icons.id == icon_id, Icons.tenant_id == tenant_id)
+                .where(
+                    Icons.id == icon_id,
+                    *(
+                        ~sa.exists().where(column == Icons.id)
+                        for column in ICON_REFERENCES
+                    ),
+                )
                 .returning(Icons.id)
             )
         ).scalar_one_or_none()
         return deleted_id is not None
-
-    async def delete(self, icon_id: UUID) -> None:
-        """Delete an icon after its owning aggregate has authorized removal."""
-        await self.session.execute(sa.delete(Icons).where(Icons.id == icon_id))

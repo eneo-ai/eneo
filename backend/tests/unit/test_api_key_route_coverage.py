@@ -872,7 +872,8 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     (
         "DELETE",
         "/icons/{id}/",
-    ): "Tenant-wide icon delete; service layer enforces tenant via user.tenant_id. "
+    ): "Deletes only an unreferenced icon of the key owner's tenant; service layer "
+    "refuses icons any resource still shows. "
     "Basic method check (DELETE→admin) blocks non-admin keys.",
     (
         "POST",

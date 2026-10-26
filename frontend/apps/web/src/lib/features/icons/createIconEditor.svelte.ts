@@ -3,12 +3,13 @@ import { m } from "$lib/paraglide/messages";
 
 /**
  * Upload/delete state for an `IconUpload`. The id is always read through `iconId`, so the shown icon
- * follows whichever state owns it; `setIconId` persists (or stages) a changed id.
+ * follows whichever state owns it; `setIconId` persists a changed id, or only stages it when `staged`.
  * Must be called during component initialisation.
  */
 export function createIconEditor(options: {
   iconId: () => string | null | undefined;
   setIconId: (id: string | null) => unknown;
+  staged?: boolean;
 }) {
   const eneo = getEneo();
   let uploading = $state(false);
@@ -40,14 +41,17 @@ export function createIconEditor(options: {
     },
     async remove() {
       error = null;
+      const id = options.iconId();
       try {
-        const id = options.iconId();
-        if (id) await eneo.icons.delete({ id });
         await options.setIconId(null);
       } catch (e) {
         console.error("Failed to delete icon:", e);
         error = m.avatar_delete_failed();
+        return;
       }
+      // The server only deletes an icon no resource shows any more, so this follows the persisted
+      // removal and is cleanup: an icon another resource still shows is kept.
+      if (id && !options.staged) await eneo.icons.delete({ id }).catch(() => {});
     }
   };
 }

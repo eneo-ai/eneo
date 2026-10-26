@@ -4701,7 +4701,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon by ID. Requires authentication and ownership.
+     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 403.
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;
@@ -42422,12 +42422,32 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Not found */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
