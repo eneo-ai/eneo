@@ -2405,7 +2405,6 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
-        icon_id = assistant.icon_id
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
@@ -2424,7 +2423,7 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        await self.repo.delete(assistant_id, space.id)
+        icon_id = await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
             await self.icon_repo.delete_if_unreferenced(icon_id)

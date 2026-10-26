@@ -5,11 +5,15 @@ every ``<img src>``. Assistants, apps, spaces and group chats reference icons
 with ``ON DELETE SET NULL``, so a delete that only checks the tenant silently
 clears whatever resource uses the icon. A resource releases its icon itself
 when an update replaces or clears it, or when the resource is deleted, and
-only an icon the caller uploaded in their tenant can be attached.
+only an icon the caller uploaded in their tenant can be attached. Changes lock
+the resource row before its icons, in id order, so concurrent changes neither
+deadlock nor release the wrong icon.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg2
@@ -24,7 +28,7 @@ from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.spaces_table import Spaces
-from eneo.icons.icon import IconInUseError
+from eneo.icons.icon import IconInUseError, IconNotAttachableError
 from eneo.main.exceptions import ErrorCodes, NotFoundException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
@@ -338,18 +342,53 @@ async def test_deleting_a_space_deletes_the_icons_of_the_resources_in_it(
     assert [await _icon_status(client, icon_id) for icon_id in icons] == [404] * 4
 
 
-def _deleting(db_container, icon_id: str, tenant_id: UUID):
-    """Start ``delete_icon`` in its own session; the future resolves to its backend pid."""
+def _racing(db_container, work: Callable[[Any], Awaitable[object]]):
+    """Start ``work`` in its own session; the future resolves to its backend pid."""
     pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
-    async def delete() -> None:
-        async with db_container() as deleting:
+    async def race() -> None:
+        async with db_container() as racer:
             pid.set_result(
-                await deleting.session().scalar(sa.text("SELECT pg_backend_pid()"))
+                await racer.session().scalar(sa.text("SELECT pg_backend_pid()"))
             )
-            await deleting.icon_service().delete_icon(UUID(icon_id), tenant_id)
+            await work(racer)
 
-    return asyncio.create_task(delete()), pid
+    return asyncio.create_task(race()), pid
+
+
+def _deleting(db_container, icon_id: str, tenant_id: UUID):
+    return _racing(
+        db_container,
+        lambda deleting: deleting.icon_service().delete_icon(UUID(icon_id), tenant_id),
+    )
+
+
+async def _change_icon(container, kind: str, resource_id: str, icon_id: str) -> None:
+    resource, icon = UUID(resource_id), UUID(icon_id)
+    match kind:
+        case "assistant":
+            await container.assistant_service().update_assistant(resource, icon_id=icon)
+        case "app":
+            await container.app_service().update_app(resource, icon_id=icon)
+        case "space":
+            await container.space_service().update_space(resource, icon_id=icon)
+        case _:
+            await container.group_chat_service().update_group_chat(
+                resource, icon_id=icon
+            )
+
+
+async def _delete(container, kind: str, resource_id: str) -> None:
+    resource = UUID(resource_id)
+    match kind:
+        case "assistant":
+            await container.assistant_service().delete_assistant(resource)
+        case "app":
+            await container.app_service().delete_app(resource)
+        case "space":
+            await container.space_service().delete_space(resource)
+        case _:
+            await container.group_chat_service().delete_group_chat(resource)
 
 
 async def _wait_until_blocked(session, racer: asyncio.Task, racer_pid) -> None:
@@ -406,6 +445,110 @@ async def test_a_delete_that_waited_for_another_delete_finds_nothing(
 
     with pytest.raises(NotFoundException):
         await second
+
+
+@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+async def test_two_updates_swapping_icons_do_not_deadlock(
+    client, owner, apps_enabled, db_container, kind
+):
+    first, first_icon = await _with_icon(client, owner, kind)
+    second, second_icon = await _with_icon(client, owner, kind)
+    keepers = [await _create(client, owner, "assistant") for _ in range(2)]
+
+    async with db_container() as attaching:
+        session = attaching.session()
+        # Attaching both icons elsewhere holds FOR KEY SHARE on them until
+        # commit, so each swap is halfway through when it starts waiting.
+        for keeper, icon_id in zip(keepers, (first_icon, second_icon)):
+            await session.execute(
+                sa.update(Assistants)
+                .where(Assistants.id == UUID(keeper))
+                .values(icon_id=UUID(icon_id))
+            )
+        swaps = [
+            _racing(db_container, lambda c: _change_icon(c, kind, first, second_icon)),
+            _racing(db_container, lambda c: _change_icon(c, kind, second, first_icon)),
+        ]
+        for swap, pid in swaps:
+            await _wait_until_blocked(session, swap, pid)
+
+    results = await asyncio.gather(*(swap for swap, _ in swaps), return_exceptions=True)
+    assert [r for r in results if isinstance(r, BaseException)] == []
+    assert await _shown_icon(client, owner, first, kind) == second_icon
+    assert await _shown_icon(client, owner, second, kind) == first_icon
+
+
+@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+async def test_concurrent_icon_changes_release_every_replaced_icon(
+    client, owner, apps_enabled, db_container, kind
+):
+    resource_id, first_icon = await _with_icon(client, owner, kind)
+    second_icon = await _upload(client, owner)
+    third_icon = await _upload(client, owner)
+
+    async with db_container() as changing:
+        await _change_icon(changing, kind, resource_id, second_icon)
+        racer, pid = _racing(
+            db_container, lambda c: _change_icon(c, kind, resource_id, third_icon)
+        )
+        await _wait_until_blocked(changing.session(), racer, pid)
+
+    await racer
+    assert await _shown_icon(client, owner, resource_id, kind) == third_icon
+    assert [
+        await _icon_status(client, icon_id)
+        for icon_id in (first_icon, second_icon, third_icon)
+    ] == [404, 404, 200]
+
+
+async def test_an_icon_deleted_while_an_update_attaches_it_is_refused(
+    client, owner, admin_user, apps_enabled, db_container
+):
+    app_id = await _create(client, owner, "app")
+    icon_id = await _upload(client, owner)
+
+    async with db_container() as deleting:
+        await deleting.icon_service().delete_icon(UUID(icon_id), admin_user.tenant_id)
+        attaching, pid = _racing(
+            db_container, lambda c: _change_icon(c, "app", app_id, icon_id)
+        )
+        await _wait_until_blocked(deleting.session(), attaching, pid)
+
+    with pytest.raises(IconNotAttachableError):
+        await attaching
+    assert await _shown_icon(client, owner, app_id, "app") is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "deleted"),
+    [
+        ("assistant", "assistant"),
+        ("app", "app"),
+        ("space", "space"),
+        ("group_chat", "group_chat"),
+        pytest.param("app", "space", id="app-in-space"),
+    ],
+)
+async def test_a_delete_waiting_on_an_icon_change_releases_the_new_icon(
+    client, owner, apps_enabled, db_container, kind, deleted
+):
+    space_id = await _create(client, owner, "space")
+    resource_id, old_icon = await _with_icon(client, owner, kind, space_id=space_id)
+    new_icon = await _upload(client, owner)
+    deleted_id = space_id if deleted == "space" else resource_id
+
+    async with db_container() as changing:
+        await _change_icon(changing, kind, resource_id, new_icon)
+        racer, pid = _racing(db_container, lambda c: _delete(c, deleted, deleted_id))
+        await _wait_until_blocked(changing.session(), racer, pid)
+
+    await racer
+    assert [
+        await _icon_status(client, icon_id) for icon_id in (old_icon, new_icon)
+    ] == [
+        404,
+        404,
+    ]
 
 
 def _upgrade(connection, revision: str) -> None:

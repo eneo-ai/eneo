@@ -139,7 +139,7 @@ class AppService:
             base_instructions=base_instructions,
         )
 
-    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+    async def _lock_app(self, app_id: UUID) -> App:
         app = await self.repo.get_for_update(app_id)
         if app is None:
             raise NotFoundException()
@@ -427,8 +427,8 @@ class AppService:
             or prompt_text is not None
             or skill_references is not None
         )
-        if requires_context_validation:
-            app = await self._lock_app_for_context_validation(app_id)
+        if requires_context_validation or is_provided(icon_id):
+            app = await self._lock_app(app_id)
         previous_icon_id = app.icon_id
         await self.icon_repo.ensure_attachable(
             previous_icon_id,
@@ -542,9 +542,6 @@ class AppService:
                 },
             )
 
-        app = space.get_app(app_id=app_id)
-        icon_id = app.icon_id
-
         if self.api_key_scope_revoker is not None:
             try:
                 await self.api_key_scope_revoker.revoke_scope(
@@ -559,7 +556,7 @@ class AppService:
                     extra={"app_id": str(app_id)},
                 )
 
-        await self.repo.delete(app_id)
+        icon_id = await self.repo.delete(app_id)
 
         if icon_id:
             await self.icon_repo.delete_if_unreferenced(icon_id)
@@ -687,7 +684,7 @@ class AppService:
             )
 
         if publish:
-            app = await self._lock_app_for_context_validation(app_id)
+            app = await self._lock_app(app_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 
