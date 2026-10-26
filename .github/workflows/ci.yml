@@ -2,18 +2,17 @@ name: CI
 
 on:
   workflow_call:
+  # Develop pushes are validated once by Build and Push Docker Images.
   push:
     branches:
-      - develop
       - "release/**"
   pull_request:
     branches:
       - develop
       - "release/**"
-  # Merge queue candidates (develop + queued PRs). Every scoped job runs in
-  # full here (their conditions only scope pull_request events), and the
-  # aggregate CI job reports the required "CI" check on the candidate.
+  # Classify the entire candidate diff, including preceding queued PRs.
   merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -52,8 +51,9 @@ jobs:
       base_sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
 
   changes:
-    name: Change scope
-    runs-on: ubuntu-latest
+    name: Scope and repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
       backend: ${{ steps.scope.outputs.backend }}
@@ -62,12 +62,11 @@ jobs:
       schema: ${{ steps.scope.outputs.schema }}
       scripts: ${{ steps.scope.outputs.scripts }}
       route_metadata: ${{ steps.scope.outputs.route_metadata }}
-      docker_backend: ${{ steps.scope.outputs.docker_backend }}
-      docker_frontend: ${{ steps.scope.outputs.docker_frontend }}
-      docker_devcontainer: ${{ steps.scope.outputs.docker_devcontainer }}
       web_next: ${{ steps.scope.outputs.web_next }}
       web_next_e2e: ${{ steps.scope.outputs.web_next_e2e }}
-      docker_web_next: ${{ steps.scope.outputs.docker_web_next }}
+      docker: ${{ steps.scope.outputs.docker }}
+      docker_matrix: ${{ steps.scope.outputs.docker_matrix }}
+      expected_jobs: ${{ steps.scope.outputs.expected_jobs }}
 
     steps:
       - name: Checkout
@@ -75,53 +74,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changed files
-        id: changed-files
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          BEFORE_SHA: ${{ github.event.before || github.event.merge_group.base_sha || '' }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            base="$PR_BASE_SHA"
-          else
-            base="$BEFORE_SHA"
-          fi
-
-          head="$HEAD_SHA"
-          files="$RUNNER_TEMP/changed-files.txt"
-
-          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-            git diff-tree --no-commit-id --name-only -r "$head" > "$files"
-          else
-            git diff --name-only "$base" "$head" > "$files"
-          fi
-
-          echo "files=$files" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Changed files"
-            echo ""
-            if [[ -s "$files" ]]; then
-              sed 's/^/- `/' "$files" | sed 's/$/`/'
-            else
-              echo "_No changed files detected. CI will fail open and run all scoped jobs._"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Classify CI scope
+      - name: Plan CI from the event's complete diff
         id: scope
-        run: node .github/scripts/ci-change-scope.mjs --files "${{ steps.changed-files.outputs.files }}" >> "$GITHUB_OUTPUT"
+        run: node .github/scripts/ci-change-scope.mjs --github-event >> "$GITHUB_OUTPUT"
 
-  branch-policy:
-    if: github.event_name == 'pull_request'
-    name: Branch policy
-    runs-on: ubuntu-latest
-
-    steps:
       - name: Check branch name
+        if: github.event_name == 'pull_request'
         env:
           BRANCH_NAME: ${{ github.head_ref }}
         run: |
@@ -138,11 +96,34 @@ jobs:
             exit 1
           fi
 
+      - name: Guard against re-introducing the old product name
+        run: python3 scripts/check_no_intric.py --repo-root .
+
+      - name: Check all HTTP route decorators
+        if: steps.scope.outputs.route_metadata == 'true'
+        run: python3 scripts/check_route_metadata.py --repo-root . --all
+
+      - name: Run developer-tooling tests
+        if: steps.scope.outputs.scripts == 'true'
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Run project workflow self-tests
+        if: steps.scope.outputs.scripts == 'true'
+        run: |
+          node .github/scripts/ensure-project-fields.mjs --self-test
+          node .github/scripts/project-intake.mjs --self-test
+          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs .github/scripts/evaluate-backend-audit.test.mjs
+          node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
+          node .github/scripts/check-user-facing.mjs --self-test
+          node scripts/collect_user_facing.mjs --self-test
+          node scripts/export_github_roadmap.mjs --self-test
+
   backend-quality:
     name: Backend quality
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
@@ -203,8 +184,9 @@ jobs:
           - { name: integration-4, suite: integration, shard: 4 }
           - { name: migrations, suite: migrations, shard: 0 }
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -258,10 +240,12 @@ jobs:
         if: matrix.suite == 'integration'
         # Four standard runners, each with four workers and isolated databases.
         # Partition files, not node IDs, so module fixtures stay in one shard.
+        # A test still running after 600s dumps every thread's stack to the log.
+        # The slowest test takes about 30s; the dump must precede the job limit.
         run: |
           python3 ../scripts/backend_test_shard.py --index "$SHARD_INDEX" --count 4 > "$RUNNER_TEMP/integration-files.txt"
           mapfile -t test_files < "$RUNNER_TEMP/integration-files.txt"
-          uv run pytest -v -n 4 --durations=25 -m integration "${test_files[@]}"
+          uv run pytest -v -n 4 --durations=25 -o faulthandler_timeout=600 -m integration "${test_files[@]}"
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           TESTCONTAINERS_RYUK_DISABLED: "true"
@@ -294,29 +278,6 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-  script-tests:
-    name: Script tests
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.scripts == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Run developer-tooling tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-
-      - name: Run project workflow self-tests
-        run: |
-          node .github/scripts/ensure-project-fields.mjs --self-test
-          node .github/scripts/project-intake.mjs --self-test
-          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs .github/scripts/evaluate-backend-audit.test.mjs
-          node .github/scripts/ci-change-scope.mjs --self-test
-          node .github/scripts/check-user-facing.mjs --self-test
-          node scripts/collect_user_facing.mjs --self-test
-          node scripts/export_github_roadmap.mjs --self-test
-
   # Preserve the existing required CI gate during rollout. Remove this caller
   # and its aggregate references once the standalone User-facing section check
   # is required in GitHub (see the What's new PLAYBOOK).
@@ -324,41 +285,12 @@ jobs:
     name: User-facing section (CI transition)
     uses: ./.github/workflows/user-facing.yml
 
-  route-metadata:
-    name: Route metadata
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.route_metadata == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Check all HTTP route decorators
-        run: python3 scripts/check_route_metadata.py --repo-root . --all
-
-  no-intric:
-    name: No intric references
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Guard against re-introducing the old product name
-        run: python3 scripts/check_no_intric.py --repo-root .
-
   frontend:
-    name: Frontend (${{ matrix.task }})
+    name: Frontend checks
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # The production build and the checks/tests are independent and each
-        # take ~3 min, so they run on separate runners instead of back to back.
-        task: [checks, build]
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -371,7 +303,6 @@ jobs:
       # backstop that keeps the i18n catalogs duplicate-free, in key parity and free of
       # keys the app no longer uses.
       - name: Check i18n message catalogs
-        if: matrix.task == 'checks'
         run: |
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
@@ -380,32 +311,23 @@ jobs:
       # User-facing release notes: schema, sv+en parity, newest-first order and
       # that every "Show me" anchor still exists in the web app.
       - name: Check What's new release notes
-        if: matrix.task == 'checks'
         working-directory: .
         run: python3 scripts/check_whats_new.py --repo-root .
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Set up frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       - name: Build workspace dependencies
         run: bun run --filter @eneo/ui build
 
       - name: Run type checks
-        if: matrix.task == 'checks'
-        run: bun run check
+        run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' check
 
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
-        if: matrix.task == 'checks'
-        run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
+        run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' lint
 
       - name: Run package tests
-        if: matrix.task == 'checks'
         run: |
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
@@ -414,32 +336,20 @@ jobs:
 
       # Use the installed runner so browser revisions track the lockfile.
       - name: Install Playwright Chromium
-        if: matrix.task == 'checks'
-        working-directory: frontend/apps/web
-        run: bun run --bun playwright install --with-deps chromium chromium-headless-shell
+        uses: ./.github/actions/setup-playwright
 
       - name: Run frontend dev lifecycle tests
-        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
-        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
-
-      - name: Build frontend
-        if: matrix.task == 'build'
-        # The legacy web image ships only apps/web. web-next has its own job
-        # with the server-side environment its production build requires.
-        run: bun run --filter '@eneo/web' build
-        env:
-          # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
-          NODE_OPTIONS: --max-old-space-size=8192
 
   frontend-web-next:
     name: Frontend (web-next)
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.web_next == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.web_next == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -452,13 +362,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Set up frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       - name: Lint
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
@@ -475,8 +380,9 @@ jobs:
   frontend-e2e:
     name: Frontend E2E
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.frontend_e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -492,22 +398,15 @@ jobs:
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: bun install --frozen-lockfile
+      - name: Set up frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       - name: Build workspace dependencies
         working-directory: frontend
         run: bun run --filter @eneo/ui build
 
       - name: Install Playwright Chromium
-        working-directory: frontend/apps/web
-        run: bun run --bun playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright
 
       # Build the production app up front so the Playwright webServer only has to
       # start `preview`. A full `vite build` inside the webServer's 180s timeout
@@ -521,7 +420,16 @@ jobs:
         env:
           SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
           NODE_OPTIONS: --max-old-space-size=8192
-        run: bun run build
+        run: /usr/bin/time -v -o "$RUNNER_TEMP/frontend-build-resources.txt" bun run build
+
+      - name: Upload build resource measurements
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frontend-build-resources
+          path: ${{ runner.temp }}/frontend-build-resources.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Wait for the E2E stack
         run: |
@@ -569,13 +477,13 @@ jobs:
 
   # web-next end-to-end and page-level accessibility (tests/a11y.spec.ts: axe
   # WCAG 2.2 A/AA scans in light and dark mode, plus the skip link) against the
-  # same isolated stack as "Frontend E2E". Unlike "Frontend (web-next)", it is
-  # not part of the aggregate CI gate yet: add it once it has run green.
+  # same isolated stack as "Frontend E2E". Both E2E suites are required by CI
+  # when their app, shared frontend inputs, or the backend changes.
   frontend-web-next-e2e:
     name: Frontend E2E (web-next)
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.web_next_e2e == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.web_next_e2e == 'true'
+    runs-on: ubuntu-24.04
     # Stack build (~2 min), install, build and the specs take ~10 min; a hung
     # stack or browser must not hold a runner for GitHub's 6-hour default.
     timeout-minutes: 30
@@ -598,39 +506,13 @@ jobs:
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Cache Bun packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: bun install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-chromium
+      - name: Set up frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       - name: Install Playwright Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: frontend/apps/web-next
-        run: bun run --bun playwright install --with-deps chromium
-
-      # The cache holds the browser, not the system libraries it needs.
-      - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        working-directory: frontend/apps/web-next
-        run: bun run --bun playwright install-deps chromium
+        uses: ./.github/actions/setup-playwright
+        with:
+          working-directory: frontend/apps/web-next
 
       # Next's incremental build cache: unchanged modules are not recompiled.
       - name: Cache Next.js build
@@ -693,8 +575,9 @@ jobs:
   schema-drift:
     name: Schema drift
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.schema == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.schema == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     services:
       redis:
         image: redis:7-alpine
@@ -736,14 +619,8 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
         working-directory: backend
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-        working-directory: frontend
+      - name: Set up frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       # schema.d.ts is generated from the backend OpenAPI spec; nothing else keeps
       # it in sync, so a backend model change that skips regeneration silently
@@ -804,47 +681,25 @@ jobs:
   docker-builds:
     name: Docker builds (${{ matrix.image }})
     needs: changes
-    if: >-
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.docker_backend == 'true' ||
-      needs.changes.outputs.docker_frontend == 'true' ||
-      needs.changes.outputs.docker_web_next == 'true' ||
-      needs.changes.outputs.docker_devcontainer == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - image: backend
-            context: ./backend
-            file: ./backend/Dockerfile
-          - image: frontend
-            context: ./frontend
-            file: ./frontend/Dockerfile
-          - image: web-next
-            context: ./frontend
-            file: ./frontend/apps/web-next/Dockerfile
-          - image: devcontainer
-            context: ./.devcontainer
-            file: ./.devcontainer/Dockerfile
+      matrix: ${{ fromJSON(needs.changes.outputs.docker_matrix) }}
 
     steps:
       - name: Checkout
-        if: >-
-          github.event_name != 'pull_request' ||
-          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
-          (matrix.image == 'web-next' && needs.changes.outputs.docker_web_next == 'true') ||
-          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # The frontend production build needs more memory than the hosted runner
-      # can provide without swap once it runs inside Docker. Keep this scoped to
-      # the frontend image; the other images build within the runner's RAM.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.33.0
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+
       - name: Add swap for frontend image build
-        if: >-
-          matrix.image == 'frontend' &&
-          (github.event_name != 'pull_request' || needs.changes.outputs.docker_frontend == 'true')
+        if: matrix.image == 'frontend'
         run: |
           sudo fallocate --length 4G /mnt/eneo-frontend.swap
           sudo chmod 600 /mnt/eneo-frontend.swap
@@ -852,33 +707,33 @@ jobs:
           sudo swapon /mnt/eneo-frontend.swap
 
       - name: Build Docker image
-        id: build-image
-        if: >-
-          github.event_name != 'pull_request' ||
-          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
-          (matrix.image == 'web-next' && needs.changes.outputs.docker_web_next == 'true') ||
-          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"
-
-
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          pull: true
+          push: false
+          # Default-branch publication exports each application image's cache
+          # under its own scope; a second export of the same layers here would
+          # only double cache storage. The devcontainer has no publication
+          # build, so CI warms its cache itself, on branch pushes only:
+          # PR/queue refs cannot share exported caches with later candidates.
+          cache-from: |
+            type=gha,scope=ci-${{ matrix.image }},timeout=2m
+            type=gha,scope=${{ matrix.image }},timeout=2m
+          cache-to: ${{ github.event_name == 'push' && matrix.image == 'devcontainer' && 'type=gha,mode=max,scope=ci-devcontainer,timeout=2m,ignore-error=true' || '' }}
 
   ci:
     name: CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     if: always()
     needs:
       - changes
       - security
-      - branch-policy
+      - user-facing
       - backend-quality
       - backend-tests
-      - script-tests
-      - route-metadata
-      - user-facing
-      - no-intric
       - frontend
       - frontend-e2e
       - frontend-web-next
@@ -887,55 +742,11 @@ jobs:
       - docker-builds
 
     steps:
-      - name: Check required jobs
+      - name: Checkout gate implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify required jobs against the CI plan
         env:
-          SECURITY_RESULT: ${{ needs.security.result }}
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
-          BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
-          BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
-          SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
-          ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
-          USER_FACING_RESULT: ${{ needs.user-facing.result }}
-          NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
-          FRONTEND_WEB_NEXT_RESULT: ${{ needs.frontend-web-next.result }}
-          FRONTEND_WEB_NEXT_E2E_RESULT: ${{ needs.frontend-web-next-e2e.result }}
-          SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
-          DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
-        run: |
-          failed=0
-
-          check_result() {
-            local name="$1"
-            local result="$2"
-
-            case "$result" in
-              success|skipped)
-                echo "$name: $result"
-                ;;
-              *)
-                echo "::error::$name failed with result: $result"
-                failed=1
-                ;;
-            esac
-          }
-
-          check_result "Security" "$SECURITY_RESULT"
-          check_result "Change scope" "$CHANGES_RESULT"
-          check_result "Branch policy" "$BRANCH_POLICY_RESULT"
-          check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
-          check_result "Backend tests" "$BACKEND_TESTS_RESULT"
-          check_result "Script tests" "$SCRIPT_TESTS_RESULT"
-          check_result "Route metadata" "$ROUTE_METADATA_RESULT"
-          check_result "User-facing section" "$USER_FACING_RESULT"
-          check_result "No intric references" "$NO_INTRIC_RESULT"
-          check_result "Frontend" "$FRONTEND_RESULT"
-          check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
-          check_result "Frontend (web-next)" "$FRONTEND_WEB_NEXT_RESULT"
-          check_result "Frontend E2E (web-next)" "$FRONTEND_WEB_NEXT_E2E_RESULT"
-          check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
-          check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
-
-          exit "$failed"
+          EXPECTED_JOBS: ${{ needs.changes.outputs.expected_jobs }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: node .github/scripts/ci-gate.mjs
