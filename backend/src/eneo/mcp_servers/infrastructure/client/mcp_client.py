@@ -5,12 +5,13 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, AsyncContextManager, Callable, Optional, cast
+from typing import Any, Callable, Optional, cast
 from urllib.parse import urlsplit
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession
+from mcp.client.session import MessageHandlerFnT
 from mcp.client.streamable_http import (
     GetSessionIdCallback,
     streamable_http_client,
@@ -702,8 +703,153 @@ def endpoint_url(mcp_server: MCPServer) -> str:
     return mcp_server.http_url
 
 
+# A disconnect waits this long for the host to unwind the SDK contexts (the
+# session's receive loop, the transport's session termination) before it is
+# cancelled.
+MCP_DISCONNECT_TIMEOUT_SECONDS = 10.0
+
+# Strong references to running connection hosts: asyncio keeps only weak
+# ones, and a host whose client has been dropped must still finish its
+# teardown. Drained at shutdown.
+_connection_hosts: set[asyncio.Task[None]] = set()
+
+
+def _retrieve_exception(future: asyncio.Future[None]) -> None:
+    if not future.cancelled():
+        future.exception()
+
+
+class _ConnectionHost:
+    """The task that owns one server connection.
+
+    anyio binds the cancel scopes of ``streamable_http_client`` and
+    ``ClientSession`` to the task that enters them: only that task may exit
+    them, in reverse order, with no other scope pushed on top meanwhile.
+    Entering them on whichever task happened to connect (a request task, a
+    gather child, a generator finalizer run by the garbage collector) is what
+    leaked their HTTP read/write loops before (#361, #1225). The host enters
+    both contexts in one coroutine on a task of its own, so they always nest
+    correctly, and leaves them when asked. Requests still go straight to the
+    ``ClientSession`` from the calling task: the SDK multiplexes them by
+    request id.
+    """
+
+    def __init__(
+        self,
+        client: "MCPClient",
+        headers: dict[str, str],
+        message_handler: MessageHandlerFnT,
+    ) -> None:
+        self._client = client
+        self._headers = headers
+        self._message_handler = message_handler
+        self._ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._stop = asyncio.Event()
+        self.task = asyncio.create_task(
+            self._run(), name=f"mcp-connection:{client.mcp_server.name}"
+        )
+        _connection_hosts.add(self.task)
+        self.task.add_done_callback(_connection_hosts.discard)
+
+    async def wait_ready(self) -> None:
+        """Return once the session is initialized; raise what connecting raised."""
+        await self._ready
+
+    def request_stop(self) -> None:
+        """Ask the host to leave its contexts; it does so without being awaited."""
+        self._stop.set()
+        # Nobody will await the handshake any more; a failure it still reports
+        # must not surface as an unretrieved future exception.
+        self._ready.add_done_callback(_retrieve_exception)
+
+    async def stop(self, timeout: float) -> None:
+        """Leave the contexts and wait for the host, bounded by ``timeout``.
+
+        Past the deadline the host is cancelled instead: cancellation unwinds
+        the same contexts, only without the transport's graceful session
+        termination.
+        """
+        self._stop.set()
+        try:
+            async with asyncio.timeout(timeout):
+                await asyncio.wait({self.task})
+        except TimeoutError:
+            logger.warning(
+                "MCP connection to %s did not close within %.0fs; cancelling it",
+                self._client.mcp_server.name,
+                timeout,
+            )
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+
+    async def _run(self) -> None:
+        client = self._client
+        try:
+            async with _open_streamable_http_client(
+                url=client.endpoint_url,
+                headers=self._headers,
+                timeout_seconds=float(client.timeout),
+                read_timeout_seconds=transport_read_timeout(client.tool_call_timeout),
+                tool_catalog_max_count=client.mcp_server.tool_catalog_max_count,
+                tool_catalog_max_bytes=client.mcp_server.tool_catalog_max_bytes,
+            ) as (read, write, get_session_id):
+                logger.debug(
+                    f"Streamable HTTP transport connected to {client.endpoint_url}"
+                )
+                async with _session_class()(
+                    read, write, message_handler=self._message_handler
+                ) as session:
+                    init_result = await session.initialize()
+                    client.record_handshake(init_result, get_session_id)
+                    client.session = session
+                    self._ready.set_result(None)
+                    await self._stop.wait()
+        except BaseException as exc:
+            if not self._ready.done():
+                # Connecting failed; the connector reports it. The contexts
+                # entered so far have already been left on this task.
+                self._ready.set_exception(exc)
+                return
+            client.log_teardown_error(exc)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+        finally:
+            client.session = None
+
+
+async def drain_connection_hosts(timeout: float) -> int:
+    """Close the connections still open at shutdown; return how many there were.
+
+    Every turn closes its own connections, so this finds none unless a
+    request was cut off before its cleanup ran. The pools those connections
+    use close after this.
+    """
+    hosts = {task for task in _connection_hosts if not task.done()}
+    if not hosts:
+        return 0
+    logger.warning(
+        "%d MCP connection(s) still open at shutdown; closing them", len(hosts)
+    )
+    for task in hosts:
+        task.cancel()
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.wait(hosts)
+    except TimeoutError:
+        logger.error(
+            "%d MCP connection(s) did not close within %.0fs at shutdown",
+            sum(1 for task in hosts if not task.done()),
+            timeout,
+        )
+    return len(hosts)
+
+
 class MCPClient:
-    """Client for interacting with HTTP-based MCP servers."""
+    """Client for interacting with HTTP-based MCP servers.
+
+    The connection lives on its own task (``_ConnectionHost``); ``connect``
+    and ``disconnect`` may be called from any task.
+    """
 
     def __init__(
         self,
@@ -747,8 +893,9 @@ class MCPClient:
         # Captured from the initialize() handshake.
         self.supports_tools_list_changed: bool = False
         self.session: Optional[ClientSession] = None
-        self._streams_context: AsyncContextManager[MCPStreams] | None = None
-        self._session_context = None
+        # The task that owns the SDK's transport and session contexts (see
+        # _ConnectionHost). Requests use ``session`` from any task.
+        self._host: _ConnectionHost | None = None
         # Populated after a successful connect() / initialize() round-trip.
         self.server_info_name: Optional[str] = None
         self.server_info_version: Optional[str] = None
@@ -862,7 +1009,7 @@ class MCPClient:
             await self._connect_internal()
         except MCPClientError:
             raise
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e)
@@ -879,30 +1026,10 @@ class MCPClient:
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
             )
-            await self._cleanup_contexts()
             raise MCPClientError(error_msg) from e
 
-    async def _cleanup_contexts(self) -> None:
-        """Clean up any partially initialized contexts."""
-        try:
-            if self._session_context:
-                await self._session_context.__aexit__(None, None, None)
-        except BaseException:
-            pass
-        finally:
-            self._session_context = None
-            self.session = None
-
-        try:
-            if self._streams_context:
-                await self._streams_context.__aexit__(None, None, None)
-        except BaseException:
-            pass
-        finally:
-            self._streams_context = None
-
     async def _connect_internal(self) -> None:
-        """Internal connection logic.
+        """Start the connection host and wait for its handshake.
 
         Errors are NOT wrapped here — they propagate to connect() which
         has the diagnostic fallback for unhelpful cancel scope errors.
@@ -913,44 +1040,19 @@ class MCPClient:
         handles returned in tool results, not to the transport session.
         """
         headers = await self._build_auth_headers()
-
-        streams_context = _open_streamable_http_client(
-            url=self.endpoint_url,
-            headers=headers,
-            timeout_seconds=float(self.timeout),
-            read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
-            tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
-            tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
-        )
-
-        streams = await streams_context.__aenter__()
-
-        self._streams_context = streams_context
-        read, write, get_session_id = streams
-        logger.debug(f"Streamable HTTP transport connected to {self.endpoint_url}")
-
-        session_context = _session_class()(
-            read, write, message_handler=self._handle_session_message
-        )
+        host = _ConnectionHost(self, headers, self._handle_session_message)
         try:
-            session = await session_context.__aenter__()
+            await host.wait_ready()
         except BaseException:
-            try:
-                await streams_context.__aexit__(None, None, None)
-            except BaseException:
-                pass
-            self._streams_context = None
+            # A failed handshake has already left its contexts; a cancelled
+            # connector leaves the host to finish on its own and unwind.
+            host.request_stop()
             raise
+        self._host = host
 
-        self._session_context = session_context
-        self.session = session
-
-        try:
-            init_result = await self.session.initialize()
-        except BaseException:
-            await self._cleanup_contexts()
-            raise
-
+    def record_handshake(
+        self, init_result: Any, get_session_id: Callable[[], str | None]
+    ) -> None:
         try:
             server_info = init_result.serverInfo
             self.server_info_name = getattr(server_info, "name", None)
@@ -983,6 +1085,25 @@ class MCPClient:
             self.server_info_version,
             session_id,
         )
+
+    def log_teardown_error(self, exc: BaseException) -> None:
+        if isinstance(exc, asyncio.CancelledError):
+            return
+        message = str(exc).lower()
+        if "cancel scope" in message or "different task" in message:
+            # The host is the only task that enters or leaves these contexts;
+            # this would mean a regression of that ownership, not a flaky server.
+            logger.error(
+                "MCP connection to %s hit a task-boundary error on teardown: %s",
+                self.mcp_server.name,
+                exc,
+            )
+        else:
+            logger.warning(
+                "MCP connection to %s ended with an error: %s",
+                self.mcp_server.name,
+                _extract_error_message(exc) or exc,
+            )
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """
@@ -1262,52 +1383,17 @@ class MCPClient:
             raise MCPClientError(f"Resource read failed: {error_msg}") from e
 
     async def disconnect(self) -> None:
-        """Disconnect from the MCP server.
+        """Close the connection: the host leaves the SDK contexts; this waits.
 
-        Must run on the same asyncio.Task that called connect(). The MCP SDK's
-        streamablehttp_client uses anyio cancel scopes bound to the entering
-        task; calling __aexit__ from a different task fails the task-boundary
-        check and leaks the internal anyio TaskGroup's child tasks (the
-        persistent HTTP read/write loops). We log this case explicitly so
-        leaks are visible rather than disguised as a slow CPU climb.
+        Safe from any task and under cancellation: the host unwinds on its
+        own once asked, so a caller that stops waiting does not leak it.
         """
-        # Clear session first
-        session_ctx = self._session_context
-        self._session_context = None
+        host = self._host
+        self._host = None
         self.session = None
-
-        streams_ctx = self._streams_context
-        self._streams_context = None
-
-        cleanup_errors: list[BaseException] = []
-
-        try:
-            if session_ctx:
-                await session_ctx.__aexit__(None, None, None)
-        except BaseException as e:
-            cleanup_errors.append(e)
-
-        try:
-            if streams_ctx:
-                await streams_ctx.__aexit__(None, None, None)
-        except BaseException as e:
-            cleanup_errors.append(e)
-
-        for err in cleanup_errors:
-            msg = str(err).lower()
-            if "cancel scope" in msg or "different task" in msg:
-                logger.error(
-                    "MCP cleanup task-boundary error for %s: %s. This leaks the "
-                    "streamablehttp_client TaskGroup; ensure connect() and "
-                    "disconnect() run on the same asyncio.Task.",
-                    self.mcp_server.name,
-                    err,
-                )
-            else:
-                logger.warning(
-                    "MCP cleanup error for %s: %s", self.mcp_server.name, err
-                )
-
+        if host is None:
+            return
+        await host.stop(MCP_DISCONNECT_TIMEOUT_SECONDS)
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
 
     async def __aenter__(self):

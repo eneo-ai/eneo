@@ -798,7 +798,6 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
     assert proxy.get_tools_for_llm() == []
     assert proxy.get_allowed_tool_names() == set()
     assert proxy._clients == {}
-    assert proxy._owner_task is None
 
 
 @pytest.mark.asyncio
@@ -817,7 +816,6 @@ async def test_unscoped_server_keeps_lazy_connection_without_preflight(
     assert proxy.get_allowed_tool_names() == {"server__tool"}
     assert _FakeMCPClient.instances == []
     assert proxy._clients == {}
-    assert proxy._owner_task is None
 
 
 @pytest.mark.asyncio
@@ -843,9 +841,11 @@ async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
+async def test_identity_discovery_uses_a_connection_of_its_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Discovery opens and closes its own client; the turn's tool calls open
+    another, which close() releases with the rest."""
     _install_fake_client(
         monkeypatch,
         live_tools_by_user={"user": [{"name": "shared"}]},
@@ -856,29 +856,21 @@ async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     discovery_task = asyncio.create_task(proxy.prepare_tools_for_context())
     await discovery_task
 
-    assert proxy._owner_task is None
     assert proxy._clients == {}
     [discovery_client] = _FakeMCPClient.instances
     assert discovery_client.enter_task is discovery_client.exit_task
 
-    async def run_streaming_phase():
-        current_task = asyncio.current_task()
-        result = await proxy.call_tools_parallel(
-            [("identity-server__shared", {"query": "hello"})]
-        )
-        await proxy.close()
-        return current_task, result
-
-    streaming_task = asyncio.create_task(run_streaming_phase())
-    owner_task, [result] = await streaming_task
+    [result] = await proxy.call_tools_parallel(
+        [("identity-server__shared", {"query": "hello"})]
+    )
+    await proxy.close()
 
     assert result["is_error"] is False
-    assert owner_task is streaming_task
     assert len(_FakeMCPClient.instances) == 2
     runtime_client = _FakeMCPClient.instances[1]
-    assert discovery_client.enter_task is not streaming_task
-    assert runtime_client.connect_task is streaming_task
-    assert runtime_client.disconnect_task is streaming_task
+    assert runtime_client.connect_task is not None
+    assert runtime_client.disconnect_task is not None
+    assert proxy._clients == {}
 
 
 @pytest.mark.asyncio
@@ -1091,13 +1083,34 @@ async def test_transport_authentication_failure_returns_actionable_error():
 
 
 @pytest.mark.asyncio
-async def test_call_tool_returns_error_when_no_client_cached():
-    """call_tool must NOT trigger a connect (it runs under asyncio.gather, on a
-    task other than the proxy's owner task). When no pre-connected client is
-    in the cache, return an error result."""
+async def test_call_tool_connects_on_first_use(monkeypatch: pytest.MonkeyPatch):
+    """A tool call opens its server's connection itself, from whatever task
+    runs it; close() releases it with the rest."""
+    _install_fake_client(monkeypatch, live_tools_by_user={"": []})
     server = _make_server()
     proxy = MCPProxySession([server])
-    # No pre-connect happened — _clients is empty.
+
+    [result] = await asyncio.gather(proxy.call_tool("server__tool", {"q": "x"}))
+    await proxy.close()
+
+    assert result["is_error"] is False
+    [client] = _FakeMCPClient.instances
+    assert client.connect_task is not None
+    assert client.disconnect_task is not None
+    assert proxy._clients == {}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_marks_a_server_failed_when_connecting_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _RefusingClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            raise MCPClientError("connection refused")
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _RefusingClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
 
     result = await proxy.call_tool("server__tool", {"q": "x"})
 
