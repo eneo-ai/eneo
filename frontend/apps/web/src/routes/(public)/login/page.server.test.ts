@@ -198,6 +198,27 @@ describe("login resume", () => {
     });
   });
 
+  test("a verified but blocked account is reported as deactivated, not as bad credentials", async () => {
+    const form = new FormData();
+    form.set("email", "user@example.com");
+    form.set("password", "correct");
+    mocks.loginWithEneo.mockResolvedValue({
+      success: false,
+      correlationId: "trace-3",
+      reason: "deactivated"
+    });
+
+    const result = await actions.login!({
+      request: new Request("https://eneo.example/login?/login", { method: "POST", body: form }),
+      cookies: { delete: vi.fn() }
+    } as never);
+
+    expect(result).toMatchObject({
+      status: 403,
+      data: { failed: true, reason: "deactivated", correlationId: "trace-3" }
+    });
+  });
+
   test("a failure without limit details reports none", async () => {
     const form = new FormData();
     form.set("email", "user@example.com");

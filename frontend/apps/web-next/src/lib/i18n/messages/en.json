@@ -865,6 +865,7 @@
   "login_process_interrupted": "Login Process Interrupted",
   "login_too_many_attempts": "Too many failed login attempts. Try again in {minutes} min.",
   "login_unavailable": "Sign-in could not be completed right now. Try again in a moment, and contact your administrator if it keeps happening.",
+  "login_account_deactivated": "This account cannot sign in. It has been deactivated, or your organisation's access is suspended. Contact your administrator.",
   "authentication_incomplete": "The authentication process was incomplete. Please ensure cookies are enabled and try again.",
   "login_failed_general": "Login Failed",
   "authentication_error_occurred": "An error occurred during authentication. Please try again or contact support.",
