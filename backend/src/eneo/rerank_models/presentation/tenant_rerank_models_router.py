@@ -9,6 +9,12 @@ from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
+from eneo.rerank_models.domain.rerank_spec import (
+    CANDIDATE_FACTOR_RANGE,
+    DEFAULT_CANDIDATE_FACTOR,
+    DEFAULT_MAX_CANDIDATES,
+    MAX_CANDIDATES_RANGE,
+)
 from eneo.rerank_models.presentation.rerank_model_models import RerankModelPublic
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
@@ -24,6 +30,14 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 router = APIRouter()
 
+_CANDIDATE_FACTOR_DESCRIPTION = (
+    "Candidates scored per requested chunk, up to max_candidates."
+)
+_MAX_CANDIDATES_DESCRIPTION = (
+    "Most candidates sorted per search; requested chunks beyond it follow"
+    " unsorted. Higher adds latency and cost."
+)
+
 
 class TenantRerankModelCreate(BaseModel):
     provider_id: UUID = Field(..., description="Model provider ID")
@@ -31,8 +45,8 @@ class TenantRerankModelCreate(BaseModel):
         ...,
         max_length=200,
         description=(
-            "Model identifier as served by the provider (e.g. 'rerank-v3.5', "
-            "'jina-reranker-v2-base-multilingual', or the name a TEI endpoint serves)"
+            "Model identifier as served by the provider, without a provider "
+            "prefix (e.g. 'rerank-v3.5', 'Qwen/Qwen3-Reranker-4B')"
         ),
     )
     display_name: str = Field(..., description="User-friendly display name")
@@ -46,6 +60,18 @@ class TenantRerankModelCreate(BaseModel):
     description: str | None = Field(default=None, description="Model description")
     security_classification: ModelId | None = Field(
         default=None, description="Security classification"
+    )
+    candidate_factor: int = Field(
+        default=DEFAULT_CANDIDATE_FACTOR,
+        ge=CANDIDATE_FACTOR_RANGE[0],
+        le=CANDIDATE_FACTOR_RANGE[1],
+        description=_CANDIDATE_FACTOR_DESCRIPTION,
+    )
+    max_candidates: int = Field(
+        default=DEFAULT_MAX_CANDIDATES,
+        ge=MAX_CANDIDATES_RANGE[0],
+        le=MAX_CANDIDATES_RANGE[1],
+        description=_MAX_CANDIDATES_DESCRIPTION,
     )
 
 
@@ -61,6 +87,18 @@ class TenantRerankModelUpdate(BaseModel):
     is_default: bool | None = Field(None, description="Set as tenant default")
     security_classification: ModelId | None = Field(
         None, description="Security classification reference (null clears it)"
+    )
+    candidate_factor: int | None = Field(
+        None,
+        ge=CANDIDATE_FACTOR_RANGE[0],
+        le=CANDIDATE_FACTOR_RANGE[1],
+        description=_CANDIDATE_FACTOR_DESCRIPTION,
+    )
+    max_candidates: int | None = Field(
+        None,
+        ge=MAX_CANDIDATES_RANGE[0],
+        le=MAX_CANDIDATES_RANGE[1],
+        description=_MAX_CANDIDATES_DESCRIPTION,
     )
 
 

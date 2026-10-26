@@ -109,3 +109,113 @@ describe("EditModelDialog for an image model", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+const rerankModel = {
+  id: "r1",
+  name: "Qwen/Qwen3-Reranker-4B",
+  nickname: "Qwen Reranker",
+  description: null,
+  family: "qwen",
+  hosting: "swe",
+  stability: "stable",
+  open_source: true,
+  candidate_factor: 5,
+  max_candidates: 100,
+  security_classification: null
+} as unknown as AdminModel;
+
+function renderRerankDialog(onOpenChange = vi.fn()) {
+  api.PUT.mockImplementation(() => ok({}));
+  renderInApp(
+    <EditModelDialog
+      model={rerankModel}
+      kind="rerank"
+      classifications={[]}
+      securityEnabled={false}
+      open
+      onOpenChange={onOpenChange}
+    />
+  );
+  return screen.findByRole("dialog", { name: "Redigera modell" });
+}
+
+describe("EditModelDialog for a rerank model", () => {
+  it("edits the candidate factor and cap, never token or price fields", async () => {
+    const onOpenChange = vi.fn();
+    const dialog = await renderRerankDialog(onOpenChange);
+    expect(within(dialog).queryByLabelText(/^Max indatatokens/)).toBeNull();
+    expect(within(dialog).queryByLabelText(/^Pris per/)).toBeNull();
+    expect(
+      (within(dialog).getByLabelText("Modellidentifierare") as HTMLInputElement).readOnly
+    ).toBe(true);
+    // The rerank API takes no family, so the field cannot promise a change.
+    const family = within(dialog).getByLabelText("Modellfamilj") as HTMLInputElement;
+    expect([family.value, family.readOnly]).toEqual(["qwen", true]);
+    await expectNoAxeViolations(dialog);
+
+    const factor = within(dialog).getByLabelText(
+      "Kandidater per efterfrågad chunk"
+    ) as HTMLInputElement;
+    const cap = within(dialog).getByLabelText(
+      "Max antal kandidater per sökning"
+    ) as HTMLInputElement;
+    expect([factor.value, cap.value]).toEqual(["5", "100"]);
+    fireEvent.change(factor, { target: { value: "3" } });
+    fireEvent.change(cap, { target: { value: "250" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PUT).toHaveBeenCalledWith("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        params: { path: { model_id: "r1" } },
+        body: {
+          display_name: "Qwen Reranker",
+          description: null,
+          hosting: "swe",
+          open_source: true,
+          stability: "stable",
+          candidate_factor: 3,
+          max_candidates: 250,
+          security_classification: null
+        }
+      })
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it.each([
+    ["Kandidater per efterfrågad chunk", "21", "Ange ett heltal från 1 till 20."],
+    ["Kandidater per efterfrågad chunk", "2.5", "Ange ett heltal från 1 till 20."],
+    ["Max antal kandidater per sökning", "0", "Ange ett heltal från 1 till 1000."],
+    ["Max antal kandidater per sökning", "", "Ange ett heltal från 1 till 1000."]
+  ])(
+    "refuses %s = %j with the reason at the field and focus on it",
+    async (label, value, problem) => {
+      const dialog = await renderRerankDialog();
+      const field = within(dialog).getByLabelText(label) as HTMLInputElement;
+      fireEvent.change(field, { target: { value } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+      const error = await within(dialog).findByText(problem);
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+      expect(field.getAttribute("aria-describedby")?.split(" ")).toContain(
+        error.closest("[id]")!.id
+      );
+      expect(document.activeElement).toBe(field);
+      expect(api.PUT).not.toHaveBeenCalled();
+    }
+  );
+
+  it("moves focus to the first of two invalid fields", async () => {
+    const dialog = await renderRerankDialog();
+    const factor = within(dialog).getByLabelText("Kandidater per efterfrågad chunk");
+    const cap = within(dialog).getByLabelText("Max antal kandidater per sökning");
+    fireEvent.change(factor, { target: { value: "0" } });
+    fireEvent.change(cap, { target: { value: "5000" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await within(dialog).findByText("Ange ett heltal från 1 till 1000.");
+    expect(within(dialog).getByText("Ange ett heltal från 1 till 20.")).toBeTruthy();
+    expect(document.activeElement).toBe(factor);
+    await expectNoAxeViolations(dialog);
+  });
+});

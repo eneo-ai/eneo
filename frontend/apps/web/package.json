@@ -67,7 +67,7 @@
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.4.1",
-    "dompurify": "^3.4.16",
+    "dompurify": "^3.4.17",
     "driver.js": "^1.8.0",
     "echarts": "^6.1.0",
     "esbuild": "^0.28.1",

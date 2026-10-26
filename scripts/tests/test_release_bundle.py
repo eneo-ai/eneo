@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +25,37 @@ smoke = module("smoke_release_bundle", "scripts/smoke_release_bundle.py")
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_frontend_runtime_gate_rejects_unpatched_node_versions(self):
+        workflow = (ROOT / ".github/workflows/application_image.yml").read_text()
+        gate = re.search(
+            r'--entrypoint node "\$IMAGE" -e \'\n(.*?)\n\s*\'',
+            workflow,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(gate, "Published frontend images must check their Node runtime")
+        program = """
+const vm = require('node:vm');
+vm.runInNewContext(process.argv[1], {
+  process: { versions: { node: process.argv[2] } },
+  console: { log() {} }
+});
+"""
+        for version, allowed in [
+            ("20.20.2", False),
+            ("22.22.0", False),
+            ("22.23.3", False),
+            ("22.23.4", True),
+            ("22.24.0", True),
+        ]:
+            with self.subTest(version=version):
+                result = subprocess.run(
+                    ["node", "-e", program, gate.group(1), version],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode == 0, allowed, result.stderr)
+
     def test_shared_identity(self):
         sha = "a" * 40
         for ref, expected in [

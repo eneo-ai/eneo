@@ -45,6 +45,7 @@
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
     completionUpdateCeilings,
+    hasValidRerankCandidateSettings,
     modelToDraft,
     rawCostToNumber,
     submittedModelName,
@@ -196,6 +197,8 @@
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
+      candidate_factor: Number(draft.candidateFactorStr),
+      max_candidates: Number(draft.maxCandidatesStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),
       ...securityClassificationPatch()
     };
@@ -205,6 +208,10 @@
     error = null;
     if (!draft.displayName.trim()) {
       error = m.display_name_required();
+      return;
+    }
+    if (modelType === "rerank" && !hasValidRerankCandidateSettings(draft)) {
+      error = m.rerank_candidate_settings_invalid();
       return;
     }
     // Mirror the AddWizard guard: a completion model cannot serve any request

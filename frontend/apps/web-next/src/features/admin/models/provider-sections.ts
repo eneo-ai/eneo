@@ -42,7 +42,8 @@ function flatten(presentation: ModelsPresentation): KindedModel[] {
       model,
       kind: "transcription" as const
     })),
-    ...presentation.image_models.map((model) => ({ model, kind: "image" as const }))
+    ...presentation.image_models.map((model) => ({ model, kind: "image" as const })),
+    ...(presentation.rerank_models ?? []).map((model) => ({ model, kind: "rerank" as const }))
   ];
 }
 
@@ -114,7 +115,8 @@ export const KIND_FILTERS: KindFilter[] = [
   "completion",
   "embedding",
   "transcription",
-  "image"
+  "image",
+  "rerank"
 ];
 
 /** Security filter value for models without a classification. */
@@ -189,7 +191,8 @@ export function countByKind(
     completion: 0,
     embedding: 0,
     transcription: 0,
-    image: 0
+    image: 0,
+    rerank: 0
   };
   for (const section of sections) {
     for (const { kind } of sectionModels(section, { ...filters, kind: "all" })) {

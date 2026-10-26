@@ -96,6 +96,23 @@ Once a provider is configured and models are added, tenant admins can enable spe
 
 ---
 
+## Rerank models
+
+A rerank model reorders the knowledge an assistant retrieves, so the most relevant passages come first regardless of their length. Add one under **Admin** → **Models** → **Rerank models** on a provider that serves reranking, for example Cohere, Azure AI or a self-hosted vLLM or Infinity server. Enter the model identifier without a provider prefix (`cohere-rerank-v4.0-fast`, not `azure_ai/cohere-rerank-v4.0-fast`). Space owners then choose it per assistant under **Material handling** → **Result ranking**; only models the space's security classification allows are offered.
+
+Each rerank model has two settings:
+
+| Setting                        | Default | Allowed | Effect                                                                                                       |
+| ------------------------------ | ------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Candidates per requested chunk | 5       | 1–20    | How many candidates are scored for each chunk the assistant asks for. Matters when few chunks are requested. |
+| Maximum candidates per search  | 100     | 1–1000  | How many search hits are sorted in one search.                                                               |
+
+An assistant gets at least as many chunks as it would without a reranker. When it asks for more than the maximum, as assistants with large context windows do, the sorted chunks come first and the rest follow unsorted, in vector search order. Raise the maximum if more of their context should be sorted.
+
+The defaults were measured on one municipality's public and internal web content with 200-token chunks; a higher maximum gave the same ranking. Other material, chunk sizes or rerankers may need other values. A higher maximum can find relevant text further down but makes every search slower and, for providers that charge per search, more expensive. The backend log line `Reranked search` shows the time spent per step and the number of sorted (`candidates`) and `unsorted` chunks.
+
+---
+
 ## Custom & Self-Hosted Providers
 
 For self-hosted inference servers or providers not natively listed in LiteLLM, use any provider type that speaks the OpenAI protocol — such as **`hosted_vllm`**, **`openai`**, or **`ollama`** — and point it at your own endpoint. The key requirement is that the server exposes an OpenAI-compatible API.

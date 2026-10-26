@@ -5,7 +5,7 @@ keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
 a loopback MCP server and a web-next administration. Flows are on for every
 tenant: the `flows_core` feature flag is seeded off by 202610211900 and turned
-on by 202610221000, which also gives existing predefined Owner roles the four
+on by 202610220930, which also gives existing predefined Owner roles the four
 flow permissions (and AI Configurator roles `flows_trace`), as new tenants get
 them. A tenant row with `enabled = false` turns flows off for that tenant.
 
@@ -70,6 +70,13 @@ The 2026-10-23 merge brought develop's `202610211200` (website path index) and
 `202610231000` joins `202610161000` with the flow head `202610221100`, so a
 flow database runs both develop migrations on its next upgrade. Re-pointing
 `202610151000` again would have marked them applied without running them.
+
+The 2026-10-26 merge brought develop's `202610221000` (rerank candidate
+settings), whose id the flow chain already used for flows on by default. Develop
+keeps the id, since develop databases record it, and the flow revision became
+`202610220930`. Flow databases are past it and alembic stores only heads, so
+they are unaffected. `202610261100` joins `202610221000` with the flow head
+`202610261000`.
 
 ## Transfer from the adoption checkpoint
 
