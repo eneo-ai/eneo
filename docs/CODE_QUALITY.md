@@ -88,7 +88,9 @@ skipped required job fails `CI`, even if GitHub treats that skipped job as green
 Missing or invalid scope output also fails the aggregate.
 
 Heavy jobs have explicit 20–30 minute limits; repository checks have ten minutes
-and the aggregate has five. The Svelte E2E build uploads
+and the aggregate has five. A backend integration test still running after ten
+minutes dumps every thread's stack to the job log before that limit, and its
+start line is the one without a result line. The Svelte E2E build uploads
 `frontend-build-resources` with GNU time's wall time, peak RSS and exit status,
 including on build failure. Its Node heap limit remains unchanged. These
 measurements help investigate the adapter-node OOM; removing the duplicate

@@ -240,10 +240,12 @@ jobs:
         if: matrix.suite == 'integration'
         # Four standard runners, each with four workers and isolated databases.
         # Partition files, not node IDs, so module fixtures stay in one shard.
+        # A test still running after 600s dumps every thread's stack to the log.
+        # The slowest test takes about 30s; the dump must precede the job limit.
         run: |
           python3 ../scripts/backend_test_shard.py --index "$SHARD_INDEX" --count 4 > "$RUNNER_TEMP/integration-files.txt"
           mapfile -t test_files < "$RUNNER_TEMP/integration-files.txt"
-          uv run pytest -v -n 4 --durations=25 -m integration "${test_files[@]}"
+          uv run pytest -v -n 4 --durations=25 -o faulthandler_timeout=600 -m integration "${test_files[@]}"
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           TESTCONTAINERS_RYUK_DISABLED: "true"
