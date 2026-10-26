@@ -12,7 +12,7 @@ import LogoutPage from "./+page.svelte";
 
 describe("logout page", () => {
   test("confirms the logout with a heading and a way back in", async () => {
-    render(LogoutPage, { data: { message: "logout" } });
+    render(LogoutPage, { data: { message: "logout", signedIn: false } });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("logout_success");
@@ -23,10 +23,20 @@ describe("logout page", () => {
   });
 
   test("explains an expired session", async () => {
-    render(LogoutPage, { data: { message: "expired" } });
+    render(LogoutPage, { data: { message: "expired", signedIn: false } });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("session_expired");
     await expect.element(page.getByText("session_expired_description")).toBeVisible();
+  });
+
+  test("a direct visit offers a deliberate logout instead of ending the session", async () => {
+    render(LogoutPage, { data: { message: "logout", signedIn: true } });
+    await expect.element(page.getByRole("heading", { level: 1 })).toHaveTextContent("logout");
+    await expect
+      .element(page.getByRole("button", { name: "logout", exact: true }))
+      .toHaveAttribute("type", "submit");
+    expect(document.querySelector("form")?.method).toBe("post");
+    expect(document.querySelector("form")?.getAttribute("action")).toBe("/logout?/logout");
   });
 });

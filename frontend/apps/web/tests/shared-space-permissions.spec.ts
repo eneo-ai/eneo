@@ -46,6 +46,7 @@ test("a shared-space viewer can read the space but cannot create assistants or m
   await expectOk(addViewerResponse, "adding viewer to shared space");
 
   await page.goto("/logout");
+  await page.getByRole("button", { name: /^(Logga ut|Logout)$/ }).click();
   await expect(page).toHaveURL(/\/login/);
   await loginViaUi(page, viewerEmail, viewerPassword);
 

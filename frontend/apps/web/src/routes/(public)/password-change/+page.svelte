@@ -4,6 +4,7 @@
   import PasswordChangeForm from "$lib/features/auth/components/PasswordChangeForm.svelte";
   import { Button } from "$lib/components/ui/button";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   let { data } = $props();
 
@@ -44,5 +45,7 @@
       <p>{m.password_change_not_available()}</p>
     </AuthAlert>
   {/if}
-  <Button variant="link" href="/logout" class="self-center">{m.logout()}</Button>
+  <form method="POST" action={localizeHref("/logout?/logout")} class="self-center">
+    <Button type="submit" variant="link">{m.logout()}</Button>
+  </form>
 </AuthPageShell>

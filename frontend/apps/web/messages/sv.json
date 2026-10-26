@@ -875,6 +875,7 @@
   "logged_in_as": "Inloggad som:",
   "logout": "Logga ut",
   "logout_success": "Du har loggat ut",
+  "logout_confirmation_description": "Välj Logga ut för att avsluta din session.",
   "login_description": "Logga in för att fortsätta till Eneo.",
   "logout_description": "Du kan stänga fönstret eller logga in igen.",
   "session_expired_description": "Logga in igen för att fortsätta där du var.",

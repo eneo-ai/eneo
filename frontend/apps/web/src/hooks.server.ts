@@ -5,7 +5,7 @@ import { DASHBOARD_URL } from "$lib/core/constants";
 import { assertDeploymentEnv } from "$lib/core/deploymentEnv.server";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
-import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
+import { authenticateUser } from "$lib/features/auth/auth.server";
 import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
 import { toAppError } from "$lib/core/errors";
 import {
@@ -36,12 +36,7 @@ function routeRequiresLogin(route: { id: string | null }): boolean {
   return !routeIsPublic;
 }
 
-const authHandle: Handle = async ({ event, resolve }) => {
-  // Clear authentication cookies if the 'clear_cookies' URL parameter is present
-  if (event.url.searchParams.get("clear_cookies")) {
-    clearFrontendCookies(event);
-  }
-
+export const authHandle: Handle = async ({ event, resolve }) => {
   // Load feature flags and environment BEFORE authentication check
   // This ensures login page has access to federation configuration flags
   // Pass event.fetch so URL rewriting in handleFetch works correctly.
