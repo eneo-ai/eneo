@@ -414,7 +414,11 @@ with the resource's own update endpoint. Icon ids are public:
 who may change the icon. A resource therefore accepts a new `icon_id` only for
 an icon the caller uploaded in their own tenant; any other id returns `400` with
 `eneo_error_code` `9076`.
-Sending the resource's current `icon_id` again is always accepted.
+Sending the resource's current `icon_id` again is always accepted. An icon whose
+uploader is not recorded (icons from before object-content storage, or of a
+removed user) keeps showing where it is but cannot be attached anywhere new.
+Service API keys have no user, so they cannot upload (`403`) or attach icons;
+use a user account or a user-owned key.
 
 `DELETE /api/v1/icons/{id}/` deletes an icon only when no assistant, app, space
 or group chat shows it. An icon that is still shown returns `409` with

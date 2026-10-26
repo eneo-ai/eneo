@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, UploadFile
 
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -69,7 +70,7 @@ async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
 @router.post(
     "/",
     response_model=IconPublic,
-    responses=responses.get_responses([400, 413, 415, 503]),
+    responses=responses.get_responses([400, 403, 413, 415, 503]),
     summary="Upload icon",
     description=(
         "Upload an icon image (PNG, JPEG, WebP) within the active deployment "
@@ -79,11 +80,16 @@ async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="IconService authorizes mutations for the caller and target icon.",
+    reason=(
+        "Any user may upload an icon to their tenant; the upload records its "
+        "uploader, which only that user may attach. Service keys have no user "
+        "and are refused."
+    ),
 )
 async def create_icon(
     file: UploadFile,
     container: _ContainerWithUploadAdmission,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ) -> IconPublic:
     icon_service = container.icon_service()
     user = container.user()

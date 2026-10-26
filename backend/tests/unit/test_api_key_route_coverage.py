@@ -867,7 +867,8 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     (
         "POST",
         "/icons/",
-    ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id. "
+    ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id "
+    "and require_user_for_creation refuses service keys. "
     "Basic method check (POST→write) blocks read keys.",
     (
         "DELETE",
