@@ -21,6 +21,7 @@ from eneo.questions.question import (
     McpToolReferencePublic,
     UseTools,
 )
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 from eneo.sessions.session import (
     AskChatResponse,
     AskResponse,
@@ -385,20 +386,23 @@ async def to_response(
 
         async def event_stream():
             assert not isinstance(response.answer, str)
-            async for chunk in response.answer:
-                if chunk.response_type == ResponseType.TEXT:
-                    yield to_ask_response(
-                        question=response.question,
-                        files=response.files,
-                        session=response.session,
-                        answer=chunk.text or "",
-                        info_blobs=chunk.reference_chunks or [],
-                        completion_model=response.completion_model,
-                        show_pricing=show_pricing,
-                        tools=response.tools,
-                    ).model_dump_json()
+            async with closing(response.answer) as answer:
+                async for chunk in answer:
+                    if chunk.response_type == ResponseType.TEXT:
+                        yield to_ask_response(
+                            question=response.question,
+                            files=response.files,
+                            session=response.session,
+                            answer=chunk.text or "",
+                            info_blobs=chunk.reference_chunks or [],
+                            completion_model=response.completion_model,
+                            show_pricing=show_pricing,
+                            tools=response.tools,
+                        ).model_dump_json()
 
-        return EventSourceResponse(event_stream(), ping=15)
+        return ClosingEventSourceResponse(
+            event_stream(), ping=15, closes=[response.answer]
+        )
 
     assert isinstance(response.answer, str)
     return to_ask_response(
@@ -444,10 +448,13 @@ async def to_conversation_response(
             )
 
             assert not isinstance(response.answer, str)
-            async for chunk in response.answer:
-                yield to_sse_response(chunk=chunk, session_id=response.session.id)
+            async with closing(response.answer) as answer:
+                async for chunk in answer:
+                    yield to_sse_response(chunk=chunk, session_id=response.session.id)
 
-        return EventSourceResponse(event_stream(), ping=15)
+        return ClosingEventSourceResponse(
+            event_stream(), ping=15, closes=[response.answer]
+        )
 
     assert isinstance(response.answer, str)
     return to_ask_conversation_response(

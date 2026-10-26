@@ -7,6 +7,10 @@ from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
+from eneo.main.stream_lifecycle import FINALIZATION_BUDGET_SECONDS
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    drain_connection_hosts,
+)
 from eneo.object_content.content import (
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
@@ -18,6 +22,7 @@ from eneo.object_content.object_store_connection import (
 from eneo.object_content.runtime import object_content_runtime
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
+from eneo.sessions.session_service import drain_background_saves
 from eneo.settings.encryption_service import EncryptionService
 
 
@@ -79,6 +84,11 @@ async def shutdown():
     if settings.openapi_only_mode:
         return
 
+    # Streamed turns finish their cleanup before the pools they use close:
+    # the saves scheduled on abort need the database, the MCP connections
+    # their HTTP clients.
+    await drain_background_saves(FINALIZATION_BUDGET_SECONDS)
+    await drain_connection_hosts(FINALIZATION_BUDGET_SECONDS)
     await object_content_runtime.stop()
     await sessionmanager.close()
     await aiohttp_client.stop()

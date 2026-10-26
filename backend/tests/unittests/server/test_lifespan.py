@@ -44,3 +44,29 @@ async def test_connection_table_outage_does_not_stop_startup(
     lifespan_module.sessionmanager.close.assert_not_awaited()
     lifespan_module.aiohttp_client.stop.assert_not_awaited()
     lifespan_module.job_manager.init.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_drains_streamed_turns_before_closing_their_pools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(openapi_only_mode=False)
+    monkeypatch.setattr(lifespan_module, "get_settings", lambda: settings)
+    order: list[str] = []
+
+    def step(name: str) -> AsyncMock:
+        return AsyncMock(side_effect=lambda *a, **k: order.append(name))
+
+    monkeypatch.setattr(lifespan_module, "drain_background_saves", step("saves"))
+    monkeypatch.setattr(lifespan_module, "drain_connection_hosts", step("mcp"))
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "stop", step("objects"))
+    monkeypatch.setattr(lifespan_module.sessionmanager, "close", step("db"))
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "stop", step("http"))
+    monkeypatch.setattr(lifespan_module.job_manager, "close", step("jobs"))
+    monkeypatch.setattr(lifespan_module.websocket_manager, "shutdown", step("ws"))
+
+    await lifespan_module.shutdown()
+
+    assert order.index("saves") < order.index("db")
+    assert order.index("mcp") < order.index("db")
+    assert order.index("mcp") < order.index("http")

@@ -68,7 +68,12 @@ differ in how a completion uses them:
   ordinary Streamable HTTP MCP client, lazily, when the model first calls a
   tool on that server, and reuses the connection for the rest of the
   completion. Prefixing (`server__tool`), parallel calls, output limits,
-  retries, reference capture and cleanup are implemented once.
+  retries, reference capture and cleanup are implemented once. Each
+  connection runs on a task of its own, so the proxy can open it from any
+  tool call and close it from wherever the answer ends: when the model
+  finishes, when the provider fails, and when the reader closes the tab
+  mid-answer. The whole turn then releases its connections, the pending tool
+  approvals and the provider stream within one shared budget of ten seconds.
 - **One way to attach.** A tool reaches a completion either because a
   **Function** the assistant enabled resolved to a provider for this user, or
   because a **general MCP server** is enabled for the space and assistant, or

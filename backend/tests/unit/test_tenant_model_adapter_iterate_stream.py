@@ -2363,3 +2363,64 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
     results = [message["content"] for message in messages if message["role"] == "tool"]
     assert results == [file_handle(file_id)]
     assert "synthetic-secret" not in str(messages)
+
+
+class _ClosableChunkStream(_AsyncChunkStream):
+    def __init__(self, chunks, eneo_context=None):
+        super().__init__(chunks, eneo_context)
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_closing_the_adapter_stream_closes_the_provider_stream():
+    """An aborted answer must release the provider's HTTP response at once."""
+    provider = _ClosableChunkStream([_text_chunk("hello"), _text_chunk(" world")])
+    adapter = _make_adapter()
+
+    stream = adapter.iterate_stream(provider)
+    assert (await anext(stream)).text == "hello"
+    await stream.aclose()
+
+    assert provider.closed
+
+
+@pytest.mark.asyncio
+async def test_closing_after_a_tool_round_closes_the_follow_up_stream():
+    """Each round replaces the provider stream; the one being read when the
+    answer is aborted is the one to release."""
+    adapter = _make_adapter()
+    first = _ClosableChunkStream([_tool_call_chunk()])
+    follow_up = _ClosableChunkStream(
+        [_text_chunk("after the tool"), _text_chunk(" call", finish_reason="stop")]
+    )
+    prepared = PreparedModelStream(
+        stream=first,
+        messages=[],
+        kwargs={},
+        mcp_proxy=_FakeMCPProxy(),
+        has_tools=True,
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up),
+    ):
+        stream = adapter.iterate_stream(
+            stream=prepared,
+            context=None,
+            model_kwargs={},
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+        async for chunk in stream:
+            if chunk.text == "after the tool":
+                break
+        await stream.aclose()
+
+    assert follow_up.closed
+    assert not first.closed, "the exhausted first-round stream needs no close"

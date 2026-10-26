@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -336,3 +337,138 @@ async def test_proxy_that_knows_no_views_is_harmless():
     await _name_app_views(chunk, None)
 
     assert chunk.tool_calls_metadata[0].app_view is None
+
+
+def _conversation_session() -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        user_id=uuid4(),
+        assistant=SimpleNamespace(id=uuid4()),
+        questions=[],
+    )
+
+
+def _service(adapter: object) -> CompletionService:
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_closing_the_completion_runs_stream_cleanup_on_the_same_task():
+    """A client abort closes the typed stream; the wrapper behind it must clean
+    up right away, on the consumer's task."""
+    completion_model = _make_completion_model()
+    service = _service(_DummyAdapter(model=completion_model))
+
+    cancelled_on: list[asyncio.Task[object] | None] = []
+    approval_manager = AsyncMock()
+    approval_manager.cancel_approval = AsyncMock(
+        side_effect=lambda _id: cancelled_on.append(asyncio.current_task())
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.completion_service.get_approval_manager",
+        return_value=approval_manager,
+    ):
+        response = await service.get_response(
+            model=completion_model,
+            text_input="hi",
+            session=_conversation_session(),
+            stream=True,
+            require_tool_approval=True,
+        )
+        assert (await anext(response.completion)).text == "hello"
+        await response.completion.aclose()
+
+    assert cancelled_on == [asyncio.current_task()]
+
+
+@pytest.mark.asyncio
+async def test_closing_the_completion_closes_the_adapter_stream_at_once():
+    """The adapter's generator holds the provider stream; closing the typed
+    completion must close it right away, not leave it to the GC."""
+    closed_on: list[asyncio.Task[object] | None] = []
+
+    class TrackingAdapter(_DummyAdapter):
+        async def iterate_stream(self, **kwargs):
+            try:
+                async for chunk in super().iterate_stream(**kwargs):
+                    yield chunk
+                    yield chunk
+            finally:
+                closed_on.append(asyncio.current_task())
+
+    completion_model = _make_completion_model()
+    service = _service(TrackingAdapter(model=completion_model))
+
+    response = await service.get_response(
+        model=completion_model, text_input="hi", stream=True
+    )
+    await anext(response.completion)
+    await response.completion.aclose()
+
+    assert closed_on == [asyncio.current_task()]
+
+
+class _ClosableStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FakeProxy:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def allow_file_references(self, *args, **kwargs) -> None:
+        pass
+
+    def set_document_template(self, reference) -> None:
+        pass
+
+    async def prepare_tools_for_context(self) -> None:
+        pass
+
+    def get_tool_count(self) -> int:
+        return 0
+
+    def get_tools_for_llm(self) -> list[dict[str, object]]:
+        return []
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_closing_an_unstarted_completion_releases_what_was_prepared():
+    """The provider request and the MCP proxy exist before the response starts.
+    A body that never iterates must still release them."""
+    prepared = _ClosableStream()
+    proxy = _FakeProxy()
+
+    class PreparingAdapter(_DummyAdapter):
+        async def prepare_streaming(self, **kwargs):
+            return SimpleNamespace(stream=prepared, _eneo_context={"has_tools": False})
+
+    completion_model = _make_completion_model()
+    service = _service(PreparingAdapter(model=completion_model))
+    service._mcp_proxy_factory = SimpleNamespace(create=lambda *a, **k: proxy)
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        stream=True,
+        mcp_servers=[SimpleNamespace(id=uuid4(), name="server", is_enabled=True)],
+    )
+    await response.completion.aclose()
+
+    assert prepared.closed
+    assert proxy.closed
