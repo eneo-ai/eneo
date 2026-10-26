@@ -53,13 +53,13 @@
     "hast-util-to-text": "^4.0.2",
     "highlight.js": "^11.11.1",
     "jose": "^6.2.3",
-    "katex": "^0.16.47",
+    "katex": "^0.18.11",
     "lowlight": "3.3.0",
     "lucide-react": "^1.17.0",
     "mdast-util-math": "^3.0.0",
     "micromark-extension-math": "^3.1.0",
     "micromark-util-character": "^2.1.1",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "next-intl": "^4.13.0",
     "next-themes": "^0.4.6",
     "openapi-fetch": "^0.17.0",
@@ -98,7 +98,7 @@
     "@vitejs/plugin-react": "^4.5.0",
     "axe-core": "4.13.0",
     "eslint": "^9",
-    "eslint-config-next": "16.3.8",
+    "eslint-config-next": "16.4.1",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "jsdom": "^26.1.0",
     "micromark-util-types": "^2.0.2",
@@ -109,7 +109,7 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "ignoreScripts": [
     "sharp",

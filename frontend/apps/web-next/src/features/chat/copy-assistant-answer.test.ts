@@ -38,6 +38,36 @@ describe("getPreferredAssistantCopyFormat", () => {
 });
 
 describe("assistantRichTextClipboardPayload", () => {
+  it.each([
+    { property: "trust", value: true },
+    { property: "processor", value: (value: unknown) => (value === false ? true : value) }
+  ])("ignores inherited KaTeX $property settings in copied formulas", ({ property, value }) => {
+    // Model pre-existing prototype pollution without leaking it to other tests.
+    // Inherited setting processors must not turn our explicit trust:false into true.
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, property);
+    let payload: ReturnType<typeof assistantRichTextClipboardPayload>;
+    try {
+      Object.defineProperty(Object.prototype, property, {
+        value,
+        configurable: true,
+        writable: true
+      });
+      payload = assistantRichTextClipboardPayload(
+        "Start $x^2$. $\\href{javascript:alert(1)}{x}$ " +
+          "$\\includegraphics{https://example.test/tracking.png}$"
+      );
+    } finally {
+      if (previous) Object.defineProperty(Object.prototype, property, previous);
+      else Reflect.deleteProperty(Object.prototype, property);
+    }
+
+    const html = document.createElement("div");
+    html.innerHTML = payload.html;
+    expect(html.querySelector("a, [href], img, mglyph")).toBeNull();
+    expect(html.querySelector("math msup")).not.toBeNull();
+    expect(payload.plainText).toContain("Start x^2.");
+  });
+
   it("renders markdown, strips inrefs, and removes unsafe html", () => {
     const payload = assistantRichTextClipboardPayload(
       '**Answer** <inref id="aaaaaaaa"/> <script>alert(1)</script> [link](javascript:alert(1))'

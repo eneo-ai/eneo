@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import JSZip from "jszip";
 import { Document, Footer, Header, ImageRun, Packer, Paragraph, TextRun, PageNumber } from "docx";
 import { renderHtml } from "../../src/tools/documents/engine/html";
 import { fontStack, pdfProfile, profileCss } from "../../src/tools/documents/engine/pdf-profile";
-import { pdfAvailable, preparePdf } from "../../src/tools/documents/engine/pdf";
+import { PDF_PYTHON, pdfAvailable, preparePdf } from "../../src/tools/documents/engine/pdf";
 import { renderDocument } from "../../src/tools/documents/engine/render";
 import { renderIntoTemplate } from "../../src/tools/documents/engine/word/apply";
 import { builtinTemplate } from "../../src/tools/documents/engine/word/builtin";
 import { parseMarkdown } from "../../src/tools/documents/markdown/parse";
 import { inspectPdf } from "./pdf-inspect";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const PDF = await pdfAvailable();
 
 // A 1x1 PNG, enough for a logo.
 const PNG = Buffer.from(
@@ -19,7 +22,7 @@ const PNG = Buffer.from(
 );
 
 /** A municipal letterhead: Arial body, blue Cambria headings, a logo and page numbers. */
-async function letterhead(): Promise<Buffer> {
+async function letterhead(bodyPicture = false): Promise<Buffer> {
   return Buffer.from(
     await Packer.toBuffer(
       new Document({
@@ -81,6 +84,19 @@ async function letterhead(): Promise<Buffer> {
               }),
             },
             children: [
+              ...(bodyPicture
+                ? [
+                    new Paragraph({
+                      children: [
+                        new ImageRun({
+                          type: "png",
+                          data: PNG,
+                          transformation: { width: 20, height: 20 },
+                        }),
+                      ],
+                    }),
+                  ]
+                : []),
               new Paragraph({ children: [new TextRun("Dnr {{dnr}}")] }),
               new Paragraph("{{content}}"),
               new Paragraph({
@@ -144,6 +160,178 @@ describe("the HTML the PDF is laid out from", () => {
     expect(fontStack("Times New Roman")).toBe('"Times New Roman", "Liberation Serif", serif');
     expect(fontStack("Courier New")).toBe('"Courier New", "Liberation Mono", monospace');
     expect(fontStack(undefined)).toContain("Carlito");
+  });
+});
+
+describe("PDF template resource boundaries", () => {
+  test.skipIf(!PDF)("renders a legitimate template with both raster paths as a tagged PDF", async () => {
+    const { buffer, pages } = await renderDocument(
+      "pdf",
+      { ...document, content: "A short document.", fields: { dnr: "1" } },
+      { template: await letterhead(true) },
+    );
+    expect(pages).toBe(1);
+    const facts = await inspectPdf(buffer);
+    expect(facts).toMatchObject({ title: document.title, marked: true, structured: true });
+    expect(buffer.toString("latin1")).toContain("/Subtype /Image");
+  });
+
+  test("custom face names remain CSS strings, including control characters and prototype names", () => {
+    expect(fontStack("noto-sans-2")).toBe('"noto-sans-2", sans-serif');
+    expect(fontStack("Åke's font")).toBe('\"Åke\'s font\", sans-serif');
+    expect(fontStack('Face"\\\n\r\f\0')).toBe('"Face\\22 \\5c \\a \\d \\c \\fffd ", sans-serif');
+    expect(fontStack("constructor")).toBe('"constructor", sans-serif');
+    expect(fontStack("__proto__")).toBe('"__proto__", sans-serif');
+  });
+
+  test.skipIf(!PDF)(
+    "every face stays data in the PDF sidecar's CSS parser",
+    () => {
+      const font = 'Face";color:red;} html{font-family:"Other\\Face';
+      const face = { font };
+      const css = profileCss({
+        page: {
+          widthMm: 210,
+          heightMm: 297,
+          marginMm: { top: 20, right: 20, bottom: 20, left: 20 },
+          headerMm: 10,
+          footerMm: 10,
+        },
+        body: face,
+        title: face,
+        headings: [{}, face, face, face],
+        header: { face, segments: [{ align: "left", parts: ["Header"] }] },
+        footer: { face, segments: [{ align: "left", parts: ["Footer"] }] },
+      });
+      const parsed = Bun.spawnSync(
+        [
+          PDF_PYTHON,
+          "-I",
+          "-c",
+          `
+import json, sys, tinycss2
+rules = tinycss2.parse_stylesheet(sys.stdin.read(), skip_whitespace=True, skip_comments=True)
+faces = []
+for rule in rules:
+    if rule.type == 'qualified-rule':
+        for declaration in tinycss2.parse_declaration_list(rule.content, skip_whitespace=True, skip_comments=True):
+            if declaration.type == 'declaration' and declaration.lower_name == 'font-family':
+                faces.append(next(token.value for token in declaration.value if token.type == 'string'))
+print(json.dumps({'faces': faces, 'selectors': [tinycss2.serialize(rule.prelude).strip() for rule in rules if rule.type == 'qualified-rule']}))
+`,
+        ],
+        { stdin: Buffer.from(css) },
+      );
+      expect(parsed.exitCode).toBe(0);
+      const result = JSON.parse(parsed.stdout.toString()) as {
+        faces: string[];
+        selectors: string[];
+      };
+      // Body, title, all three heading faces and both running bands use one serializer.
+      expect(result.faces.filter((name) => name === font)).toHaveLength(7);
+      expect(result.selectors.filter((selector) => selector === "html")).toHaveLength(1);
+      expect(result.selectors).not.toContain("Other");
+    },
+  );
+
+  test("theme colors admit only RGB values for both Word theme color forms", async () => {
+    for (const [color, expected] of [
+      ["1F4E79", "#1f4e79"],
+      ["123456;color:red", undefined],
+    ] as const) {
+      for (const kind of ["srgbClr", "sysClr"] as const) {
+        const zip = await JSZip.loadAsync(await letterhead());
+        const styles = await zip.file("word/styles.xml")!.async("string");
+        zip.file(
+          "word/styles.xml",
+          styles.replace('<w:color w:val="1F4E79"/>', '<w:color w:themeColor="accent1"/>'),
+        );
+        zip.file(
+          "word/theme/theme1.xml",
+          `<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme><a:accent1><a:${kind} ${kind === "sysClr" ? 'val="windowText" lastClr' : "val"}="${color}"/></a:accent1></a:clrScheme></a:themeElements></a:theme>`,
+        );
+        const directory = await mkdtemp(join(tmpdir(), "eneo-profile-colors-"));
+        try {
+          const profile = await pdfProfile(
+            Buffer.from(await zip.generateAsync({ type: "nodebuffer" })),
+            directory,
+          );
+          expect(profile.headings[1]?.color).toBe(expected);
+          expect(profileCss(profile)).not.toContain("123456;color:red");
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test("rejects disguised and oversized resources in both logo and body picture paths", async () => {
+    const oversized = Buffer.from(PNG);
+    oversized.writeUInt32BE(12001, 16);
+    for (const body of [false, true]) {
+      for (const bytes of [Buffer.from("wOF2: invalid image"), oversized]) {
+        const zip = await JSZip.loadAsync(await letterhead(body));
+        for (const name of Object.keys(zip.files).filter(
+          (name) => name.startsWith("word/media/") && name.endsWith(".png"),
+        ))
+          zip.file(name, bytes);
+        const template = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+        const directory = await mkdtemp(join(tmpdir(), "eneo-profile-images-"));
+        try {
+          if (!body) {
+            await expect(pdfProfile(template, directory)).rejects.toThrow("valid PNG or JPEG");
+          } else {
+            // Keep the header valid so this control reaches body picture extraction.
+            const header = await zip.file("word/header1.xml")!.async("string");
+            zip.file("word/header1.xml", header.replace(/<w:drawing[\s\S]*?<\/w:drawing>/g, ""));
+            await expect(
+              preparePdf(
+                { ...document, fields: { dnr: "1" } },
+                {
+                  template: Buffer.from(await zip.generateAsync({ type: "nodebuffer" })),
+                  images: new Map(),
+                },
+              ),
+            ).rejects.toThrow("valid PNG or JPEG");
+          }
+          expect(await readdir(directory)).toEqual([]);
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test("ignores external logos and names recognized bitmaps from their bytes", async () => {
+    for (const external of [false, true]) {
+      const zip = await JSZip.loadAsync(await letterhead());
+      const rels = await zip.file("word/_rels/header1.xml.rels")!.async("string");
+      const name = Object.keys(zip.files).find(
+        (name) => name.startsWith("word/media/") && name.endsWith(".png"),
+      )!;
+      zip.file(name.replace(/\.png$/, ".jpg"), PNG);
+      zip.remove(name);
+      zip.file(
+        "word/_rels/header1.xml.rels",
+        rels
+          .replace(/\.png/g, ".jpg")
+          .replace(
+            /(<Relationship\s[^>]*Type="[^"]*\/image")/,
+            `$1${external ? ' TargetMode="External"' : ""}`,
+          ),
+      );
+      const directory = await mkdtemp(join(tmpdir(), "eneo-profile-logo-"));
+      try {
+        const profile = await pdfProfile(
+          Buffer.from(await zip.generateAsync({ type: "nodebuffer" })),
+          directory,
+        );
+        expect(profile.header?.logo?.file).toBe(external ? undefined : "logo.png");
+        expect(await readdir(directory)).toEqual(external ? [] : ["logo.png"]);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
   });
 });
 
@@ -254,7 +442,7 @@ describe("the template body in the PDF", () => {
   });
 });
 
-describe.skipIf(!(await pdfAvailable()))("the PDF engine", () => {
+describe.skipIf(!PDF)("the PDF engine", () => {
   test("lays the document out in the template's profile as a tagged PDF", async () => {
     const { buffer, pages } = await renderDocument("pdf", document, {
       template: await letterhead(),
