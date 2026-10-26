@@ -34,7 +34,7 @@ from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
     aclose_if_possible,
     closing,
-    finalization,
+    finalization_owner,
     finalizing,
 )
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
@@ -700,7 +700,7 @@ class CompletionService:
                     # Runs on a disconnect that lands mid-await too: the
                     # shielded steps keep the cancellation out until the
                     # cleanup's budget runs out.
-                    with finalization():
+                    with finalization_owner():
                         with finalizing("pending tool approvals"):
                             if approval_manager:
                                 for approval_id in list(pending_approval_ids):
@@ -722,7 +722,7 @@ class CompletionService:
                 # The stream is prepared (the provider request is in flight)
                 # before the response starts. If the body is never iterated,
                 # streaming_wrapper never runs, so release its resources here.
-                with finalization():
+                with finalization_owner():
                     try:
                         with finalizing("prepared provider stream"):
                             await aclose_if_possible(stream_obj.stream)

@@ -8,7 +8,8 @@ import pytest
 from eneo.main import stream_lifecycle
 from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
-    finalization,
+    finalization_deadline,
+    finalization_owner,
     finalizing,
 )
 
@@ -50,20 +51,24 @@ async def test_without_finalizing_the_cancellation_cuts_the_cleanup_short():
 
 @pytest.mark.asyncio
 async def test_nested_cleanups_share_the_outermost_deadline():
-    with finalization() as outer:
+    with finalization_owner():
+        with finalizing("outer step"):
+            outer = finalization_deadline()
         await anyio.sleep(0.01)
-        with finalization() as inner:
-            pass
+        with finalization_owner(), finalizing("inner step"):
+            inner = finalization_deadline()
     assert inner == outer
 
 
 @pytest.mark.asyncio
 async def test_the_deadline_ends_with_the_cleanup_that_set_it():
-    with finalization() as first:
-        pass
+    with finalization_owner(), finalizing("first"):
+        first = finalization_deadline()
+    assert finalization_deadline() is None
     await anyio.sleep(0.01)
-    with finalization() as second:
-        pass
+    with finalization_owner(), finalizing("second"):
+        second = finalization_deadline()
+    assert first is not None and second is not None
     assert second > first
 
 
@@ -76,7 +81,7 @@ async def test_a_step_past_the_budget_is_cut_off_and_the_next_one_still_runs(
     monkeypatch.setattr(stream_lifecycle.logger, "warning", warnings)
     ran: list[str] = []
 
-    with finalization():
+    with finalization_owner():
         with finalizing("slow"):
             await anyio.sleep(10)
             ran.append("slow")
@@ -94,15 +99,16 @@ async def test_a_task_already_running_has_a_deadline_of_its_own():
     started = asyncio.Event()
     proceed = asyncio.Event()
 
-    async def elsewhere() -> float:
+    async def elsewhere() -> float | None:
         started.set()
         await proceed.wait()
-        with finalization() as deadline:
-            return deadline
+        with finalization_owner(), finalizing("elsewhere"):
+            return finalization_deadline()
 
     other = asyncio.create_task(elsewhere())
     await started.wait()
-    with finalization() as here:
+    with finalization_owner(), finalizing("here"):
+        here = finalization_deadline()
         await anyio.sleep(0.01)
         proceed.set()
         elsewhere_deadline = await other
@@ -200,7 +206,7 @@ async def test_a_step_skipped_for_a_spent_budget_says_so(
     warnings = Mock()
     monkeypatch.setattr(stream_lifecycle.logger, "warning", warnings)
 
-    with finalization():
+    with finalization_owner():
         with finalizing("slow"):
             await anyio.sleep(10)
         with finalizing("next"):

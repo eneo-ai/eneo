@@ -133,8 +133,8 @@ def finalizing(step: str) -> Generator[None, None, None]:
     """
     with finalization_owner():
         deadline = _current_deadline()
+        spent_on_entry = anyio.current_time() >= deadline
         with anyio.CancelScope(shield=True, deadline=deadline) as scope:
-            spent_on_entry = anyio.current_time() >= deadline
             yield
     if scope.cancelled_caught and spent_on_entry:
         logger.warning(
