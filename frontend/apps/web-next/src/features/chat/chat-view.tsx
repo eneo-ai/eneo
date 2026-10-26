@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -132,17 +133,47 @@ function quietLog(element: HTMLDivElement | null) {
  * conversation can be rated on its own; the rating starts from the one stored
  * with the answer.
  */
-function ConversationMessage({
+const ConversationMessage = memo(function ConversationMessage({
   sessionId,
+  onToggleActivity,
   ...props
-}: Omit<ComponentProps<typeof ChatMessage>, "feedback"> & { sessionId: string | null }) {
+}: Omit<ComponentProps<typeof ChatMessage>, "feedback" | "onActivityToggle"> & {
+  sessionId: string | null;
+  /** One handler for every message, so a finished message's props stay the same. */
+  onToggleActivity: (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => void;
+}) {
   const { message, isStreaming } = props;
   const [rating, rate] = useAnswerFeedback(message.id, message.metadata?.feedback ?? null);
   const feedback =
     sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
-  return <ChatMessage {...props} sessionId={sessionId} feedback={feedback} />;
+  return (
+    <ChatMessage
+      {...props}
+      sessionId={sessionId}
+      feedback={feedback}
+      onActivityToggle={(trigger, request) => onToggleActivity(message.id, trigger, request)}
+    />
+  );
+});
+
+/**
+ * What a file list shows of each file, as one string: a file's content (an
+ * upload's transcription) never changes under its id, so it is left out.
+ */
+function previewFilesKey(files: readonly PreviewFile[]): string {
+  return JSON.stringify(
+    files.map((file) => [
+      file.id,
+      file.name,
+      file.mimetype,
+      file.size,
+      file.original_size,
+      file.revises_file_id,
+      file.created_at
+    ])
+  );
 }
 
 type ChatViewProps = {
@@ -425,7 +456,7 @@ function ConversationView({
   }, [timings, messages, busy]);
 
   // What the conversation has to show in the side panel.
-  const documents = useMemo(
+  const documentsNow = useMemo(
     () =>
       conversationDocuments(
         messages.map((message) => ({
@@ -435,14 +466,25 @@ function ConversationView({
       ),
     [messages]
   );
+  // A streamed chunk rarely changes the documents: keep them by content so
+  // finished messages keep the same props.
+  const documentsKey = useMemo(
+    () => documentsNow.documents.map((document) => previewFilesKey(document.versions)).join("\n"),
+    [documentsNow]
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const documents = useMemo(() => documentsNow, [documentsKey]);
   const uploads = useMemo(() => conversationUploads(messages), [messages]);
   useEffect(() => {
     uploadsRef.current = uploads;
   }, [uploads]);
-  const allFiles = useMemo<PreviewFile[]>(
+  const allFilesNow = useMemo<PreviewFile[]>(
     () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
     [uploads, messages]
   );
+  const allFilesKey = useMemo(() => previewFilesKey(allFilesNow), [allFilesNow]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const allFiles = useMemo(() => allFilesNow, [allFilesKey]);
   const panelContents: PanelContents = {
     views: messages
       .flatMap(messageAppViewCalls)
@@ -781,27 +823,34 @@ function ConversationView({
 
   // Focus returns to the control that opened the panel (pill or citation).
   const activityTrigger = useRef<HTMLElement | null>(null);
-  const toggleActivity = (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
-    const tab = request?.tab ?? "steps";
-    // The pill toggles; a citation (or menu item with a tab) opens or switches.
-    if (activity?.messageId === messageId && !request?.tab) {
-      closeActivity();
-      return;
-    }
-    activityTrigger.current = trigger;
-    onActivityChange({ messageId, tab, source: request?.source ?? null });
-  };
   const closeActivity = useCallback(() => {
     onActivityChange(null);
     const trigger = activityTrigger.current;
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
+  const openActivityId = activity?.messageId;
+  const toggleActivity = useCallback(
+    (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
+      const tab = request?.tab ?? "steps";
+      // The pill toggles; a citation (or menu item with a tab) opens or switches.
+      if (openActivityId === messageId && !request?.tab) {
+        closeActivity();
+        return;
+      }
+      activityTrigger.current = trigger;
+      onActivityChange({ messageId, tab, source: request?.source ?? null });
+    },
+    [openActivityId, closeActivity, onActivityChange]
+  );
 
   const failure = error ? describeChatFailure(error, streamErrorCode, t) : null;
 
   const partnerName = displayPartnerName(partner, t);
-  const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };
+  const assistantIdentity = useMemo(
+    () => ({ id: partner.id, name: partnerName, iconId: partner.iconId }),
+    [partner.id, partnerName, partner.iconId]
+  );
   const mention =
     partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
       <Selector
@@ -1045,9 +1094,7 @@ function ConversationView({
                   knowledge={partner.knowledge}
                   durations={timings.durations(message.id)}
                   activityExpanded={activity?.messageId === message.id}
-                  onActivityToggle={(trigger, request) =>
-                    toggleActivity(message.id, trigger, request)
-                  }
+                  onToggleActivity={toggleActivity}
                   canDebug={debugAvailable && sessionId !== null}
                   conversationFiles={allFiles}
                   documents={documents.documents}
