@@ -5507,6 +5507,7 @@
   "admin_model_type_embedding": "Inbäddning",
   "admin_model_type_transcription": "Transkription",
   "admin_model_type_image": "Bildgenerering",
+  "admin_model_type_rerank": "Rerankning",
   "provider_capability_image": "Bildgenerering",
   "admin_models_delete_blocked_title": "{name} kan inte tas bort än",
   "admin_models_delete_blocked_description": "Modellen används av {names}. Byt bildmodell i källan under Verktyg, eller ta bort källan, och ta sedan bort modellen.",
