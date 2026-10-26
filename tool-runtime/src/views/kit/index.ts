@@ -8,6 +8,6 @@ export { copyText } from "./clipboard";
 export { columnWidth } from "./columns";
 export { ViewFrame, TableRows } from "./Frame";
 export { pick, useHost, useViewHost, type Host, type ToolResult } from "./host";
-export { chevronDownIcon, chevronUpIcon, codeIcon, playIcon, undoIcon } from "./icons";
+export { chevronDownIcon, chevronUpIcon, codeIcon, infoIcon, playIcon, undoIcon } from "./icons";
 export { isNumeric, numberFormatter } from "./numbers";
 export { filterRows, sortRows, toTsv } from "./rows";

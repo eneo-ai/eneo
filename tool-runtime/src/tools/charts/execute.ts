@@ -22,11 +22,16 @@ export async function executeChart(job: ChartJob): Promise<ChartResult> {
     }
     return renderChart(spec, job.config, job.includeSvg);
   } catch (error) {
-    if (error instanceof ToolError) throw error;
-    if (error instanceof ChartSpecError) throw new ToolError("INVALID_CHART", error.message);
-    if (error instanceof RenderError) throw new ToolError("IMAGE_TOO_LARGE", error.message);
-    throw new ToolError("RENDER_FAILED", "The chart could not be rendered. Simplify the data.");
+    throw chartFailure(error);
   }
+}
+
+/** A failure to validate or draw a chart as the error its tool reports. */
+export function chartFailure(error: unknown): ToolError {
+  if (error instanceof ToolError) return error;
+  if (error instanceof ChartSpecError) return new ToolError("INVALID_CHART", error.message);
+  if (error instanceof RenderError) return new ToolError("IMAGE_TOO_LARGE", error.message);
+  return new ToolError("RENDER_FAILED", "The chart could not be rendered. Simplify the data.");
 }
 
 /** Labels from one column, one series per value column; non-numbers become gaps. */
