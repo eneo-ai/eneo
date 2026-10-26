@@ -12,7 +12,7 @@ readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
 IMAGE_VERSION="$(tr -d '[:space:]' <"$SCRIPT_DIRECTORY/VERSION")"
 readonly IMAGE_VERSION
-readonly GO_IMAGE="docker.io/library/golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c"
+readonly GO_IMAGE="docker.io/library/golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
 readonly GOVULNCHECK_VERSION="v1.6.0"
 
