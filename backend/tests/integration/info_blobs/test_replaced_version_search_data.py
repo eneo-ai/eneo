@@ -23,6 +23,7 @@ from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionStat
 from eneo.database.tables.questions_table import InfoBlobReferences, Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.info_blobs.replaced_versions import (
     CleanupResult,
@@ -443,17 +444,30 @@ async def test_user_quota_query_uses_the_active_size_index_in_generic_plans(
         # back so the shared database keeps its statistics.
         savepoint = await session.begin_nested()
         try:
+            # The shape that made the quota sum expensive: a user whose
+            # documents have a long history, in a tenant with more knowledge.
+            colleague = Users(
+                username=f"colleague-{uuid4().hex[:8]}",
+                email=f"colleague-{uuid4().hex[:8]}@example.com",
+                state="active",
+                used_tokens=0,
+                tenant_id=admin_user.tenant_id,
+            )
+            session.add(colleague)
+            await session.flush()
+            rows = [(admin_user.id, InfoBlobVersionState.ACTIVE)] * 100
+            rows += [(admin_user.id, InfoBlobVersionState.SUPERSEDED)] * 2000
+            rows += [(colleague.id, InfoBlobVersionState.ACTIVE)] * 2000
             session.add_all(
                 InfoBlobs(
                     text="x",
                     size=1,
                     source_id=uuid4(),
                     version_state=state.value,
-                    user_id=admin_user.id,
+                    user_id=user_id,
                     tenant_id=admin_user.tenant_id,
                 )
-                for state in [InfoBlobVersionState.ACTIVE] * 200
-                + [InfoBlobVersionState.SUPERSEDED] * 200
+                for user_id, state in rows
             )
             await session.flush()
             connection = await session.connection()
@@ -473,9 +487,11 @@ async def test_user_quota_query_uses_the_active_size_index_in_generic_plans(
         finally:
             await savepoint.rollback()
 
+    # Whether PostgreSQL also skips the heap (an index-only scan) depends on
+    # the visibility map, which only VACUUM maintains; the index is the point.
     scans = _plan_scans(document["Plan"])
-    assert [(scan["Node Type"], scan.get("Index Name")) for scan in scans] == [
-        ("Index Only Scan", "ix_info_blobs_active_user_size")
+    assert [scan.get("Index Name") for scan in scans] == [
+        "ix_info_blobs_active_user_size"
     ], scans
 
 
