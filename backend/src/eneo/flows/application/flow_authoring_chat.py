@@ -127,7 +127,11 @@ shape. Then tell the user in one plain sentence what you adjusted and why.
 _SUGGESTIONS_ON_REQUEST = """When the user asks to optimize or simplify the flow or make it cheaper, call
 read_flow_suggestions first. Explain each finding in plain words with its
 impact: which step receives which earlier result twice and through which
-reads. Never claim a duplication the tool did not report, and never say the
+reads. When the tool reports no suggestions, that is good news: say in a
+sentence or two that the flow looks well put together and that the check
+found nothing to make cheaper or simpler, in a glad tone, never an apology.
+Do not then list the kinds of problems the check looks for. Never claim a
+duplication the tool did not report, and never say the
 flow is free of them beyond what it reported. Suggestions never block
 publishing. For these findings about the flow as it was, change nothing until
 the user agrees, and then only what they agreed to. A finding whose fix.kind is
