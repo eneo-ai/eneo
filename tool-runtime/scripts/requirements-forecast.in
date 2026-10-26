@@ -1,6 +1,8 @@
 # The forecast sidecar (scripts/forecast.py): CPU-only torch and Timestral, pinned to a commit.
-# Locked with a two-week cutoff (--exclude-newer); certifi alone may be newer, for the emSign
-# root CA advisory GHSA-6q48-6c7w-9gw2 (fixed in 2026.10.19). The lock header has the command.
+# Locked with a two-week cutoff (--exclude-newer); certifi and filelock alone may be newer, for
+# the emSign root CA advisory GHSA-6q48-6c7w-9gw2 (fixed in certifi 2026.10.19) and the
+# ReadWriteLock advisory GHSA-v4x8-3wr5-3wq8 (fixed in filelock 4.2.1). The lock header has
+# the command.
 --index-url https://download.pytorch.org/whl/cpu
 --extra-index-url https://pypi.org/simple
 torch==2.14.1+cpu
