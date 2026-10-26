@@ -128,7 +128,7 @@ def _to_event_stream(
 
     async def event_stream():
         try:
-            async with closing(answer) as chunks:
+            async with closing(answer, "helper answer stream") as chunks:
                 async for chunk in chunks:
                     if chunk.response_type == ResponseType.ERROR:
                         # The completion adapter yields an ERROR chunk (rather

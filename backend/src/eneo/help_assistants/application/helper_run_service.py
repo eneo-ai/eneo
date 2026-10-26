@@ -30,7 +30,6 @@ lives in step 020.
 
 from __future__ import annotations
 
-from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, AsyncGenerator, cast
 from uuid import UUID
@@ -64,6 +63,7 @@ from eneo.main.models import ResourcePermission
 from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
     aclose_if_possible,
+    closing,
     finalizing,
 )
 from eneo.questions.question import QuestionAdd
@@ -598,8 +598,8 @@ class HelperRunService:
         stream_usage: TokenUsage | None = None
         stream_input_token_estimate: int | None = None
 
-        async with aclosing(completion):
-            async for chunk in completion:
+        async with closing(completion, "completion stream") as chunks:
+            async for chunk in chunks:
                 if chunk.usage is not None:
                     stream_usage = chunk.usage
                 if chunk.input_token_estimate is not None:

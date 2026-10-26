@@ -386,7 +386,7 @@ async def to_response(
 
         async def event_stream():
             assert not isinstance(response.answer, str)
-            async with closing(response.answer) as answer:
+            async with closing(response.answer, "answer stream") as answer:
                 async for chunk in answer:
                     if chunk.response_type == ResponseType.TEXT:
                         yield to_ask_response(
@@ -448,7 +448,7 @@ async def to_conversation_response(
             )
 
             assert not isinstance(response.answer, str)
-            async with closing(response.answer) as answer:
+            async with closing(response.answer, "answer stream") as answer:
                 async for chunk in answer:
                     yield to_sse_response(chunk=chunk, session_id=response.session.id)
 

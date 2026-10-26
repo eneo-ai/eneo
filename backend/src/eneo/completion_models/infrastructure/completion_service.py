@@ -673,7 +673,8 @@ class CompletionService:
                             approval_manager=approval_manager,
                             approval_context=approval_context,
                             pending_approval_ids=pending_approval_ids,
-                        )
+                        ),
+                        "adapter stream",
                     ) as adapter_stream:
                         async for chunk in adapter_stream:
                             await _name_app_views(chunk, mcp_proxy)

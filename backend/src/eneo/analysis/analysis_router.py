@@ -417,7 +417,7 @@ async def ask_question_about_questions(
 
         async def event_stream():
             completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async with closing(completion_stream) as chunks:
+            async with closing(completion_stream, "analysis stream") as chunks:
                 async for chunk in chunks:
                     if chunk.stop:
                         continue
@@ -551,7 +551,7 @@ async def ask_unified_questions_about_questions(
 
         async def event_stream():
             completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async with closing(completion_stream) as chunks:
+            async with closing(completion_stream, "analysis stream") as chunks:
                 async for chunk in chunks:
                     if chunk.stop:
                         continue

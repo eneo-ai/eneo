@@ -500,7 +500,9 @@ def to_ui_message_stream_response(
     """version=3 streaming response: AI SDK UI Message Stream over SSE."""
 
     async def event_stream():
-        async with closing(_ui_message_chunks(response, base_url)) as chunks:
+        async with closing(
+            _ui_message_chunks(response, base_url), "ui message stream"
+        ) as chunks:
             async for chunk in chunks:
                 yield _event(chunk)
         yield ServerSentEvent("[DONE]")

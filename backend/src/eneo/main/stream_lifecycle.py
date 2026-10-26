@@ -11,9 +11,9 @@ Two rules make the ``finally`` blocks along that chain reliable:
 - Cleanup runs inside ``finalizing(...)``: a shielded cancel scope with one
   deadline shared by every link of the turn, so a disconnect that lands
   mid-await cannot cut the cleanup short, and the request waits at most one
-  budget for it. A step cut off by the deadline is logged; what it started
-  (an MCP connection leaving its contexts, a provider stream closing under
-  its own shield) still finishes on its own.
+  budget for it. A step cut off by the deadline is logged. An MCP connection
+  it was waiting for is cancelled and unwinds on its own; a provider stream
+  closes under its own shield.
 - A generator that never started cannot run its ``finally``. Where resources
   are acquired before the first iteration, ``OwnedAsyncGenerator`` runs the
   owner's release instead.
@@ -76,13 +76,6 @@ _finalization_owners: ContextVar[int] = ContextVar(
 def finalization_deadline() -> float | None:
     """The deadline of the cleanup in progress on this task, if one is fixed."""
     return _finalization_deadline.get()
-
-
-def clear_finalization_deadline() -> None:
-    """Forget the task's budget and owners; for tests that reuse one task."""
-    _finalization_deadline.set(None)
-    _finalization_owner_task.set(None)
-    _finalization_owners.set(0)
 
 
 @contextmanager
