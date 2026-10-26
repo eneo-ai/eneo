@@ -211,7 +211,16 @@ async def test_a_result_that_cannot_return_to_its_parts_fails_the_step(
     with pytest.raises(Exception) as failed:
         await _run(spool_contract, files, _engine(wordless_across))
 
-    assert failed.value.code == FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
+    # The parts were transcribed; it is their speakers that could not be placed, and the
+    # failure says which check refused them, so the run's error tells support what happened.
+    assert (
+        failed.value.code
+        == FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED.value
+    )
+    assert str(failed.value) == (
+        "Step 1: speaker identification failed for the recording. "
+        "A segment across a part boundary lacks word timings for all its text."
+    )
     spool_contract.assert_finished()
 
 
