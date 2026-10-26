@@ -1,0 +1,22 @@
+{
+  "exceptions": [
+    {
+      "id": "CVE-2026-112940",
+      "package": "filelock",
+      "rationale": "Affects only filelock's SQLite-backed ReadWriteLock/AsyncReadWriteLock, exploitable by a local user who can write to the lock directory. Nothing in the backend uses them: huggingface-hub takes FileLock/SoftFileLock and litellm FileLock in its proxy CLI. The fix (4.2.1) is blocked because every current litellm (1.104-1.107 pre-releases) requires filelock<4.0; bump once litellm allows 4.x.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112913",
+      "package": "filelock",
+      "rationale": "Windows-only denial of service on the SQLite-backed ReadWriteLock/AsyncReadWriteLock by a local account; the backend runs on Linux and uses neither class. Fix (4.2.1) blocked by litellm's filelock<4.0 requirement, as for CVE-2026-112940.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112907",
+      "package": "filelock",
+      "rationale": "Windows-only: a local account holding an oplock on a soft-lock marker stalls acquire(). The backend runs on Linux, where FileLock uses fcntl and the soft-lock oplock path does not exist. Fix (4.2.1) blocked by litellm's filelock<4.0 requirement, as for CVE-2026-112940.",
+      "expires": "2026-11-24"
+    }
+  ]
+}
