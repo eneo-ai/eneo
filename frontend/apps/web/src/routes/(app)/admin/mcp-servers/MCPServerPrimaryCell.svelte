@@ -4,7 +4,11 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, KeyRound, Shield, ShieldCheck, UsersRound } from "@lucide/svelte";
+  import Globe from "@lucide/svelte/icons/globe";
+  import KeyRound from "@lucide/svelte/icons/key-round";
+  import Shield from "@lucide/svelte/icons/shield";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import UsersRound from "@lucide/svelte/icons/users-round";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import { bundledIdentity } from "$lib/features/mcp/bundled";
   import { SOURCE_KINDS } from "$lib/features/mcp/sourceKind";

@@ -3,7 +3,10 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { loadLucideIcons, toKebabCase, type LucideIconRegistry } from "../lucideIcons";
-  import { Search, X, Sparkles, Check } from "@lucide/svelte";
+  import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Check from "@lucide/svelte/icons/check";
   import LucideSvg from "./LucideSvg.svelte";
   import { m } from "$lib/paraglide/messages";
 

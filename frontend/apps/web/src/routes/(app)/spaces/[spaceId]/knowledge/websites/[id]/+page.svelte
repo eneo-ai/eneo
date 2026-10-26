@@ -2,7 +2,9 @@
   import { onMount, tick, untrack } from "svelte";
   import { writable } from "svelte/store";
   import type { CrawlRun } from "@eneo/eneo-js";
-  import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { Page } from "$lib/components/layout";

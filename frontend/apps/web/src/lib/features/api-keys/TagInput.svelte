@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { X, Plus, Globe, Server, CircleAlert } from "@lucide/svelte";
+  import X from "@lucide/svelte/icons/x";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Globe from "@lucide/svelte/icons/globe";
+  import Server from "@lucide/svelte/icons/server";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { m } from "$lib/paraglide/messages";

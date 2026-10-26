@@ -14,7 +14,12 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
-  import { ArrowUpRight, Check, ChevronDown, ChevronUp, Files, LoaderCircle } from "@lucide/svelte";
+  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import Files from "@lucide/svelte/icons/files";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import type { PendingUpload } from "../../ChatService.svelte";
 
   const attachmentUrlService = getAttachmentUrlService();

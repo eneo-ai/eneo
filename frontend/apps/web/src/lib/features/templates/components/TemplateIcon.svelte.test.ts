@@ -1,16 +1,14 @@
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CreditCard,
-  Database,
-  House,
-  Image,
-  Navigation,
-  Package,
-  Rocket,
-  Tag,
-  type IconNode
-} from "@lucide/svelte";
+import type { IconNode } from "@lucide/svelte";
+import CreditCard from "@lucide/svelte/icons/credit-card";
+import Database from "@lucide/svelte/icons/database";
+import House from "@lucide/svelte/icons/house";
+import Image from "@lucide/svelte/icons/image";
+import Navigation from "@lucide/svelte/icons/navigation";
+import Package from "@lucide/svelte/icons/package";
+import Rocket from "@lucide/svelte/icons/rocket";
+import Tag from "@lucide/svelte/icons/tag";
 import type { Component } from "svelte";
 import { loadLucideIconOrNull } from "../lucideIcons";
 import TemplateIcon from "./TemplateIcon.svelte";

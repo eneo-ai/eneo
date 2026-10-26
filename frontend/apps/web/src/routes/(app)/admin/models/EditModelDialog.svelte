@@ -27,7 +27,7 @@
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import { LoaderCircle } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
