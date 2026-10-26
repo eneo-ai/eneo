@@ -177,6 +177,9 @@ class PlatformExecutionWorkerSettings:
         task_timeout_seconds=settings.task_execution_timeout_seconds
     )
     max_jobs = settings.task_execution_max_jobs
+    # A queued run waits on average half a poll for pickup (ARQ's default 0.5 s).
+    # This worker has no cron jobs, so a short poll only costs a few Redis reads.
+    poll_delay = 0.1
     queue_name = settings.task_execution_queue
     expires_extra_ms = execution_worker.expires_extra_ms
     health_check_interval = execution_worker.health_check_interval
