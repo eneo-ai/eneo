@@ -16,7 +16,7 @@ import {
   FilePreviewContent,
   type FilePreviewContentHandle
 } from "@/features/workspace/preview/file-preview-content";
-import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
+import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -469,9 +469,4 @@ export function FilePanel({
       />
     </PanelFrame>
   );
-}
-
-/** Whether a file can be exported as Word or PDF: a Markdown document the assistant made here. */
-export function isExportableDocument(file: PreviewFile): boolean {
-  return previewKindOf(file) === "markdown";
 }

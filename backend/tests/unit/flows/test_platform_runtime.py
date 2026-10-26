@@ -202,6 +202,10 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
     )
     assert PlatformExecutionWorkerSettings.max_jobs > 0
     assert PlatformMaintenanceWorkerSettings.max_jobs > 0
+    # A queued run is picked up within a tenth of a second; the maintenance
+    # worker keeps ARQ's default poll, which its cron windows are built on.
+    assert PlatformExecutionWorkerSettings.poll_delay == 0.1
+    assert not hasattr(PlatformMaintenanceWorkerSettings, "poll_delay")
 
 
 def test_retired_run_drain_runs_at_the_configured_cadence() -> None:

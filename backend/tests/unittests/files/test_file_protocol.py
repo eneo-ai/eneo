@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import replace
 from io import BytesIO
@@ -332,6 +333,54 @@ async def test_prepare_image_keeps_original_separate_from_model_input(
             await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
             == b"bounded model image"
         )
+
+
+@pytest.mark.asyncio
+async def test_prepare_image_reads_and_downscales_off_the_event_loop(
+    protocol, tmp_path, monkeypatch
+):
+    """Decoding a photo takes about 0.1 s of CPU; on the loop it stalls every
+    request and stream the worker serves."""
+    original = b"exact uploaded image"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="photo.png",
+        headers={"content-type": "image/png"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "photo.png"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    loop_thread = threading.get_ident()
+    threads: dict[str, int] = {}
+
+    def extract(*_args):
+        threads["extract"] = threading.get_ident()
+        return b"image-bytes"
+
+    def downscale(blob, mimetype):
+        threads["downscale"] = threading.get_ident()
+        return SimpleNamespace(blob=blob, mimetype=mimetype)
+
+    protocol.image_extractor.extract.side_effect = extract
+    monkeypatch.setattr(file_protocol_module, "downscale_image", downscale)
+
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        by_variant = {content.variant: content for content in prepared.contents}
+        assert (
+            await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
+            == b"image-bytes"
+        )
+
+    assert threads.keys() == {"extract", "downscale"}
+    assert loop_thread not in threads.values()
 
 
 @pytest.mark.asyncio

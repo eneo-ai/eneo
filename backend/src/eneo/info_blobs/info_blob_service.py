@@ -594,7 +594,7 @@ class InfoBlobService:
         )
         return await self.get_by_user(metadata_filter_with_user)
 
-    async def get_by_group(self, id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_group(self, id: UUID) -> list[InfoBlobInDBNoText]:
         group = await self.group_service.get_group(id)
         return await self._project_original_availability(
             await self.repo.get_by_group(group.id)

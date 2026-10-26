@@ -1023,16 +1023,14 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
-    async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDB]:
-        query = (
+    async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDBNoText]:
+        records = await self.session.scalars(
             sa.select(InfoBlobs)
             .where(InfoBlobs.group_id == group_id, active_info_blob_version())
             .order_by(InfoBlobs.created_at)
-            .options(selectinload(InfoBlobs.group))
-            .options(selectinload(InfoBlobs.embedding_model))
+            .options(defer(InfoBlobs.text), selectinload(InfoBlobs.group))
         )
-        records = await self.delegate.get_models_from_query(query)
-        return [InfoBlobInDB.model_validate(record) for record in records]
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
 
     async def get_by_website(
         self,

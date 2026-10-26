@@ -557,6 +557,18 @@ class ApiKeysV2Repository:
         deleted_id = await self.session.scalar(query)
         return deleted_id is not None
 
+    @staticmethod
+    def last_used_is_due(
+        stored: datetime | None, *, at: datetime, min_interval_seconds: int
+    ) -> bool:
+        """Whether ``update_last_used_at`` would write, judged from a loaded row.
+
+        The same predicate as the update's own guard. Only that update moves the
+        stored time, and only forward, so a loaded time that is not due means the
+        update would match no row.
+        """
+        return stored is None or stored < at - timedelta(seconds=min_interval_seconds)
+
     async def update_last_used_at(
         self,
         *,

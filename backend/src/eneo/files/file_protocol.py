@@ -246,12 +246,18 @@ class FileProtocol:
             )
 
             if file_type is FileType.IMAGE:
-                image = self.image_extractor.extract(
-                    filepath,
-                    media_type,
-                    upload_file.filename,
+                # Decoding and resampling a photo takes about 0.1 s of CPU, which
+                # would stall every request and stream on this event loop.
+                processed = await asyncio.to_thread(
+                    lambda: downscale_image(
+                        self.image_extractor.extract(
+                            filepath,
+                            media_type,
+                            upload_file.filename,
+                        ),
+                        media_type,
+                    )
                 )
-                processed = downscale_image(image, media_type)
                 model_input = PendingFileContent(
                     variant=FileContentVariant.MODEL_INPUT,
                     chunks=_bytes_chunks(processed.blob),

@@ -359,6 +359,27 @@ describe("TranscriptLines", () => {
     expect(saves[1]!.speakerEdits).toEqual([]);
   });
 
+  it("offers a speaker made from one line's badge in every other line's badge", async () => {
+    const { saves, lines } = renderLines();
+    const menu = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_00, byt talare för raden 0:05" })
+    );
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Ny talare (SPEAKER_02)" }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await within(lines).findByRole("button", {
+      name: "SPEAKER_02, ändrad från SPEAKER_00, byt talare för raden 0:05"
+    });
+
+    // Another line, not rendered again by marking text, still knows the new speaker.
+    const other = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_01, byt talare för raden 0:15" })
+    );
+    expect(within(other).getByRole("menuitemradio", { name: "SPEAKER_02" })).toBeTruthy();
+    expect(
+      within(other).getByRole("menuitemradio", { name: "Ny talare (SPEAKER_03)" })
+    ).toBeTruthy();
+  });
+
   it("leaves a whole turn to someone to check from its badge", async () => {
     const { saves } = renderLines();
     fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
@@ -878,6 +899,23 @@ describe("TranscriptLines with audio, a long transcript", { timeout: 30_000 }, (
     expect(captionsFor).not.toHaveBeenCalled();
   });
 
+  it("renders again only the lines the toolbar leaves and reaches when text is marked while it plays", async () => {
+    answerLongAudio();
+    renderInApp(<Harness saves={[]} audio={audioTarget} lines={long} initial={corrected} />);
+    const list = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    await startLong(list);
+    const textAt = (position: number) =>
+      item(list, position).querySelector("[data-word]")!.firstChild!;
+    mark(textAt(10), 0, textAt(12), 2);
+    expect((await screen.findByRole("toolbar")).closest("li")).toBe(item(list, 12));
+
+    vi.mocked(textRuns).mockClear();
+    mark(textAt(10), 0, textAt(13), 2);
+    expect(screen.getByRole("toolbar").closest("li")).toBe(item(list, 13));
+    // Lines 12 and 13 work out their words again; the other 498 keep theirs.
+    expect(vi.mocked(textRuns)).toHaveBeenCalledTimes(2);
+  });
+
   it("marks the turn and the line in it that plays, rendering again only the turns they leave and reach", async () => {
     answerLongAudio();
     renderInApp(<Harness saves={[]} audio={audioTarget} lines={long} />);
@@ -959,5 +997,83 @@ describe("TranscriptLines with audio, a long transcript", { timeout: 30_000 }, (
     playAt(audio, 0.5);
     expectPlaying(list, 1, null);
     expect(list.querySelector("[data-word]")).toBeNull();
+  });
+});
+
+describe("TranscriptLines, marking text in a long transcript", () => {
+  const COUNT = 200;
+  // Every third line is SPEAKER_00, so turns hold one or two lines.
+  const long = parseSegments(
+    Array.from({ length: COUNT }, (_, n) => ({
+      segment_index: n,
+      file_index: 0,
+      start: n * 4,
+      end: n * 4 + 3,
+      speaker: n % 3 === 0 ? "SPEAKER_00" : "SPEAKER_01",
+      text: `rad${n} ett två tre`
+    }))
+  );
+
+  function renderLong() {
+    const saves: CorrectionSet[] = [];
+    renderInApp(<Harness saves={saves} lines={long} />);
+    return saves;
+  }
+
+  /** The first text of the item at `position` in `list`. */
+  function textAt(list: HTMLElement, position: number): Node {
+    return list.children[position]!.querySelector("[data-part-of]")!.firstChild!;
+  }
+
+  it("renders again only the lines the toolbar leaves and reaches as marked text grows", async () => {
+    renderLong();
+    const list = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    mark(textAt(list, 10), 0, textAt(list, 12), 4);
+    expect((await screen.findByRole("toolbar")).closest("li")).toBe(list.children[12]);
+
+    vi.mocked(partAttributes).mockClear();
+    mark(textAt(list, 10), 0, textAt(list, 13), 4);
+    expect(screen.getByRole("toolbar").closest("li")).toBe(list.children[13]);
+    // One part each in the line the toolbar left and the line it reached.
+    expect(vi.mocked(partAttributes)).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders again only the turns the toolbar leaves and reaches as marked text grows", async () => {
+    renderLong();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const list = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
+    mark(textAt(list, 10), 0, textAt(list, 12), 4);
+    expect((await screen.findByRole("toolbar")).closest("li")).toBe(list.children[12]);
+
+    vi.mocked(partAttributes).mockClear();
+    mark(textAt(list, 10), 0, textAt(list, 13), 4);
+    expect(screen.getByRole("toolbar").closest("li")).toBe(list.children[13]);
+    // Every part of the two turns, and nothing else.
+    const parts = [12, 13].reduce(
+      (sum, position) => sum + list.children[position]!.querySelectorAll("[data-part-of]").length,
+      0
+    );
+    expect(vi.mocked(partAttributes)).toHaveBeenCalledTimes(parts);
+  });
+
+  it("gives the newest marked text to the speaker chosen in the toolbar", async () => {
+    const saves = renderLong();
+    const list = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+    mark(textAt(list, 10), 0, textAt(list, 10), 4);
+    await screen.findByRole("toolbar");
+    mark(textAt(list, 20), 0, textAt(list, 20), 5);
+    const toolbar = await screen.findByRole("toolbar");
+    expect(toolbar.closest("li")).toBe(list.children[20]);
+    fireEvent.click(within(toolbar).getByRole("button", { name: "SPEAKER_00" }));
+
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.speakerEdits).toEqual([
+      expect.objectContaining({
+        segment_index: 20,
+        char_start: 0,
+        char_end: 5,
+        speaker: "SPEAKER_00"
+      })
+    ]);
   });
 });

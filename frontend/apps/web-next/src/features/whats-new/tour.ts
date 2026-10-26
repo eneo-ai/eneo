@@ -187,7 +187,8 @@ function spotlight(
     signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("keyup", navigate);
     try {
-      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      element.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
       tour.drive();
     } catch (error) {
       reject(error);

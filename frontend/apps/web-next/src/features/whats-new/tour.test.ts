@@ -35,11 +35,42 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.resetAllMocks();
   document.body.replaceChildren();
 });
 
 describe("What's new tour", () => {
+  it.each([
+    [false, "smooth"],
+    [true, "auto"]
+  ])(
+    "scrolls to each anchor, smoothly unless motion is reduced (reduce: %s)",
+    async (reduce, behavior) => {
+      const media = window.matchMedia;
+      vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+        query === "(prefers-reduced-motion: reduce)"
+          ? ({ ...media(query), matches: reduce } as MediaQueryList)
+          : media(query)
+      );
+      const navigate = vi.fn((href: string) => {
+        window.history.pushState(null, "", href);
+        document.body.innerHTML = '<section data-tour="admin-modules"></section>';
+      });
+      await runTour(
+        [entry("admin-modules", "/admin/modules")],
+        "en",
+        labels,
+        navigate,
+        new AbortController().signal
+      );
+      expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: "center",
+        behavior
+      });
+    }
+  );
+
   it("visits available entries in order and maps the combined governance page", async () => {
     const navigate = vi.fn((href: string) => {
       window.history.pushState(null, "", href);

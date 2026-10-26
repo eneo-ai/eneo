@@ -131,7 +131,12 @@ export function templateFilesQueryOptions(flowId: string) {
 export function templateInspectionQueryOptions(flowId: string, assetId: string) {
   return queryOptions({
     queryKey: flowEditorKeys.templateInspection(flowId, assetId),
-    queryFn: (): Promise<TemplateInspection> => inspectTemplate(flowId, assetId)
+    queryFn: (): Promise<TemplateInspection> => inspectTemplate(flowId, assetId),
+    // A stored template's bytes never change (an upload makes a new asset), and
+    // each inspection spawns a process in the tool runtime, so refocusing or
+    // choosing the template again reads the cache. Invalidation and eviction
+    // still inspect anew; a runtime upgrade shows after a reload.
+    staleTime: Infinity
   });
 }
 

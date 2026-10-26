@@ -382,11 +382,14 @@ async def _ui_message_chunks(
                     text_index += 1
                     yield {"type": "text-start", "id": text_id}
                 yield {"type": "text-delta", "id": text_id, "delta": delta}
+            # Each text chunk lists every source cited so far; build a source
+            # part only the first time.
             for blob in completion.reference_chunks or []:
+                if str(blob.id) in seen_source_ids:
+                    continue
                 chunk_dict = _source_document_chunk(blob)
-                if chunk_dict["sourceId"] not in seen_source_ids:
-                    seen_source_ids.add(chunk_dict["sourceId"])
-                    yield chunk_dict
+                seen_source_ids.add(chunk_dict["sourceId"])
+                yield chunk_dict
 
         elif response_type == ResponseType.FILES:
             assert completion.generated_file is not None

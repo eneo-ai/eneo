@@ -308,7 +308,11 @@ jobs:
       - name: Verify flows migrations
         if: matrix.suite == 'migrations'
         # Every flows migration test owns its schema; the glob picks up future ones.
-        run: uv run pytest -q -m migration_isolation tests/integration/migrations/test_flow_*.py
+        # The jobs index round trip owns its schema the same way.
+        run: >-
+          uv run pytest -q -m migration_isolation
+          tests/integration/migrations/test_flow_*.py
+          tests/integration/migrations/test_jobs_user_created_index_round_trip.py
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock

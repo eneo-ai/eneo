@@ -226,8 +226,13 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         if search:
             safe_search = escape_like(search)
             search_pattern = f"%{safe_search}%"
+            # The trigram index is on lower(description); ILIKE cannot use it.
+            # Postgres lowercases both sides of ILIKE the same way, so this
+            # matches the same rows.
             query = query.where(
-                AuditLogTable.description.ilike(search_pattern, escape="\\")
+                sa.func.lower(AuditLogTable.description).like(
+                    sa.func.lower(search_pattern), escape="\\"
+                )
             )
 
         # Get total count

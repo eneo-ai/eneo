@@ -106,8 +106,8 @@ from eneo.sessions.session import (
     ViewToolCallText,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 
 _CONVERSATION_SERVICE_ACCESS_REASON = (
@@ -667,7 +667,7 @@ async def list_conversations(
             previous=previous,
         )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])

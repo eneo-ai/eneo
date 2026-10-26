@@ -28,6 +28,7 @@ from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
     SessionInDB,
+    SessionMetadataPublic,
     SessionUpdate,
 )
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
@@ -298,9 +299,9 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
+    ) -> tuple[list[SessionMetadataPublic], int]:
         user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_assistant(
+        return await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
@@ -607,9 +608,9 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
+    ) -> tuple[list[SessionMetadataPublic], int]:
         user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_group_chat(
+        return await self.session_repo.get_metadata_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
