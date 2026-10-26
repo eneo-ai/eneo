@@ -4,15 +4,14 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
-import { invalidateConversationLists } from "@/lib/api/conversations";
+import { invalidateConversationLists, patchConversationLists } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
-import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 
@@ -46,6 +45,7 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, { id, name }) => {
+      patchConversationLists(queryClient, historyKey, id, name);
       invalidate();
       onRenamed?.(id, name);
     },
@@ -62,17 +62,7 @@ export function useSessionMutations(
     onSuccess: (_, id) => {
       // Drop the row at once (the refetch follows), so the history never shows
       // a deleted conversation and focus can move on from its row.
-      queryClient.setQueryData<InfiniteData<CursorPage<{ id: string }>>>(historyKey, (data) =>
-        data
-          ? {
-              ...data,
-              pages: data.pages.map((page) => ({
-                ...page,
-                items: page.items.filter((item) => item.id !== id)
-              }))
-            }
-          : data
-      );
+      patchConversationLists(queryClient, historyKey, id, null);
       invalidate();
       onDeleted?.(id);
     },
