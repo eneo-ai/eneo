@@ -5506,6 +5506,7 @@
   "admin_model_type_embedding": "Embedding",
   "admin_model_type_transcription": "Transcription",
   "admin_model_type_image": "Image generation",
+  "admin_model_type_rerank": "Reranking",
   "provider_capability_image": "Image generation",
   "admin_models_delete_blocked_title": "{name} cannot be deleted yet",
   "admin_models_delete_blocked_description": "The model is used by {names}. Change the image model in the source under Tools, or delete the source, then delete the model.",
