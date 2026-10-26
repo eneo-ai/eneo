@@ -241,6 +241,9 @@ services:
     # /dev/shm, which Docker limits to 64 MB by default. This is an upper
     # bound, not reserved RAM.
     shm_size: 1gb
+    # Time for a clean shutdown checkpoint before the container is killed;
+    # the default 10 s can force crash recovery on the next start.
+    stop_grace_period: 2m
     env_file:
       - env_db.env
     volumes:

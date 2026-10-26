@@ -936,7 +936,10 @@ docker compose up -d db
 ```
 
 The value is an upper limit, not memory reserved up front. Recreating the
-container briefly interrupts Eneo; the data stays in its volume.
+container briefly interrupts Eneo; the data stays in its volume. Set
+`stop_grace_period: 2m` on the service too, as the reference file does: with
+the default 10 seconds, a busy database can be killed before its shutdown
+checkpoint finishes and then needs crash recovery when it starts.
 
 **Until you can recreate the container**, stop PostgreSQL from running queries
 in parallel. This takes effect without a restart and makes large queries
@@ -1240,6 +1243,25 @@ Do not edit the ledger or remove the database trigger. Existing legacy content
 remains readable while the worker waits or is stopped. See [Upgrade File & Icon
 Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
 duration, state queries, pause behavior, rollback, and cleanup.
+
+### Release search data from earlier versions
+
+Upgrading from 2.2 or a 2.3 release candidate: those versions kept the chunks
+and embeddings of every replaced document version. They count toward the
+storage quota and are never searched. Once the new version runs, remove them
+once with the worker image:
+
+```bash
+docker compose exec worker python -m eneo.info_blobs.replaced_versions run
+```
+
+Eneo stays available while it runs, and it can be stopped and run again. See
+[Free Space Held by Earlier
+Versions](/guides/document-processing#free-space-held-by-earlier-versions).
+
+If you maintain your own Compose file, also give the `db` service
+`shm_size: 1gb` and `stop_grace_period: 2m`, as the reference file does; see
+[Database Shared Memory Errors](#database-shared-memory-errors).
 
 ### Clean up old images
 
