@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
-from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -35,6 +34,7 @@ from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
     aclose_if_possible,
     closing,
+    finalization,
     finalizing,
 )
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
@@ -410,8 +410,8 @@ class CompletionService:
         )
 
     async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
-        async with aclosing(completion):
-            async for chunk in completion:
+        async with closing(completion, "completion stream") as chunks:
+            async for chunk in chunks:
                 # Adapter events name their own type (tool calls and their
                 # argument deltas, approvals and their timeouts, reasoning,
                 # images, errors) and pass through whether or not they carry
@@ -698,32 +698,43 @@ class CompletionService:
                                     )
                 finally:
                     # Runs on a disconnect that lands mid-await too: the
-                    # shielded scope keeps the cancellation out until the
-                    # shared budget runs out.
-                    with finalizing("pending tool approvals"):
-                        if approval_manager:
-                            for approval_id in list(pending_approval_ids):
-                                try:
-                                    await approval_manager.cancel_approval(approval_id)
-                                except Exception:
-                                    logger.warning(
-                                        "Failed to cancel pending tool approval",
-                                        extra={"approval_id": approval_id},
-                                        exc_info=True,
-                                    )
-                    if mcp_proxy:
-                        with finalizing("mcp proxy"):
-                            await mcp_proxy.close()
+                    # shielded steps keep the cancellation out until the
+                    # cleanup's budget runs out.
+                    with finalization():
+                        with finalizing("pending tool approvals"):
+                            if approval_manager:
+                                for approval_id in list(pending_approval_ids):
+                                    try:
+                                        await approval_manager.cancel_approval(
+                                            approval_id
+                                        )
+                                    except Exception:
+                                        logger.warning(
+                                            "Failed to cancel pending tool approval",
+                                            extra={"approval_id": approval_id},
+                                            exc_info=True,
+                                        )
+                        if mcp_proxy:
+                            with finalizing("mcp proxy"):
+                                await mcp_proxy.close()
 
             async def release_unstarted() -> None:
                 # The stream is prepared (the provider request is in flight)
                 # before the response starts. If the body is never iterated,
                 # streaming_wrapper never runs, so release its resources here.
-                with finalizing("prepared provider stream"):
-                    await aclose_if_possible(stream_obj.stream)
-                if mcp_proxy:
-                    with finalizing("mcp proxy"):
-                        await mcp_proxy.close()
+                with finalization():
+                    try:
+                        with finalizing("prepared provider stream"):
+                            await aclose_if_possible(stream_obj.stream)
+                    except Exception:
+                        # The proxy is closed regardless.
+                        logger.warning(
+                            "Closing the prepared provider stream failed",
+                            exc_info=True,
+                        )
+                    if mcp_proxy:
+                        with finalizing("mcp proxy"):
+                            await mcp_proxy.close()
 
             completion = OwnedAsyncGenerator(
                 self._typed_chunks(streaming_wrapper()), release=release_unstarted

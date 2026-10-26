@@ -472,3 +472,32 @@ async def test_closing_an_unstarted_completion_releases_what_was_prepared():
 
     assert prepared.closed
     assert proxy.closed
+
+
+@pytest.mark.asyncio
+async def test_a_failing_prepared_stream_close_still_releases_the_proxy():
+    proxy = _FakeProxy()
+
+    class _BrokenStream:
+        async def aclose(self) -> None:
+            raise RuntimeError("provider close failed")
+
+    class PreparingAdapter(_DummyAdapter):
+        async def prepare_streaming(self, **kwargs):
+            return SimpleNamespace(
+                stream=_BrokenStream(), _eneo_context={"has_tools": False}
+            )
+
+    completion_model = _make_completion_model()
+    service = _service(PreparingAdapter(model=completion_model))
+    service._mcp_proxy_factory = SimpleNamespace(create=lambda *a, **k: proxy)
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        stream=True,
+        mcp_servers=[SimpleNamespace(id=uuid4(), name="server", is_enabled=True)],
+    )
+    await response.completion.aclose()
+
+    assert proxy.closed

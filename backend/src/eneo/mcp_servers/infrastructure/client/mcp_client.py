@@ -1088,9 +1088,6 @@ class MCPClient:
         """
         if self._host is not None:
             return
-        if self._host is not None:
-            # Already connected: a second connect must not start a second host.
-            return
         headers = await self._build_auth_headers()
         host = _ConnectionHost(self, headers, self._handle_session_message)
         try:

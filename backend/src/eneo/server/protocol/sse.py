@@ -7,8 +7,8 @@ from starlette.types import Send
 from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import (
     aclose_if_possible,
-    clear_finalization_deadline,
     closing,
+    finalization,
     finalizing,
 )
 
@@ -56,9 +56,7 @@ class ClosingEventSourceResponse(EventSourceResponse):
             await super().stream_response(send)
         finally:
             body = cast(object, self.body_iterator)  # pyright: ignore[reportUnknownMemberType]
-            try:
+            with finalization():
                 await _close("response body", body)
                 for source in self._closes:
                     await _close("response source", source)
-            finally:
-                clear_finalization_deadline()

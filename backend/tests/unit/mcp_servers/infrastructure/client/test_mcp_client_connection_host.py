@@ -17,6 +17,7 @@ from uuid import uuid4
 import anyio
 import pytest
 import uvicorn
+from mcp.client.streamable_http import StreamableHTTPTransport
 from mcp.server.fastmcp import FastMCP
 
 from eneo.main import stream_lifecycle
@@ -198,6 +199,37 @@ async def test_a_close_whose_budget_is_spent_still_ends_the_connections(
             await proxy.close()
 
         async with asyncio.timeout(5):
+            while _live_hosts():
+                await asyncio.sleep(0.01)
+
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_server_slow_to_end_its_session_is_cut_off_with_the_budget(
+    monkeypatch: pytest.MonkeyPatch, teardown_errors: Mock
+):
+    """The budget bounds how long the request waits; a host still unwinding
+    when it runs out is cancelled rather than left to finish at its pace."""
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.3)
+
+    async def slow_terminate_session(
+        self: StreamableHTTPTransport, client: object
+    ) -> None:
+        await asyncio.sleep(2)
+
+    monkeypatch.setattr(
+        StreamableHTTPTransport, "terminate_session", slow_terminate_session
+    )
+    async with _mcp_server() as url:
+        proxy = MCPProxySession([_server_row(url)])
+        await proxy.call_tool("probe__echo", {"text": "a"})
+        assert len(_live_hosts()) == 1
+
+        with finalizing("mcp proxy"):
+            await proxy.close()
+
+        async with asyncio.timeout(0.5):
             while _live_hosts():
                 await asyncio.sleep(0.01)
 

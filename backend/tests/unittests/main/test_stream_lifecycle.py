@@ -8,17 +8,9 @@ import pytest
 from eneo.main import stream_lifecycle
 from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
-    clear_finalization_deadline,
-    finalization_scope,
+    finalization,
     finalizing,
 )
-
-
-@pytest.fixture(autouse=True)
-def _fresh_deadline():
-    clear_finalization_deadline()
-    yield
-    clear_finalization_deadline()
 
 
 async def _cleanup_under_cancellation(*, shielded: bool) -> bool:
@@ -57,12 +49,22 @@ async def test_without_finalizing_the_cancellation_cuts_the_cleanup_short():
 
 
 @pytest.mark.asyncio
-async def test_nested_finalizing_steps_share_the_first_deadline():
-    with finalization_scope() as outer:
+async def test_nested_cleanups_share_the_outermost_deadline():
+    with finalization() as outer:
         await anyio.sleep(0.01)
-        with finalization_scope() as inner:
+        with finalization() as inner:
             pass
-    assert inner.deadline == outer.deadline
+    assert inner == outer
+
+
+@pytest.mark.asyncio
+async def test_the_deadline_ends_with_the_cleanup_that_set_it():
+    with finalization() as first:
+        pass
+    await anyio.sleep(0.01)
+    with finalization() as second:
+        pass
+    assert second > first
 
 
 @pytest.mark.asyncio
@@ -74,13 +76,14 @@ async def test_a_step_past_the_budget_is_cut_off_and_the_next_one_still_runs(
     monkeypatch.setattr(stream_lifecycle.logger, "warning", warnings)
     ran: list[str] = []
 
-    with finalizing("slow"):
-        await anyio.sleep(10)
-        ran.append("slow")
-    with finalizing("next"):
-        ran.append("next")
-        await anyio.sleep(0)  # the spent budget ends this step here
-        ran.append("after the await")
+    with finalization():
+        with finalizing("slow"):
+            await anyio.sleep(10)
+            ran.append("slow")
+        with finalizing("next"):
+            ran.append("next")
+            await anyio.sleep(0)  # the spent budget ends this step here
+            ran.append("after the await")
 
     assert ran == ["next"]
     assert [call.args[1] for call in warnings.call_args_list] == ["slow", "next"]
@@ -94,16 +97,17 @@ async def test_a_task_already_running_has_a_deadline_of_its_own():
     async def elsewhere() -> float:
         started.set()
         await proceed.wait()
-        with finalization_scope() as scope:
-            return scope.deadline
+        with finalization() as deadline:
+            return deadline
 
     other = asyncio.create_task(elsewhere())
     await started.wait()
-    with finalization_scope() as here:
+    with finalization() as here:
         await anyio.sleep(0.01)
-    proceed.set()
+        proceed.set()
+        elsewhere_deadline = await other
 
-    assert await other != here.deadline
+    assert elsewhere_deadline != here
 
 
 def _source(events: list[str]) -> AsyncGenerator[str, None]:
@@ -173,13 +177,12 @@ async def test_owned_generator_iterates_to_the_end():
 
 
 @pytest.mark.asyncio
-async def test_a_deadline_left_behind_long_ago_is_replaced(
+async def test_a_later_cleanup_is_not_cut_by_an_earlier_spent_budget(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
     with finalizing("an earlier cleanup"):
-        pass
-    await anyio.sleep(0.05)
+        await anyio.sleep(10)
     ran = False
 
     with finalizing("a later cleanup"):
@@ -197,10 +200,11 @@ async def test_a_step_skipped_for_a_spent_budget_says_so(
     warnings = Mock()
     monkeypatch.setattr(stream_lifecycle.logger, "warning", warnings)
 
-    with finalizing("slow"):
-        await anyio.sleep(10)
-    with finalizing("next"):
-        await anyio.sleep(0)
+    with finalization():
+        with finalizing("slow"):
+            await anyio.sleep(10)
+        with finalizing("next"):
+            await anyio.sleep(0)
 
     messages = [call.args[0] for call in warnings.call_args_list]
     assert "exceeded" in messages[0]
