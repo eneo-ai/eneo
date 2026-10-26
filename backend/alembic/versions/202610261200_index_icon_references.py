@@ -9,7 +9,7 @@ The tables are small, so the indexes are built inside the migration
 transaction instead of ``CONCURRENTLY``.
 
 Revision ID: 202610261200
-Revises: 202610161000
+Revises: 202610221000
 Create Date: 2026-10-26 12:00:00.000000
 """
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202610261200"
-down_revision: str | None = "202610161000"
+down_revision: str | None = "202610221000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
