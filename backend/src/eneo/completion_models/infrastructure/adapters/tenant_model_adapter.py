@@ -240,8 +240,10 @@ def _build_tool_result_with_references(
                 )
             )
             pictures += 1
+            # Eneo's placeholder starts on a line of its own after the tool's text.
             text_parts.append(
-                MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
+                ("\n" if any(text_parts) else "")
+                + MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
                     index=pictures, mime_type=mime_type
                 )
             )
@@ -264,7 +266,10 @@ def _build_tool_result_with_references(
             )
             documents += 1
             text_parts.append(
-                MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
+                ("\n" if any(text_parts) else "")
+                + MCP_FILE_PLACEHOLDER_TEMPLATE.format(
+                    index=documents, filename=filename
+                )
             )
         elif block_type == "resource_link":
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
@@ -300,6 +305,8 @@ def _build_tool_result_with_references(
                 )
             )
 
+    # Joined as they are: a server may split one payload across text blocks.
+    # Eneo's own text (the proxy's notes, the placeholders) brings its newline.
     upstream_text = "".join(text_parts)
     if not refs:
         return upstream_text, upstream_text, refs, images

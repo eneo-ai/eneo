@@ -9,6 +9,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { failedResultText } from "$lib/features/chat/toolStepStatus";
   import { Wrench } from "@lucide/svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
@@ -41,6 +42,8 @@
   let result = $state<string | null>(null);
   let resultLoaded = $state(false);
   let resultLoading = $state(false);
+  // A failed call's message, parsed once per loaded result.
+  const shownResult = $derived(result && status === "failed" ? failedResultText(result) : result);
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);
   const canViewResult = $derived(
     !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
@@ -111,7 +114,7 @@
           <p class="text-muted text-xs">{m.loading_ellipsis()}</p>
         {:else if resultLoaded && result}
           <pre
-            class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{result}</pre>
+            class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{shownResult}</pre>
         {:else if resultLoaded}
           <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
         {/if}
