@@ -55,7 +55,7 @@
 
   // Initialize the Space Settings Editor for page-level save
   const {
-    state: { update, currentChanges, isSaving },
+    state: { resource, update, currentChanges, isSaving },
     saveChanges,
     discardChanges
   } = initSpaceSettingsEditor({
@@ -105,7 +105,7 @@
   const icon = createIconEditor({
     iconId: () => $update.icon_id,
     setIconId: (id) => ($update.icon_id = id),
-    staged: true
+    savedIconId: () => $resource.icon_id
   });
 
   async function deleteSpace() {

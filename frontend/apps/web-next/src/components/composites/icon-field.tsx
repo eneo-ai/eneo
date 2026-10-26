@@ -5,7 +5,6 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
 async function uploadIcon(file: File): Promise<{ id: string }> {
@@ -23,7 +22,8 @@ export function iconUrl(iconId: string | null | undefined): string | null {
 
 /**
  * Avatar upload/remove against the icons endpoint; `onSave` persists the new
- * icon id on the owning resource (assistant, group chat, ...).
+ * icon id on the owning resource (assistant, group chat, ...), and the server
+ * deletes the icon that id replaced.
  */
 export function IconField({
   iconId,
@@ -59,13 +59,6 @@ export function IconField({
     setBusy("remove");
     try {
       await onSave(null);
-      // The server only deletes an icon no resource shows any more, so this follows the saved
-      // removal and is cleanup: an icon another resource still shows is kept.
-      if (iconId) {
-        await browserApi
-          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
-          .catch(() => {});
-      }
       // Delete goes with the icon: focus moves to Upload instead of the page.
       uploadButton.current?.focus();
     } catch {

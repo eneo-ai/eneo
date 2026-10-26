@@ -3,17 +3,24 @@ import { m } from "$lib/paraglide/messages";
 
 /**
  * Upload/delete state for an `IconUpload`. The id is always read through `iconId`, so the shown icon
- * follows whichever state owns it; `setIconId` persists a changed id, or only stages it when `staged`.
+ * follows whichever state owns it. `setIconId` persists a changed id, and the server deletes the icon it
+ * replaced. When `setIconId` only stages the id, pass `savedIconId`: an upload that is replaced or
+ * removed before it is saved is then deleted here, because no save will ever release it.
  * Must be called during component initialisation.
  */
 export function createIconEditor(options: {
   iconId: () => string | null | undefined;
   setIconId: (id: string | null) => unknown;
-  staged?: boolean;
+  savedIconId?: () => string | null | undefined;
 }) {
   const eneo = getEneo();
   let uploading = $state(false);
   let error = $state<string | null>(null);
+
+  async function dropUnsaved(id: string | null | undefined) {
+    if (!options.savedIconId || !id || id === options.savedIconId()) return;
+    await eneo.icons.delete({ id }).catch(() => {});
+  }
 
   return {
     get url() {
@@ -29,15 +36,18 @@ export function createIconEditor(options: {
     async upload(file: File) {
       uploading = true;
       error = null;
+      const replaced = options.iconId();
       try {
         const icon = await eneo.icons.upload({ file });
         await options.setIconId(icon.id);
       } catch (e) {
         console.error("Failed to upload icon:", e);
         error = m.avatar_upload_failed();
+        return;
       } finally {
         uploading = false;
       }
+      await dropUnsaved(replaced);
     },
     async remove() {
       error = null;
@@ -49,9 +59,7 @@ export function createIconEditor(options: {
         error = m.avatar_delete_failed();
         return;
       }
-      // The server only deletes an icon no resource shows any more, so this follows the persisted
-      // removal and is cleanup: an icon another resource still shows is kept.
-      if (id && !options.staged) await eneo.icons.delete({ id }).catch(() => {});
+      await dropUnsaved(id);
     }
   };
 }

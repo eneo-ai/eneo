@@ -417,7 +417,12 @@ who may change the icon.
 or group chat shows it. An icon that is still shown returns `409` with
 `eneo_error_code` `9075`: clear `icon_id` on the resource first, which runs that
 resource's own permission check. An icon of another tenant returns `400`.
-Deleting a resource also deletes its icon when nothing else shows it.
+
+A resource releases its icon itself: replacing or clearing `icon_id`, or
+deleting the resource, deletes the previous icon when nothing else shows it.
+Deleting a space does the same for the icons of its assistants, apps and group
+chats. A client therefore only calls `DELETE` for an icon it uploaded but never
+attached.
 
 ## Related pages
 

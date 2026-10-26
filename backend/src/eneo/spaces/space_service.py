@@ -357,6 +357,7 @@ class SpaceService:
 
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
+        previous_icon_id = space.icon_id
 
         space_security_classification = None
         if is_provided(security_classification):
@@ -551,6 +552,7 @@ class SpaceService:
                 mcp_tools=mcp_tool_settings,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         return await self.get_space(id)
 
     async def security_classification_impact_analysis(
@@ -715,8 +717,7 @@ class SpaceService:
 
         if space is not None:
             assert space.id is not None
-            await self._revoke_space_api_keys(space)
-            await self.repo.delete(space.id)
+            await self._delete_with_icons(space)
 
     async def delete_space(self, id: UUID):
         space = await self.get_space(id)
@@ -725,13 +726,17 @@ class SpaceService:
         if not actor.can_delete_space():
             raise UnauthorizedException("User does not have permission to delete space")
 
-        icon_id = space.icon_id
+        await self._delete_with_icons(space)
+
+    async def _delete_with_icons(self, space: Space) -> None:
+        """Delete the space; its resources cascade, so their icons are released here."""
         assert space.id is not None
+        icon_ids = await self.icon_repo.shown_in_space(space.id)
 
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)
 
-        if icon_id:
+        for icon_id in icon_ids:
             await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def _revoke_space_api_keys(self, space: Space) -> None:
