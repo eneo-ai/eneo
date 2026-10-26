@@ -98,6 +98,41 @@ describe("ChatMessage", () => {
     expect(onActivityToggle).toHaveBeenLastCalledWith(pill);
   });
 
+  it("draws the page's card for a tool call of an answer, above the text", () => {
+    const withCall: EneoUIMessage = {
+      ...answer,
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "run_flow",
+          toolCallId: "call-run",
+          state: "output-available",
+          input: {},
+          output: { status: "succeeded" },
+          providerMetadata: {
+            eneo: {
+              server_name: "flows",
+              is_internal: true,
+              structured_content: { flow_id: "flow-1", run_id: "run-1" }
+            }
+          }
+        } as Part,
+        ...answer.parts
+      ]
+    };
+    renderMessages(
+      <ChatMessage
+        message={withCall}
+        assistant={assistant}
+        toolCards={(call) =>
+          call.structuredContent ? <p>Kort för {String(call.structuredContent.run_id)}</p> : null
+        }
+      />
+    );
+    const article = screen.getByRole("article", { name: /svar från/i });
+    expect(within(article).getByText("Kort för run-1")).toBeTruthy();
+  });
+
   it("numbers only cited MCP excerpts when several share one document title", () => {
     const onActivityToggle = vi.fn();
     const blobId = "11111111-1111-1111-1111-111111111111";

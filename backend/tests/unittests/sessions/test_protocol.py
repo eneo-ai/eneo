@@ -153,7 +153,18 @@ def test_question_public_omits_persisted_tool_result():
                 tool_call_id="call_1",
                 result="large upstream payload",
                 mcp_tool_name="server__tool",
-            )
+                structured_content={"temperature": 12},
+            ),
+            # A flow run started from the flow chat: its id draws the run card.
+            ToolCallInfo(
+                server_name="flows",
+                tool_name="run_flow",
+                tool_call_id="call_2",
+                result="run payload",
+                mcp_tool_name="flows__run_flow",
+                is_internal=True,
+                structured_content={"flow_id": "flow-1", "run_id": "run-1"},
+            ),
         ],
         skill_provenance=[skill_reference],
         skill_activation=SkillActivationEvidenceV1(
@@ -171,8 +182,16 @@ def test_question_public_omits_persisted_tool_result():
 
     public = to_question_public(question)
 
-    assert len(public.tool_calls) == 1
+    assert len(public.tool_calls) == 2
     assert public.tool_calls[0].result is None
+    # An external call's structured content is read lazily, as its text is;
+    # an own server's stays, so a card can be drawn from the history.
+    assert public.tool_calls[0].structured_content is None
+    assert public.tool_calls[1].result is None
+    assert public.tool_calls[1].structured_content == {
+        "flow_id": "flow-1",
+        "run_id": "run-1",
+    }
     assert question.tool_calls is not None
     assert question.tool_calls[0].result == "large upstream payload"
     assert public.skill_provenance == [skill_reference]

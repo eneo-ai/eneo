@@ -155,6 +155,10 @@ def _tool_metadata(tool: "ToolCallMetadata") -> dict[str, Any]:
         "app_view": tool.app_view,
         "approved": tool.approved,
         "result_status": tool.result_status,
+        # What a call on one of Eneo's own servers returned as data (a flow
+        # run's id): small, and what a client draws a card from. An external
+        # tool's structured content is read lazily, as its text is.
+        "structured_content": tool.structured_content if tool.is_internal else None,
     }
 
 

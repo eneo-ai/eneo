@@ -19,8 +19,19 @@ def to_question_public(question: Question) -> Message:
         )
 
     tools = UseTools(assistants=assistants)
+    # The result text is read through the tool-result endpoint. The
+    # structured content of a call on one of Eneo's own servers is small and
+    # is what a client draws from (a flow run's id), so it stays; an external
+    # tool's, which an MCP App view renders, is read lazily like the text.
     public_tool_calls = [
-        tool_call.model_copy(update={"result": None, "structured_content": None})
+        tool_call.model_copy(
+            update={
+                "result": None,
+                "structured_content": (
+                    tool_call.structured_content if tool_call.is_internal else None
+                ),
+            }
+        )
         for tool_call in (question.tool_calls or [])
     ]
 

@@ -124,6 +124,8 @@ export type EneoToolMetadata = {
   result_status?: string | null;
   /** History only: the files the call produced (live: the `file` parts' `tool_call_id`). */
   generated_file_ids?: string[] | null;
+  /** What a call on one of Eneo's own servers returned as data (a flow run's id); null for others. */
+  structured_content?: Record<string, unknown> | null;
 };
 
 /**

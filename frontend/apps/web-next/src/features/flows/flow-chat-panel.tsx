@@ -24,10 +24,11 @@ import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
-import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
 import type { ComposerInsert } from "@/features/chat/chat-references";
+import { flowRunCardFor } from "./chat/flow-run-card";
+import { isFlowsToolCall } from "./chat/flows-tool-call";
 import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import {
   FlowChatModelPickers,
@@ -41,14 +42,6 @@ import {
   type FlowAuthoringChat,
   type FlowPublic
 } from "./flows-api";
-
-/** The loopback server the flow chat's tools run on (the backend's `FLOWS_SERVER_NAME`). */
-export const FLOWS_SERVER_NAME = "flows";
-
-/** A call on Eneo's own flows server; an external server an admin named "flows" does not count. */
-export function isFlowsToolCall(call: Pick<ToolCallRecord, "serverName" | "isInternal">): boolean {
-  return call.serverName === FLOWS_SERVER_NAME && call.isInternal !== false;
-}
 
 type ChatPanelProps = {
   flow: FlowPublic;
@@ -190,7 +183,7 @@ function AuthoringConversation({
     onComposer(composer);
   }, [composer, onComposer]);
   useEffect(() => () => onComposer(null), [onComposer]);
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
 
@@ -269,6 +262,8 @@ function AuthoringConversation({
       onActivityChange={setActivity}
       startHeadingLevel={3}
       references={references}
+      // A run the chat starts shows in the answer, with its progress and result.
+      toolCards={(call) => flowRunCardFor(call, flow, routeId)}
       footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
       placeholder={
         chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")

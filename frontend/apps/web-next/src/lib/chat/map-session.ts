@@ -64,7 +64,9 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
             approved: tool.approved ?? null,
             result_status: tool.result_status ?? null,
             // The files the call produced (live streams carry the call id on the file part).
-            generated_file_ids: tool.generated_file_ids ?? null
+            generated_file_ids: tool.generated_file_ids ?? null,
+            // Data an own server's call returned (a flow run's id), kept in the history.
+            structured_content: tool.structured_content ?? null
           } satisfies EneoToolMetadata
         },
         state:

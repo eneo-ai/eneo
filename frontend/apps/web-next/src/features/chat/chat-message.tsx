@@ -14,7 +14,7 @@ import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useRef, type ReactNode } from "react";
+import { Fragment, useCallback, useMemo, useRef, type ReactNode } from "react";
 
 import {
   CitationSourcesProvider,
@@ -52,7 +52,11 @@ import {
   type ConversationDocument,
   type GeneratedDocument
 } from "./side-panel/document-versions";
-import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import {
+  messageGeneratedFiles,
+  messageToolCalls,
+  type ToolCallRecord
+} from "./side-panel/message-tool-calls";
 import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
 import { useSidePanel } from "./side-panel/use-side-panel";
 import {
@@ -483,7 +487,8 @@ function AssistantMessage({
   sessionId,
   documents,
   draft,
-  references
+  references,
+  toolCards
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -500,6 +505,7 @@ function AssistantMessage({
   documents: ConversationDocument[];
   draft: DocumentDraft | null;
   references?: ChatReferences;
+  toolCards?: ToolCards;
 }) {
   const panel = useSidePanel();
   const text = messageText(message);
@@ -579,6 +585,11 @@ function AssistantMessage({
             onToggle={(trigger) => onActivityToggle?.(trigger)}
           />
         )}
+        {toolCards
+          ? messageToolCalls(message).map((call) => (
+              <Fragment key={call.toolCallId}>{toolCards(call)}</Fragment>
+            ))
+          : null}
         {isStreaming && !hasText && !activity.hasActivity && <ThinkingStatus />}
         {isStreaming && !hasText && <AnswerSkeleton />}
         {message.parts.map((part, index) => {
@@ -660,7 +671,8 @@ export function ChatMessage({
   conversationFiles = NO_FILES,
   documents = NO_DOCUMENTS,
   draft = null,
-  references
+  references,
+  toolCards
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -685,6 +697,8 @@ export function ChatMessage({
   draft?: DocumentDraft | null;
   /** What the conversation can refer to: pills in questions and answers. */
   references?: ChatReferences;
+  /** A page's own card for a tool call of an answer (the flow chat's run card), drawn above the text. */
+  toolCards?: ToolCards;
 }) {
   if (message.role === "user") {
     return (
@@ -712,9 +726,16 @@ export function ChatMessage({
       documents={documents}
       draft={draft}
       references={references}
+      toolCards={toolCards}
     />
   );
 }
+
+/**
+ * What a page draws for one tool call of an answer, or null for a call it
+ * has nothing to show for: the flow chat's run card for a started run.
+ */
+export type ToolCards = (call: ToolCallRecord) => ReactNode;
 
 const NO_FILES: PreviewFile[] = [];
 

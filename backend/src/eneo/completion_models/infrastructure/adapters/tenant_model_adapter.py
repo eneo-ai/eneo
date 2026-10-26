@@ -435,6 +435,10 @@ class _ArgumentDeltas:
 async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
     """Whether the tool has an approved MCP App view.
 
+    A call's `structuredContent` is kept for such a tool (its view renders
+    from it) and for a tool of one of Eneo's own servers (a flow run's id,
+    which the flow chat shows as a run card); it is dropped for other tools.
+
     Stub proxies without ``approved_app_view`` and every lookup failure read
     as no view.
     """
@@ -1821,9 +1825,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
-                        has_app_view = not result.get(
-                            "is_error"
-                        ) and await _has_app_view(mcp_proxy, call.name)
+                        assert mcp_proxy is not None
+                        keeps_structured = not result.get("is_error") and (
+                            mcp_proxy.is_internal_tool(call.name)
+                            or await _has_app_view(mcp_proxy, call.name)
+                        )
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1868,7 +1874,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 meta=result.get("meta") or None,
                                 structured_content=(
                                     result.get("structured_content")
-                                    if has_app_view
+                                    if keeps_structured
                                     else None
                                 ),
                             )
@@ -2953,9 +2959,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
                             )
-                            has_app_view = not result_data.get(
-                                "is_error"
-                            ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
+                            keeps_structured = not result_data.get("is_error") and (
+                                mcp_proxy.is_internal_tool(tc["function"]["name"])
+                                or await _has_app_view(
+                                    mcp_proxy, tc["function"]["name"]
+                                )
+                            )
                             captured_refs.extend(refs_for_call)
                             # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
@@ -3021,7 +3030,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     meta=result_data.get("meta") or None,
                                     structured_content=(
                                         result_data.get("structured_content")
-                                        if has_app_view
+                                        if keeps_structured
                                         else None
                                     ),
                                 )

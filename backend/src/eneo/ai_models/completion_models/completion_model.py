@@ -137,8 +137,9 @@ class ToolCallMetadata:
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.
     meta: Optional[dict[str, Any]] = None
-    # The tool result's MCP `structuredContent`, kept only for a call whose
-    # tool has an approved MCP App view: it is what the view renders from.
+    # The tool result's MCP `structuredContent`, kept for a call whose tool
+    # has an approved MCP App view (it is what the view renders from) and for
+    # a call on one of Eneo's own servers (a flow run's id, for its run card).
     structured_content: Optional[dict[str, Any]] = None
     # The approved MCP App view of the tool, as `{"view_id", "mcp_server_id",
     # "ui"}`: the stored view to show for this call, the server it belongs to

@@ -167,10 +167,12 @@ class ToolCallInfo(BaseModel):
     # model a fresh reference URL per image so it can pass the image back to
     # an image tool. Absent on rows persisted before this field existed.
     generated_file_ids: Optional[list[UUID]] = None
-    # The tool result's MCP `structuredContent`, kept only for a call whose
-    # tool has an approved MCP App view, which renders from it. Like `result`
-    # it is left out of conversation payloads and read through the tool-result
-    # endpoint; it is never replayed to the model.
+    # The tool result's MCP `structuredContent`, kept for a call whose tool
+    # has an approved MCP App view (which renders from it) and for a call on
+    # one of Eneo's own servers (a flow run's id, drawn as a run card). An
+    # external call's is left out of conversation payloads like `result` and
+    # read through the tool-result endpoint; an internal call's stays in the
+    # payload. It is never replayed to the model.
     structured_content: Optional[dict[str, Any]] = None
     # The approved MCP App view of the tool when the call was made, as
     # `{"view_id", "mcp_server_id", "ui"}`. Clients show that stored view for

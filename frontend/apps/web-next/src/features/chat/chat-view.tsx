@@ -55,7 +55,13 @@ import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
-import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
+import {
+  ChatMessage,
+  PendingAnswer,
+  PendingQuestion,
+  type ActivityRequest,
+  type ToolCards
+} from "./chat-message";
 import type { ChatReferences } from "./chat-references";
 import { Composer, type ComposerHandle } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
@@ -186,6 +192,8 @@ type ChatViewProps = {
   startHeadingLevel?: StartHeadingLevel;
   /** What the conversation can refer to (the flow chat's steps and values). */
   references?: ChatReferences;
+  /** A card the page draws for a tool call of an answer (the flow chat's run card). */
+  toolCards?: ToolCards;
   /** Controls after the composer's pills (the flow chat's Fråga/Redigera picker). */
   footerActions?: ReactNode;
   /** The text field's placeholder, when the page has a better one than "Fråga …". */
@@ -224,6 +232,7 @@ function ConversationView({
   onAnswerFinished,
   startHeadingLevel,
   references,
+  toolCards,
   footerActions,
   placeholder
 }: ChatViewProps) {
@@ -1054,6 +1063,7 @@ function ConversationView({
                   documents={documents.documents}
                   draft={streaming ? liveDraft : null}
                   references={references}
+                  toolCards={toolCards}
                 />
               );
             })}

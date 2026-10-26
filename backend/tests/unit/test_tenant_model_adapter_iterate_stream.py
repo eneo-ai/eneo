@@ -2647,6 +2647,20 @@ async def test_structured_content_is_dropped_for_a_call_without_a_view():
     assert call.structured_content is None
 
 
+class _StructuredInternalProxy(_StructuredResultMixin, _FakeMCPProxy):
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return True
+
+
+async def test_structured_content_is_kept_for_a_call_on_an_own_server():
+    # A flow run started from the flow chat: its id is what the run card reads.
+    call = await _executed_tool_call(_StructuredInternalProxy())
+
+    assert call.is_internal is True
+    assert call.structured_content == {"temperature": 12}
+
+
 @pytest.mark.asyncio
 async def test_iterate_stream_error_result_skips_app_view_fetch():
     adapter = _make_adapter()
