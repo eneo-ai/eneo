@@ -419,21 +419,74 @@ describe("FlowStepEditor", () => {
       count: 2,
       previous: null,
       next: { id: "step-2", name: "Skriv svar" },
+      steps: [
+        {
+          id: "step-1",
+          label: "Steg 1: Sammanfatta",
+          kind: "Text, bearbetas med AI",
+          suggestions: 0
+        },
+        {
+          id: "step-2",
+          label: "Steg 2: Skriv svar",
+          kind: "Text, bearbetas med AI",
+          suggestions: 1
+        }
+      ],
       onGo
     };
     const { onCancel, container } = renderEditor(makeFlow(), { navigation });
     await nameField();
     const bar = screen.getByRole("navigation", { name: "Stegen" });
-    expect(within(bar).getByText("Steg 1 av 2")).toBeTruthy();
     // Disabled at the first step, so the bar does not move.
     expect(
       (within(bar).getByRole("button", { name: "Föregående steg" }) as HTMLButtonElement).disabled
     ).toBe(true);
     fireEvent.click(within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" }));
     expect(onGo).toHaveBeenCalledWith("step-2");
+
+    // The step menu names the open step and lists every step, with what it
+    // does and the suggestions about it; the open step goes nowhere.
+    const trigger = within(bar).getByRole("button", { name: "Steg 1 av 2: Steg 1: Sammanfatta" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    const current = within(menu).getByRole("menuitem", { name: /Steg 1: Sammanfatta/ });
+    expect(within(current).getByText("Visas nu")).toBeTruthy();
+    const other = within(menu).getByRole("menuitem", { name: /Steg 2: Skriv svar/ });
+    expect(within(other).getByText("Text, bearbetas med AI")).toBeTruthy();
+    expect(within(other).getByText("1 förslag")).toBeTruthy();
+    onGo.mockClear();
+    fireEvent.click(current);
+    expect(onGo).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Steg 2/ }));
+    expect(onGo).toHaveBeenCalledWith("step-2");
+
     fireEvent.click(within(bar).getByRole("button", { name: "Alla steg" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     await expectNoAxeViolations(container);
+  });
+
+  it("docks a save bar that says what is unsaved, then that the save landed", async () => {
+    const saved = makeFlow({
+      draft_revision: 5,
+      steps: [makeStep({ user_description: "Sammanfatta ärendet" })]
+    });
+    api.routes[EDITOR] = () => ({ body: saved });
+    renderEditor(makeFlow());
+    const field = await nameField();
+    // Nothing to save: the way out is "Stäng" and the save button is quiet.
+    expect(screen.getByText(messages.flow_step_editor_no_changes)).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.close })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.cancel })).toBeNull();
+
+    fireEvent.change(field, { target: { value: "Sammanfatta ärendet" } });
+    expect(screen.getByText("1 ändring som inte är sparad")).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.cancel })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_saved);
+    expect(screen.getByRole("button", { name: messages.close })).toBeTruthy();
   });
 
   it("asks before unsaved changes are left, by every way out", async () => {
@@ -446,6 +499,20 @@ describe("FlowStepEditor", () => {
         count: 2,
         previous: null,
         next: { id: "step-2", name: "Skriv svar" },
+        steps: [
+          {
+            id: "step-1",
+            label: "Steg 1: Sammanfatta",
+            kind: "Text, bearbetas med AI",
+            suggestions: 0
+          },
+          {
+            id: "step-2",
+            label: "Steg 2: Skriv svar",
+            kind: "Text, bearbetas med AI",
+            suggestions: 1
+          }
+        ],
         onGo
       }
     });

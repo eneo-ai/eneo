@@ -45,7 +45,7 @@ import { FlowReferences, insertMessage } from "./chat/reference-pill";
 import { FlowChatPanel } from "./flow-chat-panel";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
-import { stepLabel } from "./flow-labels";
+import { producesLabel, stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import type { SuggestionDismissal, SuggestionFix } from "./flow-suggestion-item";
 import type { SuggestionMeasure } from "./flow-suggestions-section";
@@ -60,6 +60,8 @@ import {
   refetchSuggestionsOnScreen,
   restoreFlowSuggestion,
   SUGGESTION_STALE,
+  suggestionsByStep,
+  suggestionsOnPage,
   type FlowSuggestion
 } from "./flow-suggestions";
 import { FlowSettings } from "./flow-settings";
@@ -617,6 +619,30 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
   const openedIndex = openedStep ? steps.indexOf(openedStep) : -1;
+  // The editor's step menu marks the steps with suggestions: the same read
+  // the step list and the editor make, so it costs no request of its own.
+  const menuSuggestions = useQuery({
+    ...flowSuggestionsQueryOptions(flowId, flow.draft_revision, suggestionRuns),
+    enabled: canEdit && openedStep !== undefined
+  });
+  const suggestionsPerStep = suggestionsByStep(
+    suggestionsOnPage(canEdit ? menuSuggestions.data?.items : [], steps).shown
+  );
+  // The step view hides the tabs: "Alla steg" is its way back to the list.
+  const editorOpen = tab === "definition" && openedStep?.id !== undefined;
+  const showTabs = canViewRuns && !editorOpen;
+  const menuSteps = steps.flatMap((step) =>
+    step.id
+      ? [
+          {
+            id: step.id,
+            label: stepLabel(step, t),
+            kind: producesLabel(step, t),
+            suggestions: suggestionsPerStep.get(step.id)?.length ?? 0
+          }
+        ]
+      : []
+  );
   const neighbour = (step: FlowStep | undefined) =>
     step?.id
       ? {
@@ -713,7 +739,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
             breadcrumbs={[
               { label: spaceName, href: spaceLandingHref(sections, routeId) },
               { label: t("flows"), href: `/spaces/${routeId}/flows` },
-              { label: flow.name, current: true }
+              // The open step is a crumb of its own; the way back to the
+              // list is the editor's "Alla steg", which asks about unsaved
+              // edits first, so the flow's crumb is no link while it is open.
+              ...(openedStep && tab === "definition"
+                ? [{ label: flow.name }, { label: stepLabel(openedStep, t), current: true }]
+                : [{ label: flow.name, current: true }])
             ]}
             actions={
               <>
@@ -754,11 +785,14 @@ export function FlowPage({ flowId }: { flowId: string }) {
           <section
             aria-label={t("flows_view_definition")}
             className={cn(
-              "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto",
+              "flex min-w-0 flex-col lg:min-h-0 lg:flex-1",
+              // An open step owns the scrolling, between its bar and its
+              // save bar; the list and the runs scroll here, under the tabs.
+              editorOpen ? "lg:overflow-hidden" : "gap-6 px-6 py-5 lg:overflow-y-auto",
               view !== "definition" && "max-lg:hidden"
             )}
           >
-            {canViewRuns ? (
+            {showTabs ? (
               <TabList
                 role="tablist"
                 aria-label={t("flow_runs_tabs_label")}
@@ -781,10 +815,10 @@ export function FlowPage({ flowId }: { flowId: string }) {
               </TabList>
             ) : null}
             <div
-              role={canViewRuns ? "tabpanel" : undefined}
+              role={showTabs ? "tabpanel" : undefined}
               id={panelId}
-              aria-labelledby={canViewRuns ? tabId(tab) : undefined}
-              className="flex min-w-0 flex-col gap-6"
+              aria-labelledby={showTabs ? tabId(tab) : undefined}
+              className={cn("flex min-w-0 flex-col", editorOpen ? "lg:min-h-0 lg:flex-1" : "gap-6")}
             >
               {tab === "runs" ? (
                 <FlowRunsList
@@ -797,7 +831,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   ref={editorRef}
                   tabIndex={-1}
                   aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
-                  className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="focus-visible:outline-ring flex min-h-0 min-w-0 flex-1 flex-col focus-visible:outline-2 focus-visible:-outline-offset-2"
                 >
                   <FlowStepEditor
                     flow={flow}
@@ -818,6 +852,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                       count: steps.length,
                       previous: neighbour(steps[openedIndex - 1]),
                       next: neighbour(steps[openedIndex + 1]),
+                      steps: menuSteps,
                       onGo: (id) => openStep({ id })
                     }}
                   />

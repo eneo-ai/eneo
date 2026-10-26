@@ -7,7 +7,8 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Suspense, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
@@ -15,6 +16,8 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { StatusLabel } from "@/components/composites/status-label";
+import { SuccessMark } from "@/components/composites/success-mark";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
@@ -111,8 +114,21 @@ export type StepNavigation = {
   count: number;
   previous: { id: string; name: string } | null;
   next: { id: string; name: string } | null;
+  /** Every step of the flow, in order, for the bar's step menu. */
+  steps: readonly StepMenuEntry[];
   /** Opens that step instead (the page writes it to the address). */
   onGo: (stepId: string) => void;
+};
+
+/** One row of the bar's step menu. */
+export type StepMenuEntry = {
+  id: string;
+  /** "Steg 2: Skriv svar". */
+  label: string;
+  /** What the step gives ("Text, bearbetas med AI"). */
+  kind: string;
+  /** The core's suggestions about the step, shown as a count. */
+  suggestions: number;
 };
 
 /**
@@ -143,12 +159,14 @@ export function FlowStepEditor({ leaveRef, navigation, ...props }: EditorProps):
     isDirty: () => session.current?.isDirty() ?? false,
     requestLeave: leave
   }));
+  const current = navigation?.steps[navigation.position - 1];
   return (
-    <div className="flex flex-col gap-4">
-      {/* The way back and to the neighbouring steps, above the step, while it loads too. */}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* The way back, the step menu and the neighbouring steps: a bar that
+          stays put above the step (the step scrolls under it on a phone). */}
       <nav
         aria-label={t("flow_step_editor_navigation")}
-        className="flex flex-wrap items-center justify-between gap-2"
+        className="bg-ax-surface border-ax-border z-10 flex flex-none flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 max-lg:sticky max-lg:top-0"
       >
         <Button
           label={t("flow_step_editor_all_steps")}
@@ -158,13 +176,50 @@ export function FlowStepEditor({ leaveRef, navigation, ...props }: EditorProps):
           onClick={() => leave(props.onCancel)}
         />
         {navigation ? (
-          <span className="flex items-center gap-1">
-            <Text type="supporting" size="sm" className="px-1">
-              {t("flow_step_editor_position", {
-                position: navigation.position,
-                count: navigation.count
-              })}
-            </Text>
+          <>
+            <span aria-hidden="true" className="bg-ax-border-strong h-5 w-px" />
+            <DropdownMenu
+              placement="below"
+              alignment="start"
+              menuWidth={320}
+              presentation="adaptive"
+              button={{
+                label: current
+                  ? t("flow_step_editor_position_named", {
+                      position: navigation.position,
+                      count: navigation.count,
+                      step: current.label
+                    })
+                  : t("flow_step_editor_position", {
+                      position: navigation.position,
+                      count: navigation.count
+                    }),
+                variant: "ghost",
+                size: "sm"
+              }}
+              items={navigation.steps.map((step) => ({
+                id: step.id,
+                label: step.label,
+                description: step.kind,
+                icon: step === current ? <Check aria-hidden="true" /> : undefined,
+                endContent:
+                  step === current ? (
+                    <Text type="supporting" size="sm">
+                      {t("flow_step_editor_menu_current")}
+                    </Text>
+                  ) : step.suggestions > 0 ? (
+                    <Token
+                      label={t("flow_step_editor_menu_suggestions", { count: step.suggestions })}
+                      size="sm"
+                      color="yellow"
+                    />
+                  ) : undefined,
+                onClick: () => {
+                  if (step !== current) leave(() => navigation.onGo(step.id));
+                }
+              }))}
+            />
+            <span className="flex-1" />
             <IconButton
               label={
                 navigation.previous
@@ -195,12 +250,18 @@ export function FlowStepEditor({ leaveRef, navigation, ...props }: EditorProps):
                 if (target) leave(() => navigation.onGo(target.id));
               }}
             />
-          </span>
+          </>
         ) : null}
       </nav>
       {/* The knowledge picker and the model list read the flow's space. */}
       <SpaceProvider routeId={props.flow.space_id}>
-        <Suspense fallback={<LoadingState label={t("flow_step_editor_loading")} rows={6} />}>
+        <Suspense
+          fallback={
+            <div className="px-6 py-5">
+              <LoadingState label={t("flow_step_editor_loading")} rows={6} />
+            </div>
+          }
+        >
           <StepEditorSession
             key={`${props.flow.id}:${props.stepId}`}
             {...props}
@@ -270,6 +331,8 @@ function StepEditorSession({
   const [checked, setChecked] = useState(false);
   const [stale, setStale] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // How many saves have landed here: the save bar says so until the next edit.
+  const [savedCount, setSavedCount] = useState(0);
   // Where the person was going when the editor asked about the unsaved changes.
   const pendingLeave = useRef<(() => void) | null>(null);
 
@@ -384,6 +447,7 @@ function StepEditorSession({
       setFormProblems([]);
       setChecked(false);
       setStale(false);
+      setSavedCount((count) => count + 1);
       announce(t("flow_step_editor_saved"));
       onSaved(updated);
     },
@@ -448,7 +512,7 @@ function StepEditorSession({
 
   if (!session) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 px-6 py-5">
         <Banner
           role="alert"
           status="warning"
@@ -462,15 +526,21 @@ function StepEditorSession({
     );
   }
   if (assistantQuery.isPending) {
-    return <LoadingState label={t("flow_step_editor_loading")} rows={6} />;
+    return (
+      <div className="px-6 py-5">
+        <LoadingState label={t("flow_step_editor_loading")} rows={6} />
+      </div>
+    );
   }
   if (assistantQuery.isError || !assistantDraft || !savedAssistant) {
     return (
-      <ListError
-        error={assistantQuery.error}
-        onRetry={() => void assistantQuery.refetch()}
-        title={t("flow_step_editor_assistant_failed")}
-      />
+      <div className="px-6 py-5">
+        <ListError
+          error={assistantQuery.error}
+          onRetry={() => void assistantQuery.refetch()}
+          title={t("flow_step_editor_assistant_failed")}
+        />
+      </div>
     );
   }
 
@@ -631,7 +701,7 @@ function StepEditorSession({
 
   if (effectiveReadOnly) {
     return (
-      <section aria-labelledby={headingId} className="flex flex-col gap-6">
+      <section aria-labelledby={headingId} className="flex flex-col gap-6 px-6 py-5">
         {header}
         {latest.published_version != null && !readOnly && (
           <Banner status="info" title={t("flow_step_editor_published")} collapsible={false} />
@@ -645,13 +715,15 @@ function StepEditorSession({
   }
 
   return (
-    <section aria-labelledby={headingId} className="flex min-h-0 flex-col">
+    <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col">
+      {/* The step scrolls on its own between the bar above and the save bar
+          below from lg; on a phone the page scrolls and both bars stick. */}
       <form
         id={formId}
         noValidate
         onSubmit={submit}
-        // Tab and focus() scroll a field into view above the docked save bar (WCAG 2.4.11).
-        className="flex flex-col gap-6 pb-4 [&_:is(input,textarea,button,[tabindex])]:scroll-mb-28"
+        // Tab and focus() scroll a field into view clear of both bars (WCAG 2.4.11).
+        className="flex min-h-0 flex-1 flex-col gap-6 px-6 py-5 lg:overflow-y-auto [&_:is(input,textarea,button,[tabindex])]:scroll-mt-16 [&_:is(input,textarea,button,[tabindex])]:scroll-mb-28"
       >
         {header}
 
@@ -835,20 +907,39 @@ function StepEditorSession({
         </RecordUploadProvider>
       </form>
 
+      {/* Docked under the step: what is unsaved, and the way out. "Spara
+          steget" stands out only while there is something to save. */}
       <div
         data-clear-of-toasts
-        className="bg-ax-surface border-ax-border sticky bottom-0 flex flex-wrap items-center gap-3 border-t py-3"
+        className="bg-ax-sunken border-ax-border-strong z-10 flex flex-none flex-wrap items-center gap-x-3 gap-y-2 border-t px-6 py-3 max-lg:sticky max-lg:bottom-0"
       >
-        <Text type="supporting" size="sm" className="min-w-0 flex-1">
-          {dirty
-            ? t("flow_step_editor_changes", { count: Math.max(changeCount, 1) })
-            : t("flow_step_editor_no_changes")}
-        </Text>
-        <Button label={t("cancel")} onClick={requestCancel} />
+        <div className="flex min-w-0 flex-1 basis-48 items-center gap-2 text-sm">
+          {save.isPending ? (
+            <Text type="supporting" size="sm">
+              {t("flow_step_editor_saving")}
+            </Text>
+          ) : dirty ? (
+            <StatusLabel
+              status="warning"
+              label={t("flow_step_editor_changes", { count: Math.max(changeCount, 1) })}
+              className="text-ax-text font-medium"
+            />
+          ) : savedCount > 0 ? (
+            <>
+              <SuccessMark size="sm" replayKey={savedCount} />
+              <span className="text-ax-success font-medium">{t("flow_step_editor_saved")}</span>
+            </>
+          ) : (
+            <Text type="supporting" size="sm">
+              {t("flow_step_editor_no_changes")}
+            </Text>
+          )}
+        </div>
+        <Button label={dirty ? t("cancel") : t("close")} onClick={requestCancel} />
         <Button
           type="submit"
           form={formId}
-          variant="primary"
+          variant={dirty ? "primary" : "secondary"}
           label={t("flow_step_editor_save")}
           isLoading={save.isPending}
           isInterruptible
