@@ -732,7 +732,7 @@ class SpaceService:
         await self.repo.delete(space.id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def _revoke_space_api_keys(self, space: Space) -> None:
         if self.api_key_scope_revoker is None:

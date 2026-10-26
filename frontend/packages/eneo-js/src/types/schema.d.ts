@@ -4701,7 +4701,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 403.
+     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;
@@ -14529,7 +14529,8 @@ export interface components {
       | 9063
       | 9064
       | 9069
-      | 9070;
+      | 9070
+      | 9075;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -42431,8 +42432,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
-      403: {
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -42440,8 +42441,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

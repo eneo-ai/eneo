@@ -15,3 +15,17 @@ def test_every_foreign_key_to_an_icon_keeps_it_from_deletion() -> None:
     assert referencing - {("icon_content_references", "icon_id")} == {
         (column.table.name, column.name) for column in ICON_REFERENCES
     }
+
+
+def test_every_icon_reference_is_indexed() -> None:
+    # Each delete looks every reference up, as does the ON DELETE SET NULL cascade.
+    unindexed = {
+        (column.table.name, column.name)
+        for column in ICON_REFERENCES
+        if not any(
+            next(iter(index.columns)).name == column.name
+            for index in column.table.indexes
+        )
+    }
+
+    assert unindexed == set()

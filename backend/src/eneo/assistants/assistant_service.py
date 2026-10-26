@@ -2419,7 +2419,7 @@ class AssistantService:
         await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

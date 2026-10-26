@@ -102,11 +102,12 @@ async def create_icon(
     description=(
         "Delete an icon of the caller's tenant that no assistant, app, space or "
         "group chat shows. Remove the icon from its resource with that "
-        "resource's update first; an icon still in use is refused with 403."
+        "resource's update first; an icon still in use is refused with 409 "
+        "(`eneo_error_code` 9075)."
     ),
     responses={
         204: {"description": "Deleted"},
-        **responses.get_responses([400, 403, 404]),
+        **responses.get_responses([400, 404, 409]),
     },
 )
 @endpoint_access(

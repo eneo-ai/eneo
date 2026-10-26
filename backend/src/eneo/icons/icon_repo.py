@@ -159,11 +159,19 @@ class IconRepository:
             media_type=row.legacy_mimetype,
         )
 
-    async def delete(self, icon_id: UUID) -> bool:
-        """Delete an icon after its owning aggregate has authorized removal.
+    async def delete_if_unreferenced(self, icon_id: UUID) -> bool:
+        """Delete the icon unless a resource still shows it; returns whether it did.
 
-        An icon that any resource still shows is kept; returns whether it was deleted.
+        Must run inside a transaction.
         """
+        # Lock first, then check in a separate statement. Under READ COMMITTED a
+        # single DELETE … WHERE NOT EXISTS evaluates the check on its starting
+        # snapshot even after waiting for a concurrent attach to commit, and the
+        # SET NULL cascade would then clear that attach. With the lock, an attach
+        # either commits before the check reads, or waits and fails its FK check.
+        await self.session.execute(
+            sa.select(Icons.id).where(Icons.id == icon_id).with_for_update()
+        )
         deleted_id = (
             await self.session.execute(
                 sa.delete(Icons)
