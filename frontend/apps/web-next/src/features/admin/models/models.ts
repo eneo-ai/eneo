@@ -8,8 +8,13 @@ export type CompletionModelAdmin = Schema<"CompletionModelSecurityStatus">;
 export type EmbeddingModelAdmin = Schema<"EmbeddingModelSecurityStatus">;
 export type TranscriptionModelAdmin = Schema<"TranscriptionModelSecurityStatus">;
 export type ImageModelAdmin = Schema<"ImageModelSecurityStatus">;
+export type RerankModelAdmin = Schema<"RerankModelSecurityStatus">;
 export type AdminModel =
-  CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin | ImageModelAdmin;
+  | CompletionModelAdmin
+  | EmbeddingModelAdmin
+  | TranscriptionModelAdmin
+  | ImageModelAdmin
+  | RerankModelAdmin;
 export type TenantCompletionModelCreate = Schema<"TenantCompletionModelCreate">;
 export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
 export type TenantEmbeddingModelCreate = Schema<"TenantEmbeddingModelCreate">;
@@ -18,6 +23,8 @@ export type TenantTranscriptionModelCreate = Schema<"TenantTranscriptionModelCre
 export type TenantTranscriptionModelUpdate = Schema<"TenantTranscriptionModelUpdate">;
 export type TenantImageModelCreate = Schema<"TenantImageModelCreate">;
 export type TenantImageModelUpdate = Schema<"TenantImageModelUpdate">;
+export type TenantRerankModelCreate = Schema<"TenantRerankModelCreate">;
+export type TenantRerankModelUpdate = Schema<"TenantRerankModelUpdate">;
 export type ModelUsageStatistics = Schema<"ModelUsageStatistics">;
 export type TranscriptionModelUsageStats = Schema<"TranscriptionModelUsageStats">;
 export type ValidationResult = Schema<"ValidationResult">;
@@ -25,7 +32,7 @@ export type ModelMigrationHistory = Schema<"ModelMigrationHistory"> & {
   model_type: "completion" | "transcription";
 };
 
-export type ModelKind = "completion" | "embedding" | "transcription" | "image";
+export type ModelKind = "completion" | "embedding" | "transcription" | "image" | "rerank";
 /** Kinds with usage endpoints (and so a detail dialog's usage tab and a migrate flow). */
 export type MigratableModelKind = "completion" | "transcription";
 
@@ -216,13 +223,26 @@ export function createTenantModel(
 ): Promise<unknown>;
 export function createTenantModel(
   api: EneoClient,
+  kind: "rerank",
+  body: TenantRerankModelCreate
+): Promise<unknown>;
+export function createTenantModel(
+  api: EneoClient,
   kind: ModelKind,
   body:
     | TenantCompletionModelCreate
     | TenantEmbeddingModelCreate
     | TenantTranscriptionModelCreate
     | TenantImageModelCreate
+    | TenantRerankModelCreate
 ) {
+  if (kind === "rerank") {
+    return unwrap(
+      api.POST("/api/v1/admin/tenant-models/rerank/", {
+        body: body as TenantRerankModelCreate
+      })
+    );
+  }
   if (kind === "image") {
     return unwrap(
       api.POST("/api/v1/admin/tenant-models/image/", {
@@ -277,6 +297,12 @@ export function updateTenantModel(
 ): Promise<unknown>;
 export function updateTenantModel(
   api: EneoClient,
+  kind: "rerank",
+  modelId: string,
+  body: TenantRerankModelUpdate
+): Promise<unknown>;
+export function updateTenantModel(
+  api: EneoClient,
   kind: ModelKind,
   modelId: string,
   body:
@@ -284,7 +310,16 @@ export function updateTenantModel(
     | TenantEmbeddingModelUpdate
     | TenantTranscriptionModelUpdate
     | TenantImageModelUpdate
+    | TenantRerankModelUpdate
 ) {
+  if (kind === "rerank") {
+    return unwrap(
+      api.PUT("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        params: { path: { model_id: modelId } },
+        body: body as TenantRerankModelUpdate
+      })
+    );
+  }
   if (kind === "image") {
     return unwrap(
       api.PUT("/api/v1/admin/tenant-models/image/{model_id}/", {
@@ -313,6 +348,13 @@ export function updateTenantModel(
 }
 
 export function deleteTenantModel(api: EneoClient, kind: ModelKind, modelId: string) {
+  if (kind === "rerank") {
+    return unwrap(
+      api.DELETE("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        params: { path: { model_id: modelId } }
+      })
+    );
+  }
   if (kind === "image") {
     return unwrap(
       api.DELETE("/api/v1/admin/tenant-models/image/{model_id}/", {

@@ -51,6 +51,7 @@ from eneo.server.endpoint_routes import (
 )
 from eneo.server.exception_handlers import (
     add_exception_handlers,
+    correlation_headers,
     default_error_code_for_status,
     extract_request_id,
     validation_error_response_content,
@@ -505,7 +506,9 @@ def get_application():
         request: Request, exc: HTTPException
     ) -> JSONResponse:
         detail = exc.detail
-        headers = exc.headers or None
+        # The raiser's headers win; otherwise carry the request's correlation
+        # id like the canonical handlers do, so the header matches the logs.
+        headers = {**(correlation_headers() or {}), **(exc.headers or {})}
 
         if exc.status_code == 500:
             return await _internal_server_error_response(request, exc)
@@ -651,6 +654,9 @@ def get_application():
         if trace_id:
             response.headers["X-Trace-Id"] = trace_id
             response.headers["X-Correlation-ID"] = trace_id
+        else:
+            # Without tracing, the request context's id is the one the logs carry.
+            response.headers.update(correlation_headers() or {})
 
         origin = request.headers.get("origin")
         if origin:

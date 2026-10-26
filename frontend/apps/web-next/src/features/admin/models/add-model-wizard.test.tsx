@@ -87,6 +87,9 @@ const liveImageModels = [
   { name: "gpt-image-1", display_name: "GPT Image 1", mode: "image", cost_per_image: 0.04 }
 ];
 
+/** The provider's rerank models, served when the list is asked for that mode. */
+const liveRerankModels = [{ name: "Qwen/Qwen3-Reranker-4B", mode: "rerank" }];
+
 function renderWizard({
   initialProviderId,
   models = [],
@@ -104,7 +107,10 @@ function renderWizard({
   api.GET.mockImplementation(
     (path: string, options?: { params?: { query?: { mode?: string } } }) => {
       if (path.endsWith("/models/")) {
-        return ok(options?.params?.query?.mode === "image" ? liveImageModels : liveModels);
+        const mode = options?.params?.query?.mode;
+        if (mode === "image") return ok(liveImageModels);
+        if (mode === "rerank") return ok(liveRerankModels);
+        return ok(liveModels);
       }
       if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
       if (path === "/api/v1/admin/model-providers/") return ok([existing]);
@@ -519,6 +525,49 @@ describe("the add-model wizard's catalog", () => {
         cost_per_image: 0.04,
         default_size: "auto",
         default_quality: "auto",
+        security_classification: null
+      }
+    });
+    expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
+  });
+
+  it("creates a rerank model, leaving factor and cap to the backend's defaults", async () => {
+    const rerankCapable = {
+      ...capabilities,
+      providers: { openai: { ...capabilities.providers.openai, modes: ["completion", "rerank"] } }
+    };
+    const { dialog, onOpenChange } = renderWizard({
+      initialProviderId: "p-vllm",
+      caps: rerankCapable
+    });
+    const type = await within(dialog).findByRole("combobox", { name: /^Modelltyp/ });
+    fireEvent.keyDown(type, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Rerankning" }));
+
+    const pick = await within(dialog).findByRole("checkbox", { name: /Qwen3-Reranker-4B/ });
+    expect(within(dialog).queryByRole("checkbox", { name: /gpt-5/ })).toBeNull();
+    fireEvent.click(pick);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.GET).toHaveBeenCalledWith(
+      "/api/v1/admin/model-providers/{provider_id}/models/",
+      expect.objectContaining({ params: expect.objectContaining({ query: { mode: "rerank" } }) })
+    );
+    expect(api.POST).toHaveBeenCalledWith(
+      "/api/v1/admin/model-providers/{provider_id}/validate-model/",
+      {
+        params: { path: { provider_id: "p-vllm" } },
+        body: { model_name: "Qwen/Qwen3-Reranker-4B", model_type: "rerank" }
+      }
+    );
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/rerank/", {
+      body: {
+        provider_id: "p-vllm",
+        name: "Qwen/Qwen3-Reranker-4B",
+        display_name: "Qwen/Qwen3-Reranker-4B",
+        family: "openai",
+        hosting: "swe",
         security_classification: null
       }
     });

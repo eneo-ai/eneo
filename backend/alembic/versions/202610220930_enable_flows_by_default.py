@@ -14,7 +14,7 @@ The downgrade turns the flag off again and leaves the permissions: while the
 flag is off they grant nothing, and Owner roles of tenants created after the
 permissions existed held them before this revision too.
 
-Revision ID: 202610221000
+Revision ID: 202610220930
 Revises: 202610212300
 Create Date: 2026-10-22 10:00:00.000000
 """
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202610221000"
+revision: str = "202610220930"
 down_revision: str | None = "202610212300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

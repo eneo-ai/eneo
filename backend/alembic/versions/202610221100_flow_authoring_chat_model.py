@@ -6,7 +6,7 @@ the space's. ``mode_changed_at`` is when edit mode was last turned on or off:
 entering edit mode after a long pause starts a new conversation.
 
 Revision ID: 202610221100
-Revises: 202610221000
+Revises: 202610220930
 Create Date: 2026-10-22 11:00:00.000000
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202610221100"
-down_revision: str | None = "202610221000"
+down_revision: str | None = "202610220930"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

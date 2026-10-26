@@ -1206,6 +1206,8 @@ class TenantRerankModelService:
                 is_enabled=payload.is_active,
                 is_default=payload.is_default,
                 security_classification_id=classification_id,
+                candidate_factor=payload.candidate_factor,
+                max_candidates=payload.max_candidates,
             )
         )
         self.session.add(new_model)
@@ -1260,6 +1262,10 @@ class TenantRerankModelService:
             model.open_source = payload.open_source
         if payload.stability is not None:
             model.stability = payload.stability
+        if payload.candidate_factor is not None:
+            model.candidate_factor = payload.candidate_factor
+        if payload.max_candidates is not None:
+            model.max_candidates = payload.max_candidates
         if "is_default" in provided and payload.is_default is not None:
             if payload.is_default:
                 await _unset_other_defaults(

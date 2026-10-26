@@ -10,9 +10,15 @@ import { useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import type { ProviderOption } from "./model-providers";
 
-type CapabilityFilter = "all" | "embedding" | "transcription" | "image";
+type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "rerank";
 
-const CAPABILITY_FILTERS: CapabilityFilter[] = ["all", "embedding", "transcription", "image"];
+const CAPABILITY_FILTERS: CapabilityFilter[] = [
+  "all",
+  "embedding",
+  "transcription",
+  "image",
+  "rerank"
+];
 
 function filterLabel(t: (key: string) => string, filter: CapabilityFilter): string {
   switch (filter) {
@@ -22,6 +28,8 @@ function filterLabel(t: (key: string) => string, filter: CapabilityFilter): stri
       return t("provider_capability_speech");
     case "image":
       return t("provider_capability_image");
+    case "rerank":
+      return t("admin_model_type_rerank");
     default:
       return t("all_providers");
   }
@@ -34,6 +42,7 @@ function ModeTokens({ modes }: { modes: string[] }) {
   if (modes.includes("embedding")) labels.push(t("provider_capability_embeddings"));
   if (modes.includes("transcription")) labels.push(t("provider_capability_speech"));
   if (modes.includes("image")) labels.push(t("provider_capability_image"));
+  if (modes.includes("rerank")) labels.push(t("admin_model_type_rerank"));
   return (
     <ul className="flex flex-wrap gap-1">
       {labels.map((label) => (
