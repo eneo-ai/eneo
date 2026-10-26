@@ -78,10 +78,13 @@ describe("view-bearing calls", () => {
         { id: "png", toolName: "create_chart", input: { format: "png" } },
         { id: "svg", toolName: "create_chart", input: { include_svg: true } },
         { id: "shown", toolName: "create_chart", input: { title: "Ärenden" } },
-        { id: "external", toolName: "create_chart", input: { format: "png" }, isBundled: false }
+        { id: "external", toolName: "create_chart", input: { format: "png" }, isBundled: false },
+        { id: "forecast-report", toolName: "create_forecast", input: { display: "none" } },
+        { id: "forecast-png", toolName: "create_forecast", input: { format: "png" } },
+        { id: "forecast", toolName: "create_forecast", input: { horizon: 28 } }
       ])
     );
-    expect(calls.map((call) => call.toolCallId)).toEqual(["shown", "external"]);
+    expect(calls.map((call) => call.toolCallId)).toEqual(["shown", "external", "forecast"]);
   });
 
   it("titles Eneo's own views in the reader's language and external ones by their tool", () => {

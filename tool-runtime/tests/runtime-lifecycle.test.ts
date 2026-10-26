@@ -176,3 +176,44 @@ test("a whole-call deadline expires in admission and cancellation recovers capac
   ).json()) as any;
   expect(diagnostic.execution).toEqual({ active: 0, queued: 0 });
 });
+test("diagnostics name the functions that cannot run now, such as a forecast without its model", async () => {
+  let installed = false;
+  const handler = createHandler({
+    token,
+    maxConcurrency: 1,
+    endpoints: [
+      { slug: "compute", tools: [], toolTimeoutMs: 1000 },
+      { slug: "forecast", tools: [], toolTimeoutMs: 1000, ready: async () => installed },
+    ],
+  });
+  const diagnose = async () =>
+    (await (
+      await handler(new Request("http://runtime/diagnostics", { headers: { authorization: "Bearer " + token } }))
+    ).json()) as any;
+  expect((await diagnose()).unavailable).toEqual(["forecast"]);
+  // Asked each time, so a model mounted later is seen without a restart.
+  installed = true;
+  expect((await diagnose()).unavailable).toEqual([]);
+});
+test("a check that throws or hangs counts as cannot run, and the diagnostic still answers", async () => {
+  const handler = createHandler({
+    token,
+    maxConcurrency: 1,
+    endpoints: [
+      {
+        slug: "throws",
+        tools: [],
+        toolTimeoutMs: 1000,
+        ready: () => {
+          throw new Error("no model");
+        },
+      },
+      { slug: "hangs", tools: [], toolTimeoutMs: 1000, ready: () => new Promise<boolean>(() => {}) },
+    ],
+  });
+  const started = performance.now();
+  const response = await handler(new Request("http://runtime/diagnostics", { headers: { authorization: "Bearer " + token } }));
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as any).unavailable).toEqual(["throws", "hangs"]);
+  expect(performance.now() - started).toBeLessThan(2500);
+});

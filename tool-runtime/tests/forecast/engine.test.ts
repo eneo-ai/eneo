@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { engineResult, forecastAvailable, timestralEngine } from "../../src/tools/forecast/engine/timestral";
+import { engineResult, forecastAvailable, forecastReady, timestralEngine } from "../../src/tools/forecast/engine/timestral";
 import { tinyCheckpoint } from "./checkpoint";
 
 const directory = await mkdtemp(join(tmpdir(), "forecast-engine-test-"));
@@ -96,5 +96,28 @@ describe("the sidecar's answer", () => {
     ["no size of the model", JSON.stringify({ forecast: interval(3) }), false],
   ])("refuses %s as a failed model", (_case, stdout, holdout) => {
     expect(() => engineResult(stdout, 3, holdout)).toThrow(expect.objectContaining({ code: "ENGINE_FAILED" }));
+  });
+});
+
+describe("whether a forecast can run", () => {
+  // Stand-ins for the sidecar and a mounted checkpoint: readiness looks for the files only.
+  async function install(parts: { python?: boolean; script?: boolean; config?: boolean; weights?: boolean }) {
+    const root = await mkdtemp(join(directory, "ready-"));
+    const model = join(root, "model");
+    await mkdir(model);
+    const write = async (on: boolean | undefined, path: string) => on !== false && writeFile(path, "");
+    await write(parts.python, join(root, "python"));
+    await write(parts.script, join(root, "forecast.py"));
+    await write(parts.config, join(model, "config.json"));
+    await write(parts.weights, join(model, "model.safetensors"));
+    return forecastReady(model, join(root, "python"), join(root, "forecast.py"));
+  }
+
+  test("needs the sidecar's Python and script and both checkpoint files", async () => {
+    expect(await install({})).toBe(true);
+    expect(await install({ python: false })).toBe(false);
+    expect(await install({ script: false })).toBe(false);
+    expect(await install({ config: false })).toBe(false);
+    expect(await install({ weights: false })).toBe(false);
   });
 });

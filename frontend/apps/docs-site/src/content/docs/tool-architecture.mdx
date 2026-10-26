@@ -30,7 +30,7 @@ part.
 | ---------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Runs in                            | The backend process, mounted at `/internal-mcp/<name>/mcp`          | A separate container in the release bundle (`tool-runtime/`, image `eneo-tool-runtime`)            | Any Streamable HTTP MCP server an administrator registers                                                                                |
 | Maintained by                      | Eneo                                                                | Eneo                                                                                               | The operator or a third party                                                                                                            |
-| Serves                             | Knowledge search, attachment reading, image generation              | Compute, charts, tabular file analysis, document and spreadsheet creation                          | Domain integrations, web search, and alternative providers for any Function                                                              |
+| Serves                             | Knowledge search, attachment reading, image generation              | Compute, charts, forecasts, tabular file analysis, document and spreadsheet creation               | Domain integrations, web search, and alternative providers for any Function                                                              |
 | Tool definitions                   | Taken from the deployed code on every completion; nothing to review | Taken from the running runtime's catalog, stored and refreshed without review, with an audit entry | Synced, stored and approved by an administrator before the model sees them                                                               |
 | Credentials                        | A 15-minute token Eneo mints for itself per completion              | A shared bearer read from the deployment environment at connect time; nothing stored               | Public, a stored encrypted bearer or API-key header sent only over https (plain http only to a loopback host); optional identity headers |
 | Access to Eneo data                | Full, through the acting user's normal permission checks            | None: no database, no signing key, only the signed links a call carries                            | None beyond the signed links a call carries                                                                                              |
@@ -89,12 +89,12 @@ differ in how a completion uses them:
 
 ## Two ways a tool is configured
 
-|                              | Function                                                                                                                       | General MCP server                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| What is saved                | A purpose (`web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`) on the space and assistant | The server and its tools on the space and assistant                    |
-| Who serves it                | Resolved at ask time: a group provider or the tenant default, from any tier                                                    | The one server that was selected                                       |
-| Replacing the implementation | Activate another provider; saved intent is untouched                                                                           | Edit each space and assistant                                          |
-| Typical use                  | Capabilities with interchangeable providers, including the ones Eneo ships                                                     | Domain tools that are what they are: a ticketing system, a records API |
+|                              | Function                                                                                                                                   | General MCP server                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| What is saved                | A purpose (`web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`, `forecast`) on the space and assistant | The server and its tools on the space and assistant                    |
+| Who serves it                | Resolved at ask time: a group provider or the tenant default, from any tier                                                                | The one server that was selected                                       |
+| Replacing the implementation | Activate another provider; saved intent is untouched                                                                                       | Edit each space and assistant                                          |
+| Typical use                  | Capabilities with interchangeable providers, including the ones Eneo ships                                                                 | Domain tools that are what they are: a ticketing system, a records API |
 
 Functions exist so that "this assistant can analyse files" is not the same
 statement as "this assistant talks to server X". An administrator can move a
@@ -134,15 +134,15 @@ fit; the placement rule and its two attachment patterns are spelled out in
 
 ### Why heavy and untrusted work runs in a separate runtime
 
-Compute, tabular analysis, charts and file creation have four properties that
-knowledge search does not:
+Compute, tabular analysis, charts, forecasts and file creation have four
+properties that knowledge search does not:
 
 1. **The input is not Eneo's own.** The model writes the JavaScript and the
    SQL. Users supply the CSV, XLSX and DOCX files. None of it can be reviewed
    before it runs, so it has to be contained instead.
 2. **They need engines.** DuckDB, QuickJS, an OOXML renderer, HTML-to-PDF
-   layout and SVG rasterising are large native or WebAssembly dependencies
-   with their own vulnerability history.
+   layout, SVG rasterising and PyTorch for the forecast model are large native
+   or WebAssembly dependencies with their own vulnerability history.
 3. **Their memory is proportional to the file**, not to the request.
 4. **They need a sandbox.** Code the model wrote must not be able to read
    another conversation's files, reach Eneo's credentials or the network, or
@@ -260,7 +260,7 @@ Function can use the bundled runtime, but the two are not interchangeable.
 | **Function**                               | Saved purpose such as `file_analysis` or `charts`; provider selection under organisation and user controls | A particular implementation or a guarantee of every native UI operation |
 | **General MCP integration**                | Approved domain tools attached through Space and Assistant configuration                                   | A new Function merely because it uses MCP                               |
 | **Loopback server**                        | Backend-owned knowledge, attachment reading or image-model calls                                           | A host for heavy file processing or arbitrary compute                   |
-| **Bundled tool runtime**                   | Eneo-maintained isolated calculations, tabular analysis, charts and file creation                          | A plugin host or durable document store                                 |
+| **Bundled tool runtime**                   | Eneo-maintained isolated calculations, tabular analysis, charts, forecasts and file creation               | A plugin host or durable document store                                 |
 | **MCP App**                                | A tool's interactive result view, such as a query table or chart                                           | An editable saved document or unrestricted access to Eneo               |
 | **Native document workspace and previews** | File display, streaming drafts, assistant-driven revisions, version navigation and export controls         | Direct rich-text or spreadsheet cell editing                            |
 
@@ -288,7 +288,7 @@ are interactive HTML views attached to MCP tools.
 | App filters, loaded rows and chart zoom            | Preserved when moving the same frame between inline and expanded display; not guaranteed across reloads                                         |
 | Markdown export to Word/PDF                        | Renders the selected saved text through a compatible current provider without another model response; download bytes are not saved as a version |
 | Runtime unavailable                                | Its tool calls can fail; ordinary chat and already-saved native previews do not depend on runtime readiness                                     |
-| MCP Apps disabled                                  | Native previews still work; bundled table tools return data and charts fall back to PNG                                                         |
+| MCP Apps disabled                                  | Native previews still work; bundled table tools return data, and charts and forecasts fall back to PNG                                          |
 | View approval revoked or originating tool disabled | An already-open app loses tool access when the host rechecks its next request                                                                   |
 
 ## Where to read next

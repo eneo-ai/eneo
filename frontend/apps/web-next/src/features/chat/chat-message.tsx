@@ -226,7 +226,7 @@ export function PendingQuestion({
 
 /**
  * What an answer produced, under its text: images inline, and one line per
- * document that names it and opens it in the side panel. A chart exported
+ * document that names it and opens it in the side panel. A chart drawn
  * only as part of a report is left out. A version a reader saved belongs to
  * the document it revises: it gets no line of its own, and the document's
  * line opens its newest version.
@@ -242,8 +242,12 @@ function GeneratedFiles({
   const hidden = new Set(
     calls.filter(isChartDocumentAsset).flatMap((call) => call.generatedFileIds)
   );
+  // Such a call's picture is shown in the report; a file it exported beside it, such as a
+  // forecast's CSV, is the user's and stays here.
   const files = messageGeneratedFiles(message).filter(
-    (file) => !hidden.has(file.id) && !file.revises_file_id
+    (file) =>
+      !(hidden.has(file.id) && (!file.mimetype || file.mimetype.startsWith("image/"))) &&
+      !file.revises_file_id
   );
   if (files.length === 0) return null;
   const latestOf = (file: GeneratedDocument) =>

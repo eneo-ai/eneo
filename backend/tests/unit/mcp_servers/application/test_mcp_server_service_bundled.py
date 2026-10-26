@@ -23,6 +23,7 @@ from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
 )
+from eneo.mcp_servers.application.runtime_status import RuntimeStatus
 from eneo.mcp_servers.domain.entities.mcp_server import (
     BUNDLED_AUTH_TYPE,
     BUNDLED_TOOLS,
@@ -225,7 +226,25 @@ class TestListBundled:
         tools = await service.list_bundled_tools()
 
         assert all(tool.available is False for tool in tools)
+        assert all(
+            tool.unavailable_reason == "runtime_not_configured" for tool in tools
+        )
         assert all(tool.mcp_server_id is None for tool in tools)
+
+    async def test_a_tool_whose_model_is_missing_is_offered_with_that_reason(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+        runtime = RuntimeStatus(expected_version="2.3.0", configured=True)
+        runtime.note_unavailable(["forecast"])
+
+        tools = {tool.tool: tool for tool in await service.list_bundled_tools(runtime)}
+
+        assert tools["forecast"].available is False
+        assert tools["forecast"].unavailable_reason == "model_missing"
+        # Only that tool: the rest of the runtime is offered as usual.
+        assert tools["compute"].available is True
+        assert tools["compute"].unavailable_reason is None
 
 
 class TestRefreshBundled:

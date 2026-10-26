@@ -54,3 +54,4 @@ roles:
       - file_creation
       - charts
       - compute
+      - forecast

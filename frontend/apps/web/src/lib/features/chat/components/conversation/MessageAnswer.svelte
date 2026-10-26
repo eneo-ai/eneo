@@ -90,6 +90,10 @@
         .flatMap((call) => chat.generatedFileIdsOf(call))
     )
   );
+  // Such a call's picture is shown in the report; a file it exported beside it, such as a
+  // forecast's CSV, is the user's and stays here.
+  const isDocumentAsset = (file: { id: string; mimetype?: string | null }) =>
+    documentAssetIds.has(file.id) && (!file.mimetype || file.mimetype.startsWith("image/"));
 
   // Reasoning/thinking text for this message: accumulated by ChatService while
   // streaming, served from the persisted `reasoning` field on reload.
@@ -732,7 +736,7 @@
 
 <McpAppFrames />
 
-{#each message.generated_files.filter((file) => !documentAssetIds.has(file.id)) as file (file.id)}
+{#each message.generated_files.filter((file) => !isDocumentAsset(file)) as file (file.id)}
   <!-- An empty mimetype is the placeholder of an image still being generated. -->
   {#if !file.mimetype || file.mimetype.startsWith("image/")}
     <AsyncImage url={attachmentUrls.getUrl(file) ?? null}></AsyncImage>

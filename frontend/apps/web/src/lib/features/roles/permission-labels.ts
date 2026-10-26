@@ -112,6 +112,8 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
       return { label: m.permission_charts(), description: m.permission_charts_description() };
     case "compute":
       return { label: m.permission_compute(), description: m.permission_compute_description() };
+    case "forecast":
+      return { label: m.permission_forecast(), description: m.permission_forecast_description() };
     case "file_creation":
       return {
         label: m.permission_file_creation(),

@@ -1,6 +1,6 @@
 # Functions
 
-Web search, image generation, ask a file, create files, charts and compute are **functions**
+Web search, image generation, ask a file, create files, charts, compute and forecast are **functions**
 (Swedish: *Funktioner*) that an
 assistant switches on, not servers it connects to. An administrator decides
 which source serves each function for the organisation; spaces, assistants and
@@ -30,6 +30,7 @@ import { Callout } from 'nextra/components'
 | **Create a file** (_Skapa fil_) | Lets the assistant draft and revise Markdown documents in Eneo, export Word (DOCX) and PDF, fill templates, and create Excel (XLSX) workbooks                                 | The provider **built into Eneo**, or an external MCP server                             |
 | **Charts** (_Diagram_)          | Lets the assistant compare values and show trends with interactive bar, line, pie and scatter charts, or export PNG images when requested                                     | The provider **built into Eneo**, or an external MCP server                             |
 | **Compute** (_Beräkning_)       | Lets the assistant run exact arithmetic, statistics, date and text calculations in an isolated JavaScript sandbox, show the result as a table and export it as CSV           | The provider **built into Eneo**, or an external MCP server                             |
+| **Forecast** (_Prognos_)        | Lets the assistant forecast the coming days of a daily series in a CSV or Excel file: a median and an interval for each day, checked against the last days      | The provider **built into Eneo**, or an external MCP server                             |
 
 The key ideas:
 
@@ -83,8 +84,8 @@ The native document workspace and file previews work without MCP Apps being
 enabled. Interactive tool views additionally require the
 [MCP Apps deployment settings](/guides/mcp-servers#interactive-tool-views).
 The bundled chart tool supplies an interactive chart app, and returns a PNG
-when an image is requested or app views are unavailable. Other MCP servers can
-supply their own app views.
+when an image is requested or app views are unavailable. The bundled forecast
+tool does the same. Other MCP servers can supply their own app views.
 
 Use **Files and views** (*Filer och vyer*) above the conversation to open the
 side panel. Its overview groups interactive views, files created in the chat
@@ -196,7 +197,7 @@ PDF document on request, in the same turn or a later one.
 
 ### Using the bundled tool runtime
 
-Ask a file, create files, charts and compute can be served by the provider
+Ask a file, create files, charts, compute and forecast can be served by the provider
 **built into Eneo**, the bundled tool runtime: an isolated container included
 in the standard Eneo deployment. It is not part of the backend process and
 holds no Eneo credentials. [Tool Runtime Security](/docs/tool-runtime-security)
@@ -214,8 +215,9 @@ in the repository covers how an operator configures or omits it. When it runs:
    it is saved inactive, ready to be activated as a replacement.
 
 For **Charts**, enable the function in the space and assistant settings and
-grant the **Charts** role permission. On an existing installation, roles are
-not granted this new permission automatically. Existing general chart servers
+grant the **Charts** role permission. Upgrading grants it to the predefined
+Owner role only, as on a new install; an administrator opts other roles in.
+Existing general chart servers
 remain unchanged; an administrator can add the function's provider separately
 and retire the old server when the function is configured.
 
@@ -223,9 +225,20 @@ and retire the old server when the function is configured.
 runs model-written JavaScript in an isolated sandbox for calculations that must
 be exact, shows a tabular result as an interactive table, and can export it as
 a CSV file that **Create a file** and **Charts** take as a source. Upgrading
-grants the **Compute** permission to the predefined User, AI Configurator and
-Owner roles. A compute server added earlier from the **MCP servers** tab keeps
+grants the **Compute** permission to the predefined Owner role only, as on a
+new install. A compute server added earlier from the **MCP servers** tab keeps
 working as a general server until an administrator retires it.
+
+**Forecast** (_Prognos_) follows the same pattern. Its provider built into Eneo
+forecasts a daily series in an attached CSV or Excel file with a model that the
+operator installs in the tool service, shows the forecast as an interactive
+view, and can export it as a CSV file that **Create a file** and **Charts**
+take as a source. The predefined Owner role receives the **Forecast**
+permission, on upgrade as on a new install; an administrator opts other roles
+in. Until the model is installed, the Forecast card under **Admin > Tools**
+says "This function needs a model that your operator adds to the tool
+runtime." and the provider built into Eneo cannot be turned on. Every other
+tool keeps working.
 
 A bundled source is an ordinary source in other respects: audiences,
 permissions and classification apply unchanged, and an external MCP server can
@@ -268,11 +281,13 @@ external server.
 Each function has a role permission of the same name, edited under **Admin →
 Roles**: **Web search** (`web_search`), **Image generation**
 (`image_generation`), **Ask a file** (`file_analysis`), **Create a file**
-(`file_creation`), **Charts** (`charts`) and **Compute** (`compute`). New
-predefined User, AI Configurator and Owner roles include all six. Existing
-predefined roles receive **Compute** on upgrade but need the **Charts**
-permission added by an administrator; custom roles only have the permissions
-an administrator adds. Without the
+(`file_creation`), **Charts** (`charts`), **Compute** (`compute`) and
+**Forecast** (`forecast`). New predefined User and AI Configurator roles
+include **Web search**, **Image generation** and **Ask a file**; the
+predefined Owner role includes all seven. **Charts**, **Compute** and
+**Forecast** go to the predefined Owner role only, on upgrade as on a new
+install, and an administrator opts other roles in. Custom roles only have the
+permissions an administrator adds. Without the
 permission the tools are never attached for that user, even where an assistant
 offers the function. Configuring a function on a space or assistant is not
 gated by these permissions.
@@ -990,3 +1005,51 @@ The bundled view contains its renderer and requests no network access or
 browser permissions. It accepts a validated chart specification, not arbitrary
 JavaScript, HTML or ECharts options. File references are resolved in the tool
 runtime; the chart view receives the resulting values.
+
+## Forecasts
+
+Enable **Forecast** (_Prognos_) under **Functions**. For hourly or per-event
+data, also enable **Ask a file**. Users can then ask, for example:
+
+- **"How many visitors can we expect each day over the next four weeks?"**
+- **"Forecast the daily energy use in this file for the coming month."**
+
+The assistant selects `create_forecast` from its description. The file needs
+one row per day, oldest first: an ISO date column (YYYY-MM-DD) and a numeric
+value column, with at least 28 days of history. An empty cell is a day whose
+value is unknown, not zero. Data per hour or per event, days without a row or
+other date formats are first turned into one row per day with **Ask a file**
+(`query_table` with export). A forecast reaches at most 180 days ahead and
+starts the day after the last day with a value: empty days at the end of the
+file, as in a sheet laid out for the whole year, are left out, and the method
+under the chart says how many.
+
+For each day the forecast gives the median (P50: half the outcomes are expected
+below it, half above) and an interval (P10–P90). The interval holds for each day on its own: about eight outcomes in
+ten fall inside it when the model fits the data, and its bounds are not added
+across days. The tool also checks how the same forecast would have done on the
+last days of the history, compared with repeating last week. The check needs
+history before those days as well: with a short history or too many missing
+days it is unavailable, and the result says why.
+
+The bundled forecast view shows the recent history, the forecast and its
+interval, opening on the days ahead:
+
+- Zoom the chart, and choose **Reset zoom** to return to the opening range.
+- Choose **Table** (_Tabell_) for the values of each day.
+- Choose **Show method** (_Visa metod_) for the data, the history, missing
+  values, the check against the outcome, the interval, what the forecast does
+  not account for and the model.
+
+Ask for a PNG image when you want a picture to download; without app support
+the tool returns a PNG automatically. For a report, the assistant makes the
+same forecast again as an image for **Create a file**, without showing it in
+the chat. Ask for a file and the forecast is exported as CSV, with the recent
+history and each day's P10, P50 and P90.
+
+The model, Timestral from Mistral AI, runs in an isolated sandbox in your own
+deployment's tool service, so the data does not leave the deployment. It knows
+only the history, not the weather, holidays, school breaks or planned changes;
+the assistant is told to say so when it matters. The operator installs the
+model as described in the
+[operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md#the-forecast-model).

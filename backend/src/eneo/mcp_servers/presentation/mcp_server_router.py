@@ -303,15 +303,17 @@ async def update_tenant_tool_enabled(
 async def get_bundled_tools(container: Container = _WITH_USER):
     """List the bundled tool runtime's servers and whether they are added."""
     service = container.mcp_server_service()
-    tools = await service.list_bundled_tools()
+    runtime = await runtime_status()
+    tools = await service.list_bundled_tools(runtime)
     return BundledToolList(
-        runtime=await runtime_status(),
+        runtime=runtime,
         items=[
             BundledToolPublic(
                 tool=tool.tool,
                 purpose=tool.purpose,
                 available=tool.available,
                 mcp_server_id=tool.mcp_server_id,
+                unavailable_reason=tool.unavailable_reason,
             )
             for tool in tools
         ],

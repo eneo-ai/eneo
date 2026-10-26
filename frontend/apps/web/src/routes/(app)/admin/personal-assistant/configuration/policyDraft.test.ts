@@ -536,7 +536,8 @@ describe("PolicyDraft", () => {
       "file_analysis",
       "file_creation",
       "charts",
-      "compute"
+      "compute",
+      "forecast"
     ]);
     // Stored intent stays selected across provider changes.
     expect(draft.mcpSelections.has("capability:web_search")).toBe(true);

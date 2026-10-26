@@ -219,6 +219,7 @@ class TestPermissionSemantics:
             "file_creation",
             "charts",
             "compute",
+            "forecast",
         }
         actual = {p.value for p in Permission}
         assert actual == expected

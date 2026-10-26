@@ -208,7 +208,7 @@ export function initConversations(client) {
      * @param {string} params.question Question to ask
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
-     * @param {("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute")[]} [params.disabledCapabilities] Capability purposes disabled for this request
+     * @param {import('../types/schema').components["schemas"]["ConversationRequest"]["disabled_capabilities"]} [params.disabledCapabilities] Capability purposes disabled for this request
      * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]

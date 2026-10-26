@@ -88,7 +88,8 @@ const CAPABILITY_STEPS: Record<string, { label: string; server: string }> = {
   file_analysis: { label: "tool_file_analysis", server: "file_analysis" },
   file_creation: { label: "tool_file_creation", server: "file_creation" },
   charts: { label: "tool_charts", server: "charts" },
-  compute: { label: "tool_compute", server: "compute" }
+  compute: { label: "tool_compute", server: "compute" },
+  forecast: { label: "tool_forecast", server: "forecast" }
 };
 
 function argumentsOf(part: ToolLike): Record<string, unknown> {

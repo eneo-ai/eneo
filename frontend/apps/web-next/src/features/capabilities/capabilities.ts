@@ -1,4 +1,12 @@
-import { Calculator, ChartColumn, FilePlus, FileSearch, Globe, Image } from "lucide-react";
+import {
+  Calculator,
+  ChartColumn,
+  FilePlus,
+  FileSearch,
+  Globe,
+  Image,
+  TrendingUp
+} from "lucide-react";
 import type { Schema } from "@/lib/api/models";
 
 export type Capability = Schema<"CapabilityAvailability">["purpose"];
@@ -72,6 +80,14 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     assistantHint: "compute_capability_hint",
     bundledDescription: "tools_builtin_compute_description",
     bundledSummary: "tools_builtin_compute_summary"
+  },
+  {
+    purpose: "forecast",
+    icon: TrendingUp,
+    spaceHint: "forecast_space_group_hint",
+    assistantHint: "forecast_capability_hint",
+    bundledDescription: "tools_builtin_forecast_description",
+    bundledSummary: "tools_builtin_forecast_summary"
   }
 ];
 

@@ -40,6 +40,7 @@ class Permission(str, Enum):
     FILE_CREATION = "file_creation"
     CHARTS = "charts"
     COMPUTE = "compute"
+    FORECAST = "forecast"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

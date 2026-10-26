@@ -11,6 +11,7 @@ CapabilityPurpose = Literal[
     "file_creation",
     "charts",
     "compute",
+    "forecast",
 ]
 
 
