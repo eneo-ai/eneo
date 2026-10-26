@@ -1,4 +1,5 @@
-import { latestRelease } from "@eneo/whats-new";
+import { latestRelease, type Release } from "@eneo/whats-new";
+import * as news from "@eneo/whats-new";
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWhatsNewStore, type Marker } from "./whatsNewStore";
@@ -58,6 +59,110 @@ afterEach(() => {
 });
 
 describe("whatsNewStore", () => {
+  it("does not announce, count, or record a release without visible entries", async () => {
+    const hidden: Release = {
+      version,
+      entries: [
+        {
+          id: "assistant",
+          type: "new",
+          area: "assistants",
+          permissions: { allOf: ["assistants"] },
+          title: { en: "Assistant", sv: "Assistent" },
+          body: { en: "Body", sv: "Text" }
+        }
+      ]
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([hidden]);
+    const { store, client } = makeStore();
+    expect(store.releases).toEqual([]);
+    expect(get(store.hasUnseen)).toBe(false);
+    expect(store.pendingAnnouncement()).toBeNull();
+    store.snoozeLatest();
+    await store.markLatestSeen();
+    await store.markLatestAnnounced();
+    expect(client.markSeen).not.toHaveBeenCalled();
+    expect(client.markAnnounced).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`eneo:whats-new:remind-after:user-1:${version}`)).toBeNull();
+
+    const granted = createWhatsNewStore({
+      user: {
+        id: "user-1",
+        roles: [{ id: "custom", name: "Custom", permissions: ["assistants"] }]
+      },
+      eneo: { whatsNew: client },
+      whatsNewEnabled: true,
+      whatsNewVersion: version,
+      whatsNewSeenVersion: null,
+      whatsNewAnnouncedVersion: null
+    });
+    expect(get(granted.hasUnseen)).toBe(true);
+    expect(granted.pendingAnnouncement()).toBe(hidden);
+  });
+
+  it("counts unread visible history without announcing an older release for a hidden latest", async () => {
+    const general = {
+      id: "general",
+      type: "new" as const,
+      area: "account" as const,
+      title: { en: "General", sv: "Allmänt" },
+      body: { en: "Body", sv: "Text" }
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([
+      { version, entries: [{ ...general, audience: "admin" }] },
+      { version: "2.1.0", entries: [general] }
+    ]);
+    const { store, client } = makeStore();
+    expect(store.releases.map((r) => r.version)).toEqual(["2.1.0"]);
+    expect(get(store.hasUnseen)).toBe(true);
+    expect(store.pendingAnnouncement()).toBeNull();
+    expect(get(makeStore("2.1.0").store.hasUnseen)).toBe(false);
+    await store.markLatestSeen();
+    expect(client.markSeen).toHaveBeenCalledWith(version);
+    expect(get(store.hasUnseen)).toBe(false);
+  });
+
+  it("preserves a due reminder while permissions hide its release", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    const restricted: Release = {
+      version,
+      entries: [
+        {
+          id: "assistant",
+          type: "new",
+          area: "assistants",
+          permissions: { allOf: ["assistants"] },
+          title: { en: "Assistant", sv: "Assistent" },
+          body: { en: "Body", sv: "Text" }
+        }
+      ]
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([restricted]);
+    const { client } = makeStore();
+    const permitted = () =>
+      createWhatsNewStore({
+        user: {
+          id: "user-1",
+          roles: [{ id: "role", name: "Custom", permissions: ["assistants"] }]
+        },
+        eneo: { whatsNew: client },
+        whatsNewEnabled: true,
+        whatsNewVersion: version,
+        whatsNewSeenVersion: null,
+        whatsNewAnnouncedVersion: version
+      });
+    permitted().snoozeLatest();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    const hidden = makeStore(null, version);
+    expect(hidden.store.pendingAnnouncement()).toBeNull();
+    await hidden.store.markLatestSeen();
+    await hidden.store.markLatestAnnounced();
+    expect(hidden.client.markSeen).not.toHaveBeenCalled();
+    expect(hidden.client.markAnnounced).not.toHaveBeenCalled();
+    expect(permitted().pendingAnnouncement()).toBe(restricted);
+  });
+
   it("restores a local reminder after reload, waits 24 hours and consumes it when shown", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
