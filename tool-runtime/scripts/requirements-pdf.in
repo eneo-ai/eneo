@@ -1,2 +1,4 @@
 weasyprint>=70,<71
 pillow>=13.0.0,<14
+# WOFF2 decoding must include the CVE-2026-111497 fix.
+brotli>=1.2.1,<2
