@@ -363,8 +363,16 @@ async def get_provider_capabilities(
         # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
         provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
 
-        if provider and mode and model_key not in raw[provider][mode]:
-            model_info: ModelCapability = {"name": model_key}
+        # The route is built as "<provider_type>/<name>" (resolve_model_route),
+        # so a name that keeps the provider's own prefix would be sent as
+        # "azure_ai/azure_ai/...". Offer the name without it.
+        name = model_key.removeprefix(f"{provider}/")
+        is_qualified = name != model_key
+
+        # LiteLLM can list a model both bare and as "<provider>/<name>". Keep
+        # the qualified row: /model-defaults/ resolves that one for the provider.
+        if provider and mode and (is_qualified or name not in raw[provider][mode]):
+            model_info: ModelCapability = {"name": name}
             if mode == "completion":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["max_output_tokens"] = info.get("max_output_tokens")
@@ -391,7 +399,7 @@ async def get_provider_capabilities(
                 model_info["cost_per_image"] = per_image_cost(
                     cast(dict[str, Any], info)
                 )
-            raw[provider][mode][model_key] = model_info
+            raw[provider][mode][name] = model_info
 
     # Build response sorted by release date (newest first)
     providers: dict[str, ProviderCapabilities] = {}
