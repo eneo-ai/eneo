@@ -20092,6 +20092,10 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Candidate Factor */
+      candidate_factor: number;
+      /** Max Candidates */
+      max_candidates: number;
     };
     /** RerankModelSecurityStatus */
     RerankModelSecurityStatus: {
@@ -20155,6 +20159,10 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Candidate Factor */
+      candidate_factor: number;
+      /** Max Candidates */
+      max_candidates: number;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -20564,7 +20572,7 @@ export interface components {
       autocut_cutoff?: number | null;
       /**
        * Rerank
-       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores, chunks beyond the model's max_candidates follow in vector order, and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
        * @default false
        */
       rerank?: boolean;
@@ -23033,7 +23041,7 @@ export interface components {
       provider_id: string;
       /**
        * Name
-       * @description Model identifier as served by the provider (e.g. 'rerank-v3.5', 'jina-reranker-v2-base-multilingual', or the name a TEI endpoint serves)
+       * @description Model identifier as served by the provider, without a provider prefix (e.g. 'rerank-v3.5', 'Qwen/Qwen3-Reranker-4B')
        */
       name: string;
       /**
@@ -23071,6 +23079,18 @@ export interface components {
       description?: string | null;
       /** @description Security classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       * @default 5
+       */
+      candidate_factor?: number;
+      /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       * @default 100
+       */
+      max_candidates?: number;
     };
     /** TenantRerankModelUpdate */
     TenantRerankModelUpdate: {
@@ -23106,6 +23126,16 @@ export interface components {
       is_default?: boolean | null;
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       */
+      candidate_factor?: number | null;
+      /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       */
+      max_candidates?: number | null;
     };
     /**
      * TenantSharePointAppCreate
