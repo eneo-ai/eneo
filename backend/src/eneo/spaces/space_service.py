@@ -358,6 +358,12 @@ class SpaceService:
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
         previous_icon_id = space.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         space_security_classification = None
         if is_provided(security_classification):
