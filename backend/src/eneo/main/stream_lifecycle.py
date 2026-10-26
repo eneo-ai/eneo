@@ -10,8 +10,10 @@ Two rules make the ``finally`` blocks along that chain reliable:
 
 - Cleanup runs inside ``finalizing(...)``: a shielded cancel scope with one
   deadline shared by every link in the task, so a disconnect that lands
-  mid-await cannot cut the cleanup short and a hung close cannot hold the
-  request open.
+  mid-await cannot cut the cleanup short, and the request waits at most one
+  budget for it. A step cut off by the deadline is logged; what it started
+  (an MCP connection leaving its contexts, a provider stream closing under
+  its own shield) still finishes on its own.
 - A generator that never started cannot run its ``finally``. Where resources
   are acquired before the first iteration, ``OwnedAsyncGenerator`` runs the
   owner's release instead.
@@ -58,9 +60,13 @@ def finalization_scope() -> anyio.CancelScope:
     The first caller on a task fixes the deadline; later callers on the same
     task, deeper or shallower in the chain, share it.
     """
+    now = anyio.current_time()
     deadline = _finalization_deadline.get()
-    if deadline is None:
-        deadline = anyio.current_time() + FINALIZATION_BUDGET_SECONDS
+    if deadline is None or now > deadline + FINALIZATION_BUDGET_SECONDS:
+        # None yet, or left behind by a cleanup that ended more than a budget
+        # ago on this task (the outermost owner clears it, but not every
+        # path has one): this is a new cleanup with a budget of its own.
+        deadline = now + FINALIZATION_BUDGET_SECONDS
         _finalization_deadline.set(deadline)
     return anyio.CancelScope(shield=True, deadline=deadline)
 
@@ -79,8 +85,16 @@ def finalizing(step: str) -> Generator[None, None, None]:
     first await), so one hung close never skips the rest.
     """
     with finalization_scope() as scope:
+        spent_on_entry = anyio.current_time() >= scope.deadline
         yield
-    if scope.cancelled_caught:
+    if scope.cancelled_caught and spent_on_entry:
+        logger.warning(
+            "Stream finalization step '%s' was cut off at its first await: "
+            "the %.0fs budget was already spent",
+            step,
+            FINALIZATION_BUDGET_SECONDS,
+        )
+    elif scope.cancelled_caught:
         logger.warning(
             "Stream finalization step '%s' exceeded the %.0fs budget and was cut off",
             step,
@@ -146,10 +160,19 @@ class OwnedAsyncGenerator(AsyncGenerator[T, None]):
         tb: TracebackType | None = None,
         /,
     ) -> T:
-        self._started = True
+        del tb
         if isinstance(typ, BaseException):
-            return await self._generator.athrow(typ, None, tb)
-        return await self._generator.athrow(typ, val, tb)
+            exc = typ
+        elif isinstance(val, BaseException):
+            exc = val
+        else:
+            exc = typ(val) if val is not None else typ()
+        if not self._started:
+            # Thrown into before it started, a generator ends without running
+            # its body: release what the body would have owned.
+            await self.aclose()
+            raise exc
+        return await self._generator.athrow(exc)
 
     async def aclose(self) -> None:
         if self._closed:

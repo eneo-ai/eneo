@@ -12,8 +12,14 @@ import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
-from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPInsecureCredentialTransportError,
+)
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+    INSECURE_CREDENTIAL_TRANSPORT_NOTICE,
+    MCPProxySession,
+)
 from eneo.roles.permissions import Permission
 
 
@@ -74,6 +80,7 @@ class _FakeMCPClient:
         self.exit_task = None
         self.connect_task = None
         self.disconnect_task = None
+        self.disconnect_requested = False
         self.assigned_mcp_session_id = None
         self.supports_tools_list_changed = False
         type(self).instances.append(self)
@@ -87,6 +94,9 @@ class _FakeMCPClient:
 
     async def connect(self) -> None:
         self.connect_task = asyncio.current_task()
+
+    def request_disconnect(self) -> None:
+        self.disconnect_requested = True
 
     async def disconnect(self) -> None:
         self.disconnect_task = asyncio.current_task()
@@ -1818,3 +1828,88 @@ async def test_handle_from_another_request_is_not_an_authorization_grant():
     result = await second.call_tool("files__tool", {"url": file_handle(file_id)})
     assert result["is_error"]
     client_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_close_asks_every_connection_to_end_before_it_waits(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A close cut off at its first await (finalization budget spent) must
+    still end the connections: the stop requests go out synchronously."""
+    _install_fake_client(monkeypatch, live_tools_by_user={"": []})
+    proxy = MCPProxySession([_make_server("first"), _make_server("second")])
+    await asyncio.gather(
+        proxy.call_tool("first__tool", {}), proxy.call_tool("second__tool", {})
+    )
+
+    async def close_without_awaiting() -> None:
+        closing = proxy.close()
+        try:
+            closing.send(None)  # runs up to the first suspension only
+        except StopIteration:
+            pass
+        finally:
+            closing.close()
+
+    await close_without_awaiting()
+
+    assert [client.disconnect_requested for client in _FakeMCPClient.instances] == [
+        True,
+        True,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_to_an_unreachable_server_connect_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = 0
+
+    class _RefusingClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.sleep(0)  # the other callers queue on the lock
+            raise MCPClientError("connection refused")
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _RefusingClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
+
+    results = await proxy.call_tools_parallel(
+        [("server__tool", {}), ("server__tool", {}), ("server__tool", {})]
+    )
+
+    assert attempts == 1
+    assert all(result["is_error"] for result in results)
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_to_an_insecure_server_all_get_the_notice(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The callers queued behind the failed connect answer like the first one:
+    with the insecure-transport notice, not the generic unavailable result."""
+    attempts = 0
+
+    class _InsecureClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.sleep(0)  # the other callers queue on the lock
+            raise MCPInsecureCredentialTransportError()
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _InsecureClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
+
+    results = await proxy.call_tools_parallel(
+        [("server__tool", {}), ("server__tool", {}), ("server__tool", {})]
+    )
+
+    assert attempts == 1
+    assert all(result["is_error"] for result in results)
+    assert [result["content"][0]["text"] for result in results] == [
+        INSECURE_CREDENTIAL_TRANSPORT_NOTICE
+    ] * 3
+    assert server.id in proxy._insecure_transport_server_ids

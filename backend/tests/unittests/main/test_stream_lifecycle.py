@@ -170,3 +170,52 @@ async def test_owned_generator_iterates_to_the_end():
     await owned.aclose()
 
     assert events == ["generator closed"]
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_left_behind_long_ago_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    with finalizing("an earlier cleanup"):
+        pass
+    await anyio.sleep(0.05)
+    ran = False
+
+    with finalizing("a later cleanup"):
+        await anyio.sleep(0)
+        ran = True
+
+    assert ran
+
+
+@pytest.mark.asyncio
+async def test_a_step_skipped_for_a_spent_budget_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    warnings = Mock()
+    monkeypatch.setattr(stream_lifecycle.logger, "warning", warnings)
+
+    with finalizing("slow"):
+        await anyio.sleep(10)
+    with finalizing("next"):
+        await anyio.sleep(0)
+
+    messages = [call.args[0] for call in warnings.call_args_list]
+    assert "exceeded" in messages[0]
+    assert "already spent" in messages[1]
+
+
+@pytest.mark.asyncio
+async def test_throwing_into_an_unstarted_owned_generator_releases_it():
+    events: list[str] = []
+
+    async def release() -> None:
+        events.append("released")
+
+    owned = OwnedAsyncGenerator(_source(events), release=release)
+    with pytest.raises(ValueError):
+        await owned.athrow(ValueError("boom"))
+
+    assert events == ["released"]

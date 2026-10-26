@@ -508,9 +508,10 @@ not represent an external result as if it came from attached knowledge.
 The proxy builds the initial model-facing registry from approved definitions
 without opening every server connection. It connects lazily when the model
 first calls a tool on a server and reuses that connection for later calls in
-the same completion. Before parallel tool calls run, required connections are
-opened on the proxy's owner task; the independent calls can then execute in
-parallel safely.
+the same completion. Each connection runs on a task of its own, so parallel
+tool calls open and share connections safely, and the proxy closes them all
+when the answer ends. A server that fails to connect is not retried for the
+rest of that completion.
 
 When a progressive-discovery server advertises `tools.listChanged`, Eneo can
 re-list after activation calls. It still intersects the live list with the

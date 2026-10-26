@@ -19,7 +19,9 @@ import pytest
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import MCPClientError
+from eneo.main.stream_lifecycle import finalizing
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -178,3 +180,82 @@ async def test_shutdown_drains_a_connection_left_open():
 
     assert not _live_hosts()
     assert await drain_connection_hosts(5) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_close_whose_budget_is_spent_still_ends_the_connections(
+    monkeypatch: pytest.MonkeyPatch, teardown_errors: Mock
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.05)
+    async with _mcp_server() as url:
+        proxy = MCPProxySession([_server_row(url)])
+        await proxy.call_tool("probe__echo", {"text": "a"})
+        assert len(_live_hosts()) == 1
+
+        with finalizing("spends the budget"):
+            await asyncio.sleep(10)
+        with finalizing("mcp proxy"):
+            await proxy.close()
+
+        async with asyncio.timeout(5):
+            while _live_hosts():
+                await asyncio.sleep(0.01)
+
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_connect_does_not_disturb_the_next_one(
+    monkeypatch: pytest.MonkeyPatch, teardown_errors: Mock
+):
+    warnings = Mock()
+    monkeypatch.setattr(client_module.logger, "warning", warnings)
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+
+        connecting = asyncio.create_task(client.connect())
+        await asyncio.sleep(0.01)  # mid-handshake
+        connecting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await connecting
+
+        await client.connect()
+        await asyncio.sleep(0.1)  # let the abandoned host finish unwinding
+        result = await client.call_tool("echo", {"text": "still connected"})
+        await client.disconnect()
+
+    assert result["content"][0]["text"] == "still connected"
+    assert not _live_hosts()
+    warnings.assert_not_called()
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_drain_during_the_handshake_fails_the_connect_plainly():
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+        connecting = asyncio.create_task(client.connect())
+        await asyncio.sleep(0)
+        await drain_connection_hosts(5)
+
+        with pytest.raises(MCPClientError):
+            await connecting
+
+    assert client.session is None
+    assert not _live_hosts()
+
+
+@pytest.mark.asyncio
+async def test_connecting_twice_keeps_the_one_connection(teardown_errors: Mock):
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+        await client.connect()
+        await client.connect()
+        assert len(_live_hosts()) == 1
+
+        result = await client.call_tool("echo", {"text": "once"})
+        await client.disconnect()
+
+    assert result["content"][0]["text"] == "once"
+    assert not _live_hosts()
+    teardown_errors.assert_not_called()

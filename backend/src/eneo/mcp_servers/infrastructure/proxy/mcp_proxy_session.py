@@ -673,8 +673,10 @@ class MCPProxySession:
     def _mark_server_failed(self, server_id: UUID) -> None:
         """Mark a server unusable for the rest of this session.
 
-        The client stays in the cache so that close() disconnects it with the
-        others at session end; a dropped client would only be closed by the GC.
+        A connected client stays in the cache so that close() disconnects it
+        with the others at session end; a dropped client would only be closed
+        by the GC. A server whose connect failed is not retried: later callers
+        answer from this mark without waiting on another attempt.
         """
         self._failed_server_ids.add(server_id)
 
@@ -996,7 +998,8 @@ class MCPProxySession:
 
         Safe from any task: the connection runs on a task of its own inside
         the client. Concurrent callers for one server share its lock, so the
-        second one finds the first one's client.
+        second one finds the first one's client, or its failure: a server that
+        failed to connect is not retried within a session.
 
         Args:
             server: MCP server to connect to
@@ -1005,7 +1008,9 @@ class MCPProxySession:
             Connected MCPClient instance
 
         Raises:
-            MCPClientError: If connection fails
+            MCPClientError: If the connection fails, or failed earlier in this
+                session (MCPInsecureCredentialTransportError when the server's
+                address may not carry its credential)
         """
         server_id = server.id
 
@@ -1020,6 +1025,15 @@ class MCPProxySession:
                     f"[MCPProxy] CACHE HIT: Reusing connection to '{server.name}'"
                 )
                 return self._clients[server_id]
+            if server_id in self._failed_server_ids:
+                # Callers queued on this lock behind a failed connect would
+                # otherwise each pay the connect timeout again. They get the
+                # first caller's error, so every parallel caller answers alike.
+                if server_id in self._insecure_transport_server_ids:
+                    raise MCPInsecureCredentialTransportError()
+                raise MCPClientError(
+                    f"'{server.name}' is unavailable for the rest of this session"
+                )
 
             auth_creds = self.auth_credentials_map.get(server_id, {})
             client = MCPClient(
@@ -1376,7 +1390,8 @@ class MCPProxySession:
         """
         Execute multiple tool calls in parallel.
 
-        Groups calls by server for efficiency, but parallelizes across servers.
+        Every call runs concurrently; calls to one server share its connection,
+        or its connect failure, through the server's lock.
 
         Args:
             tool_calls: List of (tool_name, arguments) tuples
@@ -1393,7 +1408,7 @@ class MCPProxySession:
         total_start = time.perf_counter()
 
         # Each call connects to its server on first use (under the server's
-        # lock, so parallel calls to one server share a connection).
+        # lock, so parallel calls to one server share one connect attempt).
         async def execute_single(
             tool_name: str, arguments: dict[str, Any]
         ) -> dict[str, Any]:
@@ -1473,9 +1488,11 @@ class MCPProxySession:
     async def close(self):
         """Close all connections, from any task.
 
-        Every client's connection lives on a task of its own, so the clients
-        are disconnected together; a server that hangs up slowly only delays
-        the others by the client's disconnect deadline.
+        Every client is first asked to end synchronously (request_disconnect),
+        so a close cut off at its first await by the finalization budget still
+        ends them; then the clients are disconnected together, so a server
+        that hangs up slowly does not delay the others. Errors are logged per
+        server.
         """
         if not self._clients:
             self._failed_server_ids.clear()
@@ -1484,6 +1501,11 @@ class MCPProxySession:
         clients = dict(self._clients)
         self._clients.clear()
         self._failed_server_ids.clear()
+        # Ask every connection to end before the first await: a close whose
+        # finalization budget is already spent is cut off right there, and
+        # the connections must still unwind on their own.
+        for client in clients.values():
+            client.request_disconnect()
         results = await asyncio.gather(
             *(client.disconnect() for client in clients.values()),
             return_exceptions=True,

@@ -72,8 +72,10 @@ differ in how a completion uses them:
   connection runs on a task of its own, so the proxy can open it from any
   tool call and close it from wherever the answer ends: when the model
   finishes, when the provider fails, and when the reader closes the tab
-  mid-answer. The whole turn then releases its connections, the pending tool
-  approvals and the provider stream within one shared budget of ten seconds.
+  mid-answer. The turn then releases its pending tool approvals, its
+  connections and the provider stream, and the request waits up to ten
+  seconds in all for that; a connection still closing after that finishes
+  on its own.
 - **One way to attach.** A tool reaches a completion either because a
   **Function** the assistant enabled resolved to a provider for this user, or
   because a **general MCP server** is enabled for the space and assistant, or

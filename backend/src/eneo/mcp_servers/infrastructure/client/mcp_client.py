@@ -749,11 +749,26 @@ class _ConnectionHost:
             self._run(), name=f"mcp-connection:{client.mcp_server.name}"
         )
         _connection_hosts.add(self.task)
-        self.task.add_done_callback(_connection_hosts.discard)
+        self.task.add_done_callback(self._settle)
+
+    def _settle(self, task: asyncio.Task[None]) -> None:
+        _connection_hosts.discard(task)
+        if not self._ready.done():
+            # The host ended before its handshake: cancelled before it ran
+            # at all (a shutdown drain), or on a path that reported nothing.
+            self._ready.set_exception(
+                MCPClientError(
+                    "The MCP connection was closed before its handshake finished"
+                )
+            )
 
     async def wait_ready(self) -> None:
-        """Return once the session is initialized; raise what connecting raised."""
-        await self._ready
+        """Return once the session is initialized; raise what connecting raised.
+
+        Shielded: a cancelled connector must not cancel the handshake's
+        future, which the host still completes and reports into.
+        """
+        await asyncio.shield(self._ready)
 
     def request_stop(self) -> None:
         """Ask the host to leave its contexts; it does so without being awaited."""
@@ -765,9 +780,10 @@ class _ConnectionHost:
     async def stop(self, timeout: float) -> None:
         """Leave the contexts and wait for the host, bounded by ``timeout``.
 
-        Past the deadline the host is cancelled instead: cancellation unwinds
-        the same contexts, only without the transport's graceful session
-        termination.
+        Past the deadline, or once the caller stops waiting (its finalization
+        budget ran out, it was cancelled), the host is cancelled instead:
+        cancellation unwinds the same contexts, only without the transport's
+        graceful session termination.
         """
         self._stop.set()
         try:
@@ -781,9 +797,15 @@ class _ConnectionHost:
             )
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        except asyncio.CancelledError:
+            # Not awaited: the scope cancelling this task would cancel that
+            # wait too. The host finishes unwinding on its own.
+            self.task.cancel()
+            raise
 
     async def _run(self) -> None:
         client = self._client
+        session: ClientSession | None = None
         try:
             async with _open_streamable_http_client(
                 url=client.endpoint_url,
@@ -800,21 +822,42 @@ class _ConnectionHost:
                     read, write, message_handler=self._message_handler
                 ) as session:
                     init_result = await session.initialize()
+                    if self._stop.is_set():
+                        # The connector gave up during the handshake; a later
+                        # connect may already have published its own session.
+                        return
                     client.record_handshake(init_result, get_session_id)
                     client.session = session
                     self._ready.set_result(None)
                     await self._stop.wait()
         except BaseException as exc:
+            interrupted = isinstance(
+                exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
+            )
             if not self._ready.done():
                 # Connecting failed; the connector reports it. The contexts
                 # entered so far have already been left on this task.
+                if interrupted:
+                    # Only the host itself was cancelled (a shutdown drain, a
+                    # stop deadline), never the connector, which must not see
+                    # a cancellation it did not receive.
+                    self._ready.set_exception(
+                        MCPClientError(
+                            "The MCP connection was closed before its handshake "
+                            "finished"
+                        )
+                    )
+                    raise
                 self._ready.set_exception(exc)
                 return
             client.log_teardown_error(exc)
-            if isinstance(exc, asyncio.CancelledError):
+            if interrupted:
                 raise
         finally:
-            client.session = None
+            if not self._ready.done():
+                self._ready.set_result(None)
+            if client.session is session:
+                client.session = None
 
 
 async def drain_connection_hosts(timeout: float) -> int:
@@ -1038,7 +1081,16 @@ class MCPClient:
         and let the SDK terminate any server-assigned protocol session on
         teardown. Servers that hold cross-turn state key it to explicit
         handles returned in tool results, not to the transport session.
+
+        Idempotent: while a host is attached, connecting again keeps it
+        rather than opening a second connection beside it; ``disconnect()``
+        detaches it.
         """
+        if self._host is not None:
+            return
+        if self._host is not None:
+            # Already connected: a second connect must not start a second host.
+            return
         headers = await self._build_auth_headers()
         host = _ConnectionHost(self, headers, self._handle_session_message)
         try:
@@ -1381,6 +1433,16 @@ class MCPClient:
                 f"{error_msg}"
             )
             raise MCPClientError(f"Resource read failed: {error_msg}") from e
+
+    def request_disconnect(self) -> None:
+        """Start closing without waiting; the host unwinds on its own.
+
+        Synchronous on purpose: a caller whose cleanup budget is already
+        spent is cut off at its first await, and the connection must still
+        end. ``disconnect()`` afterwards only waits.
+        """
+        if self._host is not None:
+            self._host.request_stop()
 
     async def disconnect(self) -> None:
         """Close the connection: the host leaves the SDK contexts; this waits.

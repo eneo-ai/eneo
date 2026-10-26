@@ -177,3 +177,26 @@ async def test_closing_closes_the_source_when_the_consumer_is_closed():
     await stream.aclose()
 
     assert source_closed_on is asyncio.current_task()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_body_close_still_closes_the_sources():
+    source_closed = False
+
+    class _Source:
+        async def aclose(self) -> None:
+            nonlocal source_closed
+            source_closed = True
+
+    async def body() -> AsyncGenerator[str, None]:
+        try:
+            while True:
+                yield "token"
+        finally:
+            raise RuntimeError("cleanup failed")
+
+    client = _Client()
+    response = ClosingEventSourceResponse(body(), closes=[_Source()])
+    await response(_scope(), client.receive, client.send)
+
+    assert source_closed

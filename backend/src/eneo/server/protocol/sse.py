@@ -4,6 +4,7 @@ from typing import Any, cast
 from sse_starlette import EventSourceResponse
 from starlette.types import Send
 
+from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import (
     aclose_if_possible,
     clear_finalization_deadline,
@@ -12,6 +13,17 @@ from eneo.main.stream_lifecycle import (
 )
 
 __all__ = ["ClosingEventSourceResponse", "closing"]
+
+logger = get_logger(__name__)
+
+
+async def _close(step: str, source: object) -> None:
+    try:
+        with finalizing(step):
+            await aclose_if_possible(source)
+    except Exception:
+        # The other sources still get closed; the failure is reported.
+        logger.exception("Closing the %s failed", step)
 
 
 class ClosingEventSourceResponse(EventSourceResponse):
@@ -45,10 +57,8 @@ class ClosingEventSourceResponse(EventSourceResponse):
         finally:
             body = cast(object, self.body_iterator)  # pyright: ignore[reportUnknownMemberType]
             try:
-                with finalizing("response body"):
-                    await aclose_if_possible(body)
+                await _close("response body", body)
                 for source in self._closes:
-                    with finalizing("response source"):
-                        await aclose_if_possible(source)
+                    await _close("response source", source)
             finally:
                 clear_finalization_deadline()
