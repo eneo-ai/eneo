@@ -1145,13 +1145,17 @@ class UserService:
             raise
 
         if not is_repeated_request_authentication:
-            settings = get_settings()
-            await self.api_key_v2_repo.update_last_used_at(
-                key_id=resolved.key.id,
-                tenant_id=resolved.key.tenant_id,
-                last_used_at=datetime.now(timezone.utc),
-                min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
-            )
+            min_interval = get_settings().api_key_last_used_min_interval_seconds
+            now = datetime.now(timezone.utc)
+            if ApiKeysV2Repository.last_used_is_due(
+                resolved.key.last_used_at, at=now, min_interval_seconds=min_interval
+            ):
+                await self.api_key_v2_repo.update_last_used_at(
+                    key_id=resolved.key.id,
+                    tenant_id=resolved.key.tenant_id,
+                    last_used_at=now,
+                    min_interval_seconds=min_interval,
+                )
 
         if request is None:
             raise ApiKeyValidationError(

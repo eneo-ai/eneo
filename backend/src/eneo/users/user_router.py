@@ -886,8 +886,10 @@ async def get_currently_authenticated_user(
         UserInDB, Depends(auth_dependencies.get_current_active_user_with_quota)
     ],
     container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
 ):
+    # Called on the user already loaded: as a dependency it would authenticate
+    # the request a second time.
+    await require_user_identity(current_user)
     api_key_repo = container.api_key_v2_repo()
     latest_key = await api_key_repo.get_latest_active_by_owner(
         tenant_id=current_user.tenant_id, owner_user_id=current_user.id
