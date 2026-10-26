@@ -226,3 +226,15 @@ class SimpleLogger(logging.Logger):
 def get_logger(module_name: str):
     # If we don't add a handler manually one will be created for us
     return SimpleLogger(name=module_name, level=get_loglevel())
+
+
+def redact_values(text: str, *values: str, placeholder: str = "[REDACTED]") -> str:
+    """Replace every occurrence of each non-empty ``value`` in ``text``.
+
+    For log fields built from exception text that may quote a submitted
+    secret. Longer values go first so a value containing another is replaced
+    whole.
+    """
+    for value in sorted({value for value in values if value}, key=len, reverse=True):
+        text = text.replace(value, placeholder)
+    return text

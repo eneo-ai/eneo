@@ -4,7 +4,38 @@
 import { expect, test } from "bun:test";
 import { ordered } from "../version-order.cases.json";
 
-import { ENTRY_AREAS, ENTRY_TYPES, LOCALES, compareVersions, releases } from "./index.js";
+import {
+  ENTRY_AREAS,
+  ENTRY_TYPES,
+  LOCALES,
+  compareVersions,
+  releases,
+  visibleEntries
+} from "./index.js";
+
+test("visibility uses explicit requirements without mutating the release or granting admin a bypass", () => {
+  const release = {
+    version: "2.3.0",
+    entries: [
+      { id: "general" },
+      { id: "assistant", permissions: { allOf: ["assistants"] } },
+      { id: "admin", audience: "admin" },
+      { id: "modules", audience: "admin", permissions: { allOf: ["modules"] } }
+    ].map((entry) => ({
+      type: "new",
+      area: "account",
+      title: { en: entry.id, sv: entry.id },
+      body: { en: entry.id, sv: entry.id },
+      ...entry
+    }))
+  };
+  const before = JSON.stringify(release);
+  const adminOnly = (requirement) => requirement === "admin";
+  expect(visibleEntries(release, adminOnly).map((entry) => entry.id)).toEqual(["general", "admin"]);
+  expect(visibleEntries(release, () => false).map((entry) => entry.id)).toEqual(["general"]);
+  expect(visibleEntries({ version: "2.3.0", entries: [] }, adminOnly)).toEqual([]);
+  expect(JSON.stringify(release)).toBe(before);
+});
 
 test("vocabularies come from the schema", () => {
   expect([...ENTRY_TYPES]).toEqual(["new", "improved", "fixed"]);
