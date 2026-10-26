@@ -5,10 +5,11 @@ import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { Activity, PanelRightOpen } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
 import { findAppCall } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import type { EneoUIMessage } from "@/lib/chat/types";
+import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { cn } from "@/lib/utils";
 import type { DocumentExport } from "./document-export";
 import type { DocumentSaver } from "./document-saver";
@@ -22,6 +23,32 @@ import { ViewPanel } from "./view-panel";
 
 export const SIDE_PANEL_ID = "chat-side-panel";
 const WIDTH_STORAGE_KEY = "eneo:chat-side-panel-width";
+
+/**
+ * How the panel is laid out: beside the conversation, over it in the same
+ * region, or as a sheet over the whole viewport (a view: a fixed cover).
+ */
+export type SidePanelMode = "beside" | "over" | "sheet";
+
+/**
+ * The narrowest region the panel shares with the conversation. Beside it the
+ * panel is at least 360px (its minSize), and the conversation needs about as
+ * much; narrower than that, two halves are each too small to use.
+ */
+export const BESIDE_MIN_WIDTH = 720;
+
+/**
+ * Which layout the panel gets. The window decides whether a sheet is called
+ * for (tablets, phones, 200 to 400% zoom); from 1024px the region the chat
+ * has decides between beside and over, since a chat in a column of a page
+ * (the flow page's) is far narrower than the window. An unmeasured region
+ * (not laid out yet) is taken as wide, so the panel does not start out over
+ * the conversation and then jump beside it.
+ */
+export function sidePanelMode(wideWindow: boolean, regionWidth: number | null): SidePanelMode {
+  if (!wideWindow) return "sheet";
+  return regionWidth !== null && regionWidth < BESIDE_MIN_WIDTH ? "over" : "beside";
+}
 
 /** The activity of an answer, shown by the chat view as the panel's occupant when nothing else is. */
 export type ActivityOccupant = {
@@ -49,9 +76,12 @@ export type SidePanelProps = {
  * The side region beside a conversation. It holds one occupant at a time: an
  * answer's activity, a document or uploaded file, an interactive tool view
  * covering that file, or the overview of everything the conversation has to
- * show. Beside the conversation from 1024px, with a handle to resize it and
- * a maximise over the conversation; below that a BottomSheet, except a view,
- * whose frame stays mounted in the message and is laid out over a cover.
+ * show. Beside the conversation when the region is wide enough for both, with
+ * a handle to resize it and a maximise over the conversation; over the
+ * conversation in a narrow region of a wide window (the chat column of the
+ * flow page), where the frame's close button is the way back; below 1024px a
+ * BottomSheet, except a view, whose frame stays mounted in the message and is
+ * laid out over a cover.
  */
 export function SidePanel({
   panel,
@@ -66,10 +96,16 @@ export function SidePanel({
 }: SidePanelProps) {
   const t = useTranslations();
   const panelId = useId();
-  const beside = useMediaQuery("(min-width: 1024px)");
+  const wideWindow = useMediaQuery("(min-width: 1024px)");
+  // The row the conversation and the panel share, measured for the mode.
+  const [measureRow, rowWidth] = useElementWidth<HTMLDivElement>();
+  const mode = sidePanelMode(wideWindow, rowWidth);
+  const beside = mode === "beside";
   const aside = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
 
+  // Over the conversation the panel hides it, as a sheet does: it must not
+  // open by itself there, and a quote returns to the composer.
   useEffect(() => {
     panel.setBesideConversation(beside);
   }, [panel, beside]);
@@ -79,11 +115,21 @@ export function SidePanel({
   const shownView = occupant.kind === "view" ? findAppCall(messages, occupant.callId) : null;
   const hasContents = panelContentsCount(contents) > 0;
   const shown = kind !== "closed" && !(kind === "overview" && !hasContents);
-  const maximised = panel.maximised && (kind === "file" || kind === "view");
+  const maximised = beside && panel.maximised && (kind === "file" || kind === "view");
+  // Whether the panel takes the whole row, with the conversation under it.
+  const covering = maximised || mode === "over";
   // The panel's width, a share of the row both halves share. The row is the
-  // basis only while the panel can be beside the conversation: below that it
-  // is phone-wide, and clamping the remembered width against it would lose it.
+  // basis only while the panel is beside the conversation: a narrower row
+  // (phone-wide, or a column of a page) would clamp the remembered width
+  // down and lose it.
   const containerRef = useRef<HTMLDivElement>(null);
+  const row = useCallback(
+    (element: HTMLDivElement | null) => {
+      measureRow(element);
+      containerRef.current = beside ? element : null;
+    },
+    [measureRow, beside]
+  );
   const resizable = useResizable({
     containerRef,
     defaultSize: 520,
@@ -101,19 +147,20 @@ export function SidePanel({
   // Focus moves into the panel when the reader opens a file or the overview,
   // so keyboard users land where the new content is; a panel that opened by
   // itself leaves the focus where the reader has it, and the activity body
-  // focuses its own tab. Closing hands focus back to the opener (the store
-  // does that for files), or to the panel button.
+  // focuses its own tab. The sheet is a dialog and places focus itself.
+  // Closing hands focus back to the opener (the store does that for files),
+  // or to the panel button.
   const wasShown = useRef(false);
   useEffect(() => {
     const landsHere = kind === "file" || kind === "overview";
-    if (shown && !wasShown.current && landsHere && !panel.openedByItself && beside) {
+    if (shown && !wasShown.current && landsHere && !panel.openedByItself && mode !== "sheet") {
       aside.current?.focus();
     }
     if (!shown && wasShown.current && document.activeElement === document.body) {
       trigger.current?.focus();
     }
     wasShown.current = shown;
-  }, [shown, kind, beside, panel.openedByItself]);
+  }, [shown, kind, mode, panel.openedByItself]);
 
   const close = () => {
     if (occupant.kind === "view") panel.dismissView();
@@ -137,7 +184,7 @@ export function SidePanel({
     };
     element.addEventListener("keydown", onKeyDown);
     return () => element.removeEventListener("keydown", onKeyDown);
-  }, [shown, beside, kind]);
+  }, [shown, mode, kind]);
 
   const activityEntry: ActivityEntry | null = latestActivity
     ? {
@@ -265,38 +312,42 @@ export function SidePanel({
   );
 
   return (
-    <div ref={beside ? containerRef : null} className="relative flex min-h-0 min-w-0 flex-1">
+    <div ref={row} className="relative flex min-h-0 min-w-0 flex-1">
       {/* No stacking context of its own: a view's frame lives in a message here
           and is laid out over the panel, so it must be able to paint above it. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {launcher}
         {children}
       </div>
-      {shown && beside && (
+      {shown && mode !== "sheet" && (
         <>
           {/* The panel sits at the end of the row: dragging the handle left widens it. */}
-          <ResizeHandle
-            isReversed
-            hasDivider
-            label={t("file_preview_resize_handle")}
-            resizable={resizable.props}
-          />
+          {beside && (
+            <ResizeHandle
+              isReversed
+              hasDivider
+              label={t("file_preview_resize_handle")}
+              resizable={resizable.props}
+            />
+          )}
+          {/* The same element beside and over: a row resized across the
+              threshold keeps the panel, and the focus in it. */}
           <aside
             ref={aside}
             id={panelId}
             aria-label={label}
             tabIndex={-1}
-            style={maximised ? undefined : { width: resizable.size }}
+            style={covering ? undefined : { width: resizable.size }}
             className={cn(
               "bg-ax-surface flex min-h-0 shrink-0 flex-col focus-visible:outline-none",
-              maximised ? "absolute inset-0 z-20" : "relative h-full"
+              covering ? "absolute inset-0 z-20" : "relative h-full"
             )}
           >
-            {body(false)}
+            {body(mode === "over")}
           </aside>
         </>
       )}
-      {shown && !beside && kind === "view" && (
+      {shown && mode === "sheet" && kind === "view" && (
         // The app remains mounted in the conversation, so this is a non-modal
         // cover: a dialog's focus trap would exclude the visually expanded iframe.
         <aside
@@ -309,7 +360,7 @@ export function SidePanel({
           {body(true)}
         </aside>
       )}
-      {shown && !beside && kind !== "view" && (
+      {shown && mode === "sheet" && kind !== "view" && (
         <BottomSheet
           isOpen
           onOpenChange={(open) => {
