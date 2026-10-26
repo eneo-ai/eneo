@@ -241,7 +241,7 @@
         : undefined;
     // Approval controls external MCP servers only. Eneo's read-only internal
     // knowledge/files tools are core capabilities and always auto-execute.
-    const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+    const toolApprovalEnabled = !autoAcceptTools && (hasMcpTools || hasDelegatedTools);
     // The question is echoed in the conversation as soon as the backend
     // confirms it, so clear the composer now instead of showing it dimmed
     // behind a spinner until the answer finishes. The full draft (mention
@@ -467,6 +467,11 @@
   // capabilities this user may use (a capability the role withholds is not a
   // row, so it must not open an empty popover either).
   const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
+  // An assistant with specialists consults them with their own tools, so the
+  // approval switch covers those tools even when the assistant has none itself.
+  const hasDelegatedTools = $derived(
+    chat.partner?.type !== "group-chat" && (chat.partner?.specialists?.length ?? 0) > 0
+  );
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
@@ -679,12 +684,13 @@
         />
       {/if}
 
-      {#if hasMcpTools || internalMcpServers.length > 0}
+      {#if hasMcpTools || hasDelegatedTools || internalMcpServers.length > 0}
         <ChatMcpServers
           servers={generalMcpServers}
           {capabilityServers}
           internalServers={internalMcpServers}
           modelSupportsTools={supportsToolCalling}
+          delegatedTools={hasDelegatedTools}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools

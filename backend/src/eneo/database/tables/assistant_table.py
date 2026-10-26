@@ -113,6 +113,9 @@ class Assistants(BasePublic):
     assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(
         viewonly=True
     )
+    assistant_specialists: Mapped[list["AssistantSpecialists"]] = relationship(
+        foreign_keys="AssistantSpecialists.assistant_id", viewonly=True
+    )
 
     __table_args__ = (
         Index(
@@ -181,6 +184,27 @@ class AssistantIntegrationKnowledge(BasePublic):
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
     )
+
+
+class AssistantSpecialists(BaseCrossReference):
+    """Other assistants in the same space that this assistant may consult.
+
+    The consulting assistant orchestrates: it asks its specialists focused
+    questions and writes one combined answer. Specialists are consulted
+    without their own specialists (depth one). ``description`` tells the
+    orchestrator what the specialist is for; empty means the specialist's
+    own description applies.
+    """
+
+    __tablename__ = "assistants_specialists"  # type: ignore[assignment]
+
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
+    )
+    specialist_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
+    )
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
 
 
 class AssistantMCPServers(BaseCrossReference):

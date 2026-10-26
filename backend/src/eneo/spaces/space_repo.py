@@ -24,7 +24,10 @@ from eneo.database.tables.ai_models_table import (
 )
 from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts
 from eneo.database.tables.app_template_table import AppTemplates
-from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
+from eneo.database.tables.assistant_table import (
+    Assistants,
+    AssistantsFiles,
+)
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
@@ -823,6 +826,7 @@ class SpaceRepository:
                 ),
                 selectinload(Assistants.mcp_servers),
                 selectinload(Assistants.assistant_mcp_server_tools),
+                selectinload(Assistants.assistant_specialists),
             )
             .order_by(Assistants.created_at)
         )

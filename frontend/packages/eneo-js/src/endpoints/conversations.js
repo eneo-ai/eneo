@@ -216,7 +216,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
+     * @param {(data: import("../types/resources").SSE.TokenUsage | import("../types/resources").SSE.Consultation) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
@@ -317,6 +317,17 @@ export function initConversations(client) {
                 callbacks?.onImage?.(data);
                 break;
 
+              case "consultation": {
+                const consultations = new Map(
+                  (response.consultations ?? []).map((item) => [item.id, item])
+                );
+                for (const item of data.consultations) consultations.set(item.id, item);
+                response.consultations = [...consultations.values()].sort(
+                  (a, b) => a.ordinal - b.ordinal
+                );
+                callbacks?.onEneoEvent?.(data);
+                break;
+              }
               case "token_usage":
                 callbacks?.onEneoEvent?.(data);
                 break;

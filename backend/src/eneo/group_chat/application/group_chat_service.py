@@ -15,6 +15,7 @@ from eneo.group_chat.domain.entities.group_chat import (
 from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.questions.question import ToolAssistant, UseTools
 
 if TYPE_CHECKING:
@@ -452,6 +453,9 @@ class GroupChatService:
         stream: bool = False,
         version: int = 1,
         tool_assistant_id: Optional["UUID"] = None,
+        require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> AssistantResponse:
         """Ask a question to the most appropriate assistant in a group chat
 
@@ -463,6 +467,14 @@ class GroupChatService:
         response_from_selector = None
         if not group_chat.assistants:
             raise BadRequestException("No assistants in the group chat")
+
+        if require_tool_approval:
+            # A routed group answers through one member without the
+            # consultation loop that approvals belong to.
+            raise BadRequestException(
+                "Tool approval is not supported for group chats.",
+                code="not_supported",
+            )
 
         # Existing conversations contribute history to assistant selection. A
         # new conversation is not persisted until its first question can be
@@ -562,6 +574,9 @@ class GroupChatService:
                 file_ids=file_ids or [],
                 stream=stream,
                 version=version,
+                require_tool_approval=require_tool_approval,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens
                 if selection_result is not None
                 else 0,

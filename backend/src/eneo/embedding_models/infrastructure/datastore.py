@@ -3,6 +3,8 @@ import time
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
+from eneo.assistants.delegation import authorize_current_execution
+from eneo.completion_models.domain.execution_budget import current_execution_budget
 from eneo.embedding_models.domain.chunking import (
     build_text_splitter,
     effective_chunk_config,
@@ -296,6 +298,13 @@ class Datastore:
         with vector scores; ``None`` when the reranker failed."""
         if not candidates:
             return []
+        budget = current_execution_budget()
+        if budget is not None:
+            await authorize_current_execution()
+            budget.reserve_model_request(
+                len(spec.query.encode("utf-8"))
+                + sum(len(chunk.text.encode("utf-8")) for chunk in candidates)
+            )
         try:
             scores = await spec.reranker.rerank(
                 spec.query, [chunk.text for chunk in candidates]

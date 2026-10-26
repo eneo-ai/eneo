@@ -10,8 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { Wrench } from "@lucide/svelte";
-
-  type Status = "preparing" | "running" | "complete" | "failed" | "denied";
+  import type { ToolStepStatus as Status } from "../../toolStepStatus";
 
   let {
     open,

@@ -17,6 +17,7 @@
   import McpAppFrames from "../../mcp-apps/McpAppFrames.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
+  import ConsultationTrace from "./ConsultationTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
   import ToolStepIcon from "./ToolStepIcon.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
@@ -111,13 +112,44 @@
   const submittingToolIds = new SvelteSet<string>();
   const deniedToolIds = new SvelteSet<string>();
   let isSubmittingBulk = $state(false);
+  const pendingApprovalId = $derived(chat.pendingToolApproval?.approvalId);
+  $effect(() => {
+    // Provider IDs can be reused by a later specialist or model round.
+    if (pendingApprovalId) {
+      deniedToolIds.clear();
+      submittingToolIds.clear();
+      expandedToolCalls.clear();
+    }
+  });
 
   // Split tool calls: pending approvals stay as prominent cards below (a
   // blocking decision must never hide); everything else (running, done, denied)
   // folds into the collapsible reasoning trace above them.
   const isPending = (tc: { tool_call_id?: string }) =>
     !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
-  const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
+  const pendingConsultations = $derived(
+    (message.consultations ?? []).filter(
+      (consultation) => pendingApprovalId && consultation.approval_id === pendingApprovalId
+    )
+  );
+  const pendingToolCalls = $derived([
+    ...(pendingConsultations.length ? [] : (mcpToolCalls ?? []).filter(isPending)).map((step) => ({
+      ...step,
+      consultationName: ""
+    })),
+    ...pendingConsultations.flatMap((consultation) =>
+      (consultation.tool_calls ?? [])
+        .filter((step) => step.tool_call_id && pendingToolIds.includes(step.tool_call_id))
+        .map((step) => ({
+          ...step,
+          consultationName: consultation.assistant_name,
+          tool_call_id: step.tool_call_id ?? undefined,
+          arguments: step.arguments ?? undefined,
+          approved: step.approved ?? undefined,
+          result_status: step.result_status ?? undefined
+        }))
+    )
+  ]);
   const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
 
   const conversationFiles = $derived.by(() => {
@@ -599,6 +631,9 @@
 
             <!-- Tool info -->
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              {#if toolCall.consultationName}
+                <span class="text-muted text-xs">{toolCall.consultationName}</span>
+              {/if}
               <div class="flex items-center gap-2">
                 <span class="text-default truncate text-sm font-medium"
                   >{toolDisplayName(
@@ -726,6 +761,9 @@
       file: MessageDocumentLink
     }}
   />
+  {#if message.consultations?.length}
+    <ConsultationTrace consultations={message.consultations} streaming={isStreamingTurn} />
+  {/if}
 </div>
 
 <McpImageAttachments />

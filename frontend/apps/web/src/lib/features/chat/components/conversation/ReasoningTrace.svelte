@@ -14,6 +14,7 @@
   import { slide } from "svelte/transition";
   import { Wrench, Brain, ChevronDown, LoaderCircle } from "@lucide/svelte";
   import ReasoningToolStep from "./ReasoningToolStep.svelte";
+  import type { ToolStepStatus } from "../../toolStepStatus";
 
   type Step = {
     toolName: string;
@@ -23,7 +24,7 @@
     args?: Record<string, unknown>;
     toolCallId?: string;
     previousAttempt?: boolean;
-    status: "preparing" | "running" | "complete" | "failed" | "denied";
+    status: ToolStepStatus;
   };
 
   let {

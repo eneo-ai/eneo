@@ -142,3 +142,36 @@ test("a failed answer without a reason is reported as a stream error", async () 
     (error) => error instanceof EneoError && error.response.code === "stream_error"
   );
 });
+
+test("consultations update by server ID and preserve separate follow-ups", async () => {
+  const consultations = [
+    { id: "first", ordinal: 1, status: "running", answer: "" },
+    { id: "first", ordinal: 1, status: "complete", answer: "IT answer" },
+    { id: "follow-up", ordinal: 2, status: "complete", answer: "IT clarification" }
+  ];
+  const events = [
+    'event: first_chunk\ndata: {"session_id":"s","answer":"","consultations":[]}\n\n',
+    ...consultations.map(
+      (item) =>
+        `event: consultation\ndata: ${JSON.stringify({ session_id: "s", consultations: [item] })}\n\n`
+    ),
+    'event: text\ndata: {"session_id":"s","answer":"Synthesis","references":[]}\n\n'
+  ];
+  const api = initConversations(
+    createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        new Response(events.join(""), { headers: { "Content-Type": "text/event-stream" } })
+    })
+  );
+  const observed = [];
+  const answer = await api.ask({
+    chatPartner: { id: "group", type: "group-chat" },
+    question: "Check",
+    files: [],
+    callbacks: { onEneoEvent: (event) => observed.push(event) }
+  });
+  assert.equal(answer.answer, "Synthesis");
+  assert.deepEqual(answer.consultations, consultations.slice(1));
+  assert.equal(observed.length, 3);
+});
