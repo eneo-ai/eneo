@@ -849,9 +849,7 @@ describe("FlowPage", () => {
     state.chat = ok({ ...CHAT, editing: false });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Optimera flödet" }));
-    await waitFor(() =>
-      expect(state.inserted.join("")).toMatch(/^Granska flödet med read_flow_suggestions/)
-    );
+    await waitFor(() => expect(state.inserted.join("")).toMatch(/^Gå igenom flödets förslag/));
     // Once, however often the page renders afterwards.
     expect(state.inserted).toHaveLength(1);
     expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);

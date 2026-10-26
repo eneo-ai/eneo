@@ -260,8 +260,10 @@ describe("OptimizeFlowButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Optimera flödet" }));
     expect(onAskChat).toHaveBeenCalledWith(
-      expect.stringMatching(/^Granska flödet med read_flow_suggestions och föreslå förbättringar/)
+      expect.stringMatching(/^Gå igenom flödets förslag och visa vad som kan göra det billigare/)
     );
+    // The request is the person's own message: it names no tool.
+    expect(onAskChat).not.toHaveBeenCalledWith(expect.stringContaining("read_flow_suggestions"));
     expect(api.POST).not.toHaveBeenCalled();
     expect(api.PATCH).not.toHaveBeenCalled();
     await expectNoAxeViolations(container);
