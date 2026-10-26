@@ -61,15 +61,22 @@ test("workflow, local action, scope and gate changes force full validation", () 
   }
 });
 
-test("Playwright system libraries outlast a slow mirror and fit the shortest job limit", () => {
+test("only the job limit bounds Playwright system libraries from a slow mirror", () => {
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-playwright/action.yml"), "utf8");
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  const deadline = Number(action.match(/timeout --kill-after=15s (\d+)s bun run --bun playwright install-deps chromium/)?.[1]);
-  const frontendLimit = Number(workflow.split("\n  frontend:\n")[1]?.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
-  // A slow mirror that kept progressing needed about 590 s (develop run 40352666820).
-  assert.ok(deadline >= 600, `install-deps deadline: ${deadline}s`);
-  // The rest of the Frontend checks job takes about five minutes.
-  assert.ok(deadline + 5 * 60 <= frontendLimit * 60, `deadline ${deadline}s, job limit ${frontendLimit} min`);
+  // Slow mirrors that kept progressing needed about 590 s (develop run 40352666820)
+  // and more than 720 s (run 40367572604); a step deadline turns them red.
+  const step = action.split("- name: Install system libraries\n")[1]?.split(/\n    - name: /)[0];
+  const install = step?.split("\n").find((line) => line.includes("playwright install-deps"));
+  assert.equal(install?.trim(), "bun run --bun playwright install-deps chromium");
+  assert.doesNotMatch(step, /^      timeout-minutes:/m);
+  const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/)
+    .filter((block) => block.includes("uses: ./.github/actions/setup-playwright"));
+  assert.ok(jobs.length > 0);
+  for (const block of jobs) {
+    const limit = Number(block.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+    assert.ok(limit >= 30, `${block.match(/^  ([a-z0-9-]+):/)[1]}: ${limit} min`);
+  }
 });
 
 test("push, tag and manual callers keep full validation even with only docs changed", () => {

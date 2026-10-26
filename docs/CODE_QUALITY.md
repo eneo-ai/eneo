@@ -51,10 +51,12 @@ unchanged.
 
 Frontend jobs use the same pinned Node version as the production Docker images
 and one Bun download-cache policy. Playwright still installs its system
-dependencies: apt network operations have bounded retries, and the entire
-installation has a deadline. Chromium is cached per Playwright version; a cache
-miss downloads it with a deadline and one retry. Test failures
-and OOM failures are not automatically retried. The selected Ubuntu release is
+dependencies: apt retries transient downloads and its timeouts catch a stalled
+connection, while a mirror that is slow but still progressing is bounded only by
+the 30-minute job limit, because a step deadline would fail installs that
+succeed. Chromium is cached per Playwright version; a cache miss downloads it
+with a deadline and one retry. Test failures and OOM failures are not
+automatically retried. The selected Ubuntu release is
 explicit rather than following `ubuntu-latest`.
 
 CI image builds import matching Buildx caches with a two-minute timeout. The
@@ -73,7 +75,7 @@ local build/test directories are excluded from its Docker context.
 
 The focused contract tests cover both event types, candidates that touch several
 areas, a candidate's diff onto the preceding candidate, renames/deletions,
-missing history, the Playwright install deadline, shared inputs, filtered
+missing history, Playwright jobs' time limits, shared inputs, filtered
 images, and gate failure/skip semantics. They also ensure that every CI worker
 is covered by the aggregate. Run from the repository root:
 

@@ -23,16 +23,16 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Retry transient downloads inside apt. Do not blindly rerun an apt
-        # transaction after a timeout: dpkg may have been interrupted.
-        # The apt timeouts only catch a stalled connection. A slow mirror that
-        # keeps progressing has taken almost ten minutes, so the deadline is 12.
+        # apt retries transient downloads, and its timeouts catch a stalled
+        # connection. The job's timeout-minutes bounds a mirror that is slow but
+        # still progressing: a step deadline would kill downloads that would
+        # have succeeded, and an interrupted dpkg transaction is unsafe to rerun.
         sudo tee /etc/apt/apt.conf.d/80-eneo-ci-network >/dev/null <<'APT'
         Acquire::Retries "2";
         Acquire::http::Timeout "30";
         Acquire::https::Timeout "30";
         APT
-        timeout --kill-after=15s 720s bun run --bun playwright install-deps chromium
+        bun run --bun playwright install-deps chromium
     - name: Install Chromium
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
