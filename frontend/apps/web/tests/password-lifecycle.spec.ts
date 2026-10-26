@@ -15,6 +15,9 @@ test("a generated admin-set password must be replaced at the first sign-in", asy
 
   await page.goto("/admin/users");
   await expect(page.getByRole("heading", { name: "Lösenordspolicy" })).toBeVisible();
+  // The button is server-rendered, and hydration ends after the load event that
+  // goto() waits for: a click before it attaches the handler is lost.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "Skapa användare" }).click();
   const editor = page.getByRole("dialog");
   await editor.getByLabel("Användarnamn").fill(email.split("@")[0]);
