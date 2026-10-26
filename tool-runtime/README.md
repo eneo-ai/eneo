@@ -143,7 +143,8 @@ reads fails the build.
 
 The MCP Apps client/core peers are pinned together as development dependencies
 so view builds use the fixed MCP client. The `package.json` resolutions keep
-the indirect Hono and UUID dependencies on security-fixed releases. Remove each
+the indirect body-parser (through Express in the MCP SDK), Hono and UUID
+dependencies on security-fixed releases. Remove each
 resolution once its parent requires a fixed version. ExcelJS uses only UUID's
 CommonJS `v4()` API; UUID 11.1.1 retains that API while fixing the buffer checks
 in other UUID methods.

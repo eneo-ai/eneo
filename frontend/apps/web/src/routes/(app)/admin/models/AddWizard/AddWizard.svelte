@@ -444,6 +444,8 @@
         hosting: model.hosting ?? "swe",
         is_active: true,
         description: model.description ?? null,
+        candidate_factor: model.candidateFactor,
+        max_candidates: model.maxCandidates,
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null
