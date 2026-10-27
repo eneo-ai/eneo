@@ -101,12 +101,23 @@ async def running_maintenance_worker() -> AsyncIterator[Worker]:
     try:
         yield worker
     finally:
-        with warnings.catch_warnings():
-            # ARQ's Worker.close still calls the deprecated Redis close().
-            warnings.simplefilter("ignore", DeprecationWarning)
-            await worker.close()
-        with suppress(asyncio.CancelledError):
-            await run
+        # Worker.close cancels the jobs still running, and a cancellation that
+        # lands in ARQ's shielded finish escapes it before the pool closes. A
+        # job can still be recording or finishing when the block's condition
+        # holds, so polling stops first (a poll already under way can still
+        # start a job) and the jobs it started get a bounded chance to end.
+        run.cancel()
+        try:
+            with suppress(asyncio.CancelledError):
+                await run
+        finally:
+            running = [task for task in worker.tasks.values() if not task.done()]
+            if running:
+                await asyncio.wait(running, timeout=10)
+            with warnings.catch_warnings():
+                # ARQ's Worker.close still calls the deprecated Redis close().
+                warnings.simplefilter("ignore", DeprecationWarning)
+                await worker.close()
 
 
 @asynccontextmanager

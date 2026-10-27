@@ -1766,6 +1766,15 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
                 space_factory=space_factory,
                 assistant_factory=assistant_factory,
                 model_name=f"webhook-ceiling-model-{row_no}",
+                # The send's own timeout outlasts the 30 s hold below: the
+                # deliveries finish preparing at different times, seconds apart
+                # on a loaded runner, and a send its timeout cuts leaves the
+                # cohort before it is complete.
+                output_config={
+                    "url": "https://example.org/hook/{{flow_input.case_id}}",
+                    "auth": {"mode": "none"},
+                    "timeout_seconds": 60,
+                },
             )
             assert flow.id is not None and step.id is not None
             await FlowRunWebhookDeliveryRepository(
