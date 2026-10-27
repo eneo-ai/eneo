@@ -121,10 +121,12 @@ export default ts.config(
         {
           paths: [
             {
+              // Rollup loads every module a barrel re-exports, so one import
+              // from the package root adds all ~3,700 Lucide modules to both
+              // builds. Types are erased and stay importable.
               name: "@lucide/svelte",
-              importNames: deprecatedLucideIcons.map(({ alias }) => alias),
-              message:
-                "Deprecated Lucide alias: import the current icon name named in its @deprecated note."
+              allowTypeImports: true,
+              message: "Import each icon from @lucide/svelte/icons/<name>, not the package root."
             }
           ],
           patterns: [

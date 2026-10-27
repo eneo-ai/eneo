@@ -29,7 +29,7 @@
     "test:all": "bun run test:unit && bun run test:e2e",
     "pretest:coverage": "bun run test:browsers",
     "test:coverage": "vitest run --coverage",
-    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
+    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import cast
 from uuid import UUID
 
@@ -122,12 +123,21 @@ class QuotaService:
     def _size_of_text(self, text: str) -> int:
         return len(text.encode("utf-8"))
 
-    async def ensure_capacity(self, size_in_bytes: int) -> None:
+    async def ensure_capacity(
+        self, size_in_bytes: int, *, released: Mapping[UUID, int] | None = None
+    ) -> None:
+        """Check that `size_in_bytes` more fits the tenant and user quotas.
+
+        `released` is storage the same publication frees, per owner. It lowers
+        the tenant's usage, and the user's usage only for versions they own.
+        """
+        released = released or {}
         tenant_usage = await self.info_blob_repo.get_retained_size_of_tenant(
             self.user.tenant.id
-        )
+        ) - sum(released.values())
         user_usage = (
             await self.info_blob_repo.get_retained_size_of_user(self.user.id)
+            - released.get(self.user.id, 0)
             if self.user.quota_limit is not None
             else 0
         )
@@ -139,7 +149,9 @@ class QuotaService:
             size_in_bytes=size_in_bytes,
         )
 
-    async def add_text(self, text_to_add: str) -> int:
+    async def add_text(
+        self, text_to_add: str, *, released: Mapping[UUID, int] | None = None
+    ) -> int:
         size_of_text = self._size_of_text(text_to_add)
-        await self.ensure_capacity(size_of_text)
+        await self.ensure_capacity(size_of_text, released=released)
         return size_of_text

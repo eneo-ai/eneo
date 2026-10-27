@@ -29,6 +29,8 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   ) => Promise<T>;
   /** Provide a key if attachements should also be managed, e.g. deleted when the attachment field is reverted */
   manageAttachements: Extract<keyof T, string> | false;
+  /** Delete a staged `icon_id` upload when that change is discarded; saving lets the server release the replaced icon */
+  manageIcon?: boolean;
   eneo: Eneo;
 }) {
   const { eneo, updateResource } = data;
@@ -101,6 +103,10 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       // Check if files have been uploaded that should be reverted
 
       const discardedUploads = getAddedAttachments($resource, $update, data.manageAttachements);
+      const discardedIcon =
+        data.manageIcon && (field === undefined || field === "icon_id")
+          ? getStagedIcon($resource, $update)
+          : null;
 
       if (field) {
         $update[field] = $resource[field];
@@ -118,6 +124,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
           }
         });
       }
+      if (discardedIcon) eneo.icons.delete({ id: discardedIcon }).catch(() => {});
 
       return JSON.parse(JSON.stringify($update));
     });
@@ -159,6 +166,12 @@ function getRemovedAttachments(
   return hasAttachments(base, key) && hasAttachments(update, key)
     ? getRemovedItems(base[key], update[key])
     : [];
+}
+
+/** A staged icon that differs from the saved one was uploaded during this edit; no resource shows it. */
+function getStagedIcon(base: Record<string, unknown>, update: Record<string, unknown>) {
+  const staged = update.icon_id;
+  return typeof staged === "string" && staged !== base.icon_id ? staged : null;
 }
 
 function hasAttachments(

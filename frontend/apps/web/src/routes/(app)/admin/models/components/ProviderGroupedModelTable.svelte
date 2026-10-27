@@ -28,7 +28,9 @@
   import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { writable } from "svelte/store";
-  import { Plus, TriangleAlert, Clock } from "@lucide/svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Clock from "@lucide/svelte/icons/clock";
 
   import { m } from "$lib/paraglide/messages";
   import {

@@ -7,7 +7,7 @@
   import { Navigation } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { deLocalizeUrl, localizeHref } from "$lib/paraglide/runtime";
-  import { Sparkles } from "@lucide/svelte";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
 
   const { enabled, hasUnseen } = getWhatsNewStore();

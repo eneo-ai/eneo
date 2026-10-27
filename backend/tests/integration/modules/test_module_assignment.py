@@ -10,6 +10,7 @@ from eneo.authentication.auth_models import (
     ApiKeyScopeType,
     ApiKeyType,
 )
+from eneo.tenants.tenant_repo import TenantRepository
 
 pytestmark = pytest.mark.integration
 
@@ -212,6 +213,7 @@ async def test_revocation_committing_before_installation_prevents_binding(
 async def test_install_and_uninstall_are_idempotent_under_concurrent_retries(
     client,
     admin_token,
+    monkeypatch,
 ):
     module_key = f"concurrent-{uuid4().hex[:12]}"
     service_key = await create_module_service_key(client, token=admin_token)
@@ -235,6 +237,28 @@ async def test_install_and_uninstall_are_idempotent_under_concurrent_retries(
     assert {response.json()["module_id"] for response in installed} == {
         installed[0].json()["module_id"]
     }
+
+    # Overlap the retry deterministically: hold the first uninstall's
+    # transaction open after its DELETE until the retry has passed the
+    # installation pre-check. Without the hold the retry may start after the
+    # commit and correctly get the uniform 404 instead of changed=false.
+    disable_module = TenantRepository.disable_module
+    retry_passed_precheck = asyncio.Event()
+    first_entered = False
+
+    async def hold_first_uninstall(self, tenant_id, module_id):
+        nonlocal first_entered
+        if first_entered:
+            retry_passed_precheck.set()
+            return await disable_module(self, tenant_id=tenant_id, module_id=module_id)
+        first_entered = True
+        assignment = await disable_module(
+            self, tenant_id=tenant_id, module_id=module_id
+        )
+        await asyncio.wait_for(retry_passed_precheck.wait(), timeout=10)
+        return assignment
+
+    monkeypatch.setattr(TenantRepository, "disable_module", hold_first_uninstall)
 
     removed = await asyncio.gather(
         client.delete(

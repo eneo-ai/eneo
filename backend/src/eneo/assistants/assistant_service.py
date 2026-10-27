@@ -1648,6 +1648,7 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        previous_icon_id = assistant.icon_id
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -1727,6 +1728,12 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if is_personal_default and reasoning_effort_only_update:
@@ -2124,6 +2131,7 @@ class AssistantService:
                 document_template=document_template,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
@@ -2427,7 +2435,6 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
-        icon_id = assistant.icon_id
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
@@ -2446,7 +2453,7 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        await self.repo.delete(assistant_id, space.id)
+        icon_id = await self.repo.delete(assistant_id, space.id)
 
         # After the delete: a widget created meanwhile holds the assistant row
         # until it commits, so it is archived here too.
@@ -2459,7 +2466,7 @@ class AssistantService:
         )
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
