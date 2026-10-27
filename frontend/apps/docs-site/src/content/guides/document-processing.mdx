@@ -350,38 +350,17 @@ Deleting a collection or website removes every document in it.
 
 ### Free Space Held by Earlier Versions
 
-Eneo 2.2 and the 2.3 release candidates kept the chunks and embeddings of every
-replaced version. Nothing searched them, but they counted toward the storage
-quota and took database space. On websites that are recrawled often, they can
-fill the quota so that changed pages are no longer saved (crawl problems show
-`TENANT_QUOTA_EXCEEDED`).
+Eneo 2.2.0 up to and including 2.3.0-rc.3 kept the chunks and embeddings of
+every replaced version. Nothing searched them, but they counted toward the
+storage quota and took database space. On websites that are recrawled often,
+they can fill the quota so that changed pages are no longer saved (crawl
+problems show `TENANT_QUOTA_EXCEEDED`).
 
-Current versions remove this data when they replace a version. Remove what
-earlier versions left behind once, with the worker image:
-
-```bash
-# How many replaced versions still hold search data
-docker compose exec worker python -m eneo.info_blobs.replaced_versions status
-
-# Remove it in small batches
-docker compose exec worker python -m eneo.info_blobs.replaced_versions run
-```
-
-- Eneo keeps running. Run the command at a quiet time; each small batch is its
-  own short transaction, followed by a short pause.
-- You can stop it at any time. Removed batches stay removed; run it again to
-  continue.
-- `status` prints how many replaced versions still hold search data as
-  `remaining`. For `run`, exit code `0` means nothing is left, `2` that some
-  versions were in use and you should run it again, and `3` that it stopped
-  early (the output says why).
-- The text, metadata, originals and citations of earlier versions stay.
-- Quota usage drops as batches complete. PostgreSQL reuses the freed space for
-  new data but does not return it to the operating system. Shrinking the files
-  needs a table rewrite in a maintenance window, with the trade-offs described
-  in [Reclaim disk space](/guides/file-icon-storage-upgrade#reclaim-disk-space-optional).
-- Deleting rows writes WAL. If you keep WAL for a replica or an archive, watch
-  its size while the command runs.
+Current releases remove this data when they replace a version. Remove what
+earlier releases left behind once, with the guide
+[Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+Eneo keeps running while it works, and the text, originals and citations of
+earlier versions stay.
 
 ---
 
@@ -468,8 +447,8 @@ and Eneo keeps answering from older page content.
 
 **Solution:**
 
-1. Run `status` and `run` from
-   [Free Space Held by Earlier Versions](#free-space-held-by-earlier-versions).
+1. Run the one-time cleanup in
+   [Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
    On installations upgraded from 2.2, replaced versions often hold much of the
    quota.
 2. If the quota is still full, remove websites or documents that are no longer
