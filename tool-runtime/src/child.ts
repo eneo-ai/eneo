@@ -4,8 +4,16 @@ import { dirname } from "node:path";
 import { publicError, ToolError } from "./errors";
 import type { ComputeConfig } from "./tools/compute/config";
 import type { ComputeJob } from "./tools/compute/ports";
-import type { IngestJob, JsonExtractJob, QueryJob } from "./tools/tabular/ports";
-import type { BuiltinTemplateJob, InspectJob, RenderJob } from "./tools/documents/ports";
+import type {
+  IngestJob,
+  JsonExtractJob,
+  QueryJob,
+} from "./tools/tabular/ports";
+import type {
+  BuiltinTemplateJob,
+  InspectJob,
+  RenderJob,
+} from "./tools/documents/ports";
 import type { ChartJob } from "./tools/charts/ports";
 
 export type SandboxJob =
@@ -28,7 +36,10 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
   switch (input.job.kind) {
     case "compute": {
       const { runJavaScript } = await import("./tools/compute/engine/quickjs");
-      const { config } = input as Extract<SandboxJob, { config: ComputeConfig }>;
+      const { config } = input as Extract<
+        SandboxJob,
+        { config: ComputeConfig }
+      >;
       return { ...(await runJavaScript(input.job, config)) };
     }
     case "tabular_ingest": {
@@ -52,7 +63,8 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
       return executeInspect(input.job);
     }
     case "builtin_template": {
-      const { executeBuiltinTemplate } = await import("./tools/documents/execute");
+      const { executeBuiltinTemplate } =
+        await import("./tools/documents/execute");
       return executeBuiltinTemplate(input.job);
     }
     case "render_chart": {
@@ -86,11 +98,23 @@ function filesConfined(): boolean {
 /** Whether TCP is denied: a confined child cannot even bind a loopback port. */
 function tcpConfined(): boolean {
   try {
-    Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }).stop(true);
+    Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }).stop(
+      true,
+    );
     return false;
   } catch {
     return true;
   }
+}
+
+/**
+ * The whole message reaches the parent before the process exits: a pipe holds 64 KB, and
+ * a write beyond that is still in flight when exit() runs, which cuts the result short.
+ */
+function reply(message: string): Promise<void> {
+  return new Promise((resolve) => {
+    process.stdout.write(message, () => resolve());
+  });
 }
 
 if (import.meta.main) {
@@ -102,9 +126,9 @@ if (import.meta.main) {
       );
     const input = JSON.parse(await Bun.stdin.text()) as SandboxJob;
     const result = await execute(input);
-    process.stdout.write(JSON.stringify({ ok: true, result }));
+    await reply(JSON.stringify({ ok: true, result }));
   } catch (error) {
-    process.stdout.write(JSON.stringify({ ok: false, error: publicError(error) }));
+    await reply(JSON.stringify({ ok: false, error: publicError(error) }));
   }
   // Native engine resources (DuckDB) must never extend the lifetime of a job.
   process.exit(0);

@@ -45,19 +45,59 @@ const JSON_TYPES = [
   "application/octet-stream",
 ];
 const MAX_METADATA_BYTES = 256 * 1024;
+/** Characters of one cell in a query's returned rows; the export file keeps the whole cell. */
+const MAX_CELL_CHARS = 4_000;
+/** Bytes of returned rows per query: the rows must fit the child's reply with room to spare. */
+const MAX_PREVIEW_BYTES = 256 * 1024;
+
+/**
+ * The rows a query returns, bounded in two ways a row limit cannot be: a cell is cut to
+ * MAX_CELL_CHARS (a sheet made of JSON records can hold a whole record in one cell) and
+ * the rows stop where MAX_PREVIEW_BYTES is reached, reported as truncation.
+ */
+function boundedRows(rows: unknown[][]): {
+  rows: unknown[][];
+  clippedCells: number;
+  truncated: boolean;
+} {
+  const kept: unknown[][] = [];
+  let bytes = 0;
+  let clippedCells = 0;
+  for (const row of rows) {
+    const bounded = row.map((cell) => {
+      if (typeof cell !== "string" || cell.length <= MAX_CELL_CHARS)
+        return cell;
+      clippedCells += 1;
+      return cell.slice(0, MAX_CELL_CHARS) + "…";
+    });
+    bytes += Buffer.byteLength(JSON.stringify(bounded)) + 1;
+    if (bytes > MAX_PREVIEW_BYTES && kept.length)
+      return { rows: kept, clippedCells, truncated: true };
+    kept.push(bounded);
+  }
+  return { rows: kept, clippedCells, truncated: false };
+}
 
 /** Refuses bytes that are not UTF-8 text of the named kind. */
 function assertUtf8Text(bytes: Buffer, kind: string): void {
   if (bytes.includes(0))
-    throw new ToolError("INVALID_FILE", `The file is not a supported UTF-8 ${kind} file.`);
+    throw new ToolError(
+      "INVALID_FILE",
+      `The file is not a supported UTF-8 ${kind} file.`,
+    );
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new ToolError("INVALID_FILE", `${kind} files must use UTF-8 encoding.`);
+    throw new ToolError(
+      "INVALID_FILE",
+      `${kind} files must use UTF-8 encoding.`,
+    );
   }
 }
 
-type IngestedSheet = import("./engine/xlsx-to-csv").SheetCsv & { jsonPath?: string };
+type IngestedSheet = import("./engine/xlsx-to-csv").SheetCsv & {
+  jsonPath?: string;
+};
 
 /** The records of a JSON file as sheets; a selection narrows them to one sheet's rows. */
 async function jsonSheets(
@@ -78,9 +118,14 @@ async function jsonSheets(
     const { sheet: requested, source_rows } = job.selection;
     if (!requested && sheets.length > 1)
       throw new ToolError("SHEET_REQUIRED", "The selection must name a sheet.");
-    const sheet = requested ? sheets.find((s) => s.name === requested) : sheets[0];
+    const sheet = requested
+      ? sheets.find((s) => s.name === requested)
+      : sheets[0];
     if (!sheet)
-      throw new ToolError("UNKNOWN_SHEET", "Unknown sheet. Use a name from inspect_table.");
+      throw new ToolError(
+        "UNKNOWN_SHEET",
+        "Unknown sheet. Use a name from inspect_table.",
+      );
     sheets = [
       {
         ...sheet,
@@ -109,7 +154,10 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
     assertZipWithinBounds(bytes, config.max_expanded_bytes);
   } else if (job.format === "json") {
     if (!JSON_TYPES.includes(job.contentType))
-      throw new ToolError("INVALID_FILE", "The file is not a supported JSON file.");
+      throw new ToolError(
+        "INVALID_FILE",
+        "The file is not a supported JSON file.",
+      );
     assertUtf8Text(bytes, "JSON");
   } else {
     if (!CSV_TYPES.includes(job.contentType))
@@ -211,7 +259,9 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
 }
 
 /** The value at a JSONPath in a JSON file the parent downloaded and wrote for this job. */
-export async function executeJsonExtract(job: JsonExtractJob): Promise<JsonExtractOutcome> {
+export async function executeJsonExtract(
+  job: JsonExtractJob,
+): Promise<JsonExtractOutcome> {
   const bytes = await readFile(job.inputPath);
   assertUtf8Text(bytes, "JSON");
   return extractJsonPath(job.inputPath, job.path, {
@@ -246,22 +296,39 @@ export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
           },
         );
         // The caller still gets a bounded preview; the file carries every row.
-        const preview = outcome.rows.slice(0, limits.rowLimit);
+        const preview = boundedRows(outcome.rows.slice(0, limits.rowLimit));
         results.push({
           ok: true,
           outcome: {
             ...outcome,
-            rows: preview,
-            returnedRows: preview.length,
+            rows: preview.rows,
+            returnedRows: preview.rows.length,
             truncated:
-              outcome.truncated || outcome.rows.length > preview.length,
+              outcome.truncated ||
+              preview.truncated ||
+              outcome.rows.length > preview.rows.length,
             exportedRows: outcome.rows.length,
             exportTruncated: outcome.truncated,
+            ...(preview.clippedCells
+              ? { clippedCells: preview.clippedCells }
+              : {}),
           },
         });
         continue;
       }
-      results.push({ ok: true, outcome });
+      const bounded = boundedRows(outcome.rows);
+      results.push({
+        ok: true,
+        outcome: {
+          ...outcome,
+          rows: bounded.rows,
+          returnedRows: bounded.rows.length,
+          truncated: outcome.truncated || bounded.truncated,
+          ...(bounded.clippedCells
+            ? { clippedCells: bounded.clippedCells }
+            : {}),
+        },
+      });
     } catch (error) {
       results.push({
         ok: false,

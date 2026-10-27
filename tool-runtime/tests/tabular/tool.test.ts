@@ -445,6 +445,38 @@ describe("inspect and query", () => {
     });
   });
 
+  test("cuts long cells and stops the rows at the result's byte budget", async () => {
+    const { tool } = setup("bounded");
+    const query = (sql: string) =>
+      tool("query_table").execute(
+        { file: { url: url(FILE_A), filename: "sales.csv" }, sql },
+        alice,
+      ) as Promise<{
+        rows: unknown[][];
+        returned_rows: number;
+        truncated: boolean;
+        clipped_cells?: number;
+        cells_hint?: string;
+      }>;
+    const clipped = await query(
+      "SELECT region, repeat('x', 50000) AS big FROM t",
+    );
+    expect(clipped).toMatchObject({
+      returned_rows: 3,
+      truncated: false,
+      clipped_cells: 3,
+    });
+    expect(String(clipped.rows[0]![1])).toHaveLength(4_001);
+    expect(clipped.cells_hint).toContain("4,000");
+    // 243 rows of 3,000 characters are more than the budget holds.
+    const bounded = await query(
+      "SELECT repeat('x', 3000) AS big FROM t a, t b, t c, t d, t e",
+    );
+    expect(bounded.truncated).toBe(true);
+    expect(bounded.returned_rows).toBeLessThan(243);
+    expect(bounded).not.toHaveProperty("clipped_cells");
+  });
+
   test("rejects anything but one SELECT", async () => {
     const { tool } = setup("reject");
     for (const sql of [

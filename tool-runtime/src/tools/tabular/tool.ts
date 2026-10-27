@@ -64,6 +64,8 @@ const ROWS_SHOWN =
 
 /** Characters of JSON text query_json returns at most; the rest is reached by a narrower path. */
 const JSON_VALUE_MAX_CHARS = 16_000;
+const CELLS_CLIPPED =
+  "Some cells were cut at 4,000 characters. Select a part of the value (substring, json_extract) or fewer columns to read a long cell in full.";
 
 const JSON_TRUNCATED =
   "The value is longer than what one call returns. Narrow the path to the part you need, or, for an array of records, use query_table on the sheet inspect_table lists for that path.";
@@ -127,7 +129,11 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     ref: FileReference & { sheet?: string; source_rows?: number[] },
     ctx: CallContext,
   ) {
-    requireExtension(ref, TABLE_FILE_EXTENSIONS, "inspect_table and query_table");
+    requireExtension(
+      ref,
+      TABLE_FILE_EXTENSIONS,
+      "inspect_table and query_table",
+    );
     const format = sourceFormat(ref.filename);
     const { bytes, contentType } = await fetchReference(ref, ctx, {
       allowedFileOrigins: deps.allowedFileOrigins,
@@ -485,6 +491,12 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
             rows: outcome.rows,
             returned_rows: outcome.returnedRows,
             truncated: outcome.truncated,
+            ...(outcome.clippedCells
+              ? {
+                  clipped_cells: outcome.clippedCells,
+                  cells_hint: CELLS_CLIPPED,
+                }
+              : {}),
             ...coverage(outcome),
             ...input.calculation,
             ...(shown ? { shown: ROWS_SHOWN } : {}),
@@ -541,13 +553,17 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           found: outcome.matches > 0,
           type: outcome.type,
           matches: outcome.matches,
-          ...(outcome.array_length !== undefined ? { array_length: outcome.array_length } : {}),
+          ...(outcome.array_length !== undefined
+            ? { array_length: outcome.array_length }
+            : {}),
           value: outcome.value,
           truncated: outcome.truncated,
-          ...(outcome.truncated ? { total_chars: outcome.total_chars, hint: JSON_TRUNCATED } : {}),
+          ...(outcome.truncated
+            ? { total_chars: outcome.total_chars, hint: JSON_TRUNCATED }
+            : {}),
           ...(outcome.matches === 0
             ? {
-                hint: "Nothing is at this path. Compare it with the keys in inspect_table's json.structure; keys are case-sensitive, and a key holding a dot or a space is quoted: $.\"a.b\".",
+                hint: 'Nothing is at this path. Compare it with the keys in inspect_table\'s json.structure; keys are case-sensitive, and a key holding a dot or a space is quoted: $."a.b".',
               }
             : {}),
         };

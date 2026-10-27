@@ -196,7 +196,10 @@ are disabled, memory (256 MB), spill space (256 MB) and threads (1) are set,
 and the configuration is locked so the query cannot change any of it. DuckDB's
 own parser must see exactly one statement of type `SELECT`; anything else is
 refused. The query is wrapped in a row limit (500, or the export limit of
-200,000) and interrupted at its deadline (10 s). The engine's diagnosis of the
+200,000) and interrupted at its deadline (10 s). The rows returned to the
+model are bounded as well: a cell is cut at 4,000 characters and the rows stop
+at 256 KB, reported as truncation; an export file keeps every cell whole. The
+engine's diagnosis of the
 model's SQL (an unknown column, a syntax error, a failed cast) is returned so
 the model can correct it; other engine errors are reported generically.
 

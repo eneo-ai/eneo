@@ -83,6 +83,8 @@ export type QueryOutcome = {
   /** Rows written to the export file, and whether the export hit its row limit. */
   exportedRows?: number;
   exportTruncated?: boolean;
+  /** Cells cut to MAX_CELL_CHARS in the returned rows. */
+  clippedCells?: number;
 };
 
 /** Per statement: a result, or the safe reason it was rejected. */
