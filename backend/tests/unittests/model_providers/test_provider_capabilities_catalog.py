@@ -6,7 +6,7 @@ name that kept LiteLLM's own provider prefix was therefore routed as
 ``azure_ai/azure_ai/...`` (#1188).
 """
 
-from typing import Any, cast
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import litellm
@@ -14,20 +14,26 @@ import pytest
 
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.presentation.model_provider_router import (
+    ModelCostInfo,
+    ProviderCapabilities,
     get_provider_capabilities,
 )
 
 
-async def _catalog(model_cost: dict[str, dict[str, Any]] | None = None) -> Any:
+async def _catalog(
+    model_cost: dict[str, ModelCostInfo] | None = None,
+) -> dict[str, ProviderCapabilities]:
     if model_cost is None:
         response = await get_provider_capabilities(_user=MagicMock())
     else:
         with patch("litellm.model_cost", model_cost):
             response = await get_provider_capabilities(_user=MagicMock())
-    return cast(dict[str, Any], response)["providers"]
+    return cast(dict[str, ProviderCapabilities], response["providers"])
 
 
-def _names(providers: Any, provider: str, mode: str) -> list[str]:
+def _names(
+    providers: dict[str, ProviderCapabilities], provider: str, mode: str
+) -> list[str]:
     return [m["name"] for m in providers[provider]["models"][mode]]
 
 
@@ -73,11 +79,11 @@ async def test_catalog_names_leave_out_the_providers_own_prefix() -> None:
 async def test_bare_and_qualified_entries_collapse_to_the_qualified_row(
     qualified_first: bool,
 ) -> None:
-    bare = (
+    bare: tuple[str, ModelCostInfo] = (
         "gemini-exp-1206",
         {"litellm_provider": "gemini", "mode": "chat", "max_input_tokens": 1048576},
     )
-    qualified = (
+    qualified: tuple[str, ModelCostInfo] = (
         "gemini/gemini-exp-1206",
         {"litellm_provider": "gemini", "mode": "chat", "max_input_tokens": 2097152},
     )
@@ -91,7 +97,7 @@ async def test_bare_and_qualified_entries_collapse_to_the_qualified_row(
 
 
 async def test_no_bundled_catalog_name_repeats_its_providers_prefix() -> None:
-    model_cost = cast(dict[str, Any], getattr(litellm, "model_cost"))
+    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
     providers = await _catalog()
 
     for provider, data in providers.items():
