@@ -4,7 +4,9 @@
   No raw tool names, no argument JSON, no result viewer.
 -->
 <script lang="ts">
-  import { Check, ChevronRight, X } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import X from "@lucide/svelte/icons/x";
   import { m } from "$lib/paraglide/messages";
   import { creditedServers, groupToolSteps, type WidgetToolStep } from "../widgetToolSteps";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";

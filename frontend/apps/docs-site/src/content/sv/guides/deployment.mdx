@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@fb0ebb3c501a
+translationSource: guides/deployment.mdx@997003fbe9d7
 ---
 
 import { Callout } from "nextra/components";
@@ -209,6 +209,21 @@ Behåll en kopia av miljöfiler, krypteringsnyckel, releasepaket och exakt
 Compose-kommando. Vid återställning ska databasen och objektlagringen höra
 till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
 
+Vid uppgradering från 2.2 eller en 2.3-förhandsversion: de versionerna behöll
+sökdata (textbitar och inbäddningar) för varje ersatt dokumentversion. De
+räknas mot lagringskvoten men söks aldrig. När den nya versionen kör, ta bort
+dem en gång med worker-avbildningen:
+
+```bash
+docker compose exec worker python -m eneo.info_blobs.replaced_versions run
+```
+
+Eneo är tillgängligt under tiden, och kommandot kan stoppas och köras igen.
+Se [Frigör utrymme från tidigare
+versioner](/guides/document-processing#free-space-held-by-earlier-versions).
+Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
+`stop_grace_period: 2m`, som referensfilen gör; se nästa avsnitt.
+
 ## Felsökning och nästa steg
 
 - **502 från proxyn:** kontrollera domänen, containrarnas status och backendloggar.
@@ -219,6 +234,19 @@ till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
 - **Jobb fastnar:** läs loggarna för båda workrarna och `/api/healthz/crawler`,
   som kräver installationens super-API-nyckel i `X-API-Key`. Kontrollera
   kapacitet och anslutning till databas och Redis.
+- **Delat minne i databasen tar slut:** vissa anrop ger HTTP 500 och
+  databasloggen visar `could not resize shared memory segment ... No space left
+  on device`. Disken är inte full: PostgreSQL har slut på `/dev/shm`, ett litet
+  minnesområde i containern som Docker och Podman begränsar till 64 MB om
+  tjänsten inte sätter `shm_size`. Sätt `shm_size: 1gb` på tjänsten `db`, som
+  referensfilens `docker-compose.yml` gör, och skapa om containern med
+  `docker compose up -d db`. Värdet är ett tak, inte reserverat minne. Sätt
+  också `stop_grace_period: 2m`, annars kan en upptagen databas dödas innan
+  dess checkpoint är klar. Tills containern kan skapas om: stoppa parallella
+  frågor utan omstart med `ALTER SYSTEM SET max_parallel_workers_per_gather =
+  0;` följt av `SELECT pg_reload_conf();` i `psql`, starta om backend så att
+  anslutningarna görs om, och återställ med `ALTER SYSTEM RESET
+  max_parallel_workers_per_gather;` när `shm_size` är höjt.
 
 För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till
 **English** på den här sidan. Andra fördjupningar finns i guiderna om

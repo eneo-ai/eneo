@@ -4,7 +4,8 @@
   readers and keeps focus sensible when rows come and go.
 -->
 <script lang="ts">
-  import { Plus, X } from "@lucide/svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
   import { tick, untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";

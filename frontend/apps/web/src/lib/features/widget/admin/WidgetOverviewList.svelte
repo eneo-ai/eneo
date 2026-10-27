@@ -7,7 +7,9 @@
 <script lang="ts">
   import type { Eneo, WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
   import { invalidateAll } from "$app/navigation";
-  import { ArrowRight, Pause, Play } from "@lucide/svelte";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Pause from "@lucide/svelte/icons/pause";
+  import Play from "@lucide/svelte/icons/play";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

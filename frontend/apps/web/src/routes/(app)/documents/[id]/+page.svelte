@@ -1,6 +1,10 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Check, Copy, Download, ExternalLink, FileText } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Download from "@lucide/svelte/icons/download";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FileText from "@lucide/svelte/icons/file-text";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card/index.js";

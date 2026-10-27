@@ -6,16 +6,14 @@
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
   import { goto } from "$app/navigation";
-  import {
-    LayoutGrid,
-    Pencil,
-    Plus,
-    ShieldCheck,
-    Star,
-    StarOff,
-    SwatchBook,
-    Trash2
-  } from "@lucide/svelte";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Plus from "@lucide/svelte/icons/plus";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import Star from "@lucide/svelte/icons/star";
+  import StarOff from "@lucide/svelte/icons/star-off";
+  import SwatchBook from "@lucide/svelte/icons/swatch-book";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

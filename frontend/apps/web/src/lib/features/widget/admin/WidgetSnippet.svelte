@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import type { Widget } from "@eneo/eneo-js";
-  import { ExternalLink } from "@lucide/svelte";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";

@@ -8,7 +8,9 @@
 -->
 <script lang="ts">
   import { tick } from "svelte";
-  import { Check, ThumbsDown, ThumbsUp } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import ThumbsDown from "@lucide/svelte/icons/thumbs-down";
+  import ThumbsUp from "@lucide/svelte/icons/thumbs-up";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
