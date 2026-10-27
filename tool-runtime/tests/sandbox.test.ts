@@ -42,19 +42,21 @@ describe("sandbox child", () => {
   });
 
   test("returns a result larger than a pipe holds intact", async () => {
+    // The compute lane's own cap is raised so the reply is well past what a pipe buffers.
+    const roomy = computeConfigSchema.parse({ max_result_bytes: 384 * 1024 });
     const outcome = (await runIsolated(
       {
         job: {
           kind: "compute",
-          code: 'return "x".repeat(400_000);',
+          code: 'return "x".repeat(350_000);',
           input: null,
         },
-        config,
+        config: roomy,
       },
       10_000,
     )) as { ok: boolean; result: string };
     expect(outcome.ok).toBe(true);
-    expect(outcome.result).toHaveLength(400_000);
+    expect(outcome.result).toHaveLength(350_000);
   });
 
   test("writes a compute export into the directory the parent made for it", async () => {
