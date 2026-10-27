@@ -3,7 +3,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey
+from sqlalchemy import Boolean, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,14 @@ class GroupChatsTable(BasePublic):
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
     group_chat_assistants: Mapped[list["GroupChatsAssistantsMapping"]] = relationship(
         viewonly=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_group_chats_icon_id",
+            "icon_id",
+            postgresql_where=text("icon_id IS NOT NULL"),
+        ),
     )
 
 

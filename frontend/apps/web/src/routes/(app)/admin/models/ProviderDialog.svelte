@@ -14,7 +14,7 @@
   import type { ModelProviderPublic, OutboundHeaderOptions } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
   import { onMount, untrack } from "svelte";
-  import { LoaderCircle } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
 
   import { invalidate } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";

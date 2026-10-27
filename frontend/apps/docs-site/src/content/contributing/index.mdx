@@ -2,85 +2,207 @@
 title: Contributing to Eneo
 ---
 
+import { Callout, Steps } from "nextra/components";
+
 # Contributing to Eneo
 
-Eneo is an open-source project licensed under AGPL v3, and we welcome contributions from the community. However, Eneo's core development is led by a dedicated team with a clear vision for the platform. To keep the project focused and maintainable, all outside contributions must align with Eneo's goals and follow an **issue-first workflow**.
+Eneo is open source under AGPL v3 and is built together by public-sector
+organisations. Anyone can contribute. You do not need to belong to a team or an
+organisation to report a bug, suggest an improvement or submit a change.
 
----
+This guide follows a contribution from start to finish: choosing how to
+contribute, opening an issue, making a change in a fork and getting it merged.
+How the roles and protections work is explained in
+[Governance and Roles](/contributing/governance).
 
-## How to Contribute
+## Ways to contribute
 
-Every contribution — whether a bug fix, new feature, or improvement — starts with an issue. This ensures alignment before any code is written.
+| You want to                                    | Start here                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Report something that does not work            | A **Bug Report** issue. See [Create an issue](#create-an-issue).                                                         |
+| Suggest a feature or an improvement            | A **Feature Request** issue.                                                                                             |
+| Flag a risk or an observation                  | A **Finding** issue.                                                                                                     |
+| Ask a question or discuss an idea              | [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions). See [Getting help](#getting-help) for other channels. |
+| Fix a bug, build a feature or improve the docs | An issue first, then a pull request from your fork. See [Contribute a change](#contribute-a-change).                     |
+| Review someone else's work                     | Comment on an [open pull request](https://github.com/eneo-ai/eneo/pulls).                                                |
+| Report a security vulnerability                | Privately, never in a public issue. See [Report a vulnerability](#report-a-vulnerability).                               |
 
-### 1. Check Existing Issues
+Everything in this table works with an ordinary GitHub account.
 
-Before opening a new issue, search the [GitHub Issues](https://github.com/eneo-ai/eneo/issues) to see if your idea or bug has already been reported.
+## Create an issue
 
-### 2. Create an Issue
+<Steps>
 
-Open a new issue describing the change you'd like to make. Be specific about:
+### Search first
 
-- **What** you want to change or add
-- **Why** the change is needed
-- **How** you plan to approach it (if you have a proposal)
+Search the [existing issues](https://github.com/eneo-ai/eneo/issues?q=is%3Aissue),
+both open and closed. If your problem or idea is already there, add a 👍
+reaction or a comment with new information instead of opening a duplicate.
 
-### 3. Discuss and Get Approval
+### Choose a template
 
-Wait for feedback from the maintainers. This step is important — it saves you from spending time on work that may not be accepted. Maintainers may suggest a different approach, ask clarifying questions, or confirm that the change is welcome.
+Go to [**Issues → New issue**](https://github.com/eneo-ai/eneo/issues/new/choose).
+Blank issues are turned off, so choose the template that fits:
 
-### 4. Fork, Implement, and Submit a PR
+- **Bug Report**: something does not work as expected.
+- **Feature Request**: a new capability or an improvement.
+- **Finding**: a risk, problem or improvement idea that is not yet a clear bug
+  or feature.
 
-Once your issue has been discussed and given the green light:
+**Epic** and **Development task** are planning templates. Maintainers and
+partner organisations use them when work is scheduled on the
+[roadmap](/contributing/project-roadmap). You do not need them to contribute.
 
-1. Fork the repository
-2. Create a feature branch (`feature/your-feature-name`)
-3. Implement the change
-4. Submit a pull request referencing the issue
+### Fill in the form
 
----
+Describe one problem or need per issue. For a bug, include the steps to
+reproduce it, what you expected and what happened. Choose the **Area** that
+fits best, or **Other** if you are unsure.
 
-## What Makes a Good Contribution
+### Follow the conversation
 
-Contributions should be **generic** — they must benefit all users of the platform, not just a single organization.
+The issue is labelled automatically from the template and the area you chose,
+and added to the [Eneo project](https://github.com/orgs/eneo-ai/projects/5). A
+maintainer then triages it and may ask follow-up questions, so keep an eye on
+your GitHub notifications.
+
+</Steps>
+
+<Callout type="warning">
+  Issues, comments and pull requests are public. Do not include personal data,
+  credentials, internal hostnames or content from your organisation's users.
+  Replace real values in logs and screenshots before you post them.
+</Callout>
+
+## Contribute a change
+
+The same steps apply to code and documentation.
+
+<Steps>
+
+### Agree on the change in an issue
+
+Comment on the issue that you would like to work on it, and wait for a
+maintainer to confirm the approach. This avoids work that cannot be accepted.
+Even a small fix needs an issue; for a typo, one line is enough.
+
+### Fork and set up
+
+[Fork the repository](https://github.com/eneo-ai/eneo/fork), clone your fork and
+add the main repository as `upstream`:
+
+```bash
+git clone https://github.com/<your-username>/eneo.git
+cd eneo
+git remote add upstream https://github.com/eneo-ai/eneo.git
+```
+
+Open the folder in VS Code and choose **Reopen in Container**. The
+[development environment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment)
+covers the rest of the setup.
+
+### Branch from the latest `develop`
+
+```bash
+git fetch upstream
+git switch -c fix/short-description upstream/develop
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+```
+
+Use a prefix that describes the work: `feature/`, `fix/`, `docs/`, `refactor/`
+or `test/`. The hooks run formatting, commit message and pre-push checks
+locally, so problems show up before CI.
+
+### Make the change
+
+Commit in small steps using
+[Conventional Commits](#commit-message-format). Add or update tests, and update
+the documentation in the same pull request when behaviour changes. For
+documentation pages, follow the
+[authoring guide](https://github.com/eneo-ai/eneo/blob/develop/frontend/apps/docs-site/AUTHORING.md).
+
+### Open a pull request against `develop`
+
+Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
+`develop` branch. Before you submit:
+
+- Write the title as a Conventional Commit, for example
+  `fix(spaces): resolve permission check bug`. It becomes the commit message
+  on `develop`.
+- Link the issue under **Planning** with `Fixes #123`.
+- Fill in the rest of the template: **Changes**, **Why**, **User-facing**,
+  **Testing**, and **Accessibility** for UI changes.
+- Leave **Allow edits by maintainers** ticked, so a maintainer can push a small
+  fix for you.
+- Open it as a **draft** if you want early feedback on the direction.
+
+### Let the checks run
+
+`CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels`
+must pass. If this is your first contribution, a maintainer may need to approve
+the first workflow run before it starts.
+
+You may not be able to add labels yourself. A maintainer adds them during
+review, and the PR label check turns green when they do. If the pull request
+links no issue, it gets a `needs:task-link` label until you add `Fixes #123`.
+
+### Review and merge
+
+A Core Maintainer reviews the pull request. Answer the comments and push new
+commits to the same branch instead of force-pushing, so reviewers can see what
+changed. A new commit dismisses an earlier approval, and every conversation
+must be resolved before the merge.
+
+When the pull request is approved, a Core Maintainer adds it to the merge queue,
+which tests it against the latest `develop` and squash-merges it. You do not
+need to keep your branch up to date yourself unless GitHub reports a conflict.
+
+</Steps>
+
+## Best practices
+
+- **Keep pull requests small.** One issue, one pull request, small enough to
+  review in one sitting. Split unrelated changes.
+- **Ask early.** A draft pull request or a question in the issue costs less than
+  rework after review.
+- **Make it generic.** Changes must benefit every organisation that runs Eneo.
+  See [What makes a good contribution](#what-makes-a-good-contribution).
+- **Test what you change.** Run the relevant tests locally; CI runs the full set.
+- **Document with the change.** Update the docs page and the **User-facing**
+  section in the same pull request.
+- **Follow the design system.** Use existing components and patterns. UI in the
+  React beta must meet WCAG 2.2 AA.
+- **Never commit secrets or personal data.** Keep credentials in `.env` files,
+  which are not committed.
+- **Keep your fork in sync.** Start each new branch from
+  `upstream/develop`, as shown above.
+
+## What makes a good contribution
+
+Contributions should be **generic**: they must benefit all users of the
+platform, not a single organisation.
 
 **Good contributions:**
 
-- "Improve vector search performance" — universal improvement
-- "Add accessibility features for screen readers" — platform-wide enhancement
-- "Implement batch processing for documents" — general capability
+- "Improve vector search performance": a universal improvement
+- "Add accessibility features for screen readers": a platform-wide enhancement
+- "Implement batch processing for documents": a general capability
 
 **Contributions that won't be accepted:**
 
-- "Add custom branding for Municipality X" — too specific
-- "Implement Company Y's approval workflow" — organization-specific
-- "Change color scheme to match our brand" — violates design system
-- "Add hard-coded integration with our internal system" — not generic
+- "Add custom branding for Municipality X": too specific
+- "Implement Company Y's approval workflow": organisation-specific
+- "Change color scheme to match our brand": violates the design system
+- "Add hard-coded integration with our internal system": not generic
 
-All UI contributions must follow Eneo's established design system and use existing components and patterns. No PR may break existing functionality.
+UI contributions must follow Eneo's design system and use existing components
+and patterns. No pull request may break existing functionality.
 
----
+Looking for a place to start? See issues labelled
+[`good first issue`](https://github.com/eneo-ai/eneo/labels/good%20first%20issue)
+and [`help wanted`](https://github.com/eneo-ai/eneo/labels/help%20wanted).
 
-## Pull Request Guidelines
-
-- **Reference the approved issue** in your PR description
-- **Keep the scope focused** — one feature or fix per PR
-- **Include tests** for new functionality
-- **Follow existing conventions** — code style, project structure, commit message format
-- **Update documentation** if your change affects user-facing behavior
-
-## Roadmap Planning
-
-Eneo tracks roadmap epics, development tasks, findings, bugs, and chores in one GitHub Project. Epics use the `Roadmap version` field to appear in exported roadmap snapshots such as `2.0`, `2.1`, `2.2`, or `2.X`.
-
-See [Project Roadmap](/contributing/project-roadmap) for the project fields, version rules, task-to-epic relationship, and export workflow.
-
-## Security Checks
-
-Pull requests run CI and Dependency Review before merge. These checks make dependency updates reviewable and prevent known high-severity vulnerable dependencies from entering `develop`. Code scanning is paused while maintainers evaluate a setup that gives developers useful feedback without high false-positive noise.
-
-See [Security for Contributors](/contributing/security) for the required checks, alert triage order, and how to handle dependency or security check failures.
-
-### Commit Message Format
+## Commit message format
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -96,16 +218,47 @@ fix(spaces): resolve permission check bug
 docs(api): update assistant endpoint documentation
 ```
 
----
+## Security checks
 
-## Development Setup and Detailed Guidelines
+Pull requests run CI and Dependency Review before merge. These checks keep
+dependency updates reviewable and prevent known high-severity vulnerable
+dependencies from entering `develop`. See
+[Security for Contributors](/contributing/security) for the required checks and
+how to handle a failing security check.
 
-For the full development environment setup, architecture overview, testing guidelines, code standards, and more, see the [CONTRIBUTING.md](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md) file in the repository.
+## Report a vulnerability
 
----
+Never report a vulnerability in a public issue, pull request or discussion.
+Report it privately, either through
+[**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
+on GitHub or by email to `security@sundsvall.se`. The
+[security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
+describes what to include and the response times.
 
-## Getting Help
+## Roadmap planning
 
-- **GitHub Issues** — for bugs and feature requests
-- **GitHub Discussions** — for questions and general discussion
-- **Email** — digitalisering@sundsvall.se (public sector organizations)
+Eneo tracks roadmap epics, development tasks, findings, bugs and chores in one
+GitHub Project. Epics use the `Roadmap version` field to appear in exported
+roadmap snapshots such as `2.0`, `2.1`, `2.2` or `2.X`. See
+[Project Roadmap](/contributing/project-roadmap) for the fields, version rules
+and export workflow.
+
+## Development setup and detailed guidelines
+
+For the development environment, architecture, testing, code standards and
+database migrations, see
+[CONTRIBUTING.md](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
+in the repository.
+
+## Getting help
+
+- **[GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)**:
+  questions and ideas, open to everyone.
+- **Issue comments**: questions about a specific issue or pull request.
+- **[Forum](https://forum.eneo.ai) and [chat](https://chat.eneo.ai)**: the
+  collaboration forum for public-sector employees. Both require an email
+  address from a public-sector organisation.
+- **Email `digitalisering@sundsvall.se`**: for organisations that want to take
+  part in the collaboration. See
+  [Samarbetsforum](https://eneo.ai/samarbetsforum.html) for how Eneo is
+  governed.

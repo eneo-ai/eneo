@@ -4,7 +4,7 @@ vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
 
-import type { ImageModel } from "@eneo/eneo-js";
+import type { ImageModel, RerankModel } from "@eneo/eneo-js";
 import {
   applyCatalogModelToDraft,
   createEmptyDraft,
@@ -125,5 +125,60 @@ describe("rerank model drafts", () => {
       inputCostPerToken: null,
       outputCostPerToken: null
     });
+  });
+
+  it("starts with the default candidate factor and cap and sends them", () => {
+    const draft = { ...createEmptyDraft("rerank", "cohere"), name: "r", displayName: "R" };
+
+    expect([draft.candidateFactorStr, draft.maxCandidatesStr]).toEqual(["5", "100"]);
+    expect(draftToWizardModel(draft)).toMatchObject({ candidateFactor: 5, maxCandidates: 100 });
+  });
+
+  it("reads the candidate factor and cap of an existing model", () => {
+    const model = {
+      id: "r-1",
+      name: "rerank-v3.5",
+      nickname: "Rerank",
+      hosting: "eu",
+      description: null,
+      security_classification: null,
+      candidate_factor: 3,
+      max_candidates: 250
+    } as unknown as RerankModel;
+
+    const draft = modelToDraft(model, "rerank");
+
+    expect([draft.candidateFactorStr, draft.maxCandidatesStr]).toEqual(["3", "250"]);
+  });
+
+  it.each([
+    ["candidateFactorStr", "0"],
+    ["candidateFactorStr", "21"],
+    ["candidateFactorStr", ""],
+    ["maxCandidatesStr", "0"],
+    ["maxCandidatesStr", "1001"],
+    ["maxCandidatesStr", "2.5"]
+  ])("is incomplete when %s is %s", (field, value) => {
+    const draft = {
+      ...createEmptyDraft("rerank", "cohere"),
+      name: "r",
+      displayName: "R",
+      [field]: value
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(false);
+  });
+
+  it("accepts the numbers a number input binds", () => {
+    const draft = {
+      ...createEmptyDraft("rerank", "cohere"),
+      name: "r",
+      displayName: "R",
+      candidateFactorStr: 4 as unknown as string,
+      maxCandidatesStr: 200 as unknown as string
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(true);
+    expect(draftToWizardModel(draft)).toMatchObject({ candidateFactor: 4, maxCandidates: 200 });
   });
 });

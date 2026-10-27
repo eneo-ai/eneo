@@ -27,7 +27,7 @@
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import { LoaderCircle } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
@@ -42,6 +42,7 @@
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
+    hasValidRerankCandidateSettings,
     MAX_COST_INPUT,
     modelToDraft,
     rawCostToNumber,
@@ -194,6 +195,8 @@
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
+      candidate_factor: Number(draft.candidateFactorStr),
+      max_candidates: Number(draft.maxCandidatesStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),
       ...securityClassificationPatch()
     };
@@ -208,6 +211,10 @@
     // Mirror the AddWizard guard: completion models cannot persist with
     // null/0 token budgets — the backend rejects them and downstream code
     // would divide by zero on context-window math.
+    if (modelType === "rerank" && !hasValidRerankCandidateSettings(draft)) {
+      error = m.rerank_candidate_settings_invalid();
+      return;
+    }
     if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
       error = m.completion_token_budgets_required();
       return;

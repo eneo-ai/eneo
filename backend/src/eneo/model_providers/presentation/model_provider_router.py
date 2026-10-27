@@ -304,6 +304,9 @@ async def get_provider_capabilities(
     # Supports: YYYY-MM-DD (OpenAI), YYYYMMDD (Anthropic), @YYYYMMDD (Vertex)
     _date_dashed = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
     _date_compact = re.compile(r"(?:@|-)(\d{8})(?:\D|$)|(\d{8})$")
+    # LiteLLM prices image generation per "[<quality>/]<W>-x-<H>/<model>" key
+    # (default_image_cost_calculator); the model id is the last segment.
+    _image_size_segment = re.compile(r"(?:^|/)\d+-x-\d+/")
 
     def _extract_model_date(name: str) -> str:
         """Extract date from model name, normalized to YYYYMMDD for sorting."""
@@ -343,6 +346,15 @@ async def get_provider_capabilities(
         if model_key.endswith("-latest"):
             continue
 
+        # Skip LiteLLM's pricing-only keys: a wildcard is never a model id,
+        # "month-commitment" marks Bedrock provisioned-throughput prices
+        # (litellm.is_bedrock_pricing_only_model), and a size-prefixed key
+        # prices one image format, not a model.
+        if "*" in model_key or "month-commitment" in model_key:
+            continue
+        if _image_size_segment.search(model_key):
+            continue
+
         # Skip non-standard model types that aren't useful for text chat/embedding
         model_lower = model_key.lower()
         if model_lower.endswith("/container"):
@@ -363,8 +375,20 @@ async def get_provider_capabilities(
         # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
         provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
 
-        if provider and mode and model_key not in raw[provider][mode]:
-            model_info: ModelCapability = {"name": model_key}
+        # The route is built as "<provider_type>/<name>" (resolve_model_route),
+        # so a name that keeps the provider's own prefix would be sent as
+        # "azure_ai/azure_ai/...". Offer the name without it. LiteLLM keys
+        # carry the raw provider ("vllm/..."), so that prefix goes too, but
+        # exactly one prefix is removed either way.
+        name = model_key.removeprefix(f"{provider}/")
+        if name == model_key and raw_provider != provider:
+            name = model_key.removeprefix(f"{raw_provider}/")
+        is_qualified = name != model_key
+
+        # LiteLLM can list a model both bare and as "<provider>/<name>". Keep
+        # the qualified row: /model-defaults/ resolves that one for the provider.
+        if provider and mode and (is_qualified or name not in raw[provider][mode]):
+            model_info: ModelCapability = {"name": name}
             if mode == "completion":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["max_output_tokens"] = info.get("max_output_tokens")
@@ -391,7 +415,7 @@ async def get_provider_capabilities(
                 model_info["cost_per_image"] = per_image_cost(
                     cast(dict[str, Any], info)
                 )
-            raw[provider][mode][model_key] = model_info
+            raw[provider][mode][name] = model_info
 
     # Build response sorted by release date (newest first)
     providers: dict[str, ProviderCapabilities] = {}

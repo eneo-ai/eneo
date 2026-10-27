@@ -384,11 +384,15 @@ class ModelProviderService:
         """Encrypt sensitive credential fields."""
         encrypted_creds = credentials.copy()
 
-        # Encrypt API key if present
-        if "api_key" in encrypted_creds and encrypted_creds["api_key"]:
-            encrypted_creds["api_key"] = self.encryption.encrypt(
-                encrypted_creds["api_key"]
-            )
+        # Stored trimmed; a key that is only whitespace is stored as no key,
+        # which is how _has_stored_api_key and masked_api_key already read it.
+        api_key = encrypted_creds.get("api_key")
+        if isinstance(api_key, str):
+            api_key = api_key.strip()
+        if api_key:
+            encrypted_creds["api_key"] = self.encryption.encrypt(api_key)
+        else:
+            encrypted_creds.pop("api_key", None)
 
         # Add more credential fields here if needed in the future
         # e.g., client_secret, access_token, etc.
@@ -594,6 +598,12 @@ class ModelProviderService:
         next_credentials = (
             credentials if credentials is not None else provider.credentials
         )
+        if credentials is not None or config is not None:
+            # Checked as the provider ends up, not as the edit arrived. Kept
+            # credentials are ciphertext here, which only has to be non-blank.
+            self._validate_required_fields(
+                provider.provider_type, next_credentials, merged_config
+            )
         if embedding_provider_configuration(
             provider.provider_type, provider.credentials, provider.config
         ) != embedding_provider_configuration(
@@ -783,7 +793,7 @@ class ModelProviderService:
 
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
+        api_key = str(decrypted_creds.get("api_key") or "").strip()
         provider_type = provider.provider_type.lower()
 
         # Build the litellm model identifier
@@ -884,7 +894,7 @@ class ModelProviderService:
         """
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
+        api_key = str(decrypted_creds.get("api_key") or "").strip()
         provider_type = provider.provider_type.lower()
         endpoint = configured_endpoint(provider.config)
 
@@ -934,9 +944,11 @@ class ModelProviderService:
         """
         provider = await self.repository.get_by_id(provider_id)
         provider_type = provider.provider_type.lower()
+        # Stripped: a whitespace-only or newline-terminated stored key would
+        # otherwise reach the wire as "Bearer \n", which h11 refuses to send.
         api_key = str(
             self._decrypt_credentials(provider.credentials).get("api_key") or ""
-        )
+        ).strip()
         request = connection_check_request(
             provider_type, api_key, configured_endpoint(provider.config)
         )

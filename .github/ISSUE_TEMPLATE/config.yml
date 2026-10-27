@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/eneo-ai/eneo/security/advisories/new
+    about: Report vulnerabilities privately. Never open a public issue for a security problem.
+  - name: Ask a question or discuss an idea
+    url: https://github.com/eneo-ai/eneo/discussions
+    about: For questions and early ideas that are not yet a bug report or feature request.
+  - name: How to contribute
+    url: https://docs.eneo.ai/contributing
+    about: Which template to choose, how to contribute a change and what happens after you open an issue.

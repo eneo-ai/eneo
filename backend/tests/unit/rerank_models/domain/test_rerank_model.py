@@ -30,6 +30,8 @@ def _db_row(**overrides):
         security_classification=None,
         tenant_id=uuid4(),
         provider_id=uuid4(),
+        candidate_factor=5,
+        max_candidates=100,
     )
     for key, value in overrides.items():
         setattr(row, key, value)
@@ -74,6 +76,15 @@ class TestCreateFromDb:
         assert public.can_access is True
         assert public.provider_type == "cohere"
         assert public.security_classification is None
+
+    def test_carries_candidate_factor_and_cap_to_the_public_dto(self):
+        model = RerankModel.create_from_db(
+            _db_row(candidate_factor=3, max_candidates=250), _user()
+        )
+
+        assert (model.candidate_factor, model.max_candidates) == (3, 250)
+        public = RerankModelPublic.from_domain(model)
+        assert (public.candidate_factor, public.max_candidates) == (3, 250)
 
     def test_disabled_model_cannot_be_accessed(self):
         model = RerankModel.create_from_db(_db_row(is_enabled=False), _user())
