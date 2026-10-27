@@ -1246,18 +1246,12 @@ duration, state queries, pause behavior, rollback, and cleanup.
 
 ### Release search data from earlier versions
 
-Upgrading from 2.2 or a 2.3 release candidate: those versions kept the chunks
-and embeddings of every replaced document version. They count toward the
-storage quota and are never searched. Once the new version runs, remove them
-once with the worker image:
-
-```bash
-docker compose exec worker python -m eneo.info_blobs.replaced_versions run
-```
-
-Eneo stays available while it runs, and it can be stopped and run again. See
-[Free Space Held by Earlier
-Versions](/guides/document-processing#free-space-held-by-earlier-versions).
+Upgrading from 2.2 or from 2.3.0-rc.3 or earlier: those releases kept the
+chunks and embeddings of every replaced document version. They count toward
+the storage quota and are never searched. Once the new version runs, remove
+them once with
+[Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+Eneo stays available while it runs, and it can be stopped and run again.
 
 If you maintain your own Compose file, also give the `db` service
 `shm_size: 1gb` and `stop_grace_period: 2m`, as the reference file does; see
