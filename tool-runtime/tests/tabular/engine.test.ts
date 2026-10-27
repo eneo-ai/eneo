@@ -95,6 +95,21 @@ describe("extracted DuckDB engine", () => {
     const data = await runQuery({ csvPath: malformed, sql: "SELECT * FROM t" });
     expect(data.rejectedRows).toBeGreaterThan(0);
   });
+  test("profiles every column of a sheet at the column limit", async () => {
+    const wide = join(directory, "wide.csv");
+    const header = Array.from({ length: 200 }, (_, i) => `c${i}`).join(",");
+    const rows = Array.from({ length: 30 }, (_, r) =>
+      Array.from({ length: 200 }, (_, i) => `v${(r * i) % 7}`).join(","),
+    );
+    await writeFile(wide, [header, ...rows].join("\n") + "\n");
+    const described = await describeCsv(wide);
+    expect(described.columns).toHaveLength(200);
+    expect(described.columns[0]!.profile).toMatchObject({
+      distinctCount: 1,
+      values: ["v0"],
+    });
+    expect(described.columns[199]!.profile!.distinctCount).toBe(7);
+  });
   test("types every column from the whole file, so a late non-numeric value loses no row", async () => {
     const late = join(directory, "late.csv");
     const lines = ["id,amount,code"];

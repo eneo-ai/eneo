@@ -23,7 +23,8 @@ download policy or an engine's limits.
   `assert_table` and `query_json` over signed Eneo attachment URLs. It fetches
   only from the origin Eneo sends in `X-Eneo-File-Origin`. CSV, TSV and XLSX
   files are sheets; a JSON or JSON Lines file
-  (`src/tools/tabular/engine/json-to-csv.ts`) is read by DuckDB's JSON reader,
+  (`src/tools/tabular/engine/json-to-csv.ts`) is read as text by DuckDB's JSON
+  reader (no type inference; memory bounded by 32 times the file size),
   every array of records within three levels of the root becomes a sheet named
   by its path, nested objects become dotted columns and arrays stay JSON text.
   `inspect_table` returns the file's inferred structure, and `query_json`
