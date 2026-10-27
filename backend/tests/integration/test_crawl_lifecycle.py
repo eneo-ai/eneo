@@ -1026,10 +1026,15 @@ async def test_lease_lock_prevents_sweeper_overlap_and_stale_overwrite(
             task=first_task,
         )
         await repo.mark_dispatched(first_attempt_id)
+
+    # A lease runs from the start of the transaction that claims it (``now()``),
+    # so the claim gets one of its own, right before the publication locks it:
+    # the setup above would otherwise spend the 500 ms on a slow runner.
+    async with db_session() as session:
         assert (
-            await repo.claim_attempt(
+            await CrawlRunRepository(session).claim_attempt(
                 first_attempt_id,
-                dispatch_id=first_job.id,
+                dispatch_id=first_job_id,
                 lease_owner="first-worker",
                 lease_duration=timedelta(milliseconds=500),
             )
