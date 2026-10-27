@@ -39,9 +39,6 @@
       },
     },
   },
-  "overrides": {
-    "body-parser": "2.4.0",
-  },
   "packages": {
     "@astryxdesign/core": ["@astryxdesign/core@0.6.4", "", { "dependencies": { "intl-messageformat": "^11.2.9" }, "peerDependencies": { "@stylexjs/stylex": "^0.19.0", "react": ">=19.0.0", "react-dom": ">=19.0.0" } }, "sha512-g2XVPdFyCo0IZxHlIhNyvy9EjpfORWX/lmfWNh/NoaWmaiLd4zjg00/SUve+NA6/pdwaewzLuypwS4hUYdn4ZQ=="],
 

@@ -141,10 +141,6 @@ them first, and the image builds them in its own stage, so React, Astryx and
 Vite are development dependencies only. A page larger than the 2 MB a host
 reads fails the build.
 
-The `package.json` resolution keeps the indirect body-parser dependency
-(through Express in the MCP SDK) on a security-fixed release. Remove it once
-the SDK requires a fixed version.
-
 The runtime reads the built pages when it starts. Eneo stores its own copy of
 each view and replaces it by itself when the runtime's catalog changes; the
 backend caches that catalog for up to five minutes. To see a changed view in
