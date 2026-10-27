@@ -219,6 +219,10 @@ _MAX_TOOL_SCHEMA_EXPANSION_CHARS = 4 * 1024 * 1024
 # would raise out of a counter rather than answer it.
 _MAX_TOOL_SCHEMA_REFERENCE_DEPTH = 64
 _LOCAL_POINTER_PREFIX = "#/"
+# Where a schema keeps its definitions: `$defs` from draft 2019-09 on, and
+# `definitions` in draft-07 and earlier, which the bundled tool runtime's
+# schemas (written by zod-to-json-schema) still use. A validator reads both.
+_DEFINITION_CONTAINERS = ("$defs", "definitions")
 
 # What an unbounded schema reserves. This is a refusal, not a measurement: no
 # context window admits it, so every budget that subtracts it declines the
@@ -260,29 +264,36 @@ class _ExpansionBudget:
         self.incomplete = True
 
 
-def _definition_name(pointer: str) -> str | None:
-    """Read a `#/$defs/<name>` pointer the way a schema validator reads it.
+def _definition_pointer(pointer: str) -> tuple[str, str] | None:
+    """Read a `#/$defs/<name>` or `#/definitions/<name>` pointer the way a
+    schema validator reads it.
 
     The pointer is a URI fragment holding a JSON Pointer, so percent-encoding
     is undone first, the result is split into tokens, and only then are the
-    JSON Pointer escapes decoded — per token, because a decoded `~1` is part of
+    JSON Pointer escapes decoded, per token, because a decoded `~1` is part of
     a name and never a separator. Skipping the first step left
     `#/$defs/space%20name` unresolved; skipping the split read `#/$defs/a/b` as
     a definition literally named `a/b`, which is a different schema.
 
-    Returns None for every pointer outside this one supported shape, including
-    a deeper path into a definition, a whole-document `#`, an anchor, and an
-    external reference. The caller refuses those rather than pricing them.
+    Returns the container and the name, or None for every pointer outside
+    these two shapes, including a deeper path into a definition, a
+    whole-document `#`, an anchor, and an external reference. The caller
+    refuses those rather than pricing them.
     """
     if not pointer.startswith(_LOCAL_POINTER_PREFIX):
         return None
     tokens = unquote(pointer[len(_LOCAL_POINTER_PREFIX) :]).split("/")
-    if len(tokens) != 2 or tokens[0] != "$defs":
+    if len(tokens) != 2 or tokens[0] not in _DEFINITION_CONTAINERS:
         return None
-    return tokens[1].replace("~1", "/").replace("~0", "~")
+    return tokens[0], tokens[1].replace("~1", "/").replace("~0", "~")
 
 
-def _resolve_definition(name: str, definitions: object) -> object | None:
+def _resolve_definition(container: str, name: str, document: object) -> object | None:
+    """The definition a pointer names, read from the document the pointer is
+    written against (a tool's parameter object, a response format's schema)."""
+    if not isinstance(document, dict):
+        return None
+    definitions = cast("dict[str, Any]", document).get(container)
     if not isinstance(definitions, dict):
         return None
     return cast("dict[str, Any]", definitions).get(name)
@@ -291,12 +302,13 @@ def _resolve_definition(name: str, definitions: object) -> object | None:
 def _expand_schema_references(
     node: object,
     *,
-    definitions: object,
+    document: object,
     active: frozenset[str],
     budget: _ExpansionBudget,
     depth: int,
 ) -> object:
-    """Write every `$defs` reference out where it is used, keeping `$defs` too.
+    """Write every definition reference out where it is used, keeping the
+    definitions too.
 
     A reference already being expanded on this path is left exactly as written,
     so a recursive schema terminates. `$defs` is kept rather than dropped for
@@ -320,7 +332,7 @@ def _expand_schema_references(
         return [
             _expand_schema_references(
                 item,
-                definitions=definitions,
+                document=document,
                 active=active,
                 budget=budget,
                 depth=depth,
@@ -335,7 +347,7 @@ def _expand_schema_references(
         if key == "$ref" and isinstance(value, str):
             expanded[key] = _expanded_reference(
                 value,
-                definitions=definitions,
+                document=document,
                 active=active,
                 budget=budget,
                 depth=depth,
@@ -343,7 +355,7 @@ def _expand_schema_references(
             continue
         expanded[key] = _expand_schema_references(
             value,
-            definitions=definitions,
+            document=document,
             active=active,
             budget=budget,
             depth=depth,
@@ -354,7 +366,7 @@ def _expand_schema_references(
 def _expanded_reference(
     pointer: str,
     *,
-    definitions: object,
+    document: object,
     active: frozenset[str],
     budget: _ExpansionBudget,
     depth: int,
@@ -363,11 +375,11 @@ def _expanded_reference(
         # A cycle: the definition is already being counted further up, and
         # `$defs` keeps its own copy, so the pointer alone is the honest cost.
         return pointer
-    name = _definition_name(pointer)
-    if name is None or depth >= _MAX_TOOL_SCHEMA_REFERENCE_DEPTH:
+    located = _definition_pointer(pointer)
+    if located is None or depth >= _MAX_TOOL_SCHEMA_REFERENCE_DEPTH:
         budget.cannot_account_for_a_reference()
         return pointer
-    target = _resolve_definition(name, definitions)
+    target = _resolve_definition(*located, document)
     if target is None or not budget.spend(len(_serialized(target))):
         if target is None:
             budget.cannot_account_for_a_reference()
@@ -376,7 +388,7 @@ def _expanded_reference(
         pointer,
         _expand_schema_references(
             target,
-            definitions=definitions,
+            document=document,
             active=active | {pointer},
             budget=budget,
             depth=depth + 1,
@@ -403,11 +415,7 @@ def _tool_reserve_payload(tools: list[dict[str, Any]]) -> _ToolReservePayload:
             expanded.append(
                 _expand_schema_references(
                     tool,
-                    definitions=(
-                        cast("dict[str, Any]", parameters).get("$defs")
-                        if isinstance(parameters, dict)
-                        else None
-                    ),
+                    document=parameters,
                     active=frozenset(),
                     budget=budget,
                     depth=0,
@@ -615,11 +623,7 @@ def _response_format_reserve_payload(
     try:
         expanded = _expand_schema_references(
             response_format,
-            definitions=(
-                cast("dict[str, Any]", schema).get("$defs")
-                if isinstance(schema, dict)
-                else None
-            ),
+            document=schema,
             active=frozenset(),
             budget=budget,
             depth=0,

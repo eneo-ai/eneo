@@ -342,6 +342,41 @@ def test_only_a_direct_definition_reference_is_priced():
         assert measured.tokens > 1_000_000_000
 
 
+def test_a_draft_07_definitions_reference_is_priced_like_a_defs_one():
+    # The bundled tool runtime's schemas are draft-07 and keep their
+    # definitions under `definitions`; a validator resolves those exactly as
+    # it resolves `$defs`, so the counter must price them the same, at every
+    # use site, instead of refusing a tool a provider accepts.
+    definition = {"type": "string", "enum": ["ALPHA-KEY", "BETA-KEY"] * 400}
+
+    def tools_with(container: str) -> list[dict]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_javascript",
+                    "parameters": {
+                        "type": "object",
+                        container: {"__schema0": definition},
+                        "properties": {
+                            name: {"allOf": [{"$ref": f"#/{container}/__schema0"}]}
+                            for name in ("input", "fallback", "example")
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
+    measured = measure_tool_tokens(tools_with("definitions"), "openai/gpt-4o")
+    modern = measure_tool_tokens(tools_with("$defs"), "openai/gpt-4o")
+
+    assert measured.source is TokenCountSource.LITELLM
+    # The same expansion; only the pointers' own spelling differs.
+    assert abs(measured.tokens - modern.tokens) < 50
+    assert measured.tokens >= 3 * count_tokens(json.dumps(definition), "openai/gpt-4o")
+
+
 def test_a_refused_schema_stops_the_walk_instead_of_serializing_the_rest():
     # Once the answer is a refusal there is nothing left to measure, and a
     # catalogue may be tens of megabytes. The guard is bounded work, so count
