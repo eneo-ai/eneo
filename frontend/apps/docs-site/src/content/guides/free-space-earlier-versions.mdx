@@ -27,12 +27,16 @@ once per installation.
 
 - **Use a worker image with the current command.** 2.3.0-rc.4 has an earlier
   version whose final count can time out on a large database and hide the
-  result. The current one lists its exit codes in `--help`:
+  result. In the current one, `--help` has a line starting with `Exit codes:`:
 
   ```bash
-  docker compose run --rm --no-deps worker \
+  docker compose --env-file .env --env-file release.env \
+    run --rm --no-deps worker \
     python -m eneo.info_blobs.replaced_versions --help
   ```
+
+  If `Exit codes:` is missing, the command started an older worker image:
+  check that you pass the same environment files as when you deployed.
 
 - **Watch WAL if you keep it.** Removing rows writes WAL. If you keep WAL for a
   replica or an archive, check that it has room.
@@ -46,9 +50,12 @@ once per installation.
 
 Run the commands on the Docker host, in the directory with your
 `docker-compose.yml`. Each starts a one-off container from the worker's image
-and configuration. With Podman, write `podman-compose` for `docker compose` and
-`podman` for `docker`. Already in a shell in the worker container, for example
-Portainer's console? Use [the commands for inside the
+and configuration, so pass the same environment files as when you deploy
+(`--env-file .env --env-file release.env`, see
+[One version for the application](/guides/deployment#one-version-for-the-application)).
+Without `release.env`, `docker compose run` can start the previous release's
+image. Already in a shell in the worker container, for example Portainer's
+console? Use [the commands for inside the
 container](#inside-the-worker-container) instead.
 
 <Steps>
@@ -56,7 +63,8 @@ container](#inside-the-worker-container) instead.
 ### See what is there
 
 ```bash
-docker compose run --rm --no-deps -T worker \
+docker compose --env-file .env --env-file release.env \
+  run --rm --no-deps -T worker \
   python -m eneo.info_blobs.replaced_versions status > replaced-status.json
 cat replaced-status.json
 ```
@@ -80,8 +88,8 @@ again.
 ### Start the cleanup
 
 ```bash
-nohup docker compose run --rm --no-deps -T \
-  --name eneo-replaced-versions worker \
+nohup docker compose --env-file .env --env-file release.env \
+  run --rm --no-deps -T --name eneo-replaced-versions worker \
   python -m eneo.info_blobs.replaced_versions run \
   > replaced-run.json 2> replaced-run.log &
 ```
@@ -90,8 +98,7 @@ It runs in the background and keeps running when you log out.
 
 <Callout type="warning">
   Start it exactly like this. Started directly with `docker compose exec`, it
-  keeps running unseen when the client stops. Started with
-  `podman-compose run -d`, Podman restarts it every time it finishes.
+  keeps running unseen when the client stops.
 </Callout>
 
 ### Follow or stop it
@@ -136,7 +143,8 @@ stop.
 Let PostgreSQL reuse the freed space:
 
 ```bash
-docker compose exec -T db psql -U postgres -d eneo \
+docker compose --env-file .env --env-file release.env \
+  exec -T db psql -U postgres -d eneo \
   -c "VACUUM (ANALYZE, PARALLEL 0) info_blob_chunks;" \
   -c "VACUUM (ANALYZE, PARALLEL 0) info_blobs;"
 ```
@@ -175,12 +183,15 @@ It keeps running when you close the shell. Restarting or recreating the worker
 container stops it; run it again afterwards. Vacuum from the host as in the
 last step.
 
-### On Kubernetes or another platform
+### On Podman, Kubernetes or another platform
 
-Run the same command once in a container with the backend image and the
-worker's environment, for example as a Job with
-`restartPolicy: Never` and `backoffLimit: 0`. `kubectl logs -f` shows progress
-and then the result; `kubectl delete job` stops it like `docker stop`.
+Run the same command once in a one-off container with this release's backend
+image and the worker's environment, and stop it with SIGTERM, for example
+`podman stop`. Do not start it with `podman-compose run -d`: that container
+keeps the worker's restart policy, so Podman starts the cleanup again every
+time it finishes. On Kubernetes, use a Job with `restartPolicy: Never` and
+`backoffLimit: 0`; `kubectl logs -f` shows progress and then the result, and
+`kubectl delete job` stops it like `docker stop`.
 
 ## Quota and disk afterwards
 
