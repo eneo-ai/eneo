@@ -149,10 +149,14 @@ the nested-router and mounted-API tests when upgrading FastAPI.
 
 ## Required Checks in Branch Protection
 
-The `develop` ruleset should require these checks:
+The `develop` ruleset requires these checks:
 
 - `CI / CI`
 - `Dependency Review / Dependency Review`
+
+A separate `PR label classification` ruleset requires `PR label policy / PR labels` on `develop`, `main` and `release/**`.
+
+Who can approve, merge and release, and how branches and tags are protected, is described in [Governance and Roles](/contributing/governance).
 
 Remove older or paused required status checks if they appear as `Expected` and never report:
 

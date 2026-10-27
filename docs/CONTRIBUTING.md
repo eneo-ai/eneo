@@ -491,7 +491,7 @@ test(users): add integration tests for user creation
 3. **Include Tests**: All new functionality requires tests
 4. **Update Documentation**: Keep docs synchronized with code changes
 5. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
-6. **Request Review**: At least one approval required from maintainers
+6. **Request Review**: At least one approval from a member of `@eneo-ai/core-maintainers` is required. GitHub requests the review automatically through `.github/CODEOWNERS`, and only Core Maintainers can merge. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 **PR Template:**
 ```markdown
@@ -847,7 +847,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 - Feature freeze 1 week before minor releases
 - Critical bug fixes accepted during freeze
-- All changes require approval from maintainers
+- All changes require approval from Core Maintainers, who also cut release branches and publish releases
 - Changelog updated with each release
 
 ---
