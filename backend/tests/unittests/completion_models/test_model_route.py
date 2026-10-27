@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from litellm import get_llm_provider
 
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
@@ -51,6 +52,21 @@ def test_tenant_adapter_uses_the_completion_models_canonical_route():
     )
 
     assert adapter.get_model_route() == model.get_model_route()
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "model_name"),
+    [("openrouter", "openrouter/auto"), ("openai", "openai/gpt-oss-120b")],
+)
+def test_model_route_keeps_a_model_name_that_starts_with_the_provider(
+    provider_type: str, model_name: str
+):
+    # LiteLLM strips only the first "<provider>/", so the provider receives the
+    # name intact. Stripping a repeated prefix here would break these (#1188).
+    route = resolve_model_route(provider_type=provider_type, model_name=model_name)
+
+    assert route == f"{provider_type}/{model_name}"
+    assert get_llm_provider(route)[:2] == (model_name, provider_type)
 
 
 def test_model_route_accepts_the_maximum_length():
