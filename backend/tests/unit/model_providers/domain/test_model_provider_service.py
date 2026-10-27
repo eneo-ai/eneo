@@ -112,6 +112,58 @@ class TestDestinationNormalization:
         assert effective_endpoint("hosted_vllm", {}) is None
 
 
+class TestStoredKeyIsNormalised:
+    """Surrounding whitespace, including a pasted trailing newline, never
+    reaches the row: it would come back as an illegal header value."""
+
+    async def test_create_stores_the_trimmed_key(self):
+        service, repository = _service(_provider())
+        repository.create.side_effect = lambda created: created
+
+        created = await service.create(
+            tenant_id=uuid4(),
+            name="new",
+            provider_type="openai",
+            credentials={"api_key": " sk-abc\n"},
+            config={},
+        )
+
+        assert created.credentials["api_key"] == "enc(sk-abc)"
+
+    async def test_update_stores_the_trimmed_key(self):
+        provider = _provider()
+        service, _ = _service(provider)
+
+        updated = await service.update(
+            provider.id, credentials={"api_key": " sk-abc\n"}
+        )
+
+        assert updated.credentials["api_key"] == "enc(sk-abc)"
+
+    async def test_create_still_rejects_a_whitespace_only_required_key(self):
+        service, repository = _service(_provider())
+
+        with pytest.raises(BadRequestException, match="required"):
+            await service.create(
+                tenant_id=uuid4(),
+                name="new",
+                provider_type="openai",
+                credentials={"api_key": " \n"},
+                config={},
+            )
+
+        repository.create.assert_not_awaited()
+
+    async def test_a_whitespace_only_optional_key_is_stored_as_no_key(self):
+        provider = _provider("hosted_vllm", config={"endpoint": "http://vllm:8000"})
+        service, _ = _service(provider)
+
+        updated = await service.update(provider.id, credentials={"api_key": " \n"})
+
+        assert "api_key" not in updated.credentials
+        assert service.masked_api_key(updated) is None
+
+
 class TestUpdateWithNewDestination:
     async def test_endpoint_change_without_credentials_is_rejected_before_writing(self):
         provider = _provider(config={"endpoint": "https://api.example.com"})

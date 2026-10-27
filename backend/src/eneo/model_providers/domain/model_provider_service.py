@@ -384,11 +384,15 @@ class ModelProviderService:
         """Encrypt sensitive credential fields."""
         encrypted_creds = credentials.copy()
 
-        # Encrypt API key if present
-        if "api_key" in encrypted_creds and encrypted_creds["api_key"]:
-            encrypted_creds["api_key"] = self.encryption.encrypt(
-                encrypted_creds["api_key"]
-            )
+        # Stored trimmed; a key that is only whitespace is stored as no key,
+        # which is how _has_stored_api_key and masked_api_key already read it.
+        api_key = encrypted_creds.get("api_key")
+        if isinstance(api_key, str):
+            api_key = api_key.strip()
+        if api_key:
+            encrypted_creds["api_key"] = self.encryption.encrypt(api_key)
+        else:
+            encrypted_creds.pop("api_key", None)
 
         # Add more credential fields here if needed in the future
         # e.g., client_secret, access_token, etc.
