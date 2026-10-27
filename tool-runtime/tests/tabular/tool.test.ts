@@ -495,163 +495,31 @@ describe("inspect and query", () => {
 });
 
 describe("JSON files", () => {
-  test("a document with thousands of distinct keys is read within the ordinary memory limit", async () => {
-    const { tool } = setup("json-wide");
-    const inspected = (await tool("inspect_table").execute(
-      { files: [{ url: url(FILE_G), filename: "draft.json" }] },
-      alice,
-    )) as {
-      files: Array<{
-        json: { root_type: string; values: number };
-        sheets: Array<{ name: string; json_path: string }>;
-      }>;
+  test("a JSON document is read by path, its structure first", async () => {
+    const { tool } = setup("json-path");
+    const read = (path?: string) =>
+      tool("query_json").execute(
+        {
+          file: { url: url(FILE_D), filename: "export.json" },
+          ...(path ? { path } : {}),
+        },
+        alice,
+      );
+    const described = (await read()) as {
+      root_type: string;
+      values: number;
+      structure: string;
+      structure_truncated: boolean;
     };
-    expect(inspected.files[0]!.json).toMatchObject({
-      root_type: "OBJECT",
-      values: 1,
-    });
-    // The two arrays under the root object: the form fields and the steps.
-    expect(inspected.files[0]!.sheets.map((s) => s.name)).toEqual([
-      "k1.k4",
-      "k1.k10",
-    ]);
-  });
-
-  test("arrays of records become sheets named by their path, with the file's structure", async () => {
-    const { tool } = setup("json-inspect");
-    const result = (await tool("inspect_table").execute(
-      { files: [{ url: url(FILE_D), filename: "export.json" }] },
-      alice,
-    )) as {
-      files: Array<{
-        json: {
-          root_type: string;
-          values: number;
-          structure: string;
-          structure_truncated: boolean;
-        };
-        sheets: Array<{
-          name: string;
-          json_path: string;
-          parsed_rows: number;
-          columns: Array<{ name: string; type: string }>;
-        }>;
-      }>;
-    };
-    const file = result.files[0]!;
-    expect(file.json).toMatchObject({
+    expect(described).toMatchObject({
       root_type: "OBJECT",
       values: 1,
       structure_truncated: false,
     });
-    expect(JSON.parse(file.json.structure)).toMatchObject({
+    expect(JSON.parse(described.structure)).toMatchObject({
       meta: { count: expect.any(String), source: "VARCHAR" },
       items: [{ id: expect.any(String), addr: { city: "VARCHAR" } }],
     });
-    expect(
-      file.sheets.map((s) => [s.name, s.json_path, s.parsed_rows]),
-    ).toEqual([
-      ["items", '$."items"', 3],
-      ["log.entries", '$."log"."entries"', 1],
-    ]);
-    // Nested objects are dotted columns; arrays stay JSON text; types come from the values.
-    expect(file.sheets[0]!.columns.map((c) => [c.name, c.type])).toEqual([
-      ["id", "BIGINT"],
-      ["name", "VARCHAR"],
-      ["amount", "DOUBLE"],
-      ["tags", "VARCHAR"],
-      ["addr.city", "VARCHAR"],
-    ]);
-  });
-
-  test("records are queried like any sheet, and JSON columns open with json functions", async () => {
-    const { tool } = setup("json-query");
-    const result = await tool("query_table").execute(
-      {
-        file: { url: url(FILE_D), filename: "export.json", sheet: "items" },
-        sql: 'SELECT "addr.city" AS city, SUM(amount) AS total, SUM(json_array_length(tags)) AS tags FROM t GROUP BY city ORDER BY city',
-      },
-      alice,
-    );
-    expect(result).toMatchObject({
-      sheet: "items",
-      columns: ["city", "total", "tags"],
-      rows: [
-        ["Sundsvall", 40.5, "2"],
-        ["Umeå", 20, "0"],
-      ],
-      parsed_rows: 3,
-    });
-    // A file with several sheets needs the sheet named, as a workbook does.
-    await expect(
-      tool("query_table").execute(
-        {
-          file: { url: url(FILE_D), filename: "export.json" },
-          sql: "SELECT 1",
-        },
-        alice,
-      ),
-    ).rejects.toMatchObject({ code: "SHEET_REQUIRED" });
-  });
-
-  test("JSON Lines are one sheet of records whose root is the array of lines", async () => {
-    const { tool } = setup("jsonl");
-    const inspected = (await tool("inspect_table").execute(
-      { files: [{ url: url(FILE_E), filename: "events.jsonl" }] },
-      alice,
-    )) as {
-      files: Array<{
-        json: { root_type: string; values: number };
-        sheets: Array<{
-          name: string;
-          json_path: string;
-          parsed_rows: number;
-          columns: Array<{ name: string }>;
-        }>;
-      }>;
-    };
-    expect(inspected.files[0]!.json).toMatchObject({
-      root_type: "RECORDS",
-      values: 3,
-    });
-    expect(inspected.files[0]!.sheets).toMatchObject([
-      { name: "records", json_path: "$", parsed_rows: 3 },
-    ]);
-    expect(inspected.files[0]!.sheets[0]!.columns.map((c) => c.name)).toEqual([
-      "id",
-      "v.k",
-    ]);
-    const counted = await tool("query_table").execute(
-      {
-        file: { url: url(FILE_E), filename: "events.jsonl" },
-        sql: 'SELECT "v.k", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY 1',
-      },
-      alice,
-    );
-    expect(counted).toMatchObject({
-      rows: [
-        ["a", "2"],
-        ["b", "1"],
-      ],
-    });
-    expect(
-      await tool("query_json").execute(
-        {
-          file: { url: url(FILE_E), filename: "events.jsonl" },
-          path: "$[1].v.k",
-        },
-        alice,
-      ),
-    ).toMatchObject({ found: true, type: "VARCHAR", value: '"b"' });
-  });
-
-  test("query_json reads a value, a subtree, every match of a wildcard, or nothing", async () => {
-    const { tool } = setup("json-path");
-    const read = (path: string) =>
-      tool("query_json").execute(
-        { file: { url: url(FILE_D), filename: "export.json" }, path },
-        alice,
-      );
     expect(await read("$.meta.count")).toMatchObject({
       found: true,
       type: "UBIGINT",
@@ -688,47 +556,128 @@ describe("JSON files", () => {
     expect(long.total_chars).toBe(17_002);
     expect(long.value).toHaveLength(16_000);
     expect(long.hint).toContain("Narrow the path");
-    // A path must start at the root, and only JSON files are read this way.
+    // A path must start at the root, and only JSON documents are read this way.
     await expect(read("items[0]")).rejects.toThrow();
+    for (const file of [
+      { url: url(FILE_A), filename: "sales.csv" },
+      { url: url(FILE_E), filename: "events.jsonl" },
+    ])
+      await expect(
+        tool("query_json").execute({ file, path: "$" }, alice),
+      ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+  });
+
+  test("a JSON document is not a table", async () => {
+    const { tool } = setup("json-not-a-table");
     await expect(
-      tool("query_json").execute(
-        { file: { url: url(FILE_A), filename: "sales.csv" }, path: "$" },
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_D), filename: "export.json" }] },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+    await expect(
+      tool("query_table").execute(
+        {
+          file: { url: url(FILE_D), filename: "export.json" },
+          sql: "SELECT 1",
+        },
         alice,
       ),
     ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
   });
 
+  test("a document with thousands of distinct keys is read within the ordinary memory limit", async () => {
+    const { tool } = setup("json-wide");
+    const described = (await tool("query_json").execute(
+      { file: { url: url(FILE_G), filename: "draft.json" } },
+      alice,
+    )) as { root_type: string; structure_truncated: boolean; hint?: string };
+    expect(described).toMatchObject({
+      root_type: "OBJECT",
+      structure_truncated: true,
+    });
+    expect(described.hint).toContain("part of the tree");
+    expect(
+      await tool("query_json").execute(
+        { file: { url: url(FILE_G), filename: "draft.json" }, path: "$.k0" },
+        alice,
+      ),
+    ).toMatchObject({ found: true, value: "1" });
+  });
+
+  test("JSON Lines are one sheet of records, queried like any sheet", async () => {
+    const { tool } = setup("jsonl");
+    const inspected = (await tool("inspect_table").execute(
+      { files: [{ url: url(FILE_E), filename: "events.jsonl" }] },
+      alice,
+    )) as {
+      files: Array<{
+        json?: unknown;
+        sheets: Array<{
+          name: string;
+          parsed_rows: number;
+          columns: Array<{ name: string }>;
+        }>;
+      }>;
+    };
+    expect(inspected.files[0]).not.toHaveProperty("json");
+    expect(inspected.files[0]!.sheets).toMatchObject([
+      { name: "records", parsed_rows: 3 },
+    ]);
+    // Nested objects are dotted columns.
+    expect(inspected.files[0]!.sheets[0]!.columns.map((c) => c.name)).toEqual([
+      "id",
+      "v.k",
+    ]);
+    expect(
+      await tool("query_table").execute(
+        {
+          file: { url: url(FILE_E), filename: "events.jsonl" },
+          sql: 'SELECT "v.k", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY 1',
+        },
+        alice,
+      ),
+    ).toMatchObject({
+      rows: [
+        ["a", "2"],
+        ["b", "1"],
+      ],
+    });
+    // A native row selection filters the records before SQL; the one sheet needs no name.
+    expect(
+      await tool("query_table").execute(
+        {
+          file: {
+            url: url(FILE_E),
+            filename: "events.jsonl",
+            source_rows: [2, 4],
+          },
+          sql: "SELECT SUM(id) AS total FROM t",
+        },
+        alice,
+      ),
+    ).toMatchObject({ source_rows: [2, 4], rows: [["4"]], parsed_rows: 2 });
+    await expect(
+      tool("query_table").execute(
+        {
+          file: { url: url(FILE_E), filename: "events.jsonl", sheet: "Nope" },
+          sql: "SELECT 1",
+        },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "UNKNOWN_SHEET" });
+  });
+
   test("a malformed file is refused as such", async () => {
     const { tool } = setup("json-broken");
     await expect(
-      tool("inspect_table").execute(
-        { files: [{ url: url(FILE_F), filename: "broken.json" }] },
+      tool("query_json").execute(
+        { file: { url: url(FILE_F), filename: "broken.json" } },
         alice,
       ),
     ).rejects.toMatchObject({
       code: "INVALID_FILE",
       message: expect.stringContaining("not valid JSON"),
-    });
-  });
-
-  test("a native row selection filters a JSON sheet before SQL", async () => {
-    const { tool } = setup("json-selection");
-    const result = await tool("query_table").execute(
-      {
-        file: {
-          url: url(FILE_D),
-          filename: "export.json",
-          sheet: "items",
-          source_rows: [2, 4],
-        },
-        sql: "SELECT SUM(amount) AS total FROM t",
-      },
-      alice,
-    );
-    expect(result).toMatchObject({
-      source_rows: [2, 4],
-      rows: [[40.5]],
-      parsed_rows: 2,
     });
   });
 });

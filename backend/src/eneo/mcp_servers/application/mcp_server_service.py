@@ -204,8 +204,9 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "file-analysis": (
         "Answers questions about attached files in an isolated sandbox: CSV, "
-        "Excel and JSON files are inspected and queried with DuckDB. Files are "
-        "fetched through short-lived signed links."
+        "Excel and JSON Lines files are inspected and queried with DuckDB, and "
+        "JSON documents are read by path. Files are fetched through short-lived "
+        "signed links."
     ),
     "file-creation": (
         "Creates Word (DOCX), PDF and Excel (XLSX) files in an isolated "

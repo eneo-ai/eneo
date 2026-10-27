@@ -6,17 +6,13 @@ import { join } from "node:path";
 import { ToolError } from "../../errors";
 import { describeCsv, QueryRejectedError, runQuery } from "./engine/duckdb";
 import { convertXlsxToCsvSheets } from "./engine/xlsx-to-csv";
-import {
-  convertJsonToCsvSheets,
-  extractJsonPath,
-  type JsonSummary,
-} from "./engine/json-to-csv";
+import { convertJsonLinesToCsv, readJson } from "./engine/json";
 import { queryLimits } from "./config";
 import type {
   IngestJob,
   IngestResult,
   JsonExtractJob,
-  JsonExtractOutcome,
+  JsonReadOutcome,
   QueryJob,
   QueryJobResult,
   SheetMetadata,
@@ -35,7 +31,7 @@ const CSV_TYPES = [
   "text/plain",
   "application/octet-stream",
 ];
-const JSON_TYPES = [
+const JSON_LINES_TYPES = [
   "application/json",
   "text/json",
   "application/x-ndjson",
@@ -95,47 +91,29 @@ function assertUtf8Text(bytes: Buffer, kind: string): void {
   }
 }
 
-type IngestedSheet = import("./engine/xlsx-to-csv").SheetCsv & {
-  jsonPath?: string;
-};
+type IngestedSheet = import("./engine/xlsx-to-csv").SheetCsv;
 
-/** The records of a JSON file as sheets; a selection narrows them to one sheet's rows. */
-async function jsonSheets(
-  job: IngestJob,
-): Promise<{ sheets: IngestedSheet[]; json: JsonSummary }> {
+/** The one sheet of a JSON Lines file, its records; a selection narrows it to some rows. */
+async function jsonLinesSheet(job: IngestJob): Promise<IngestedSheet> {
   const { config } = job;
-  const converted = await convertJsonToCsvSheets(job.inputPath, {
-    maxSheets: config.max_sheets,
+  const csv = await convertJsonLinesToCsv(job.inputPath, {
     maxExpandedBytes: config.max_expanded_bytes,
     memoryMb: config.memory_mb,
   });
-  let sheets: IngestedSheet[] = converted.sheets.map((sheet) => ({
-    name: sheet.name,
-    csv: sheet.csv,
-    jsonPath: sheet.json_path,
-  }));
-  if (job.selection) {
-    const { sheet: requested, source_rows } = job.selection;
-    if (!requested && sheets.length > 1)
-      throw new ToolError("SHEET_REQUIRED", "The selection must name a sheet.");
-    const sheet = requested
-      ? sheets.find((s) => s.name === requested)
-      : sheets[0];
-    if (!sheet)
-      throw new ToolError(
-        "UNKNOWN_SHEET",
-        "Unknown sheet. Use a name from inspect_table.",
-      );
-    sheets = [
-      {
-        ...sheet,
-        csv: selectCsvRows(sheet.csv, { source_rows }),
-        sourceRows: source_rows,
-        explicitHeader: true,
-      },
-    ];
-  }
-  return { sheets, json: converted.summary };
+  // The sheet is written with its header line, so it is never sniffed for one.
+  const sheet: IngestedSheet = { name: "records", csv, explicitHeader: true };
+  if (!job.selection) return sheet;
+  const { sheet: requested, source_rows } = job.selection;
+  if (requested && requested !== sheet.name)
+    throw new ToolError(
+      "UNKNOWN_SHEET",
+      "Unknown sheet. Use a name from inspect_table.",
+    );
+  return {
+    ...sheet,
+    csv: selectCsvRows(csv, { source_rows }),
+    sourceRows: source_rows,
+  };
 }
 
 export async function executeIngest(job: IngestJob): Promise<IngestResult> {
@@ -152,13 +130,13 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
         "The file is not a supported XLSX workbook.",
       );
     assertZipWithinBounds(bytes, config.max_expanded_bytes);
-  } else if (job.format === "json") {
-    if (!JSON_TYPES.includes(job.contentType))
+  } else if (job.format === "jsonl") {
+    if (!JSON_LINES_TYPES.includes(job.contentType))
       throw new ToolError(
         "INVALID_FILE",
-        "The file is not a supported JSON file.",
+        "The file is not a supported JSON Lines file.",
       );
-    assertUtf8Text(bytes, "JSON");
+    assertUtf8Text(bytes, "JSON Lines");
   } else {
     if (!CSV_TYPES.includes(job.contentType))
       throw new ToolError(
@@ -168,11 +146,10 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
     assertUtf8Text(bytes, "CSV");
   }
   let sheets: IngestedSheet[];
-  let json: JsonSummary | undefined;
   try {
     if (job.format === "xlsx")
       sheets = await convertXlsxToCsvSheets(bytes, job.selection);
-    else if (job.format === "json") ({ sheets, json } = await jsonSheets(job));
+    else if (job.format === "jsonl") sheets = [await jsonLinesSheet(job)];
     else
       sheets = [
         {
@@ -217,8 +194,7 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
     let description;
     try {
       description = await describeCsv(path, {
-        // Generated sheets (JSON records) always carry their header line.
-        explicitHeader: sheet.explicitHeader || sheet.jsonPath !== undefined,
+        explicitHeader: sheet.explicitHeader,
       });
     } catch {
       throw new ToolError(
@@ -243,10 +219,9 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
       csv,
       ...(sheet.sourceRows
         ? { sourceRows: sheet.sourceRows, explicitHeader: true }
-        : sheet.jsonPath !== undefined
+        : sheet.explicitHeader
           ? { explicitHeader: true }
           : {}),
-      ...(sheet.jsonPath !== undefined ? { jsonPath: sheet.jsonPath } : {}),
       ...(sheet.calculation ? { calculation: sheet.calculation } : {}),
     });
   }
@@ -255,16 +230,16 @@ export async function executeIngest(job: IngestJob): Promise<IngestResult> {
       "INGEST_LIMIT",
       "The workbook's column profile is too large.",
     );
-  return { sheets: metadata, ...(json ? { json } : {}) };
+  return { sheets: metadata };
 }
 
 /** The value at a JSONPath in a JSON file the parent downloaded and wrote for this job. */
 export async function executeJsonExtract(
   job: JsonExtractJob,
-): Promise<JsonExtractOutcome> {
+): Promise<JsonReadOutcome> {
   const bytes = await readFile(job.inputPath);
   assertUtf8Text(bytes, "JSON");
-  return extractJsonPath(job.inputPath, job.path, {
+  return readJson(job.inputPath, job.path, {
     maxChars: job.maxChars,
     memoryMb: job.config.memory_mb,
   });

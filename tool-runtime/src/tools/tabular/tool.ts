@@ -15,6 +15,7 @@ import { SheetCache } from "./cache";
 import {
   fetchReference,
   JSON_EXTENSIONS,
+  JSON_LINES_EXTENSIONS,
   jsonReference,
   requireExtension,
   TABLE_FILE_EXTENSIONS,
@@ -27,7 +28,7 @@ import type {
   IngestJob,
   IngestResult,
   JsonExtractJob,
-  JsonExtractOutcome,
+  JsonReadOutcome,
   QueryJob,
   QueryJobResult,
   QueryOutcome,
@@ -41,7 +42,7 @@ import { showsTable } from "./view/paging";
 export type TabularExecutor = {
   ingest(job: IngestJob): Promise<IngestResult>;
   query(job: QueryJob): Promise<QueryJobResult>;
-  extractJson(job: JsonExtractJob): Promise<JsonExtractOutcome>;
+  extractJson(job: JsonExtractJob): Promise<JsonReadOutcome>;
 };
 
 export type TabularDeps = {
@@ -68,7 +69,9 @@ const CELLS_CLIPPED =
   "Some cells were cut at 4,000 characters. Select a part of the value (substring, json_extract) or fewer columns to read a long cell in full.";
 
 const JSON_TRUNCATED =
-  "The value is longer than what one call returns. Narrow the path to the part you need, or, for an array of records, use query_table on the sheet inspect_table lists for that path.";
+  "The value is longer than what one call returns. Narrow the path to the part you need: one element of the array, one key of the object.";
+const JSON_STRUCTURE_TRUNCATED =
+  "The structure is longer than what one call returns. Read a part of the tree by its path to see the rest.";
 
 const NO_ROWS_MATCHED =
   "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
@@ -81,14 +84,15 @@ const sheetName = z
   .max(200)
   .optional()
   .describe(
-    "Exact sheet name from inspect_table. Required when the workbook, or the JSON file, has several sheets.",
+    "Exact sheet name from inspect_table. Required when the workbook has several sheets.",
   );
 
 /** How a file's bytes are read, from its extension (the schema admits only these). */
 function sourceFormat(filename: string): SourceFormat {
   const extension = filename.split(".").pop()!.toLowerCase();
   if (extension === "xlsx") return "xlsx";
-  if ((JSON_EXTENSIONS as readonly string[]).includes(extension)) return "json";
+  if ((JSON_LINES_EXTENSIONS as readonly string[]).includes(extension))
+    return "jsonl";
   return "csv";
 }
 const extraFiles = z
@@ -152,7 +156,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       tenantId: ctx.tenantId,
       userId: ctx.userId,
       kind:
-        { xlsx: "xlsx-calculation-v1", csv: "csv", json: "json-v1" }[format] +
+        { xlsx: "xlsx-calculation-v1", csv: "csv", jsonl: "jsonl-v1" }[format] +
         (selection ? ":selection-v1:" + JSON.stringify(selection) : ""),
       sha256: createHash("sha256").update(file.bytes).digest("hex"),
     });
@@ -173,8 +177,12 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     });
   }
 
-  /** The value at a JSONPath in a JSON attachment, read in a sandbox child. */
-  async function extract(ref: FileReference, path: string, ctx: CallContext) {
+  /** A JSON attachment's structure, or the value at a JSONPath in it, read in a sandbox child. */
+  async function extract(
+    ref: FileReference,
+    path: string | undefined,
+    ctx: CallContext,
+  ) {
     requireExtension(ref, JSON_EXTENSIONS, "query_json");
     const { bytes } = await fetchReference(ref, ctx, {
       allowedFileOrigins: deps.allowedFileOrigins,
@@ -340,8 +348,9 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     .min(1)
     .max(500)
     .regex(/^\$/, "A JSONPath starts with $")
+    .optional()
     .describe(
-      'JSONPath of the value to read, starting at the root $: $.meta.count, $.items[0].name, $.items[#-1] (last element), $.items[*].id (every match, returned as one array). Quote a key that holds a dot, a space or brackets: $."a.b". Filters such as [?(...)] are not supported: tabulate the array with query_table instead.',
+      'JSONPath of the value to read, starting at the root $: $.meta.count, $.items[0].name, $.items[#-1] (last element), $.items[*].id (every match, returned as one array). Quote a key that holds a dot, a space or brackets: $."a.b". Filters such as [?(...)] are not supported. Omit the path to get the file\'s structure first.',
     );
   const jsonQueryInput = z
     .object({
@@ -385,7 +394,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "inspect_table",
       title: "Inspect table",
       description:
-        "Start here for any question about an attached CSV, TSV, Excel (.xlsx), JSON or JSON Lines (.jsonl, .ndjson) file, including what it contains, and when the user wants to view, browse, filter, sort or analyse it. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. A JSON file's arrays of records are its sheets, one per array, named by their path (json_path); nested objects become dotted columns such as addr.city and arrays stay JSON text. The file's whole structure (types in place of values) is returned as json.structure, so a question about a single value or a part of the tree is answered with query_json and its path. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
+        "Start here for any question about an attached CSV, TSV, Excel (.xlsx) or JSON Lines (.jsonl, .ndjson) file, including what it contains, and when the user wants to view, browse, filter, sort or analyse it. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. A JSON Lines file is one sheet, records, with nested objects as dotted columns such as addr.city and arrays as JSON text. A JSON (.json) file is a document, not a table: read it with query_json. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
       inputSchema: inspectInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
@@ -401,10 +410,8 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           const loaded = await load(ref, ctx);
           files.push({
             filename: ref.filename,
-            ...(loaded.json ? { json: loaded.json } : {}),
             sheets: loaded.sheets.map((s) => ({
               name: s.name,
-              ...(s.jsonPath !== undefined ? { json_path: s.jsonPath } : {}),
               columns: s.columns,
               parsed_rows: s.rowCount,
               ...(s.skipRows ? { header_row: s.skipRows + 1 } : {}),
@@ -434,7 +441,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       title: "Query table",
       ...(deps.resultView ? { view: deps.resultView } : {}),
       description:
-        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV, Excel or JSON dataset. Call inspect_table first for the actual sheet and column names. In a sheet made from JSON records, a column holding an array or a nested object is JSON text: read into it with json_extract_string(col, \'$.key\') or json_array_length(col). Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file, a source file for create_spreadsheet, or a chart over more than about 50 rows; a smaller aggregate goes to create_chart as labels and series without export, since an export is shown to the user as a downloadable file. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
+        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV, Excel or JSON Lines dataset. Call inspect_table first for the actual sheet and column names. In a JSON Lines sheet, a column holding an array or a nested object is JSON text: read into it with json_extract_string(col, \'$.key\') or json_array_length(col). Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file, a source file for create_spreadsheet, or a chart over more than about 50 rows; a smaller aggregate goes to create_chart as labels and series without export, since an export is shown to the user as a downloadable file. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
       inputSchema: queryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
@@ -540,14 +547,21 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     },
     {
       name: "query_json",
-      title: "Read JSON value",
+      title: "Read JSON",
       description:
-        "Read one value, object or array from an attached JSON or JSON Lines file by its path, for questions about a specific field, a setting, a nested part of the tree or an element of an array. Call inspect_table first: its json.structure shows the paths that exist, and its sheets show which arrays of records are better served by query_table (counts, filters, groupings and listings over many records). Pass the file's signed url and filename unchanged. Returns the value as JSON text with its type, the number of matches for a wildcard path and an array's length. A long value is cut at a fixed size and says so: narrow the path rather than paging. In a JSON Lines file the root $ is the array of its lines.",
+        "Read an attached JSON (.json) file, for any question about it. Call it first without a path: it returns the file's structure, types in place of values, which shows the paths that exist. Then read what the question needs by its path: one value, a setting, a nested part of the tree, an element of an array or every match of a wildcard. Pass the file's signed url and filename unchanged. Returns the value as JSON text with its type, the number of matches for a wildcard path and an array's length. A long value is cut at a fixed size and says so: narrow the path rather than paging. A JSON Lines file (.jsonl, .ndjson) is a table instead: use inspect_table and query_table.",
       inputSchema: jsonQueryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
         const args = jsonQueryInput.parse(raw);
         const outcome = await extract(args.file, args.path, ctx);
+        if ("structure" in outcome)
+          return {
+            ...outcome,
+            ...(outcome.structure_truncated
+              ? { hint: JSON_STRUCTURE_TRUNCATED }
+              : {}),
+          };
         return {
           path: args.path,
           found: outcome.matches > 0,
@@ -563,7 +577,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
             : {}),
           ...(outcome.matches === 0
             ? {
-                hint: 'Nothing is at this path. Compare it with the keys in inspect_table\'s json.structure; keys are case-sensitive, and a key holding a dot or a space is quoted: $."a.b".',
+                hint: 'Nothing is at this path. Compare it with the keys in the structure (query_json without a path); keys are case-sensitive, and a key holding a dot or a space is quoted: $."a.b".',
               }
             : {}),
         };
@@ -573,7 +587,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "assert_table",
       title: "Check table",
       description:
-        "Validate data-quality rules over a CSV/TSV/Excel/JSON table (or the exact source_rows selection supplied in file), such as required values, unique IDs or allowed ranges. Call inspect_table first. Supply up to 20 named SELECT checks over table t; the first cell must be boolean true to pass. Example: SELECT COUNT(*) = COUNT(DISTINCT id) FROM t. False, null and SQL errors are reported per check. Disclose any missing saved formula results even when the checks pass; formulas are not recalculated.",
+        "Validate data-quality rules over a CSV/TSV/Excel/JSON Lines table (or the exact source_rows selection supplied in file), such as required values, unique IDs or allowed ranges. Call inspect_table first. Supply up to 20 named SELECT checks over table t; the first cell must be boolean true to pass. Example: SELECT COUNT(*) = COUNT(DISTINCT id) FROM t. False, null and SQL errors are reported per check. Disclose any missing saved formula results even when the checks pass; formulas are not recalculated.",
       inputSchema: assertInput.shape,
       readOnly: true,
       async execute(raw, ctx) {

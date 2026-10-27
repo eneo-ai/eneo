@@ -204,13 +204,13 @@ model's SQL (an unknown column, a syntax error, a failed cast) is returned so
 the model can correct it; other engine errors are reported generically.
 
 **File parsing** happens in the same confined children. CSV and JSON must be
-UTF-8 without NUL bytes. A JSON file is read as text by DuckDB's JSON reader,
-with no type inference, in an instance of its own whose memory limit is the
-query limit or 32 times the file size, whichever is larger (640 MB at the
-20 MB upload cap); its arrays of records are written as sheet CSVs (at most
-20 sheets, 200 columns each, within the same 64 MiB), and `query_json` binds
-the model's path as a string literal
-and returns at most 16,000 characters. XLSX and DOCX packages pass a zip guard that reads only the
+UTF-8 without NUL bytes. JSON is read as text by DuckDB's JSON reader, with no
+type inference, in an instance of its own whose memory limit is the query
+limit or 32 times the file size, whichever is larger (640 MB at the 20 MB
+upload cap). A JSON Lines file becomes one sheet CSV of its records (200
+columns, within the same 64 MiB); a JSON document is never turned into sheets,
+and `query_json` binds the model's path as a string literal and returns at
+most 16,000 characters of structure or value. XLSX and DOCX packages pass a zip guard that reads only the
 central directory: at most 10,000 entries, no ZIP64, and a declared expansion
 bounded at 64 MiB or 100 times the packed size. A workbook is converted to at
 most 20 sheets and 64 MiB of CSV; formulas are read as their saved values and

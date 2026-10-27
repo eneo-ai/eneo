@@ -1,9 +1,9 @@
 import type { TabularColumn } from "./engine/types";
-import type { JsonExtractOutcome, JsonSummary } from "./engine/json-to-csv";
+import type { JsonReadOutcome } from "./engine/json";
 import type { TabularConfig } from "./config";
 
 /** How the downloaded bytes are read: by their filename's extension. */
-export type SourceFormat = "csv" | "xlsx" | "json";
+export type SourceFormat = "csv" | "xlsx" | "jsonl";
 
 /** Formula values come from Excel's saved results; this runtime never recalculates. */
 export type CalculationDiagnostics = {
@@ -26,12 +26,10 @@ export type SheetMetadata = {
   explicitHeader?: boolean;
   /** Lines above the header (a report title) that every read of this sheet skips. */
   skipRows?: number;
-  /** For a sheet of a JSON file: the path of the array (or record) it holds. */
-  jsonPath?: string;
 };
 
-/** What one ingest produced and the cache keeps: the sheets, and for JSON the tree summary. */
-export type IngestResult = { sheets: SheetMetadata[]; json?: JsonSummary };
+/** What one ingest produced and the cache keeps. */
+export type IngestResult = { sheets: SheetMetadata[] };
 
 /** Child job: validate and convert one downloaded file, writing sheet CSVs to `outputDir`. */
 export type IngestJob = {
@@ -44,15 +42,15 @@ export type IngestJob = {
   config: TabularConfig;
 };
 
-/** Child job: the value at a JSONPath in a downloaded JSON file. */
+/** Child job: a downloaded JSON document's structure, or the value at a JSONPath in it. */
 export type JsonExtractJob = {
   kind: "json_extract";
   inputPath: string;
-  path: string;
+  path?: string;
   maxChars: number;
   config: TabularConfig;
 };
-export type { JsonExtractOutcome };
+export type { JsonReadOutcome };
 
 /** Child job: one read-only query (or a list of checks) over already-parsed sheet CSVs. */
 export type QueryJob = {

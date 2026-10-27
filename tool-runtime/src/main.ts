@@ -11,7 +11,7 @@ import { computeTools } from "./tools/compute/tool";
 import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
 import type {
   IngestResult,
-  JsonExtractOutcome,
+  JsonReadOutcome,
   QueryJobResult,
 } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
@@ -33,9 +33,14 @@ import { chartView } from "./tools/charts/view";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
-  runIsolated(job, timeoutMs, { requireConfinement: config.requireConfinement });
+  runIsolated(job, timeoutMs, {
+    requireConfinement: config.requireConfinement,
+  });
 // What a sandbox child of this runtime is confined to, measured by running one.
-const confinement = await isolate({ job: { kind: "confinement" } }, 10_000).catch(() => ({
+const confinement = await isolate(
+  { job: { kind: "confinement" } },
+  10_000,
+).catch(() => ({
   files: false,
   tcp: false,
 }));
@@ -59,7 +64,10 @@ const endpoints: Endpoint[] = [
     tools: computeTools(
       config.compute,
       async (job) =>
-        (await isolate({ job, config: config.compute }, computeJobTimeoutMs)) as ComputeOutcome,
+        (await isolate(
+          { job, config: config.compute },
+          computeJobTimeoutMs,
+        )) as ComputeOutcome,
       await computeResultView(),
     ),
   },
@@ -88,7 +96,9 @@ const sheetCache = new SheetCache(
   tabular.max_upload_bytes + tabular.max_expanded_bytes,
 );
 // Parsed sheets are plaintext on disk: they leave within one sweep of expiring.
-sheetCache.sweepEvery(Math.max(30_000, Math.min(tabular.cache_ttl_ms, 5 * 60_000)));
+sheetCache.sweepEvery(
+  Math.max(30_000, Math.min(tabular.cache_ttl_ms, 5 * 60_000)),
+);
 const ingestTimeoutMs = 25_000;
 const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
 endpoints.push({
@@ -103,13 +113,24 @@ endpoints.push({
     executor: {
       ingest: (job) =>
         slot(
-          async () =>
-            (await isolate({ job }, ingestTimeoutMs)) as IngestResult,
+          async () => (await isolate({ job }, ingestTimeoutMs)) as IngestResult,
         ),
       query: (job) =>
-        slot(async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult),
+        slot(
+          async () =>
+            (await isolate(
+              { job },
+              queryJobTimeoutMs,
+            )) as unknown as QueryJobResult,
+        ),
       extractJson: (job) =>
-        slot(async () => (await isolate({ job }, ingestTimeoutMs)) as unknown as JsonExtractOutcome),
+        slot(
+          async () =>
+            (await isolate(
+              { job },
+              ingestTimeoutMs,
+            )) as unknown as JsonReadOutcome,
+        ),
     },
   }),
 });
@@ -155,7 +176,10 @@ endpoints.push(
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: chartTools(
       chartConfigSchema.parse({}),
-      (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartResult),
+      (job) =>
+        slot(
+          async () => (await isolate({ job }, renderTimeoutMs)) as ChartResult,
+        ),
       {
         allowedFileOrigins: config.tabular.allowedFileOrigins,
         maxBytes: tabular.max_upload_bytes,
@@ -171,13 +195,19 @@ const fetch = createHandler({
   maxConcurrency: config.maxConcurrency,
   maxQueue: config.maxQueue,
   maxQueuePerGroup: config.maxQueuePerGroup,
-  confinement: { files: confinement.files === true, tcp: confinement.tcp === true },
+  confinement: {
+    files: confinement.files === true,
+    tcp: confinement.tcp === true,
+  },
   nativeStatus: () => nativeScheduler.status,
   allowedFileOrigins: config.tabular.allowedFileOrigins,
   endpoints,
   builtinTemplate,
   inspectTemplate: inspector,
-  renderDocument: documentControlRenderer(render, config.documents.max_export_bytes),
+  renderDocument: documentControlRenderer(
+    render,
+    config.documents.max_export_bytes,
+  ),
   maxBodyBytes: config.maxBodyBytes,
 });
 

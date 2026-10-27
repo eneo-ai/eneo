@@ -75,11 +75,11 @@ __all__ = [
 TABULAR_MIME_TYPES = frozenset(
     {CSV_MIME_TYPE, "text/tab-separated-values", XLSX_MIME_TYPE}
 )
-# JSON documents the same tools read: records become sheets, and a value is read
-# by its path, so the tree never has to be paged through as text.
-JSON_MIME_TYPES = frozenset(
-    {"application/json", "text/json", "application/x-ndjson", "application/jsonl"}
-)
+# JSON Lines, one record per line, is a table the same tools read. A JSON
+# document is a tree that query_json reads by its structure and by path, so it
+# never has to be paged through as text.
+JSON_LINES_MIME_TYPES = frozenset({"application/x-ndjson", "application/jsonl"})
+JSON_MIME_TYPES = frozenset({"application/json", "text/json"})
 
 
 def _text(message: str) -> list[TextContent]:
@@ -97,12 +97,10 @@ def _table_tools_offered(ctx: Context) -> bool:
 def _table_tools_redirect(file) -> list[TextContent]:
     if file.mimetype in JSON_MIME_TYPES:
         return _text(
-            f"'{file.name}' ({file.mimetype}) is structured data. Use "
-            "inspect_table with the same url to see its structure and the "
-            "sheets made of its arrays of records, query_json to read a value "
-            "or a part of the tree by its path, and query_table to answer from "
-            "its records; all read the file itself. Call read_file again with "
-            "raw=true only if those tools could not read it."
+            f"'{file.name}' ({file.mimetype}) is a JSON document. Use query_json "
+            "with the same url: without a path for its structure, then with a "
+            "path for a value or a part of the tree; it reads the file itself. "
+            "Call read_file again with raw=true only if it could not read it."
         )
     return _text(
         f"'{file.name}' ({file.mimetype}) is a table. Use inspect_table with the "
@@ -180,8 +178,8 @@ async def read_file(
     summarize files too large to read into context), prefer that tool and
     pass it the same url; if it fails or no such tool exists, use this one
     rather than telling the user the file cannot be read. For a CSV, TSV,
-    Excel or JSON file, inspect_table and query_table (and query_json for a
-    value in a JSON tree), when available, describe and query the file far
+    Excel or JSON Lines file, inspect_table and query_table, and for a JSON
+    document query_json, when available, describe and query the file far
     better than its raw text, also when the user only asks what the file
     contains; while they are available this tool points such a file at them
     instead of returning its text. Set raw=true only when they could not read
@@ -203,7 +201,11 @@ async def read_file(
 
     if (
         not raw
-        and (file.mimetype in TABULAR_MIME_TYPES or file.mimetype in JSON_MIME_TYPES)
+        and (
+            file.mimetype in TABULAR_MIME_TYPES
+            or file.mimetype in JSON_LINES_MIME_TYPES
+            or file.mimetype in JSON_MIME_TYPES
+        )
         and _table_tools_offered(ctx)
     ):
         logger.info("[FILES] read_file file=%s pointed at the table tools", file_id)
@@ -220,8 +222,8 @@ async def read_file(
 
 
 _TABLE_TOOLS_SUFFIX = (
-    "\n\nAttached CSV, TSV, Excel and JSON files belong to inspect_table, "
-    "query_table and query_json, which read the file itself; for such a file "
+    "\n\nAttached CSV, TSV, Excel, JSON Lines and JSON files belong to "
+    "inspect_table, query_table and query_json, which read the file itself; for such a file "
     "this tool points at them instead of returning its text, unless raw=true."
 )
 

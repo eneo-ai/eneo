@@ -22,14 +22,13 @@ download policy or an engine's limits.
 - `POST /mcp/file-analysis` exposes `inspect_table`, `query_table`,
   `assert_table` and `query_json` over signed Eneo attachment URLs. It fetches
   only from the origin Eneo sends in `X-Eneo-File-Origin`. CSV, TSV and XLSX
-  files are sheets; a JSON or JSON Lines file
-  (`src/tools/tabular/engine/json-to-csv.ts`) is read as text by DuckDB's JSON
-  reader (no type inference; memory bounded by 32 times the file size),
-  every array of records within three levels of the root becomes a sheet named
-  by its path, nested objects become dotted columns and arrays stay JSON text.
-  `inspect_table` returns the file's inferred structure, and `query_json`
-  returns the value at a JSONPath (bounded to 16,000 characters) for the parts
-  of a tree that are not records. `query_table` brings a table view
+  files are sheets, and so is a JSON Lines file (`src/tools/tabular/engine/json.ts`):
+  one record per line, nested objects as dotted columns, arrays as JSON text,
+  read as text by DuckDB's JSON reader with no type inference and memory
+  bounded by 32 times the file size. A JSON document is never turned into
+  sheets: `query_json` returns its structure (types in place of values)
+  without a path and the value at a JSONPath (bounded to 16,000 characters)
+  with one. `query_table` brings a table view
   (an MCP App, `src/tools/tabular/view/`) that hosts showing tool views render
   with its result. Set `display: "none"` for intermediate queries used by charts
   or other tools; the default `display: "table"` preserves in-chat browsing.
