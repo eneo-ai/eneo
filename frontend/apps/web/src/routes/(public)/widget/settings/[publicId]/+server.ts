@@ -26,13 +26,14 @@ async function fetchSettings(
 ): Promise<WidgetLauncherSettings | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESPONSE_DEADLINE_MS);
+  const backendUrl = getBackendUrl() ?? "";
   const client = createWidgetClient({
-    baseUrl: getBackendUrl() ?? "",
+    baseUrl: backendUrl,
     publicId,
     fetch: (input, init) => fetch(input, { ...init, signal: controller.signal })
   });
   try {
-    return launcherSettings(await client.config());
+    return launcherSettings(await client.config(), backendUrl);
   } catch (error) {
     if (controller.signal.aborted) throw new BackendTimeout();
     if (error instanceof EneoError && error.status === 404) return null;

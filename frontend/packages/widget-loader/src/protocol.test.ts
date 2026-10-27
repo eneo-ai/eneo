@@ -27,6 +27,45 @@ describe("parseFrameMessage", () => {
         payload: { colors, title: "  Fråga kommunen " }
       })
     ).toEqual({ type: "ready", payload: { colors, title: "Fråga kommunen" } });
+    // The persona names the launcher; its avatar comes only when it is the launcher.
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { persona: { name: " Sigge ", avatar_url: null } }
+      })
+    ).toEqual({ type: "ready", payload: { persona: { name: "Sigge", avatar_url: null } } });
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: {
+          persona: { name: "Sigge", avatar_url: "https://api.kommun.se/api/v1/icons/abc/" }
+        }
+      })
+    ).toEqual({
+      type: "ready",
+      payload: { persona: { name: "Sigge", avatar_url: "https://api.kommun.se/api/v1/icons/abc/" } }
+    });
+    // No name, no persona; a non-http(s) avatar never reaches an <img>.
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { persona: { name: "", avatar_url: "https://x.se/a.png" } }
+      })
+    ).toEqual({ type: "ready" });
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { persona: { name: "Sigge", avatar_url: "javascript:alert(1)" } }
+      })
+    ).toEqual({ type: "ready", payload: { persona: { name: "Sigge", avatar_url: null } } });
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "close" })).toEqual({
       type: "close"
     });
@@ -110,18 +149,32 @@ describe("parseWidgetSettings", () => {
     dark: { accent: "#9CC7F0", on_accent: "#111111" }
   };
 
-  it("keeps a fixed language, the position and valid colours", () => {
+  it("keeps a fixed language, the position, valid colours and the persona", () => {
     expect(parseWidgetSettings({ language: "en", position: "bottom-left", colors })).toEqual({
       language: "en",
       position: "bottom-left",
-      colors
+      colors,
+      persona: null
+    });
+    expect(
+      parseWidgetSettings({
+        language: "sv",
+        position: "bottom-right",
+        colors,
+        persona: { name: "Sigge", avatar_url: "https://api.kommun.se/api/v1/icons/abc/" }
+      })
+    ).toEqual({
+      language: "sv",
+      position: "bottom-right",
+      colors,
+      persona: { name: "Sigge", avatar_url: "https://api.kommun.se/api/v1/icons/abc/" }
     });
   });
 
   it("treats an automatic language and anything unknown as unset", () => {
     expect(
       parseWidgetSettings({ language: "auto", position: "top-left", colors: { light: 1 } })
-    ).toEqual({ language: null, position: null, colors: null });
+    ).toEqual({ language: null, position: null, colors: null, persona: null });
     expect(parseWidgetSettings(null)).toBeNull();
     expect(parseWidgetSettings("bottom-left")).toBeNull();
   });

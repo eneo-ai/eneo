@@ -69,7 +69,8 @@ describe("GET /widget/settings/[publicId]", () => {
       colors: {
         light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
         dark: { accent: "#9CC7F0", on_accent: "#111111" }
-      }
+      },
+      persona: null
     });
     // The loader reads every field it is sent; a rename on either side fails here.
     expect(parseWidgetSettings(body)).toEqual(body);

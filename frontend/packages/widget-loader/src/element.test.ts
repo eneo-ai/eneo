@@ -160,6 +160,65 @@ describe("launcher", () => {
     element.removeAttribute("launcher");
     expect(launcherOf(element).hidden).toBe(false);
   });
+
+  it("names who answers, and that it is an AI, once a persona is known", async () => {
+    stubSettings({ language: "sv", persona: { name: "Sigge", avatar_url: null } });
+    const element = await mount();
+    const launcher = launcherOf(element);
+    expect(launcher.getAttribute("aria-label")).toBe("Öppna chatt med Sigge, AI-assistent");
+    // No face in the button without an uploaded avatar: the bubble is the chat.
+    expect(launcher.classList.contains("avatar")).toBe(false);
+    expect(launcher.querySelector("img")).toBeNull();
+
+    element.openPanel();
+    deliver(element, frameMessage("ready", { persona: { name: "Sigge", avatar_url: null } }));
+    deliver(element, frameMessage("close"));
+    deliver(element, frameMessage("unread", { count: 2 }));
+    expect(launcher.getAttribute("aria-label")).toBe(
+      "Öppna chatt med Sigge, AI-assistent, 2 nya meddelanden"
+    );
+
+    // The host's own label still wins while nothing is unread.
+    const custom = await mount({ label: "Fråga oss" });
+    expect(launcherOf(custom).getAttribute("aria-label")).toBe("Fråga oss");
+  });
+
+  it("shows the persona's avatar as the launcher, the same image the chat shows, and falls back to the bubble when it cannot load", async () => {
+    const avatar = `${location.origin}/avatar.png`;
+    stubSettings({ language: "en", persona: { name: "Sigge", avatar_url: avatar } });
+    const element = await mount();
+    const launcher = launcherOf(element);
+    const image = launcher.querySelector("img.avatar") as HTMLImageElement;
+    expect(launcher.classList.contains("avatar")).toBe(true);
+    expect(image.src).toBe(avatar);
+    expect(image.alt).toBe("");
+    expect(image.referrerPolicy).toBe("no-referrer");
+    expect(launcher.getAttribute("aria-label")).toBe("Open chat with Sigge, AI assistant");
+    // The face fills the disc and keeps an accent ring; the chat glyph moves
+    // to a corner badge so the button still reads as a chat.
+    const chat = launcher.querySelector("svg.chat") as SVGElement;
+    expect(getComputedStyle(image).borderRadius).toBe("50%");
+    expect(getComputedStyle(chat).width).toBe("22px");
+    expect(getComputedStyle(launcher).borderColor).not.toBe("rgba(0, 0, 0, 0)");
+
+    // Open, the close icon sits on the plain disc, never over the face.
+    element.openPanel();
+    expect(getComputedStyle(image).opacity).toBe("0");
+    element.closePanel();
+
+    // A host CSP that refuses the image leaves the plain bubble.
+    image.dispatchEvent(new Event("error"));
+    expect(launcher.classList.contains("avatar")).toBe(false);
+    expect(getComputedStyle(image).display).toBe("none");
+
+    // The embed page's own report replaces what the settings said.
+    element.openPanel();
+    deliver(element, frameMessage("ready", { persona: { name: "Kim", avatar_url: null } }));
+    expect(launcher.querySelector("img")).toBeNull();
+    expect(launcher.classList.contains("avatar")).toBe(false);
+    element.closePanel();
+    expect(launcher.getAttribute("aria-label")).toBe("Open chat with Kim, AI assistant");
+  });
 });
 
 describe("saved settings", () => {

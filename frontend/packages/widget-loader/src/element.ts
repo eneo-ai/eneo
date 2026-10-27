@@ -5,6 +5,7 @@ import {
   type ColorScheme,
   type HostMessage,
   type LauncherColors,
+  type LauncherPersona,
   type PageContext,
   type PanelLayout,
   type WidgetSettings
@@ -33,6 +34,8 @@ const SANDBOX =
 
 type Labels = {
   open: string;
+  /** The launcher names who answers, and that it is an AI (AI Act article 50). */
+  openWith: (name: string) => string;
   close: string;
   title: string;
   loading: string;
@@ -42,18 +45,19 @@ type Labels = {
 const LABELS: Record<string, Labels> = {
   sv: {
     open: "Öppna chatt",
+    openWith: (name) => `Öppna chatt med ${name}, AI-assistent`,
     close: "Stäng chatt",
     title: "Chatt",
     loading: "Laddar chatten…",
-    unread: (count) =>
-      `Öppna chatt, ${count} ${count === 1 ? "nytt meddelande" : "nya meddelanden"}`
+    unread: (count) => `${count} ${count === 1 ? "nytt meddelande" : "nya meddelanden"}`
   },
   en: {
     open: "Open chat",
+    openWith: (name) => `Open chat with ${name}, AI assistant`,
     close: "Close chat",
     title: "Chat",
     loading: "Loading chat…",
-    unread: (count) => `Open chat, ${count} new ${count === 1 ? "message" : "messages"}`
+    unread: (count) => `${count} new ${count === 1 ? "message" : "messages"}`
   }
 };
 
@@ -110,6 +114,8 @@ export class EneoWidgetElement extends HTMLElement {
   private unread = 0;
   private context: PageContext | null = null;
   private colors: LauncherColors | null = null;
+  private persona: LauncherPersona | null = null;
+  private avatar: HTMLImageElement | null = null;
   private widgetTitle: string | null = null;
   private lastFocus: Element | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -262,10 +268,9 @@ export class EneoWidgetElement extends HTMLElement {
           return;
         }
         this.settings = parseWidgetSettings(raw);
-        if (this.settings?.colors) {
-          this.colors = this.settings.colors;
-          this.paintLauncher();
-        }
+        if (this.settings?.colors) this.colors = this.settings.colors;
+        this.persona = this.settings?.persona ?? null;
+        this.paintLauncher();
         this.syncLauncher();
       })
       .catch(() => {})
@@ -363,15 +368,35 @@ export class EneoWidgetElement extends HTMLElement {
       this.launcher.style.removeProperty("--_eneo-accent");
       this.launcher.style.removeProperty("--_eneo-on-accent");
     }
+    // The persona's avatar as the launcher, the same image the chat shows.
+    // The host page's CSP may refuse it; the plain bubble stays then.
+    const url = this.persona?.avatar_url;
+    if (url) {
+      if (!this.avatar) {
+        this.avatar = document.createElement("img");
+        this.avatar.className = "avatar";
+        this.avatar.alt = "";
+        this.avatar.referrerPolicy = "no-referrer";
+        this.avatar.addEventListener("error", () => this.launcher.classList.remove("avatar"));
+        this.launcher.prepend(this.avatar);
+      }
+      if (this.avatar.getAttribute("src") !== url) this.avatar.src = url;
+      this.launcher.classList.add("avatar");
+    } else {
+      this.avatar?.remove();
+      this.avatar = null;
+      this.launcher.classList.remove("avatar");
+    }
   }
 
   private syncLauncher(): void {
     const custom = this.getAttribute("label");
+    const open = this.persona ? this.labels.openWith(this.persona.name) : this.labels.open;
     const label = this.isOpen
       ? this.labels.close
       : this.unread > 0
-        ? this.labels.unread(this.unread)
-        : custom || this.labels.open;
+        ? `${open}, ${this.labels.unread(this.unread)}`
+        : custom || open;
     this.launcher.setAttribute("aria-label", label);
     this.launcher.title = label;
     this.panel.setAttribute("aria-label", this.labels.title);
@@ -531,9 +556,11 @@ export class EneoWidgetElement extends HTMLElement {
         // The embed header replaces the loader's mobile close row when ready.
         this.setAttribute("ready", "");
         this.colors = message.payload?.colors ?? null;
+        this.persona = message.payload?.persona ?? null;
         this.widgetTitle = message.payload?.title ?? null;
         this.frame.title = this.frameTitle;
         this.paintLauncher();
+        this.syncLauncher();
         this.sendTheme();
         if (this.context) this.send({ type: "context", payload: this.context });
         if (this.pendingOpen) {

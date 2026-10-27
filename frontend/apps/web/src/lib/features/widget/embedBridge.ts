@@ -23,8 +23,17 @@ import type { LauncherColors } from "./contrast";
  */
 export type PanelLayout = { full: boolean; expanded: boolean };
 
+/**
+ * The persona as the launcher needs it: the name for the button's accessible
+ * name, the avatar only when the widget shows it as the launcher.
+ */
+export type LauncherPersona = { name: string; avatar_url: string | null };
+
 export type OutboundMessage =
-  | { type: "ready"; payload?: { colors?: LauncherColors; title?: string } }
+  | {
+      type: "ready";
+      payload?: { colors?: LauncherColors; title?: string; persona?: LauncherPersona };
+    }
   | { type: "close" }
   | { type: "conversation_started" }
   | { type: "unread"; payload: { count: number } }
@@ -137,15 +146,20 @@ export function createEmbedBridge(options: {
     embedded,
     post,
     /**
-     * The loader paints its launcher with the widget's colours and names the
-     * frame after the widget's title for screen readers once the page is up.
+     * The loader paints its launcher with the widget's colours, names the
+     * frame after the widget's title for screen readers once the page is up,
+     * and names its button after the persona (showing its avatar when asked).
      */
-    ready: (colors?: LauncherColors, title?: string) =>
+    ready: (colors?: LauncherColors, title?: string, persona?: LauncherPersona) =>
       post(
-        colors || title
+        colors || title || persona
           ? {
               type: "ready",
-              payload: { ...(colors ? { colors } : {}), ...(title ? { title } : {}) }
+              payload: {
+                ...(colors ? { colors } : {}),
+                ...(title ? { title } : {}),
+                ...(persona ? { persona } : {})
+              }
             }
           : { type: "ready" }
       ),

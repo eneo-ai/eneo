@@ -64,10 +64,37 @@ export const styles = `
 /* Transitions switch on at the first open (see openPanel): a stylesheet that
    arrives after the elements are in the tree would otherwise animate its own
    resting state, e.g. fade the backdrop out on page load. */
-.launcher.motion svg { transition: opacity 0.15s ease, transform 0.15s ease; }
+.launcher.motion svg, .launcher.motion .avatar { transition: opacity 0.15s ease, transform 0.15s ease; }
 .launcher .close { opacity: 0; transform: rotate(-90deg); }
 :host([open]) .launcher .chat { opacity: 0; transform: rotate(90deg); }
 :host([open]) .launcher .close { opacity: 1; transform: none; }
+/* The persona's avatar as the launcher: the same image the chat shows, ringed
+   in the accent so it has an edge on any host background (WCAG 1.4.11), with
+   the chat glyph shrunk to a corner badge so the button still reads as a chat.
+   Open, the face gives way to the close icon on the plain accent disc. */
+.launcher .avatar { display: none; }
+.launcher.avatar { border-color: var(--eneo-widget-color, var(--_eneo-accent, #1d4ed8)); }
+.launcher.avatar .avatar {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.launcher.avatar .chat {
+  inset: auto -4px -4px auto;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 4px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--eneo-widget-color, var(--_eneo-accent, #1d4ed8));
+  box-shadow: 0 0 0 2px #ffffff;
+}
+:host([open]) .launcher.avatar .avatar { opacity: 0; }
 .badge {
   position: absolute;
   inset-block-start: -4px;

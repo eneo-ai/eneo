@@ -157,6 +157,20 @@ The web app's `/widget/...` route reads `dist/` at build time and answers 503
 until the package has been built. `bun run dev` in `frontend/` runs `build:dev`
 once before it starts the web app.
 
+## Persona and the launcher
+
+A widget with a persona reports its name with `ready` (and the saved settings
+carry it too), and the launcher's accessible name becomes "Öppna chatt med
+<name>, AI-assistent" / "Open chat with <name>, AI assistant"; a host's
+`label` attribute still wins while nothing is unread. When the widget shows
+its avatar as the launcher, `persona.avatar_url` carries the image: the
+launcher then shows it ringed in the accent colour, with the chat glyph as a
+corner badge, and the close icon on the plain disc while open. The image is
+loaded with `referrerpolicy="no-referrer"`; a host CSP that refuses it (it
+comes from the Eneo API origin, `img-src`) leaves the plain bubble. The
+avatar is never shown without an uploaded image, so a persona with only a
+monogram keeps the bubble.
+
 ## Releases
 
 Hosts that require `integrity` load `/widget/<version>/eneo.js`, which is

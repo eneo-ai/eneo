@@ -40,8 +40,23 @@ export function parseLauncherColors(raw: unknown): LauncherColors | null {
   return light && dark ? { light, dark } : null;
 }
 
-/** What the embed page reports once it is up; either part may be missing. */
-export type ReadyPayload = { colors?: LauncherColors; title?: string };
+/**
+ * The voice the chat answers with, as far as the launcher needs it: the name
+ * for its accessible name, and the avatar only when it is the launcher.
+ */
+export type LauncherPersona = { name: string; avatar_url: string | null };
+
+export function parseLauncherPersona(raw: unknown): LauncherPersona | null {
+  const value = raw as { name?: unknown; avatar_url?: unknown } | null;
+  const name = value && typeof value.name === "string" ? value.name.trim().slice(0, 30) : "";
+  if (!name) return null;
+  const url = value!.avatar_url;
+  // Only an http(s) address becomes an <img> source (a local Eneo is http).
+  return { name, avatar_url: typeof url === "string" && /^https?:\/\//.test(url) ? url : null };
+}
+
+/** What the embed page reports once it is up; any part may be missing. */
+export type ReadyPayload = { colors?: LauncherColors; title?: string; persona?: LauncherPersona };
 
 export type WidgetPosition = "bottom-right" | "bottom-left";
 
@@ -54,16 +69,23 @@ export type WidgetSettings = {
   language: "sv" | "en" | null;
   position: WidgetPosition | null;
   colors: LauncherColors | null;
+  persona: LauncherPersona | null;
 };
 
 export function parseWidgetSettings(raw: unknown): WidgetSettings | null {
   if (!raw || typeof raw !== "object") return null;
-  const value = raw as { language?: unknown; position?: unknown; colors?: unknown };
+  const value = raw as {
+    language?: unknown;
+    position?: unknown;
+    colors?: unknown;
+    persona?: unknown;
+  };
   return {
     language: value.language === "sv" || value.language === "en" ? value.language : null,
     position:
       value.position === "bottom-right" || value.position === "bottom-left" ? value.position : null,
-    colors: parseLauncherColors(value.colors)
+    colors: parseLauncherColors(value.colors),
+    persona: parseLauncherPersona(value.persona)
   };
 }
 
@@ -111,7 +133,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       // The widget's title names the frame for screen readers; plain text only.
       const title = typeof payload.title === "string" ? payload.title.trim().slice(0, 200) : "";
       if (title) ready.title = title;
-      return colors || title ? { type: "ready", payload: ready } : { type: "ready" };
+      const persona = parseLauncherPersona(payload.persona);
+      if (persona) ready.persona = persona;
+      return colors || title || persona ? { type: "ready", payload: ready } : { type: "ready" };
     }
     case "close":
       return { type: "close" };
