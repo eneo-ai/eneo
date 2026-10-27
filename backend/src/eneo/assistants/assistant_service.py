@@ -1618,6 +1618,7 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        previous_icon_id = assistant.icon_id
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -2094,6 +2095,7 @@ class AssistantService:
                 document_template=document_template,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 

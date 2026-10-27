@@ -23,7 +23,8 @@ export function iconUrl(iconId: string | null | undefined): string | null {
 
 /**
  * Avatar upload/remove against the icons endpoint; `onSave` persists the new
- * icon id on the owning resource (assistant, group chat, ...).
+ * icon id on the owning resource (assistant, group chat, ...), and the server
+ * deletes the icon that id replaced.
  */
 export function IconField({
   iconId,
@@ -44,10 +45,17 @@ export function IconField({
   async function replaceIcon(file: File) {
     if (busy) return;
     setBusy("upload");
+    let uploaded: string | undefined;
     try {
-      const uploaded = await uploadIcon(file);
-      await onSave(uploaded.id);
+      uploaded = (await uploadIcon(file)).id;
+      await onSave(uploaded);
     } catch {
+      // Nothing shows an upload whose id could not be saved, and nothing else would delete it.
+      if (uploaded) {
+        await browserApi
+          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: uploaded } } })
+          .catch(() => {});
+      }
       toast.error(t("avatar_upload_failed"));
     } finally {
       setBusy(null);
@@ -59,13 +67,6 @@ export function IconField({
     setBusy("remove");
     try {
       await onSave(null);
-      // The server only deletes an icon no resource shows any more, so this follows the saved
-      // removal and is cleanup: an icon another resource still shows is kept.
-      if (iconId) {
-        await browserApi
-          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
-          .catch(() => {});
-      }
       // Delete goes with the icon: focus moves to Upload instead of the page.
       uploadButton.current?.focus();
     } catch {

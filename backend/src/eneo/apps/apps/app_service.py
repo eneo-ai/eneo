@@ -429,6 +429,7 @@ class AppService:
         )
         if requires_context_validation:
             app = await self._lock_app_for_context_validation(app_id)
+        previous_icon_id = app.icon_id
 
         completion_model = None
         if completion_model_id is not None:
@@ -513,6 +514,7 @@ class AppService:
             )
 
         app_in_db = await self.repo.update(app)
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()

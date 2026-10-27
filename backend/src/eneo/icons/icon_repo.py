@@ -14,6 +14,7 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
+from eneo.main.models import NotProvided, is_provided
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
@@ -197,3 +198,27 @@ class IconRepository:
             )
         ).scalar_one_or_none()
         return deleted_id is not None
+
+    async def release_replaced(
+        self, previous: UUID | None, requested: UUID | None | NotProvided
+    ) -> None:
+        """Delete the icon an update replaced or cleared, unless another resource
+        still shows it. Call after the update is written."""
+        if previous is None or not is_provided(requested) or requested == previous:
+            return
+        await self.delete_if_unreferenced(previous)
+
+    async def shown_in_space(self, space_id: UUID) -> list[UUID]:
+        """Icons the space and the assistants, apps and group chats in it show,
+        in a stable order so concurrent cleanups lock them alike."""
+        icon_ids = await self.session.scalars(
+            sa.union(
+                sa.select(Spaces.icon_id).where(Spaces.id == space_id),
+                sa.select(Assistants.icon_id).where(Assistants.space_id == space_id),
+                sa.select(Apps.icon_id).where(Apps.space_id == space_id),
+                sa.select(GroupChatsTable.icon_id).where(
+                    GroupChatsTable.space_id == space_id
+                ),
+            )
+        )
+        return sorted(icon_id for icon_id in icon_ids if icon_id is not None)

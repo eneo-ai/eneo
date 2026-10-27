@@ -3,7 +3,8 @@
 Icon ids are public: ``GET /icons/{id}/`` is unauthenticated and the id sits in
 every ``<img src>``. Assistants, apps, spaces and group chats reference icons
 with ``ON DELETE SET NULL``, so a delete that only checks the tenant silently
-clears whatever resource uses the icon.
+clears whatever resource uses the icon. A resource releases its icon itself
+when an update replaces or clears it, or when the resource is deleted.
 """
 
 import asyncio
@@ -114,16 +115,22 @@ async def _upload(client, headers: dict[str, str]) -> str:
     return uploaded.json()["id"]
 
 
-async def _create(client, headers: dict[str, str], kind: str) -> str:
-    """Create a resource of ``kind`` in a new space of the caller."""
-    space = await client.post(
-        "/api/v1/spaces/", json={"name": f"Icons {uuid4().hex[:8]}"}, headers=headers
-    )
-    assert space.status_code == 201, space.text
+async def _create(
+    client, headers: dict[str, str], kind: str, space_id: str | None = None
+) -> str:
+    """Create a resource of ``kind``, by default in a new space of the caller."""
+    if space_id is None:
+        space = await client.post(
+            "/api/v1/spaces/",
+            json={"name": f"Icons {uuid4().hex[:8]}"},
+            headers=headers,
+        )
+        assert space.status_code == 201, space.text
+        space_id = space.json()["id"]
     if kind == "space":
-        return space.json()["id"]
+        return space_id
     created = await client.post(
-        f"/api/v1/spaces/{space.json()['id']}/applications/{_CREATE_PATHS[kind]}/",
+        f"/api/v1/spaces/{space_id}/applications/{_CREATE_PATHS[kind]}/",
         json={"name": f"Shows an icon {uuid4().hex[:8]}"},
         headers=headers,
     )
@@ -143,12 +150,16 @@ async def _set_icon(
 
 
 async def _with_icon(
-    client, headers: dict[str, str], kind: str = "assistant", icon_id: str | None = None
+    client,
+    headers: dict[str, str],
+    kind: str = "assistant",
+    icon_id: str | None = None,
+    space_id: str | None = None,
 ) -> tuple[str, str]:
     """Create a resource of the caller and show an icon on it."""
     if icon_id is None:
         icon_id = await _upload(client, headers)
-    resource_id = await _create(client, headers, kind)
+    resource_id = await _create(client, headers, kind, space_id)
     attached = await _set_icon(client, headers, kind, resource_id, icon_id)
     assert attached.status_code == 200, attached.text
     assert attached.json()["icon_id"] == icon_id
@@ -195,15 +206,43 @@ async def test_an_icon_of_another_tenant_cannot_be_deleted(client, owner, other_
     assert await _icon_status(client, icon_id) == 200
 
 
-async def test_the_owner_removes_an_icon_by_clearing_it_first(client, owner):
+@pytest.mark.parametrize("change", ["replace", "clear"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+async def test_changing_the_icon_deletes_the_one_it_replaced(
+    client, owner, apps_enabled, kind, change
+):
+    resource_id, icon_id = await _with_icon(client, owner, kind)
+    new_icon_id = await _upload(client, owner) if change == "replace" else None
+
+    changed = await _set_icon(client, owner, kind, resource_id, new_icon_id)
+
+    assert changed.status_code == 200, changed.text
+    assert await _shown_icon(client, owner, resource_id, kind) == new_icon_id
+    assert await _icon_status(client, icon_id) == 404
+    if new_icon_id is not None:
+        assert await _icon_status(client, new_icon_id) == 200
+
+
+async def test_sending_the_current_icon_again_keeps_it(client, owner):
     assistant_id, icon_id = await _with_icon(client, owner)
 
-    cleared = await _set_icon(client, owner, "assistant", assistant_id, None)
-    assert cleared.status_code == 200, cleared.text
-    deleted = await client.delete(f"/api/v1/icons/{icon_id}/", headers=owner)
+    resent = await _set_icon(client, owner, "assistant", assistant_id, icon_id)
 
-    assert deleted.status_code == 204, deleted.text
-    assert await _icon_status(client, icon_id) == 404
+    assert resent.status_code == 200, resent.text
+    assert await _icon_status(client, icon_id) == 200
+
+
+async def test_clearing_an_icon_keeps_it_for_another_resource_that_shows_it(
+    client, owner, member
+):
+    owned_assistant, icon_id = await _with_icon(client, owner)
+    borrowing_assistant, _ = await _with_icon(client, member, icon_id=icon_id)
+
+    cleared = await _set_icon(client, member, "assistant", borrowing_assistant, None)
+
+    assert cleared.status_code == 200, cleared.text
+    assert await _shown_icon(client, owner, owned_assistant) == icon_id
+    assert await _icon_status(client, icon_id) == 200
 
 
 async def test_deleting_a_resource_keeps_an_icon_another_resource_shows(
@@ -233,6 +272,21 @@ async def test_deleting_the_last_resource_that_shows_an_icon_deletes_it(
 
     assert deleted.status_code == 204, deleted.text
     assert await _icon_status(client, icon_id) == 404
+
+
+async def test_deleting_a_space_deletes_the_icons_of_the_resources_in_it(
+    client, owner, apps_enabled
+):
+    space_id, space_icon = await _with_icon(client, owner, "space")
+    icons = [space_icon]
+    for kind in ("assistant", "app", "group_chat"):
+        _, icon_id = await _with_icon(client, owner, kind, space_id=space_id)
+        icons.append(icon_id)
+
+    deleted = await client.delete(f"/api/v1/spaces/{space_id}/", headers=owner)
+
+    assert deleted.status_code == 204, deleted.text
+    assert [await _icon_status(client, icon_id) for icon_id in icons] == [404] * 4
 
 
 def _deleting(db_container, icon_id: str, tenant_id: UUID):
