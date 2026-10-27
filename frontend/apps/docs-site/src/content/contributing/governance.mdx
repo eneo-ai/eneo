@@ -2,7 +2,7 @@
 title: Governance and Roles
 ---
 
-import { Callout, Steps } from "nextra/components";
+import { Callout } from "nextra/components";
 
 # Governance and Roles
 
@@ -15,6 +15,9 @@ partner organisations and anyone else can propose and build improvements.
 **Stewardship** sits with one accountable team, which reviews every change and
 decides what is merged and released.
 
+This page explains the roles and the protections behind them. For the practical
+steps, see [Contributing to Eneo](/contributing).
+
 ## Two roles
 
 ### Core Maintainers: stewards of the platform
@@ -23,9 +26,9 @@ Core Maintainers is the Eneo team at Sundsvalls kommun
 (`@eneo-ai/core-maintainers`). The team is accountable for everything that
 ships. It:
 
-- sets the technical direction, architecture and quality bar
+- keeps the codebase in line with the agreed technical roadmap and architecture
 - reviews and approves every change before it is merged
-- merges pull requests and cuts releases
+- merges pull requests and publishes releases
 - responds to security alerts and vulnerability reports
 
 ### Collaborators: building Eneo together
@@ -38,59 +41,29 @@ agencies who develop Eneo with us in the open (`@eneo-ai/collaborators`). They:
 - review each other's work and share what their organisations need
 
 Their work reaches the platform through pull requests that a Core Maintainer
-reviews. Anyone without a partner agreement can contribute the same way, through
-issues and pull requests from a fork.
+reviews.
+
+### Everyone else
+
+You do not need to be in a team to contribute. Anyone with a GitHub account can
+open issues, take part in discussions, review pull requests and submit changes
+from a fork, in exactly the same way as Collaborators.
+
+## How a change reaches Eneo
 
 ![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and publish a release from a release branch with a v tag. GitHub rulesets ensure that only Core Maintainers can merge into develop, push to release branches and create v tags.](/diagrams/contribution-governance.svg)
 
-## The contribution flow
+1. **Issue.** The change is described and agreed in an issue.
+2. **Fork and pull request.** The contributor builds it in a fork and opens a
+   pull request against `develop`.
+3. **Checks.** CI, Dependency Review and the PR label check run automatically.
+4. **Review.** A Core Maintainer other than the author approves it.
+5. **Merge.** A Core Maintainer adds it to the merge queue, which tests it
+   against the latest `develop` and squash-merges it.
+6. **Release.** Core Maintainers cut a release branch and publish a `v*` tag.
 
-<Steps>
-
-### Start with an issue
-
-Every change starts with an issue that the maintainers have discussed, so no
-one spends time on work that cannot be accepted. See
-[Contributing to Eneo](/contributing).
-
-### Work in a fork
-
-Fork the repository, create a branch in your fork and open a pull request
-against `develop`. Pull requests from forks run the same CI as everyone else's,
-but with a read-only token and without access to repository secrets.
-
-### Pass the required checks
-
-These checks must pass:
-
-- `CI / CI`
-- `Dependency Review / Dependency Review`
-- `PR label policy / PR labels`
-
-See [Security for Contributors](/contributing/security) for what each check
-covers, and the
-[required-label policy](https://github.com/eneo-ai/eneo/blob/develop/.github/PROJECT_WORKFLOW.md#required-labels)
-for the labels a pull request needs.
-
-### Get an approval from a Core Maintainer
-
-GitHub requests a review from `@eneo-ai/core-maintainers` automatically. At
-least one Core Maintainer must approve. Reviews from others are welcome and
-help, but only a Core Maintainer's approval counts towards the requirement. A
-new commit after an approval dismisses it, and all review conversations must be
-resolved before the merge.
-
-Core Maintainers' own pull requests follow the same rule: another Core
-Maintainer approves them.
-
-### Merge through the queue
-
-A Core Maintainer adds the approved pull request to the merge queue. The queue
-re-runs the required checks on the combined change and squash-merges it into
-`develop`. The push to `develop` then runs the full suite again through **Build
-and Push Docker Images**.
-
-</Steps>
+Each step is described for contributors in
+[Contributing to Eneo](/contributing#contribute-a-change).
 
 ## How we protect the platform
 
@@ -98,7 +71,7 @@ The rules are enforced by GitHub team roles and repository rulesets. They do not
 depend on anyone remembering them.
 
 - **Least privilege.** Only Core Maintainers have write access to the
-  repository. Collaborators contribute from forks. Administrator rights are
+  repository. Everyone else contributes from forks. Administrator rights are
   limited to a small number of organisation owners.
 - **Four eyes on every change.** Every pull request into `develop` needs an
   approval from a Core Maintainer other than its author. New commits reset the
@@ -120,13 +93,13 @@ The security policy behind these controls is in
 
 ## Roles and permissions
 
-| Role                | Team                        | Access to `eneo`                                                    | What the role can do                                                                                                                               |
-| ------------------- | --------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Everyone            | –                           | Public                                                              | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork.                          |
-| Collaborators       | `@eneo-ai/collaborators`    | Triage                                                              | Everything above, plus label, assign, close and reopen issues and pull requests.                                                                   |
-| Technical committee | `@eneo-ai/teknisk-kommitte` | Triage                                                              | Raise and discuss issues and priorities.                                                                                                           |
-| Core Maintainers    | `@eneo-ai/core-maintainers` | Maintain on every repository, plus Security manager and CI/CD admin | Approve and merge pull requests, cut release branches, publish releases, triage security alerts and manage Actions secrets, variables and runners. |
-| Administrators      | Organisation owners         | Admin                                                               | Change rulesets, team access and repository settings.                                                                                              |
+| Role             | Team                        | Access to `eneo`                                                    | What the role can do                                                                                                                               |
+| ---------------- | --------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Everyone         | –                           | Public                                                              | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork.                          |
+| Collaborators    | `@eneo-ai/collaborators`    | Triage                                                              | Everything above, plus label, assign, close and reopen issues and pull requests.                                                                   |
+| Teknisk kommitté | `@eneo-ai/teknisk-kommitte` | Triage                                                              | Shape the technical roadmap through issues and discussions, and organise issues.                                                                   |
+| Core Maintainers | `@eneo-ai/core-maintainers` | Maintain on every repository, plus Security manager and CI/CD admin | Approve and merge pull requests, cut release branches, publish releases, triage security alerts and manage Actions secrets, variables and runners. |
+| Administrators   | Organisation owners         | Admin                                                               | Change rulesets, team access and repository settings.                                                                                              |
 
 Organisation members have read access to the organisation's repositories by
 default. Any further rights come from the teams above.
@@ -175,14 +148,35 @@ review. It is not part of the normal flow.
   review the change afterwards.
 </Callout>
 
+## Where this fits in Eneo's governance
+
+The roles on this page cover day-to-day work in the repository. Eneo as a whole
+is governed by a user association of public-sector organisations:
+
+- The **Styrgrupp** sets the vision and strategy.
+- The **Teknisk kommitté** owns the technical roadmap, architecture, release
+  planning and security direction.
+- The **Tekniskt råd** and the **Användarråd** gather needs from partners and
+  users and bring them into the roadmap.
+
+Core Maintainers carry out the technical stewardship in the repository in line
+with those decisions. See [Samarbetsforum](https://eneo.ai/samarbetsforum.html)
+for the bodies, their members and how to take part.
+
 ## FAQ
+
+### Do I need to be in a team to contribute?
+
+No. Anyone with a GitHub account can open issues and submit pull requests from
+a fork. The teams give partner organisations extra rights to organise issues,
+not a different way to contribute code. Start with
+[Contributing to Eneo](/contributing).
 
 ### How does my organisation become a Collaborator?
 
 Contact the maintainers at `digitalisering@sundsvall.se`. Developers from
 partner municipalities and agencies are added to `@eneo-ai/collaborators`.
-Until then, you can already contribute through issues and pull requests from a
-fork.
+Until then, you can contribute in the same way as everyone else.
 
 ### Why can't Collaborators push branches or merge, even trusted partners?
 
@@ -201,14 +195,19 @@ early and speed it up.
 ### Does CI run on my pull request from a fork?
 
 Yes. The same checks run, with a read-only token and without secrets. If you
-are a first-time contributor outside the organisation, a Core Maintainer may
-need to approve the first workflow run before it starts.
+are a first-time contributor, a Core Maintainer may need to approve the first
+workflow run before it starts.
+
+### Why is the PR label check red on my pull request?
+
+Contributors without Triage access cannot add labels. A maintainer adds the
+labels during review and the check turns green. You do not need to do anything.
 
 ### Who decides what goes into Eneo?
 
-Priorities are discussed in issues, together with partner organisations and
-the technical committee. Core Maintainers make the final decision to merge and
-are accountable for what is released.
+Needs from partners and users reach the roadmap through the Tekniskt råd and
+the Användarråd, and the Teknisk kommitté sets the technical priorities. Core
+Maintainers decide on each merge and are accountable for what is released.
 
 ### How do I get a fix into a released version?
 
@@ -223,5 +222,7 @@ bypass exists for urgent cases, and its reason is recorded in the pull request.
 
 ### How do I report a security vulnerability?
 
-Email `security@sundsvall.se`. Do not report it in a public issue, pull request
-or discussion. See [Security for Contributors](/contributing/security).
+Privately, through
+[**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
+or by email to `security@sundsvall.se`. Never report it in a public issue, pull
+request or discussion.

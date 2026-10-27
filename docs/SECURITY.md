@@ -6,7 +6,13 @@ public GitHub issues, pull requests, or discussions.
 
 ## Reporting a Vulnerability
 
-Email security reports to `security@sundsvall.se`.
+Report a vulnerability privately in one of two ways:
+
+- On GitHub, through **Security → Report a vulnerability**
+  (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
+  visible only to you and the maintainers, and the fix can be coordinated in a
+  private advisory.
+- By email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
 
