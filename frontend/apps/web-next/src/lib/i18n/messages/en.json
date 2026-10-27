@@ -2934,7 +2934,7 @@
   "api_keys_action_purge": "Delete permanently",
   "api_keys_admin_action_purge": "Delete permanently",
   "api_keys_purge_dialog_title": "Delete API key permanently?",
-  "api_keys_purge_dialog_description": "This removes the key from the database. The audit log entry is preserved, but the key itself cannot be recovered. Only revoked or expired keys can be deleted.",
+  "api_keys_purge_dialog_description": "This removes the key from the database. If it is a service key, its conversations are deleted too, along with files only they used. The audit log entry is preserved, but nothing deleted can be recovered. Only revoked or expired keys can be deleted.",
   "api_keys_purge_confirm": "Delete permanently",
   "api_keys_action_suspend": "Suspend",
   "api_keys_action_reactivate": "Reactivate",

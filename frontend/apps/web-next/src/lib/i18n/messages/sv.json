@@ -2967,7 +2967,7 @@
   "api_keys_action_purge": "Ta bort permanent",
   "api_keys_admin_action_purge": "Ta bort permanent",
   "api_keys_purge_dialog_title": "Ta bort API-nyckel permanent?",
-  "api_keys_purge_dialog_description": "Detta tar bort nyckeln från databasen. Audit-loggen behålls, men själva nyckeln kan inte återskapas. Endast återkallade eller utgångna nycklar kan tas bort.",
+  "api_keys_purge_dialog_description": "Detta tar bort nyckeln från databasen. Om det är en tjänstenyckel tas även dess konversationer bort, liksom filer som bara de använde. Audit-loggen behålls, men det som tas bort kan inte återskapas. Endast återkallade eller utgångna nycklar kan tas bort.",
   "api_keys_purge_confirm": "Ta bort permanent",
   "api_keys_action_suspend": "Pausa",
   "api_keys_action_reactivate": "Återaktivera",
