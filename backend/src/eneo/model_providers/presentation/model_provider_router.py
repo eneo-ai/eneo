@@ -365,8 +365,12 @@ async def get_provider_capabilities(
 
         # The route is built as "<provider_type>/<name>" (resolve_model_route),
         # so a name that keeps the provider's own prefix would be sent as
-        # "azure_ai/azure_ai/...". Offer the name without it.
+        # "azure_ai/azure_ai/...". Offer the name without it. LiteLLM keys
+        # carry the raw provider ("vllm/..."), so that prefix goes too, but
+        # exactly one prefix is removed either way.
         name = model_key.removeprefix(f"{provider}/")
+        if name == model_key and raw_provider != provider:
+            name = model_key.removeprefix(f"{raw_provider}/")
         is_qualified = name != model_key
 
         # LiteLLM can list a model both bare and as "<provider>/<name>". Keep

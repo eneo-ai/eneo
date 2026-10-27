@@ -6,18 +6,19 @@ name that kept LiteLLM's own provider prefix was therefore routed as
 ``azure_ai/azure_ai/...`` (#1188).
 """
 
+from collections import defaultdict
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import litellm
 import pytest
 
-from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.presentation.model_provider_router import (
     ModelCostInfo,
     ProviderCapabilities,
     get_provider_capabilities,
 )
+from eneo.tenants.provider_field_config import get_canonical_provider_type
 
 
 async def _catalog(
@@ -96,14 +97,61 @@ async def test_bare_and_qualified_entries_collapse_to_the_qualified_row(
     assert models[0]["max_input_tokens"] == 2097152
 
 
-async def test_no_bundled_catalog_name_repeats_its_providers_prefix() -> None:
-    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
-    providers = await _catalog()
+async def test_the_raw_litellm_prefix_goes_too_under_the_canonical_provider() -> None:
+    providers = await _catalog(
+        {"vllm/x": {"litellm_provider": "vllm", "mode": "chat"}},
+    )
 
-    for provider, data in providers.items():
-        for models in data["models"].values():
-            for model in models:
-                name = model["name"]
-                route = resolve_model_route(provider_type=provider, model_name=name)
-                # A repeated prefix is only right when the upstream id has it.
-                assert route in model_cost or not name.startswith(f"{provider}/"), route
+    assert "vllm" not in providers
+    assert _names(providers, "hosted_vllm", "completion") == ["x"]
+
+
+async def test_only_a_whole_prefix_segment_is_stripped() -> None:
+    providers = await _catalog(
+        {
+            "openai-whisper": {
+                "litellm_provider": "openai",
+                "mode": "audio_transcription",
+            },
+            "geminix/foo": {"litellm_provider": "gemini", "mode": "chat"},
+        }
+    )
+
+    assert _names(providers, "openai", "transcription") == ["openai-whisper"]
+    assert _names(providers, "gemini", "completion") == ["geminix/foo"]
+
+
+async def test_no_bundled_catalog_name_is_one_of_litellms_prefixed_keys() -> None:
+    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
+
+    # Keys LiteLLM lists under a provider with that provider's own prefix, raw
+    # ("vllm/...") or canonical ("hosted_vllm/..."), and what they strip to.
+    prefixed_keys: dict[str, set[str]] = defaultdict(set)
+    stripped: set[tuple[str, str]] = set()
+    for key, info in model_cost.items():
+        raw_provider = info.get("litellm_provider", "")
+        if not raw_provider:
+            continue
+        provider = get_canonical_provider_type(raw_provider)
+        for prefix in (f"{provider}/", f"{raw_provider}/"):
+            if key.startswith(prefix):
+                prefixed_keys[provider].add(key)
+                stripped.add((provider, key.removeprefix(prefix)))
+                break
+
+    providers = await _catalog()
+    offered = {
+        (provider, model["name"])
+        for provider, data in providers.items()
+        for models in data["models"].values()
+        for model in models
+    }
+
+    # The bundled map must exercise the strip, or the check below is vacuous.
+    assert offered & stripped
+
+    for provider, name in offered:
+        # The prefixed key itself is only a valid name when the upstream id
+        # repeats the prefix ("openrouter/openrouter/auto" -> "openrouter/auto").
+        if name in prefixed_keys[provider]:
+            assert f"{provider}/{name}" in model_cost, (provider, name)
