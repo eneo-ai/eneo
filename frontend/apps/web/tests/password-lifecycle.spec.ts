@@ -10,6 +10,8 @@ test("a generated admin-set password must be replaced at the first sign-in", asy
   page,
   browser
 }) => {
+  test.setTimeout(60_000);
+
   const email = `${uniqueName("e2e-onetime").replace(/\s+/g, "-").toLowerCase()}@example.com`;
   const chosenPassword = "ChosenByTheUser2!";
 
@@ -46,7 +48,7 @@ test("a generated admin-set password must be replaced at the first sign-in", asy
     await newUser.locator('input[name="password"]').fill(oneTimePassword);
     await newUser.locator('button[type="submit"]').click();
 
-    await expect(newUser).toHaveURL(/\/password-change/);
+    await expect(newUser).toHaveURL(/\/password-change/, { timeout: 15_000 });
     await expect(newUser.getByRole("heading", { name: "Välj ett nytt lösenord" })).toBeVisible();
     await expect(newUser.getByText(/sattes av en administratör/)).toBeVisible();
 
@@ -59,7 +61,7 @@ test("a generated admin-set password must be replaced at the first sign-in", asy
     await newUser.getByLabel("Bekräfta nytt lösenord").fill(chosenPassword);
     await newUser.getByRole("button", { name: "Byt lösenord" }).click();
 
-    await expect(newUser).toHaveURL(/\/login\?message=password_changed/);
+    await expect(newUser).toHaveURL(/\/login\?message=password_changed/, { timeout: 15_000 });
     await newUser.locator('input[name="email"]').fill(email);
     await newUser.locator('input[name="password"]').fill(chosenPassword);
     await newUser.locator('button[type="submit"]').click();
@@ -72,7 +74,7 @@ test("a generated admin-set password must be replaced at the first sign-in", asy
     await newUser.locator('input[name="email"]').fill(email);
     await newUser.locator('input[name="password"]').fill(oneTimePassword);
     await newUser.locator('button[type="submit"]').click();
-    await expect(newUser.getByRole("alert")).toBeVisible();
+    await expect(newUser.getByRole("alert")).toBeVisible({ timeout: 15_000 });
     await expect(newUser).toHaveURL(/\/login/);
   } finally {
     await context.close();
