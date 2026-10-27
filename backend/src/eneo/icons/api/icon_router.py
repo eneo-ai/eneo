@@ -99,13 +99,25 @@ async def create_icon(
     "/{id}/",
     status_code=204,
     summary="Delete icon",
-    description="Delete an icon by ID. Requires authentication and ownership.",
-    responses={204: {"description": "Deleted"}, 404: {"description": "Not found"}},
+    description=(
+        "Delete an icon of the caller's tenant that no assistant, app, space or "
+        "group chat shows. Remove the icon from its resource with that "
+        "resource's update first; an icon still in use is refused with 409 "
+        "(`eneo_error_code` 9075)."
+    ),
+    responses={
+        204: {"description": "Deleted"},
+        **responses.get_responses([400, 404, 409]),
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="IconService authorizes mutations for the caller and target icon.",
+    reason=(
+        "Icon ids are public, so IconService deletes only an icon of the "
+        "caller's tenant that no resource references; detaching it is "
+        "authorized by the owning resource's update."
+    ),
 )
 async def delete_icon(id: UUID, container: _ContainerWithUser) -> None:
     icon_service = container.icon_service()

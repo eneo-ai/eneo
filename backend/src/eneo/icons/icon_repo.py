@@ -4,14 +4,27 @@ from uuid import UUID
 import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.object_content_table import (
     IconContentReferences,
     ObjectContents,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
+
+# Every column that shows an icon. Their foreign keys are ON DELETE SET NULL and
+# icon ids are public, so an icon is only deleted once none of them references it.
+ICON_REFERENCES = (
+    Assistants.icon_id,
+    Apps.icon_id,
+    Spaces.icon_id,
+    GroupChatsTable.icon_id,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +101,19 @@ class IconRepository:
         )
         return None if row is None else IconMetadata.model_validate(row)
 
-    async def get_for_lifecycle(self, icon_id: UUID) -> IconMetadata | None:
-        row = await self.session.get(Icons, icon_id)
+    async def get_for_lifecycle(
+        self, icon_id: UUID, *, lock: bool = False
+    ) -> IconMetadata | None:
+        """With ``lock``, wait for a concurrent delete, so a deleted icon reads as gone."""
+        if lock:
+            row = await self.session.scalar(
+                sa.select(Icons)
+                .where(Icons.id == icon_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        else:
+            row = await self.session.get(Icons, icon_id)
         return None if row is None else IconMetadata.model_validate(row)
 
     async def get_primary_reference(
@@ -146,16 +170,30 @@ class IconRepository:
             media_type=row.legacy_mimetype,
         )
 
-    async def delete_by_tenant(self, icon_id: UUID, tenant_id: UUID) -> bool:
+    async def delete_if_unreferenced(self, icon_id: UUID) -> bool:
+        """Delete the icon unless a resource still shows it; returns whether it did.
+
+        Must run inside a transaction.
+        """
+        # Lock first, then check in a separate statement. Under READ COMMITTED a
+        # single DELETE … WHERE NOT EXISTS evaluates the check on its starting
+        # snapshot even after waiting for a concurrent attach to commit, and the
+        # SET NULL cascade would then clear that attach. With the lock, an attach
+        # either commits before the check reads, or waits and fails its FK check.
+        await self.session.execute(
+            sa.select(Icons.id).where(Icons.id == icon_id).with_for_update()
+        )
         deleted_id = (
             await self.session.execute(
                 sa.delete(Icons)
-                .where(Icons.id == icon_id, Icons.tenant_id == tenant_id)
+                .where(
+                    Icons.id == icon_id,
+                    *(
+                        ~sa.exists().where(column == Icons.id)
+                        for column in ICON_REFERENCES
+                    ),
+                )
                 .returning(Icons.id)
             )
         ).scalar_one_or_none()
         return deleted_id is not None
-
-    async def delete(self, icon_id: UUID) -> None:
-        """Delete an icon after its owning aggregate has authorized removal."""
-        await self.session.execute(sa.delete(Icons).where(Icons.id == icon_id))

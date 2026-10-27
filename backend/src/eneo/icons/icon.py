@@ -11,3 +11,13 @@ class IconMetadataCreate(BaseModel):
 
 class IconMetadata(InDB, IconMetadataCreate):
     pass
+
+
+class IconInUseError(Exception):
+    code = "icon_in_use"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The icon is still shown by an assistant, app, space or group chat. "
+            "Remove it there first; the icon is deleted when nothing shows it."
+        )
