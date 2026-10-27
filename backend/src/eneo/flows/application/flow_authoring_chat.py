@@ -469,17 +469,17 @@ async def _sync_assistant(
 async def _sync_tools(
     container: Container, chat: FlowAuthoringChats, space: Space, assistant: Any
 ) -> None:
-    """Give the chat's assistant the tool runtime's functions its space offers
-    and look-up mode for uploads. A refusal (a provider that stopped meeting
-    the space's classification, a tool set that does not fit the model) is
-    logged and leaves the chat as it is: the chat is usable without them."""
-    tools: dict[str, Any] = {}
+    """Give the chat's assistant look-up mode for uploads and the tool
+    runtime's functions its space offers. Each goes in an update of its own:
+    a refusal (a provider that stopped meeting the space's classification, a
+    tool set that does not fit the model) is logged and leaves the chat as it
+    is, and never takes the other setting with it."""
     # A file uploaded in the chat is looked up through the files tool where
     # the model needs it, not put whole in the prompt: the chat is shown
     # long material (a letter, a transcript) to build a flow around. A model
     # without tool calling gets the text inlined anyway.
     if assistant.inline_file_text:
-        tools["inline_file_text"] = False
+        await _update_tools(container, chat, "look-up mode", inline_file_text=False)
     # The tool runtime's functions, as far as the space offers them and a
     # provider is ready; a space setting that changed is followed here.
     states = await capability_availability(
@@ -487,19 +487,25 @@ async def _sync_tools(
     )
     wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
     if sorted(wanted) != sorted(assistant.enabled_capabilities):
-        tools["enabled_capabilities"] = wanted
-    if not tools:
-        return
+        await _update_tools(
+            container, chat, "the tool runtime's functions", enabled_capabilities=wanted
+        )
+
+
+async def _update_tools(
+    container: Container, chat: FlowAuthoringChats, what: str, **setting: Any
+) -> None:
     try:
         await container.assistant_service().update_assistant(
             assistant_id=chat.assistant_id,
-            update=AssistantUpdateCommand(**tools),
+            update=AssistantUpdateCommand(**setting),
             include_hidden=True,
         )
     except BadRequestException as exc:
         logger.warning(
-            "The flow chat's assistant %s did not get its tools: %s",
+            "The flow chat's assistant %s did not get %s: %s",
             chat.assistant_id,
+            what,
             exc,
         )
 
