@@ -5,12 +5,15 @@ import { AvatarGroup, AvatarGroupOverflow } from "@astryxdesign/core/AvatarGroup
 import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useQuery } from "@tanstack/react-query";
 import { Building2, ShieldCheck, SquarePen, User } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
+import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
+import { flowsListQueryOptions } from "@/features/flows/flows-api";
 import { AddMemberDialog } from "../members/space-members";
 import { memberDisplayName, personToneClass } from "../members/member-avatar";
 import { useSpace } from "../use-space";
@@ -33,11 +36,23 @@ export function useSpaceDisplayName(): string {
   return space.name;
 }
 
-/** The space's tabs for this user, flows included when the tenant has them. */
+/**
+ * The space's tabs for this user, flows included when the tenant has them. The
+ * other counts come with the space; the flows are listed separately (the same
+ * list the flows tab shows), so their count arrives once that list is read.
+ */
 export function useSpaceSections(): SpaceSection[] {
   const { space, routeId, can } = useSpace();
   const { featureFlags } = useAppContext();
-  return spaceSections(space, can, routeId, { flows: featureFlags.flows });
+  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
+  const flows = useQuery({
+    ...flowsListQueryOptions(browserApi, space.id),
+    enabled: showsFlows
+  });
+  return spaceSections(space, can, routeId, {
+    flows: featureFlags.flows,
+    flowCount: flows.data?.length
+  });
 }
 
 function MemberStack() {

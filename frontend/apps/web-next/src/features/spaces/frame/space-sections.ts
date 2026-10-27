@@ -31,6 +31,8 @@ type Can = (action: ResourcePermission, resource: SpaceResource) => boolean;
 export type SpaceSectionOptions = {
   /** The tenant's `flows_core` gate is on and the user may view flows. */
   flows?: boolean;
+  /** The space's flows, once their list is read; the space itself does not carry them. */
+  flowCount?: number;
 };
 
 function isSectionId(value: string | undefined): value is SpaceSectionId {
@@ -74,7 +76,7 @@ export function spaceSections(
     );
   }
   if (!isOrg && can("read", "app")) add("apps", space.applications?.apps.count ?? 0);
-  if (!isOrg && can("read", "app") && options.flows) add("flows");
+  if (!isOrg && can("read", "app") && options.flows) add("flows", options.flowCount);
   if (can("read", "website") || can("read", "collection")) {
     add("knowledge", ownKnowledgeCount(space));
   }

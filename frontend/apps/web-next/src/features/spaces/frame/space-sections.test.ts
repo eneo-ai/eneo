@@ -75,6 +75,15 @@ describe("spaceSections", () => {
     ]);
   });
 
+  it("counts the flows on their tab once their list is read", () => {
+    const space = makeSpace({});
+    const flowsTab = (flowCount?: number) =>
+      spaceSections(space, canFor(space), "space-1", { flows: true, flowCount }).find(
+        (section) => section.id === "flows"
+      );
+    expect(flowsTab()).not.toHaveProperty("count");
+    expect(flowsTab(4)?.count).toBe(4);
+  });
   it("adds flows after the apps only when the tenant has them", () => {
     const space = makeSpace({});
     const ids = (flows: boolean) =>
