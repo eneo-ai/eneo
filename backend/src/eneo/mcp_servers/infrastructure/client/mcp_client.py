@@ -711,7 +711,7 @@ MCP_DISCONNECT_TIMEOUT_SECONDS = 10.0
 # Strong references to running connection hosts: asyncio keeps only weak
 # ones, and a host whose client has been dropped must still finish its
 # teardown. Drained at shutdown.
-_connection_hosts: set[asyncio.Task[None]] = set()
+_connection_hosts: dict[asyncio.Task[None], "_ConnectionHost"] = {}
 
 
 def _retrieve_exception(future: asyncio.Future[None]) -> None:
@@ -749,11 +749,11 @@ class _ConnectionHost:
         self.task = asyncio.create_task(
             self._run(), name=f"mcp-connection:{client.mcp_server.name}"
         )
-        _connection_hosts.add(self.task)
+        _connection_hosts[self.task] = self
         self.task.add_done_callback(self._settle)
 
     def _settle(self, task: asyncio.Task[None]) -> None:
-        _connection_hosts.discard(task)
+        _connection_hosts.pop(task, None)
         if self._cancel_timer is not None:
             self._cancel_timer.cancel()
         if not self._ready.done():
@@ -834,8 +834,16 @@ class _ConnectionHost:
                 ) as session:
                     init_result = await session.initialize()
                     if self._stop.is_set():
-                        # The connector gave up during the handshake; a later
-                        # connect may already have published its own session.
+                        # Asked to stop during the handshake: the connector gave
+                        # up (a later connect may already have published its
+                        # own session) or a shutdown drain is running, and a
+                        # connector still waiting must not get a dead host.
+                        self._ready.set_exception(
+                            MCPClientError(
+                                "The MCP connection was closed before its "
+                                "handshake finished"
+                            )
+                        )
                         return
                     client.record_handshake(init_result, get_session_id)
                     client.session = session
@@ -876,26 +884,34 @@ async def drain_connection_hosts(timeout: float) -> int:
     """Close the connections still open at shutdown; return how many there were.
 
     Every turn closes its own connections, so this finds none unless a
-    request was cut off before its cleanup ran. The pools those connections
-    use close after this.
+    request was cut off before its cleanup ran. Each host is asked to leave
+    its contexts, as ``disconnect()`` would, so a healthy connection ends the
+    way a disconnect ends it, session terminated, rather than by cancellation
+    unwinding the SDK's scopes; a host that has not left them within
+    ``timeout`` is cancelled and joined. Runs while the loopback internal-MCP
+    servers are still up and before the pools the connections use close.
     """
-    hosts = {task for task in _connection_hosts if not task.done()}
+    hosts = {task: host for task, host in _connection_hosts.items() if not task.done()}
     if not hosts:
         return 0
     logger.warning(
         "%d MCP connection(s) still open at shutdown; closing them", len(hosts)
     )
-    for task in hosts:
-        task.cancel()
-    try:
-        async with asyncio.timeout(timeout):
-            await asyncio.wait(hosts)
-    except TimeoutError:
+    for host in hosts.values():
+        host.request_stop()
+    await asyncio.wait(set(hosts), timeout=timeout)
+    unfinished = {task for task in hosts if not task.done()}
+    if unfinished:
         logger.error(
-            "%d MCP connection(s) did not close within %.0fs at shutdown",
-            sum(1 for task in hosts if not task.done()),
+            "%d of %d MCP connection(s) did not close within %.0fs at shutdown; "
+            "cancelling them",
+            len(unfinished),
+            len(hosts),
             timeout,
         )
+        for task in unfinished:
+            task.cancel()
+        await asyncio.wait(unfinished, timeout=timeout)
     return len(hosts)
 
 

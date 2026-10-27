@@ -98,6 +98,11 @@ async def test_hanging_up_mid_stream_runs_the_cleanup_on_the_streaming_task():
 
 @pytest.mark.asyncio
 async def test_hanging_up_during_work_stops_it_and_finishes_the_cleanup():
+    # Rests on Starlette's BaseHTTPMiddleware forwarding ``http.disconnect`` to
+    # the inner app while the body is parked in an await (no send pending):
+    # that message is what stops the work. If a Starlette bump stops the
+    # forwarding, this times out waiting for the cleanup and the assumption,
+    # not the response, is what broke.
     cleanup = _Cleanup()
     work_cancelled = asyncio.Event()
 

@@ -37,6 +37,11 @@ async def lifespan(app: FastAPI):
     else:
         async with internal_mcp_lifespan():
             yield
+            # Streamed turns cut off by the shutdown finish their cleanup
+            # while everything they use is still up: a connection host
+            # attached to a loopback server ends gracefully only while that
+            # server still answers, and the pools close in shutdown().
+            await drain_streamed_turns()
     await shutdown()
 
 
@@ -78,17 +83,23 @@ async def startup():
     await init_predefined_roles()
 
 
+async def drain_streamed_turns():
+    """Finish the cleanup of turns cut off by the shutdown.
+
+    The saves scheduled on abort need the database, the MCP connections
+    their HTTP clients and the loopback internal-MCP servers: this runs
+    before any of them close.
+    """
+    await drain_background_saves(FINALIZATION_BUDGET_SECONDS)
+    await drain_connection_hosts(FINALIZATION_BUDGET_SECONDS)
+
+
 async def shutdown():
     settings = get_settings()
     # Skip all shutdown dependencies when in OpenAPI-only mode
     if settings.openapi_only_mode:
         return
 
-    # Streamed turns finish their cleanup before the pools they use close:
-    # the saves scheduled on abort need the database, the MCP connections
-    # their HTTP clients.
-    await drain_background_saves(FINALIZATION_BUDGET_SECONDS)
-    await drain_connection_hosts(FINALIZATION_BUDGET_SECONDS)
     await object_content_runtime.stop()
     await sessionmanager.close()
     await aiohttp_client.stop()

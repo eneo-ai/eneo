@@ -15,6 +15,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import anyio
+import httpx
 import pytest
 import uvicorn
 from mcp.client.streamable_http import StreamableHTTPTransport
@@ -184,6 +185,45 @@ async def test_shutdown_drains_a_connection_left_open():
 
 
 @pytest.mark.asyncio
+async def test_a_shutdown_drain_ends_a_healthy_connection_gracefully(
+    monkeypatch: pytest.MonkeyPatch, teardown_errors: Mock
+):
+    """The drain asks the host to leave its contexts as a disconnect would,
+    so it ends on its own with the session terminated, not by cancellation;
+    cancelling is only for a host that misses the deadline."""
+    warnings = Mock()
+    monkeypatch.setattr(client_module.logger, "warning", warnings)
+    terminated: list[str | None] = []
+    terminate_session = StreamableHTTPTransport.terminate_session
+
+    async def recording_terminate_session(
+        self: StreamableHTTPTransport, client: httpx.AsyncClient
+    ) -> None:
+        await terminate_session(self, client)
+        terminated.append(self.session_id)
+
+    monkeypatch.setattr(
+        StreamableHTTPTransport, "terminate_session", recording_terminate_session
+    )
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+        await client.connect()
+        host = client._host
+        assert host is not None
+
+        assert await drain_connection_hosts(5.0) == 1
+
+    assert not _live_hosts()
+    assert host.task.done() and not host.task.cancelled()
+    assert len(terminated) == 1 and terminated[0] is not None
+    assert client.session is None
+    assert [c.args[0] for c in warnings.call_args_list] == [
+        "%d MCP connection(s) still open at shutdown; closing them"
+    ]
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_a_close_whose_budget_is_spent_still_ends_the_connections(
     monkeypatch: pytest.MonkeyPatch, teardown_errors: Mock
 ):
@@ -216,7 +256,7 @@ async def test_a_server_slow_to_end_its_session_is_cut_off_with_the_budget(
     async def slow_terminate_session(
         self: StreamableHTTPTransport, client: object
     ) -> None:
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
     monkeypatch.setattr(
         StreamableHTTPTransport, "terminate_session", slow_terminate_session
@@ -229,7 +269,9 @@ async def test_a_server_slow_to_end_its_session_is_cut_off_with_the_budget(
         with finalizing("mcp proxy"):
             await proxy.close()
 
-        async with asyncio.timeout(0.5):
+        # Well under the 5 s the server takes, with headroom for a loaded
+        # runner over the 0.3 s budget.
+        async with asyncio.timeout(2):
             while _live_hosts():
                 await asyncio.sleep(0.01)
 
@@ -252,7 +294,9 @@ async def test_a_cancelled_connect_does_not_disturb_the_next_one(
             await connecting
 
         await client.connect()
-        await asyncio.sleep(0.1)  # let the abandoned host finish unwinding
+        async with asyncio.timeout(5):  # the abandoned host finishes unwinding
+            while len(_live_hosts()) > 1:
+                await asyncio.sleep(0.01)
         result = await client.call_tool("echo", {"text": "still connected"})
         await client.disconnect()
 
