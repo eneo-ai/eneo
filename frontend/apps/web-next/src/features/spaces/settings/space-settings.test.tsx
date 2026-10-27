@@ -406,7 +406,7 @@ it("deletes the space once its name is confirmed: the list refreshes, the delete
   // A read of the space that started before the delete answers after it.
   let answerLate!: (space: Space) => void;
   const lateRead = queryClient
-    .fetchQuery({
+    .query({
       queryKey: space,
       queryFn: () => new Promise<Space>((resolve) => (answerLate = resolve)),
       staleTime: 0
