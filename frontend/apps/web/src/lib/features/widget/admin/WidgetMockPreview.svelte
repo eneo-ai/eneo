@@ -6,24 +6,42 @@
   been applied.
 -->
 <script lang="ts">
-  import type { WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
+  import type { WidgetPersona, WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
   import { IconEneo } from "@eneo/icons/eneo";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Moon, Sun } from "@lucide/svelte";
+  import Moon from "@lucide/svelte/icons/moon";
+  import Sun from "@lucide/svelte/icons/sun";
   import { untrack } from "svelte";
-  import { readableOn, themeColors } from "../contrast";
+  import { getEneo } from "$lib/core/Eneo";
+  import { contrastRatio, readableOn, themeColors } from "../contrast";
+  import { monogram } from "../persona";
   import { currentAppScheme } from "./appScheme";
   import { linkHost } from "../urls";
+  import WidgetPersonaByline from "../components/WidgetPersonaByline.svelte";
 
   type Props = {
     name: string;
     texts: WidgetTexts;
     theme: WidgetTheme;
+    persona?: WidgetPersona | null;
   };
 
-  let { name, texts, theme }: Props = $props();
+  let { name, texts, theme, persona = null }: Props = $props();
+
+  const eneo = getEneo();
+  // What the embed page shows: the same byline, the same avatar rule.
+  const personaPreview = $derived.by(() => {
+    const name = persona?.name;
+    if (!name) return null;
+    return {
+      name,
+      avatarUrl: persona.avatar_icon_id ? eneo.icons.url({ id: persona.avatar_icon_id }) : null,
+      monogram: monogram(name),
+      inLauncher: !!persona.avatar_icon_id && (persona.avatar_in_launcher ?? false)
+    };
+  });
 
   // Previewed in the scheme the template pins, else what the admin sees in
   // Eneo; the toggle lets them check the other one.
@@ -40,6 +58,7 @@
   const header = $derived(colors.header);
   const radius = $derived(`${theme.radius ?? 12}px`);
   const left = $derived(theme.position === "bottom-left");
+  const avatarOnAccent = $derived(contrastRatio(readableOn(accent), accent) >= 4.5);
 </script>
 
 <section
@@ -108,7 +127,14 @@
           </p>
         </div>
       </div>
-      <div class="flex flex-col gap-3 px-4 py-4">
+      <div
+        class="flex flex-col gap-3 px-4 py-4"
+        style:--widget-avatar-bg={avatarOnAccent ? accent : null}
+        style:--widget-avatar-fg={avatarOnAccent ? readableOn(accent) : null}
+      >
+        {#if personaPreview}
+          <WidgetPersonaByline persona={personaPreview} intro />
+        {/if}
         {#if texts.welcome}
           <p class="text-sm whitespace-pre-wrap">{texts.welcome}</p>
         {/if}
@@ -151,18 +177,45 @@
         {/if}
       </div>
     </div>
-    <span
-      class="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full shadow"
-      style:background={accent}
-      style:color={readableOn(accent)}
-      aria-hidden="true"
-    >
-      <!-- Same glyph as the loader's launcher button. -->
-      <svg viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor"
-        ><path
-          d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-        /></svg
+    {#if personaPreview?.inLauncher && personaPreview.avatarUrl}
+      <!-- The avatar as the launcher: ringed in the accent, with the chat
+           glyph as a badge so it still reads as a chat. -->
+      <span class="relative inline-block h-14 w-14 shrink-0" aria-hidden="true">
+        <img
+          class="h-14 w-14 rounded-full object-cover shadow"
+          style:border="2px solid {accent}"
+          src={personaPreview.avatarUrl}
+          alt=""
+          width="56"
+          height="56"
+        />
+        <span
+          class="absolute -right-0.5 -bottom-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full"
+          style:background={accent}
+          style:color={readableOn(accent)}
+          style:border="2px solid var(--background-primary)"
+        >
+          <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="currentColor"
+            ><path
+              d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+            /></svg
+          >
+        </span>
+      </span>
+    {:else}
+      <span
+        class="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full shadow"
+        style:background={accent}
+        style:color={readableOn(accent)}
+        aria-hidden="true"
       >
-    </span>
+        <!-- Same glyph as the loader's launcher button. -->
+        <svg viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor"
+          ><path
+            d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+          /></svg
+        >
+      </span>
+    {/if}
   </div>
 </section>

@@ -9,6 +9,7 @@ export const LOCK_GROUPS: readonly WidgetTemplateLockGroup[] = [
   "appearance",
   "language",
   "legal_texts",
+  "persona",
   "wording"
 ];
 
@@ -45,7 +46,10 @@ export function isGroupLocked(
   return (link?.locked_groups ?? []).includes(group);
 }
 
-type TemplateContent = Pick<WidgetTemplate, "texts" | "theme" | "language" | "locked_groups">;
+type TemplateContent = Pick<
+  WidgetTemplate,
+  "texts" | "theme" | "persona" | "language" | "locked_groups"
+>;
 
 /**
  * What a widget receives when it links to the template: the published
@@ -77,6 +81,8 @@ function groupDiffers(
       return a.language !== b.language;
     case "legal_texts":
       return LEGAL_TEXT_FIELDS.some((field) => (a.texts[field] ?? "") !== (b.texts[field] ?? ""));
+    case "persona":
+      return stableJson(a.persona) !== stableJson(b.persona);
     case "wording":
       return WORDING_FIELDS.some((field) => (a.texts[field] ?? "") !== (b.texts[field] ?? ""));
   }

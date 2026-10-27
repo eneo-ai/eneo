@@ -103,9 +103,31 @@ def _user(*permissions: Permission, tenant_id=None):
     )
 
 
-def _template_service(user, repo=None, widget_repo=None):
+class _FakeIconRepo:
+    """Records the icon lifecycle calls the services must make."""
+
+    def __init__(self):
+        self.attachable = []
+        self.released = []
+        self.deleted = []
+
+    async def ensure_attachable(self, previous, requested, *, tenant_id, user_id):
+        self.attachable.append((previous, requested, tenant_id, user_id))
+
+    async def release_replaced(self, previous, requested):
+        self.released.append((previous, requested))
+
+    async def delete_if_unreferenced(self, icon_id):
+        self.deleted.append(icon_id)
+        return True
+
+
+def _template_service(user, repo=None, widget_repo=None, icon_repo=None):
     return WidgetTemplateService(
-        user, repo or _InMemoryRepo(), widget_repo or _InMemoryWidgetRepo()
+        user,
+        repo or _InMemoryRepo(),
+        widget_repo or _InMemoryWidgetRepo(),
+        icon_repo or _FakeIconRepo(),
     )
 
 
@@ -429,3 +451,90 @@ async def test_archived_followers_never_block_deletion():
     )
     await service.delete_template(template.id)
     assert await repo.get(template.id) is None
+
+
+def _persona_template(avatar_icon_id=None):
+    from eneo.widgets.domain.widget import WidgetPersona
+
+    template = WidgetTemplate.create(tenant_id=uuid4(), name="Mall")
+    template.persona = WidgetPersona(name="Sigge", avatar_icon_id=avatar_icon_id)
+    template.locked_groups = [TemplateLockGroup.PERSONA]
+    return template
+
+
+def test_persona_is_a_templated_part_with_its_own_lock():
+    from eneo.widgets.domain.widget import WidgetPersona
+
+    avatar = uuid4()
+    template = _persona_template(avatar)
+    widget = _widget_for(template)
+    own_avatar = uuid4()
+    widget.persona = WidgetPersona(name="Egen", avatar_icon_id=own_avatar)
+
+    # Linking copies it with everything else; the release carries it too.
+    assert template.project_onto(widget, ALL_LOCK_GROUPS) is True
+    assert widget.persona.name == "Sigge" and widget.persona.avatar_icon_id == avatar
+    assert template.draft_release().persona == template.persona
+    assert template.project_onto(widget, [TemplateLockGroup.PERSONA]) is False
+
+    # A locked persona refuses a different value and passes the same one.
+    assert template.locked_changes(widget, {"persona": widget.persona}) == []
+    assert template.locked_changes(
+        widget, {"persona": {"name": "Annan", "avatar_icon_id": None}}
+    ) == ["persona"]
+    template.locked_groups = []
+    assert template.locked_changes(widget, {"persona": {"name": "Annan"}}) == []
+
+    # Not locked by default: a new template only governs look and language.
+    assert (
+        TemplateLockGroup.PERSONA
+        not in WidgetTemplate.create(tenant_id=uuid4(), name="Ny").locked_groups
+    )
+
+
+async def test_template_avatars_follow_the_icon_lifecycle():
+    """Only the admin's own upload becomes the avatar, a replaced one is
+    released, and a deleted template releases what only it showed."""
+    repo, widgets, icons = _InMemoryRepo(), _InMemoryWidgetRepo(), _FakeIconRepo()
+    admin = _user(Permission.ADMIN)
+    service = _template_service(admin, repo, widgets, icons)
+    template = await service.create_template(name="Mall")
+    first, second = uuid4(), uuid4()
+
+    template = await service.update_template(
+        template.id,
+        {"persona": {"name": "Sigge", "avatar_icon_id": first}},
+    )
+    assert icons.attachable == [(None, first, admin.tenant_id, admin.id)]
+    assert icons.released == [(None, first)]
+
+    template = await service.update_template(
+        template.id, {"persona": {"name": "Sigge", "avatar_icon_id": second}}
+    )
+    assert icons.attachable[-1] == (first, second, admin.tenant_id, admin.id)
+    assert icons.released[-1] == (first, second)
+
+    # Publishing puts the avatar on the followers, releasing what they showed.
+    template = await service.update_template(
+        template.id, {"locked_groups": [TemplateLockGroup.PERSONA]}
+    )
+    published = (await service.publish_template(template.id)).template
+    follower = _widget_for(published)
+    follower.template_id = published.id
+    follower.persona = follower.persona.model_copy(
+        update={"name": "Egen", "avatar_icon_id": first}
+    )
+    follower = await widgets.add(follower)
+    icons.released.clear()
+    await service.update_template(
+        template.id, {"persona": {"name": "Sigge", "avatar_icon_id": second}}
+    )
+    result = await service.publish_template(template.id)
+    assert [w.id for w in result.synced_widgets] == [follower.id]
+    assert (await widgets.get(follower.id)).persona.avatar_icon_id == second
+    assert (first, second) in icons.released
+
+    # Deleting the template releases the draft's and the release's avatars.
+    widgets.rows.clear()
+    await service.delete_template(template.id)
+    assert icons.deleted == [second]

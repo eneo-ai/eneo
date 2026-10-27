@@ -27,6 +27,9 @@ class WidgetTemplates(BasePublic):
     theme: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
+    persona: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
     language: Mapped[str] = mapped_column(server_default="auto")
     is_default: Mapped[bool] = mapped_column(server_default=sa.false())
     # Draft lock groups (TemplateLockGroup values); followers are held to the
@@ -34,8 +37,8 @@ class WidgetTemplates(BasePublic):
     locked_groups: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
     )
-    # The published release: texts, theme, language and locked_groups as of
-    # the last publication. NULL until the template is published.
+    # The published release: texts, theme, persona, language and locked_groups
+    # as of the last publication. NULL until the template is published.
     published: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     published_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True

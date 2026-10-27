@@ -38,6 +38,7 @@ class WidgetAssembler:
             name=widget.name,
             texts=widget.texts,
             theme=widget.theme,
+            persona=widget.persona,
             limits=widget.limits,
             privacy=widget.privacy,
             language=widget.language,

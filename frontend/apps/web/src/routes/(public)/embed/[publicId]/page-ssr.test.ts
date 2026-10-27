@@ -37,6 +37,7 @@ describe("embed page on the server", () => {
           name: "Public assistant",
           texts: {},
           theme: {},
+          persona: {},
           language: "en",
           bot_protection: "altcha",
           max_question_chars: 2000,

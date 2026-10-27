@@ -229,3 +229,54 @@ def test_theme_header_colour_and_logo_are_validated():
         WidgetTheme(header_color="blue")
     with pytest.raises(ValueError):
         WidgetTheme(logo_url="javascript:alert(1)")
+
+
+def test_persona_is_optional_and_its_parts_depend_on_each_other():
+    from eneo.widgets.domain.widget import WidgetPersona
+
+    assert not _widget().persona.is_set
+    neutral = WidgetPersona()
+    assert neutral.name == "" and neutral.avatar_icon_id is None
+    assert neutral.avatar_in_launcher is False
+
+    persona = WidgetPersona(name="  Sigge  ", avatar_icon_id=uuid4())
+    assert persona.name == "Sigge" and persona.is_set
+    # The monogram is the first character, so the name starts with a letter;
+    # letters outside ASCII count.
+    assert WidgetPersona(name="Åsa").name == "Åsa"
+    with pytest.raises(ValueError):
+        WidgetPersona(name="1Sigge")
+    with pytest.raises(ValueError):
+        WidgetPersona(name="🙂 Sigge")
+    with pytest.raises(ValueError):
+        WidgetPersona(name="S" * 31)
+    # A face without a name has nothing to read beside it.
+    with pytest.raises(ValueError):
+        WidgetPersona(avatar_icon_id=uuid4())
+    # The launcher only ever shows an uploaded image, never a monogram.
+    with pytest.raises(ValueError):
+        WidgetPersona(name="Sigge", avatar_in_launcher=True)
+    with pytest.raises(ValueError):
+        WidgetPersona(name="Sigge", avatar_icon_id=uuid4(), unknown=True)
+
+
+def test_persona_is_editable_without_touching_visitor_tokens():
+    widget = _widget()
+    icon_id = uuid4()
+    assert (
+        widget.apply_update({"persona": {"name": "Sigge", "avatar_icon_id": icon_id}})
+        is False
+    )
+    assert widget.persona.name == "Sigge"
+    assert widget.persona.avatar_icon_id == icon_id
+    assert widget.token_generation == 0
+    with pytest.raises(BadRequestException):
+        widget.apply_update(
+            {
+                "persona": {
+                    "name": "Sigge",
+                    "avatar_in_launcher": True,
+                    "avatar_icon_id": None,
+                }
+            }
+        )

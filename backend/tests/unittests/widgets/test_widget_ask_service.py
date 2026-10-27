@@ -745,3 +745,24 @@ async def test_a_vote_and_its_later_change_are_booked_on_the_conversation_day():
         for call in deps.usage.record.await_args_list
     ]
     assert booked == [(monday, 1, 0), (monday, -1, 1)]
+
+
+async def test_a_persona_name_is_presentation_in_the_prompt_addendum():
+    from eneo.widgets.domain.widget import WidgetPersona
+
+    widget = _widget(persona=WidgetPersona(name="Sigge"))
+    service, deps = _service(tokens=(1, 1))
+
+    response = await service.ask(
+        _principal(widget),
+        question="Vem är du?",
+        session_id=None,
+        client_ip="203.0.113.1",
+    )
+    await _drain(response)
+
+    addendum = deps.assistant_service.ask.await_args.kwargs["prompt_addendum"]
+    assert addendum.startswith(module.WIDGET_STYLE_PROMPT)
+    assert 'under the name "Sigge"' in addendum
+    assert "remain an AI assistant" in addendum
+    assert module.widget_prompt_addendum(_widget()) == module.WIDGET_STYLE_PROMPT

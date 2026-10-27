@@ -135,7 +135,26 @@ def _space(space_id, assistant, *, can_edit=True, organization=False, personal=F
     return space, can_edit
 
 
-def _service(user, space, can_edit=True, repo=None, template_repo=None):
+class _FakeIconRepo:
+    """Records the icon lifecycle calls the services must make."""
+
+    def __init__(self):
+        self.attachable = []
+        self.released = []
+        self.deleted = []
+
+    async def ensure_attachable(self, previous, requested, *, tenant_id, user_id):
+        self.attachable.append((previous, requested, tenant_id, user_id))
+
+    async def release_replaced(self, previous, requested):
+        self.released.append((previous, requested))
+
+    async def delete_if_unreferenced(self, icon_id):
+        self.deleted.append(icon_id)
+        return True
+
+
+def _service(user, space, can_edit=True, repo=None, template_repo=None, icon_repo=None):
     space_service = MagicMock()
     space_service.get_space = AsyncMock(return_value=space)
     space_service.repo.one = AsyncMock(return_value=space)
@@ -157,6 +176,7 @@ def _service(user, space, can_edit=True, repo=None, template_repo=None):
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
+        icon_repo=icon_repo or _FakeIconRepo(),
     )
 
 
@@ -356,13 +376,15 @@ async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
     )
     activated = await outsider.activate_widget(view.widget.id)
     assert activated.widget.status == WidgetStatus.ACTIVE
-    assert repo.locked_reads == []
+    # Only the update locked its row (before any icon lock); activation reads
+    # plainly and relies on the revision.
+    assert repo.locked_reads == [view.widget.id]
     paused = await outsider.pause_widget(view.widget.id)
     assert paused.widget.status == WidgetStatus.PAUSED
     archived = await outsider.archive_widget(view.widget.id)
     assert archived.widget.status == WidgetStatus.ARCHIVED
     # Both write past the revision check, so both decide on a locked row.
-    assert repo.locked_reads == [view.widget.id, view.widget.id]
+    assert repo.locked_reads == [view.widget.id] * 3
 
 
 async def test_pause_is_allowed_for_editors_and_admins(assistant):
@@ -749,3 +771,87 @@ async def test_create_refuses_an_assistant_that_left_the_space_meanwhile(assista
     with pytest.raises(NotFoundException):
         await service.create_widget(space_id=space.id, target_id=assistant.id, name="w")
     assert repo.rows == {}
+
+
+async def test_persona_avatar_is_checked_before_the_write_and_released_after(
+    assistant,
+):
+    space, _ = _space(uuid4(), assistant)
+    repo, icons = _InMemoryRepo(), _FakeIconRepo()
+    user = _user(Permission.WIDGETS)
+    service = _service(user, space, repo=repo, icon_repo=icons)
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    first, second = uuid4(), uuid4()
+
+    updated = await service.update_widget(
+        view.widget.id,
+        {
+            "revision": view.widget.revision,
+            "persona": {"name": "Sigge", "avatar_icon_id": first},
+        },
+    )
+    assert updated.widget.persona.avatar_icon_id == first
+    # The row was locked before the icons (see IconRepository.lock_for_change).
+    assert repo.locked_reads == [view.widget.id]
+    assert icons.attachable == [(None, first, user.tenant_id, user.id)]
+    assert icons.released == [(None, first)]
+
+    await service.update_widget(
+        updated.widget.id,
+        {
+            "revision": updated.widget.revision,
+            "persona": {"name": "Sigge", "avatar_icon_id": second},
+        },
+    )
+    assert icons.attachable[-1] == (first, second, user.tenant_id, user.id)
+    assert icons.released[-1] == (first, second)
+
+    # An update that leaves the persona alone neither checks nor releases.
+    icons.attachable.clear()
+    icons.released.clear()
+    current = await service.get_widget(view.widget.id)
+    await service.update_widget(
+        current.widget.id, {"revision": current.widget.revision, "name": "Ny"}
+    )
+    assert icons.attachable == [(second, second, user.tenant_id, user.id)]
+    assert icons.released == [(second, second)]
+
+
+async def test_linking_a_template_releases_the_widgets_own_avatar(assistant):
+    from eneo.widgets.domain.widget import WidgetPersona
+    from eneo.widgets.domain.widget_template import WidgetTemplate
+
+    space, _ = _space(uuid4(), assistant)
+    repo, template_repo, icons = (
+        _InMemoryRepo(),
+        _InMemoryTemplateRepo(),
+        _FakeIconRepo(),
+    )
+    admin = _user(Permission.WIDGETS, Permission.ADMIN)
+    service = _service(
+        admin, space, repo=repo, template_repo=template_repo, icon_repo=icons
+    )
+    template_avatar, own_avatar = uuid4(), uuid4()
+    template = WidgetTemplate.create(tenant_id=admin.tenant_id, name="Mall")
+    template.persona = WidgetPersona(name="Sigge", avatar_icon_id=template_avatar)
+    template.publish(by=admin.id)
+    template = await template_repo.add(template)
+
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    view = await service.update_widget(
+        view.widget.id,
+        {
+            "revision": view.widget.revision,
+            "persona": {"name": "Egen", "avatar_icon_id": own_avatar},
+        },
+    )
+    icons.released.clear()
+    linked = await service.link_template(
+        view.widget.id, template.id, revision=view.widget.revision
+    )
+    assert linked.widget.persona.avatar_icon_id == template_avatar
+    assert icons.released == [(own_avatar, template_avatar)]

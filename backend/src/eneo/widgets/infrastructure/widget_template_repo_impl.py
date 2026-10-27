@@ -11,7 +11,12 @@ import sqlalchemy as sa
 from eneo.database.database import AsyncSession
 from eneo.database.tables.widget_templates_table import WidgetTemplates
 from eneo.main.exceptions import NotFoundException
-from eneo.widgets.domain.widget import WidgetLanguage, WidgetTexts, WidgetTheme
+from eneo.widgets.domain.widget import (
+    WidgetLanguage,
+    WidgetPersona,
+    WidgetTexts,
+    WidgetTheme,
+)
 from eneo.widgets.domain.widget_template import (
     TemplateLockGroup,
     TemplateRelease,
@@ -27,6 +32,7 @@ def _to_entity(row: WidgetTemplates) -> WidgetTemplate:
         description=row.description or "",
         texts=WidgetTexts.model_validate(row.texts or {}),
         theme=WidgetTheme.model_validate(row.theme or {}),
+        persona=WidgetPersona.model_validate(row.persona or {}),
         language=WidgetLanguage(row.language),
         is_default=bool(row.is_default),
         locked_groups=[TemplateLockGroup(group) for group in (row.locked_groups or [])],
@@ -48,6 +54,7 @@ def _to_values(template: WidgetTemplate) -> dict[str, Any]:
         "description": template.description,
         "texts": template.texts.model_dump(mode="json"),
         "theme": template.theme.model_dump(mode="json"),
+        "persona": template.persona.model_dump(mode="json"),
         "language": template.language.value,
         "is_default": template.is_default,
         "locked_groups": [group.value for group in template.locked_groups],

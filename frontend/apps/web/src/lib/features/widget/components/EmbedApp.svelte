@@ -10,6 +10,7 @@
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
   import type { VisitorSession } from "../visitorSession";
   import { DARK_SURFACE, LIGHT_SURFACE, contrastRatio, readableOn, themeColors } from "../contrast";
+  import { personaView } from "../persona";
   import { widgetChatPartner } from "../widgetPartner";
   import WidgetChat from "./WidgetChat.svelte";
 
@@ -90,6 +91,11 @@
   const focus = $derived(
     contrastRatio(accent, dark ? DARK_SURFACE : LIGHT_SURFACE) >= 3 ? accent : null
   );
+  // The persona's monogram is small text on the avatar: it takes the accent
+  // only where the derived text colour reaches 4.5:1 on it (WCAG 1.4.3);
+  // otherwise the byline's neutral plate, in both sizes so the face is one.
+  const persona = personaView(initial.config, initial.baseUrl);
+  const avatarOnAccent = $derived(contrastRatio(readableOn(accent), accent) >= 4.5);
 </script>
 
 <div
@@ -100,12 +106,15 @@
   style:--widget-on-header={header ? readableOn(header) : null}
   style:--widget-focus={focus}
   style:--widget-radius="{config.theme.radius ?? 12}px"
+  style:--widget-avatar-bg={avatarOnAccent ? accent : null}
+  style:--widget-avatar-fg={avatarOnAccent ? readableOn(accent) : null}
 >
   <WidgetChat
     {config}
     {client}
     {hostOrigin}
     {previewToken}
+    {persona}
     onSession={(created) => (session = created)}
     onTheme={applyScheme}
   />

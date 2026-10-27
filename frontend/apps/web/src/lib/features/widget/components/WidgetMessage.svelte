@@ -2,7 +2,11 @@
   import type { ConversationMessage } from "@eneo/eneo-js";
   import { Markdown, sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { tick } from "svelte";
-  import { Check, ChevronRight, Copy, ExternalLink, FileText } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Copy from "@lucide/svelte/icons/copy";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FileText from "@lucide/svelte/icons/file-text";
   import { m } from "$lib/paraglide/messages";
   import { Announcer } from "../announcer.svelte";
   import {
@@ -13,8 +17,10 @@
     type WidgetSource
   } from "../widgetMessageContext";
   import { linkHost } from "../urls";
+  import type { PersonaView } from "../persona";
   import { widgetToolSteps } from "../widgetToolSteps";
   import WidgetInref from "./WidgetInref.svelte";
+  import WidgetPersonaByline from "./WidgetPersonaByline.svelte";
   import WidgetQuestionBubble from "./WidgetQuestionBubble.svelte";
   import WidgetToolActivity from "./WidgetToolActivity.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
@@ -28,6 +34,8 @@
     showSources?: boolean;
     /** Off when the widget keeps the tools behind an answer out of view. */
     showActivity?: boolean;
+    /** Who answers; null when the widget has no persona. */
+    persona?: PersonaView | null;
   };
 
   let {
@@ -36,7 +44,8 @@
     isLast,
     isLoading,
     showSources = true,
-    showActivity = true
+    showActivity = true,
+    persona = null
   }: Props = $props();
 
   const anchorFor = (sourceIndex: number) => `widget-source-${index}-${sourceIndex}`;
@@ -109,6 +118,11 @@
   <WidgetQuestionBubble text={message.question} />
 
   <div class="flex flex-col gap-2">
+    {#if persona}
+      <!-- Before the activity row, so "Söker…" is read as the persona's step,
+           and already while the answer is on its way. -->
+      <WidgetPersonaByline {persona} />
+    {/if}
     {#if steps.length > 0}
       <div aria-label={m.widget_activity()} role="group">
         <WidgetToolActivity {steps} working={stepsWorking} />
@@ -118,7 +132,9 @@
       <!-- The chat announces the wait once; the dots stay silent. -->
       <div aria-hidden="true"><TypingIndicator /></div>
     {:else if !waiting}
-      <span class="sr-only">{m.widget_assistant()}: </span>
+      {#if !persona}
+        <span class="sr-only">{m.widget_assistant()}: </span>
+      {/if}
       <div class="widget-answer">
         <Markdown
           class="text-primary max-w-none"

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
+from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -63,6 +64,7 @@ class WidgetService:
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         tenant_service: "TenantService",
+        icon_repo: IconRepository,
         token_service: Optional[VisitorTokenService] = None,
     ) -> None:
         self.user = user
@@ -71,6 +73,7 @@ class WidgetService:
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.tenant_service = tenant_service
+        self.icon_repo = icon_repo
         self.token_service = token_service or VisitorTokenService()
 
     # --- policy -----------------------------------------------------------
@@ -290,7 +293,10 @@ class WidgetService:
     async def _widget_for_change(
         self, widget_id: UUID, revision: int
     ) -> tuple[Widget, "Space"]:
-        widget = await self._owned_widget(widget_id)
+        # Row lock first, icons after (IconRepository.lock_for_change): an
+        # update and a template publication swapping avatars then queue on
+        # the widget row instead of deadlocking on the icons.
+        widget = await self._owned_widget(widget_id, for_update=True)
         space = await self._space_for_edit(widget.space_id)
         if widget.revision != revision:
             raise WidgetRevisionConflictError()
@@ -308,6 +314,11 @@ class WidgetService:
         self._link(widget, template)
         self._hold_to_rules(before, widget)
         widget = await self.repo.update(widget)
+        # The template's avatar replaced the widget's own; the old one goes
+        # unless something else still shows it.
+        await self.icon_repo.release_replaced(
+            before.persona.avatar_icon_id, widget.persona.avatar_icon_id
+        )
         return self._view(space, widget, template)
 
     async def detach_template(self, widget_id: UUID, *, revision: int) -> WidgetView:
@@ -322,14 +333,11 @@ class WidgetService:
         self, widget_id: UUID, changes: dict[str, Any]
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
-        widget = await self._owned_widget(widget_id)
-        space = await self._space_for_edit(widget.space_id)
         changes = dict(changes)
         revision = changes.pop("revision", None)
         if revision is None:
             raise BadRequestException("revision is required.")
-        if revision != widget.revision:
-            raise WidgetRevisionConflictError()
+        widget, space = await self._widget_for_change(widget_id, revision)
         template = await self._template_of(widget)
         if template is not None and template.published is not None:
             locked = template.published.locked_changes(widget, changes)
@@ -338,7 +346,17 @@ class WidgetService:
         before = widget.model_copy(deep=True)
         widget.apply_update(changes)
         self._hold_to_rules(before, widget)
+        # Only the editor's own uploads can become the avatar; the id is public.
+        await self.icon_repo.ensure_attachable(
+            before.persona.avatar_icon_id,
+            widget.persona.avatar_icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
         widget = await self.repo.update(widget)
+        await self.icon_repo.release_replaced(
+            before.persona.avatar_icon_id, widget.persona.avatar_icon_id
+        )
         return self._view(space, widget, template)
 
     async def activate_widget(self, widget_id: UUID) -> WidgetView:

@@ -75,6 +75,7 @@ export type Widget = components["schemas"]["WidgetPublic"];
 export type WidgetUpdate = components["schemas"]["WidgetUpdate"];
 export type WidgetTexts = components["schemas"]["WidgetTexts"];
 export type WidgetTheme = components["schemas"]["WidgetTheme"];
+export type WidgetPersona = components["schemas"]["WidgetPersona"];
 export type WidgetLimits = components["schemas"]["WidgetLimits"];
 export type WidgetPrivacy = components["schemas"]["WidgetPrivacy"];
 export type WidgetStatus = components["schemas"]["WidgetStatus"];

@@ -15,6 +15,7 @@ from eneo.widgets.domain.widget import (
     DEFAULT_AI_DISCLOSURE,
     Widget,
     WidgetLanguage,
+    WidgetPersona,
     WidgetTexts,
     WidgetTheme,
     clean_text,
@@ -25,6 +26,7 @@ TEMPLATE_FIELDS = (
     "description",
     "texts",
     "theme",
+    "persona",
     "language",
     "is_default",
     "locked_groups",
@@ -44,6 +46,9 @@ class TemplateLockGroup(str, Enum):
     LANGUAGE = "language"
     # The AI disclosure under the title and the footer note with its link.
     LEGAL_TEXTS = "legal_texts"
+    # The name and avatar visitors talk to, and whether the avatar is the
+    # launcher: one face for every widget of the organisation.
+    PERSONA = "persona"
     WORDING = "wording"
 
 
@@ -76,6 +81,14 @@ def _as_theme(value: Any) -> WidgetTheme:
     )
 
 
+def _as_persona(value: Any) -> WidgetPersona:
+    return (
+        value
+        if isinstance(value, WidgetPersona)
+        else WidgetPersona.model_validate(value)
+    )
+
+
 class TemplateContent(BaseModel):
     """What a template governs on a widget, and the rules for governing it.
 
@@ -91,6 +104,7 @@ class TemplateContent(BaseModel):
 
     texts: WidgetTexts = Field(default_factory=WidgetTexts)
     theme: WidgetTheme = Field(default_factory=WidgetTheme)
+    persona: WidgetPersona = Field(default_factory=WidgetPersona)
     language: WidgetLanguage = WidgetLanguage.AUTO
     locked_groups: list[TemplateLockGroup] = Field(
         default_factory=list[TemplateLockGroup]
@@ -132,6 +146,9 @@ class TemplateContent(BaseModel):
         if TemplateLockGroup.LANGUAGE in wanted and widget.language != self.language:
             widget.language = self.language
             changed = True
+        if TemplateLockGroup.PERSONA in wanted and widget.persona != self.persona:
+            widget.persona = self.persona.model_copy(deep=True)
+            changed = True
         text_updates: dict[str, Any] = {}
         for group, fields in LOCK_GROUP_TEXT_FIELDS.items():
             if group not in wanted:
@@ -164,6 +181,12 @@ class TemplateContent(BaseModel):
             and WidgetLanguage(changes["language"]) != widget.language
         ):
             violations.append("language")
+        if (
+            self.is_locked(TemplateLockGroup.PERSONA)
+            and "persona" in changes
+            and _as_persona(changes["persona"]) != widget.persona
+        ):
+            violations.append("persona")
         if "texts" in changes:
             new_texts = _as_texts(changes["texts"])
             for group, fields in LOCK_GROUP_TEXT_FIELDS.items():
@@ -244,6 +267,7 @@ class WidgetTemplate(TemplateContent):
         return TemplateRelease(
             texts=self.texts.model_copy(deep=True),
             theme=self.theme.model_copy(deep=True),
+            persona=self.persona.model_copy(deep=True),
             language=self.language,
             locked_groups=list(self.locked_groups),
         )

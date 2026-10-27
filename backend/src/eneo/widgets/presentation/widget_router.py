@@ -578,6 +578,7 @@ def _template_public(
         description=template.description,
         texts=template.texts,
         theme=template.theme,
+        persona=template.persona,
         language=template.language,
         is_default=template.is_default,
         locked_groups=list(template.locked_groups),
@@ -588,6 +589,7 @@ def _template_public(
             WidgetTemplateReleasePublic(
                 texts=template.published.texts,
                 theme=template.published.theme,
+                persona=template.published.persona,
                 language=template.published.language,
                 locked_groups=list(template.published.locked_groups),
             )
@@ -609,6 +611,7 @@ def _template_snapshot(template: WidgetTemplate) -> dict[str, Any]:
         "locked_groups": [group.value for group in template.locked_groups],
         "texts": template.texts.model_dump(mode="json"),
         "theme": template.theme.model_dump(mode="json"),
+        "persona": template.persona.model_dump(mode="json"),
         "published_at": (
             template.published_at.isoformat() if template.published_at else None
         ),

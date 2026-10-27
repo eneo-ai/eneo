@@ -968,6 +968,71 @@ describe("WidgetChat", () => {
   });
 });
 
+describe("WidgetChat with a persona", () => {
+  const persona = { name: "Sigge", avatar_icon_id: null, avatar_in_launcher: false };
+  const bylines = () => document.querySelectorAll("[data-widget-chat] .widget-byline");
+
+  test("opens with the persona's name and AI marker, then names every answer", async () => {
+    renderApp({ persona });
+    await expect.element(composer()).toBeVisible();
+    // The intro: the name, the AI marker written out, then the welcome text.
+    const intro = bylines()[0];
+    expect(intro.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "S Sigge widget_persona_ai_assistant"
+    );
+    expect(intro.querySelector(".widget-avatar")?.getAttribute("aria-hidden")).toBe("true");
+    expect(page.getByText("Hej! Vad kan jag hjälpa dig med?").elements()).toHaveLength(1);
+
+    await userEvent.click(suggestion());
+    // The intro leaves with the first question; the pending answer already carries the byline.
+    await vi.waitFor(() => expect(answers()).toHaveLength(1));
+    expect(answers()[0].querySelector(".widget-byline")?.textContent).toContain("Sigge");
+    await releaseAnswer();
+    // The byline is the sender: no second, hidden "Assistant:" prefix.
+    const hidden = [...answers()[0].querySelectorAll(".sr-only")].map((el) =>
+      el.textContent?.trim()
+    );
+    expect(hidden).not.toContain("widget_assistant:");
+    expect(answers()[0].querySelector(".widget-ai-chip")?.textContent).toContain(
+      "widget_persona_ai_assistant"
+    );
+    expect(document.querySelector("[data-widget-chat] .widget-byline.mb-2")).toBeNull();
+  });
+
+  test("announces who is answering and prefixes the answer with the name", async () => {
+    renderApp({ persona });
+    await expect.element(composer()).toBeVisible();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(announced()).toBe("widget_persona_answering"));
+    await releaseAnswer();
+    await vi.waitFor(() => expect(announced()).toBe("Sigge: Svaret från assistenten."));
+  });
+
+  test("shows the avatar when one is set and falls back to the monogram when it cannot load", async () => {
+    renderApp({ persona: { ...persona, avatar_icon_id: "11111111-1111-4111-8111-111111111111" } });
+    await expect.element(composer()).toBeVisible();
+    const image = bylines()[0].querySelector("img") as HTMLImageElement;
+    expect(image.src).toBe("http://localhost/api/v1/icons/11111111-1111-4111-8111-111111111111/");
+    expect(image.alt).toBe("");
+    image.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(bylines()[0].querySelector("img")).toBeNull());
+    expect(bylines()[0].querySelector(".widget-avatar")?.textContent?.trim()).toBe("S");
+  });
+
+  test("keeps the neutral chat exactly as before without a persona", async () => {
+    renderApp();
+    await expect.element(composer()).toBeVisible();
+    expect(bylines()).toHaveLength(0);
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    expect(answers()[0].querySelector(".widget-byline")).toBeNull();
+    const hidden = [...answers()[0].querySelectorAll(".sr-only")].map((el) =>
+      el.textContent?.trim()
+    );
+    expect(hidden).toContain("widget_assistant:");
+  });
+});
+
 describe("WidgetChat for screen reader users", () => {
   /** Walk the whole page with the virtual screen reader's reading cursor. */
   async function readThrough(): Promise<string[]> {
@@ -1103,6 +1168,32 @@ describe("WidgetChat against WCAG 2.2 A and AA", () => {
       });
       await expect.element(composer()).toBeVisible();
       expect(document.documentElement.dataset.theme).toBe(scheme);
+      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+      await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
+      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+    }
+  );
+
+  test.each(["light", "dark"] as const)(
+    "a persona's intro, byline and AI marker pass every rule, contrast included (%s)",
+    async (scheme) => {
+      render(EmbedApp, {
+        config: config({
+          persona: {
+            name: "Sigge",
+            avatar_icon_id: "11111111-1111-4111-8111-111111111111",
+            avatar_in_launcher: false
+          }
+        }),
+        publicId: "wgt_test",
+        baseUrl: "http://localhost",
+        hostOrigin: null,
+        hostScheme: scheme
+      });
+      await expect.element(composer()).toBeVisible();
       expect(JSON.stringify(await wcagViolations())).toBe("[]");
 
       await userEvent.click(suggestion());

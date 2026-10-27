@@ -19,6 +19,7 @@
   import { WidgetTemplateAutosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { guardAutosaveNavigation } from "$lib/features/widget/admin/guardAutosaveNavigation";
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
+  import WidgetPersonaFields from "$lib/features/widget/admin/WidgetPersonaFields.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -26,7 +27,8 @@
   import { collapseWhitespace, TextDraft } from "$lib/features/widget/admin/textDraft.svelte";
   import { m } from "$lib/paraglide/messages";
   import { intlLocale } from "$lib/core/formatting/dateTime";
-  import { FileText, Palette } from "@lucide/svelte";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Palette from "@lucide/svelte/icons/palette";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -72,6 +74,13 @@
         .map(([path, message]) => [path.slice("texts.".length), message])
     )
   );
+  const personaErrors = $derived(
+    Object.fromEntries(
+      Object.entries(autosave.refusals)
+        .filter(([path]) => path.startsWith("persona."))
+        .map(([path, message]) => [path.slice("persona.".length), message])
+    )
+  );
   // The legal-texts lock needs a subtitle to enforce; the API refuses the
   // save otherwise, so the switch waits until there is one.
   const hasSubtitle = $derived((template.texts.subtitle ?? "").trim().length > 0);
@@ -106,6 +115,10 @@
     legal_texts: {
       label: m.widget_admin_template_lock_legal_texts(),
       description: m.widget_admin_template_lock_legal_texts_description()
+    },
+    persona: {
+      label: m.widget_admin_template_lock_persona(),
+      description: m.widget_admin_template_lock_persona_description()
     },
     wording: {
       label: m.widget_admin_template_lock_wording(),
@@ -388,6 +401,21 @@
                 />
               </Card.Content>
             </Card.Root>
+            <Card.Root class="mt-6">
+              <Card.Header>
+                <Card.Title><h2>{m.widget_admin_persona()}</h2></Card.Title>
+                <Card.Description>{m.widget_admin_template_persona_description()}</Card.Description>
+              </Card.Header>
+              <Card.Content>
+                <WidgetPersonaFields
+                  persona={template.persona ?? {}}
+                  title={template.texts.title}
+                  idPrefix="template"
+                  errors={personaErrors}
+                  onChange={(persona) => autosave.patch({ persona })}
+                />
+              </Card.Content>
+            </Card.Root>
           </Tabs.Content>
           <Tabs.Content value="appearance">
             <Card.Root>
@@ -407,7 +435,12 @@
         </Tabs.Root>
       </div>
       <aside class="min-w-0 self-start xl:sticky xl:top-4">
-        <WidgetMockPreview name={template.name} texts={template.texts} theme={template.theme} />
+        <WidgetMockPreview
+          name={template.name}
+          texts={template.texts}
+          theme={template.theme}
+          persona={template.persona}
+        />
       </aside>
     </div>
   </Page.Main>

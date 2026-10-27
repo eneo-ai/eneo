@@ -63,13 +63,20 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
   const localized = config ? embedLanguageRedirect(url, config.language) : null;
   if (localized) redirect(307, localized);
 
-  // The page fetches its API and the organisation's logo from other origins
-  // at most; answer Markdown must not be able to reach anything else. The
-  // preview has no configuration yet, so it accepts any https image.
+  // The page fetches its API and the persona's avatar from the backend and
+  // the organisation's logo from its own host, at most; answer Markdown must
+  // not be able to reach anything else. The preview has no configuration
+  // yet, so it accepts any https image.
   const backendOrigin = originSource(baseUrl);
   const logoOrigin = originSource(config?.theme.logo_url);
   locals.embedSources = {
-    img: preview ? ["https:"] : logoOrigin ? [logoOrigin] : [],
+    img: [
+      ...new Set(
+        (preview ? ["https:", backendOrigin] : [logoOrigin, backendOrigin]).filter(
+          (source): source is string => !!source
+        )
+      )
+    ],
     connect: backendOrigin ? [backendOrigin] : []
   };
 

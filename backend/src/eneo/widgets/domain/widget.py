@@ -34,6 +34,8 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 MAX_ALLOWED_ORIGINS = 20
 MAX_SUGGESTED_QUESTIONS = 4
+# Shown beside a 24 px avatar in a panel about 380 px wide; longer names wrap.
+MAX_PERSONA_NAME_LENGTH = 30
 MAX_SUGGESTED_QUESTION_LENGTH = 160
 # The daily usage counters are int4 columns.
 MAX_DAILY_TOKEN_BUDGET = 2_000_000_000
@@ -246,6 +248,48 @@ class WidgetTheme(BaseModel):
         return value
 
 
+class WidgetPersona(BaseModel):
+    """The voice the visitor talks to: a name and a face shown inside the
+    conversation, while the header keeps the organisation's logo and title.
+
+    An empty name is the neutral mode every widget starts in: answers carry
+    no sender. The name is presentation only; the assistant's own prompt
+    decides tone and behaviour. The AI marker beside the name is not a
+    setting, so a persona can never read as a person (AI Act article 50).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(default="", max_length=MAX_PERSONA_NAME_LENGTH)
+    # An icon the admin uploaded; the embed page builds the URL. Without one
+    # the first letter of the name stands in.
+    avatar_icon_id: Optional[UUID] = None
+    # Show the avatar as the launcher button on the host page instead of the
+    # chat bubble. Opt-in: the launcher is seen before any AI disclosure.
+    avatar_in_launcher: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        cleaned = _clean(value)
+        # The monogram is the first character; it must be a letter.
+        if cleaned and not cleaned[0].isalpha():
+            raise ValueError("The persona name must start with a letter.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _avatar_needs_name(self) -> "WidgetPersona":
+        if self.avatar_icon_id is not None and not self.name:
+            raise ValueError("A persona avatar needs a persona name.")
+        if self.avatar_in_launcher and self.avatar_icon_id is None:
+            raise ValueError("The launcher can only show an uploaded avatar.")
+        return self
+
+    @property
+    def is_set(self) -> bool:
+        return bool(self.name)
+
+
 class WidgetLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -308,6 +352,7 @@ class Widget(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     texts: WidgetTexts = Field(default_factory=WidgetTexts)
     theme: WidgetTheme = Field(default_factory=WidgetTheme)
+    persona: WidgetPersona = Field(default_factory=WidgetPersona)
     limits: WidgetLimits = Field(default_factory=WidgetLimits)
     privacy: WidgetPrivacy = Field(default_factory=WidgetPrivacy)
     language: WidgetLanguage = WidgetLanguage.AUTO
@@ -458,6 +503,7 @@ class Widget(BaseModel):
             "name",
             "texts",
             "theme",
+            "persona",
             "limits",
             "privacy",
             "language",

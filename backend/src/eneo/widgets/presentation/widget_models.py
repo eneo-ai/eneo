@@ -15,6 +15,7 @@ from eneo.widgets.domain.widget import (
     BotProtection,
     WidgetLanguage,
     WidgetLimits,
+    WidgetPersona,
     WidgetPrivacy,
     WidgetStatus,
     WidgetTargetType,
@@ -62,8 +63,8 @@ class WidgetTemplateLinkPublic(BaseModel):
         description=(
             "Parts of the widget that follow the template and cannot be"
             " edited on the widget: appearance, language, legal_texts"
-            " (disclosure and footer) and/or wording (title, welcome,"
-            " placeholder)."
+            " (disclosure and footer), persona (name and avatar) and/or"
+            " wording (title, welcome, placeholder)."
         )
     )
 
@@ -111,6 +112,13 @@ class WidgetUpdate(BaseModel):
     theme: WidgetTheme | SkipJsonSchema[None] = Field(
         default=None, description=_WHOLE_GROUP
     )
+    persona: WidgetPersona | SkipJsonSchema[None] = Field(
+        default=None,
+        description=(
+            _WHOLE_GROUP + " Only an icon the caller uploaded can be the avatar"
+            " (`icon_not_attachable` otherwise)."
+        ),
+    )
     limits: WidgetLimits | SkipJsonSchema[None] = Field(
         default=None, description=_WHOLE_GROUP
     )
@@ -157,6 +165,7 @@ class WidgetPublic(BaseModel):
     name: str
     texts: WidgetTexts
     theme: WidgetTheme
+    persona: WidgetPersona
     limits: WidgetLimits
     privacy: WidgetPrivacy
     language: WidgetLanguage
@@ -194,6 +203,7 @@ class WidgetTemplateUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
     texts: Optional[WidgetTexts] = None
     theme: Optional[WidgetTheme] = None
+    persona: Optional[WidgetPersona] = None
     language: Optional[WidgetLanguage] = None
     is_default: Optional[bool] = None
     locked_groups: Optional[list[TemplateLockGroup]] = Field(
@@ -208,19 +218,22 @@ class WidgetTemplateReleasePublic(BaseModel):
 
     texts: WidgetTexts
     theme: WidgetTheme
+    persona: WidgetPersona
     language: WidgetLanguage
     locked_groups: list[TemplateLockGroup]
 
 
 class WidgetTemplatePublic(BaseModel):
-    """The draft (texts, theme, language, locked_groups) plus its publication
-    state. Followers are linked to and locked by the published release."""
+    """The draft (texts, theme, persona, language, locked_groups) plus its
+    publication state. Followers are linked to and locked by the published
+    release."""
 
     id: UUID
     name: str
     description: str
     texts: WidgetTexts
     theme: WidgetTheme
+    persona: WidgetPersona
     language: WidgetLanguage
     is_default: bool
     locked_groups: list[TemplateLockGroup]

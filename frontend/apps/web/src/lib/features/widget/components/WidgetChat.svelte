@@ -14,11 +14,15 @@
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { Maximize2, MessageSquarePlus, Minimize2, X } from "@lucide/svelte";
+  import Maximize2 from "@lucide/svelte/icons/maximize-2";
+  import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
+  import Minimize2 from "@lucide/svelte/icons/minimize-2";
+  import X from "@lucide/svelte/icons/x";
   import { solveWithAltcha } from "../altcha";
   import { Announcer } from "../announcer.svelte";
   import { answerText } from "../answerText";
   import { createEmbedBridge, type PanelLayout } from "../embedBridge";
+  import type { PersonaView } from "../persona";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
   import {
     MAX_COOLDOWN_SECONDS,
@@ -30,6 +34,7 @@
   import WidgetComposer from "./WidgetComposer.svelte";
   import WidgetFeedback from "./WidgetFeedback.svelte";
   import WidgetMessage from "./WidgetMessage.svelte";
+  import WidgetPersonaByline from "./WidgetPersonaByline.svelte";
   import WidgetQuestionBubble from "./WidgetQuestionBubble.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
 
@@ -42,9 +47,19 @@
     onTheme?: (scheme: "light" | "dark" | "auto") => void;
     /** Admin preview of a draft widget: used as the visitor token, nothing is remembered. */
     previewToken?: string | null;
+    /** The voice answers are presented under; null for a neutral widget. */
+    persona?: PersonaView | null;
   };
 
-  let { config, client, hostOrigin, onSession, onTheme, previewToken = null }: Props = $props();
+  let {
+    config,
+    client,
+    hostOrigin,
+    onSession,
+    onTheme,
+    previewToken = null,
+    persona = null
+  }: Props = $props();
 
   const chat = getChatService();
 
@@ -78,7 +93,15 @@
   let rateableSession = $state<string | null>(null);
 
   // Props are fixed for the lifetime of the page; capture them once.
-  const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme, previewToken }));
+  const initial = untrack(() => ({
+    client,
+    config,
+    hostOrigin,
+    onSession,
+    onTheme,
+    previewToken,
+    persona
+  }));
 
   const session = new VisitorSession({
     client: initial.client,
@@ -105,6 +128,9 @@
         // The heading gives screen readers context without panning the iframe.
         if (matchMedia("(pointer: coarse)").matches) title?.focus({ preventScroll: true });
         else composer?.focus();
+        // Focus lands past the header, so the AI disclosure under the title
+        // would never be read; say it with the title each time the chat opens.
+        announcer.announce(`${initial.config.texts.title || initial.config.name}. ${subtitle}`);
       },
       onTheme: (scheme) => initial.onTheme?.(scheme),
       onLayout: (next) => {
@@ -155,7 +181,13 @@
   onMount(() => {
     bridge.ready(
       launcherColors(initial.config.theme),
-      initial.config.texts.title || initial.config.name
+      initial.config.texts.title || initial.config.name,
+      initial.persona
+        ? {
+            name: initial.persona.name,
+            avatar_url: initial.persona.inLauncher ? initial.persona.avatarUrl : null
+          }
+        : undefined
     );
     if (initial.config.single_turn) {
       session.rememberSession(null);
@@ -234,7 +266,11 @@
     pendingQuestion = question;
     pendingFrom = messages.length;
     // The typing dots are silent; this tells a screen reader the question went off.
-    announcer.announce(m.assistant_is_typing());
+    announcer.announce(
+      initial.persona
+        ? m.widget_persona_answering({ name: initial.persona.name })
+        : m.assistant_is_typing()
+    );
     try {
       await ask(question, false);
     } finally {
@@ -273,9 +309,8 @@
       // The finished answer is read once, as in any chat; the stream never
       // is (the log's own live region is off).
       const answer = answerText(chat.currentConversation.messages?.at(-1)?.answer ?? "");
-      announcer.announce(
-        answer ? `${m.widget_assistant()}: ${answer}` : m.widget_answer_complete()
-      );
+      const sender = initial.persona?.name ?? m.widget_assistant();
+      announcer.announce(answer ? `${sender}: ${answer}` : m.widget_answer_complete());
     } catch (error) {
       if ((chat.currentConversation.messages?.length ?? 0) > turns) {
         // The answer broke off after it began: what arrived stays, the alert
@@ -458,8 +493,16 @@
       {#if unavailable}
         <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
       {:else if messages.length === 0 && !showPending}
-        {#if config.texts.welcome}
-          <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
+        <!-- The opening belongs to the empty state: it goes when the first
+             question does, like the welcome text, and stays out while a
+             stored conversation is being restored so it never flashes. -->
+        {#if !restoring}
+          {#if persona}
+            <WidgetPersonaByline {persona} intro />
+          {/if}
+          {#if config.texts.welcome}
+            <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
+          {/if}
         {/if}
         {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
           <ul
@@ -493,13 +536,19 @@
                 isLoading={chat.askQuestion.isLoading}
                 showSources={config.show_sources ?? true}
                 showActivity={config.show_tool_activity ?? true}
+                {persona}
               />
             {/each}
             {#if showPending && pendingQuestion !== null}
               <li class="widget-enter flex flex-col gap-3">
                 <WidgetQuestionBubble text={pendingQuestion} />
-                <!-- Announced once when the question is sent, not by the dots. -->
-                <div aria-hidden="true"><TypingIndicator /></div>
+                <div>
+                  {#if persona}
+                    <WidgetPersonaByline {persona} />
+                  {/if}
+                  <!-- Announced once when the question is sent, not by the dots. -->
+                  <div aria-hidden="true"><TypingIndicator /></div>
+                </div>
               </li>
             {/if}
           </ol>

@@ -19,7 +19,11 @@
   import { toastWidgetError } from "./errors";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "@lucide/svelte";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Palette from "@lucide/svelte/icons/palette";
+  import Rocket from "@lucide/svelte/icons/rocket";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
   import { getCapability } from "$lib/features/mcp/capabilities";
@@ -31,6 +35,7 @@
   import { WidgetAutosave } from "./widgetAutosave.svelte";
   import { guardAutosaveNavigation } from "./guardAutosaveNavigation";
   import WidgetLiveTest from "./WidgetLiveTest.svelte";
+  import WidgetPersonaFields from "./WidgetPersonaFields.svelte";
   import WidgetPreview from "./WidgetPreview.svelte";
   import WidgetRulesFields from "./WidgetRulesFields.svelte";
   import WidgetSnippet from "./WidgetSnippet.svelte";
@@ -93,6 +98,7 @@
         .map(([path, message]) => [path.slice(group.length + 1), message])
     );
   const textErrors = $derived(refusalsIn("texts"));
+  const personaErrors = $derived(refusalsIn("persona"));
   // The theme fields check what they send, so a refusal here is rare and
   // shown once for the whole appearance.
   const appearanceErrors = $derived([
@@ -123,6 +129,7 @@
   const lockedTexts = $derived(lockedTextFields(link));
   const languageLocked = $derived(isGroupLocked(link, "language"));
   const appearanceLocked = $derived(isGroupLocked(link, "appearance"));
+  const personaLocked = $derived(isGroupLocked(link, "persona"));
   const lockHint = $derived(link ? m.widget_admin_template_locked_hint({ name: link.name }) : "");
   const groupLabels = $derived<Record<string, string>>({
     appearance: m.widget_admin_template_lock_appearance(),
@@ -396,6 +403,27 @@
                 onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
                 groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
+              />
+            </Card.Content>
+          </Card.Root>
+
+          <Card.Root>
+            <Card.Header>
+              <Card.Title><h2>{m.widget_admin_persona()}</h2></Card.Title>
+              <Card.Description>{m.widget_admin_persona_description()}</Card.Description>
+            </Card.Header>
+            <Card.Content class="flex flex-col gap-4">
+              {#if autosave.refusals["persona"]}
+                <Field.Error id="widget-persona-error">{autosave.refusals["persona"]}</Field.Error>
+              {/if}
+              <WidgetPersonaFields
+                persona={current.persona ?? {}}
+                title={current.texts.title}
+                assistantIconId={assistant.icon_id ?? null}
+                locked={personaLocked}
+                {lockHint}
+                errors={personaErrors}
+                onChange={(persona) => autosave.patch({ persona })}
               />
             </Card.Content>
           </Card.Root>

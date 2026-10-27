@@ -89,6 +89,7 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         name=widget.name,
         texts=widget.texts,
         theme=widget.theme,
+        persona=widget.persona,
         language=widget.language,
         bot_protection=widget.bot_protection,
         max_question_chars=widget.limits.max_question_chars,

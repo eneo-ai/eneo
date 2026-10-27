@@ -48,6 +48,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
     language: "sv",
     texts: { title: "", welcome: "", suggested_questions: [], subtitle: "AI" },
     theme: { primary_color: "#1F4E79", radius: 12, color_scheme: "auto" },
+    persona: { name: "", avatar_icon_id: null, avatar_in_launcher: false },
     limits: { daily_token_budget: 4000, max_question_chars: 2000 },
     privacy: { retention_days: 30 },
     allowed_origins: ["https://www.kommun.se"],

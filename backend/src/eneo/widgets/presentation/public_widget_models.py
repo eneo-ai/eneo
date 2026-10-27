@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.widgets.domain.widget import (
     BotProtection,
     WidgetLanguage,
+    WidgetPersona,
     WidgetTexts,
     WidgetTheme,
 )
@@ -24,6 +25,12 @@ class WidgetPublicConfig(BaseModel):
     name: str
     texts: WidgetTexts
     theme: WidgetTheme
+    persona: WidgetPersona = Field(
+        description=(
+            "The name and avatar answers are presented under; an empty name"
+            " means answers carry no sender. The avatar is `/icons/{id}/`."
+        )
+    )
     language: WidgetLanguage
     bot_protection: BotProtection
     max_question_chars: int

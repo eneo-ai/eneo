@@ -39,6 +39,12 @@ class Widgets(BasePublic):
     theme: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
+    # WidgetPersona: name, avatar_icon_id, avatar_in_launcher. The icon id is
+    # not a foreign key: templates copy the document wholesale and the
+    # release is JSON; IconRepository counts it as a reference instead.
+    persona: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
     limits: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )

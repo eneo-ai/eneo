@@ -1277,6 +1277,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
+        icon_repo=icon_repo,
         token_service=widget_visitor_token_service,
     )
     widget_template_service = providers.Factory(
@@ -1284,6 +1285,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=widget_template_repo,
         widget_repo=widget_repo,
+        icon_repo=icon_repo,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,

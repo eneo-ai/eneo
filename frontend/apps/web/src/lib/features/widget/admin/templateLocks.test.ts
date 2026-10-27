@@ -120,6 +120,6 @@ describe("template locks", () => {
     const summary = publicationSummary(template({ published: null, published_at: null }));
     expect(summary.written).toEqual(["appearance", "language"]);
     expect(summary.newlyLocked).toEqual(["appearance", "language"]);
-    expect(summary.changedUnlocked).toEqual(["legal_texts", "wording"]);
+    expect(summary.changedUnlocked).toEqual(["legal_texts", "persona", "wording"]);
   });
 });

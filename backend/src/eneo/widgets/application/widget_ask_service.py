@@ -120,6 +120,24 @@ WIDGET_STYLE_PROMPT = (
     "enumeration, avoid headings, and do not restate the question."
 )
 
+# The persona is presentation, not identity: the name is shown beside every
+# answer, so the model must neither sign with it nor claim to be a person.
+WIDGET_PERSONA_PROMPT = (
+    'In this window you are presented to the visitor under the name "{name}". '
+    "It is a display name: you remain an AI assistant and say so if asked who "
+    "or what you are. Do not sign your answers with the name or repeat it "
+    "unprompted."
+)
+
+
+def widget_prompt_addendum(widget: Widget) -> str:
+    """What is appended to the assistant's prompt for this widget's turns."""
+    if not widget.persona.is_set:
+        return WIDGET_STYLE_PROMPT
+    return f"{WIDGET_STYLE_PROMPT} " + WIDGET_PERSONA_PROMPT.format(
+        name=widget.persona.name
+    )
+
 
 class WidgetAskService:
     """Runs the ordinary assistant ask pipeline for an anonymous visitor.
@@ -274,7 +292,7 @@ class WidgetAskService:
                 # only cited documents come back as references.
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
-                prompt_addendum=WIDGET_STYLE_PROMPT,
+                prompt_addendum=widget_prompt_addendum(widget),
             )
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a

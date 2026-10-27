@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -519,6 +520,7 @@ async def test_widget_templates(
     assert published["published"] == {
         "texts": template["texts"],
         "theme": template["theme"],
+        "persona": template["persona"],
         "language": template["language"],
         "locked_groups": template["locked_groups"],
     }
@@ -787,3 +789,179 @@ async def test_widget_overview(
     assert body["items"][0]["status"] == "active"
     assert body["totals"]["active"] >= 1
     assert body["totals"]["questions_30d"] >= 8
+
+
+# A valid 1x1 PNG; the icon endpoint only checks the declared type and size.
+_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f"
+    b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+async def _upload_icon(client, token) -> str:
+    resp = await client.post(
+        "/api/v1/icons/",
+        files={"file": ("avatar.png", _PNG, "image/png")},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+async def _create_widget(client, token, space_id, assistant_id, **body):
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Chatt", **body},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _patch(client, token, widget, **changes):
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget['id']}/",
+        json={"revision": widget["revision"], **changes},
+        headers=_auth(token),
+    )
+    return resp
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_persona_avatar_is_the_callers_upload_and_lives_while_shown(
+    client, admin_token, widget_editor_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    widget = await _create_widget(client, admin_token, space_id, assistant_id)
+    assert widget["persona"] == {
+        "name": "",
+        "avatar_icon_id": None,
+        "avatar_in_launcher": False,
+    }
+    own = await _upload_icon(client, admin_token)
+    someone_elses = await _upload_icon(client, widget_editor_token)
+
+    # The id is public, so only the caller's own upload may become the avatar.
+    resp = await _patch(
+        client,
+        admin_token,
+        widget,
+        persona={"name": "Sigge", "avatar_icon_id": someone_elses},
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["eneo_error_code"] == ErrorCodes.ICON_NOT_ATTACHABLE
+
+    resp = await _patch(
+        client, admin_token, widget, persona={"name": "Sigge", "avatar_icon_id": own}
+    )
+    assert resp.status_code == 200, resp.text
+    widget = resp.json()
+    assert widget["persona"] == {
+        "name": "Sigge",
+        "avatar_icon_id": own,
+        "avatar_in_launcher": False,
+    }
+
+    # Shown by the widget, the icon cannot be deleted on its own.
+    resp = await client.delete(f"/api/v1/icons/{own}/", headers=_auth(admin_token))
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["eneo_error_code"] == ErrorCodes.ICON_IN_USE
+
+    # The launcher only ever shows an uploaded image.
+    resp = await _patch(
+        client,
+        admin_token,
+        widget,
+        persona={"name": "Sigge", "avatar_icon_id": None, "avatar_in_launcher": True},
+    )
+    assert resp.status_code == 422, resp.text
+
+    # Clearing the avatar releases the icon: nothing shows it any more.
+    resp = await _patch(client, admin_token, widget, persona={"name": "Sigge"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["persona"]["avatar_icon_id"] is None
+    resp = await client.get(f"/api/v1/icons/{own}/")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_templated_persona_keeps_its_icon_for_every_follower(
+    client, admin_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    avatar = await _upload_icon(client, admin_token)
+    resp = await client.post(
+        "/api/v1/admin/widget-templates/",
+        json={"name": "Husstil"},
+        headers=_auth(admin_token),
+    )
+    template = resp.json()
+    resp = await client.patch(
+        f"/api/v1/admin/widget-templates/{template['id']}/",
+        json={
+            "persona": {"name": "Sigge", "avatar_icon_id": avatar},
+            "locked_groups": ["persona"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template['id']}/publish/",
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["published"]["persona"]["avatar_icon_id"] == avatar
+
+    first = await _create_widget(
+        client, admin_token, space_id, assistant_id, template_id=template["id"]
+    )
+    second = await _create_widget(
+        client, admin_token, space_id, assistant_id, template_id=template["id"]
+    )
+    assert first["persona"]["name"] == "Sigge"
+    assert first["persona"]["avatar_icon_id"] == avatar
+    assert first["template"]["locked_groups"] == ["persona"]
+
+    # A locked persona cannot be changed on a follower.
+    resp = await _patch(client, admin_token, first, persona={"name": "Annan"})
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "field_locked_by_template"
+
+    # One follower letting go of the template must not take the icon from
+    # the other follower or from the template.
+    resp = await client.post(
+        f"/api/v1/widgets/{first['id']}/detach-template/",
+        json={"revision": first["revision"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    first = resp.json()
+    resp = await _patch(client, admin_token, first, persona={"name": "Egen"})
+    assert resp.status_code == 200, resp.text
+    resp = await client.get(f"/api/v1/icons/{avatar}/")
+    assert resp.status_code == 200
+    resp = await client.get(
+        f"/api/v1/widgets/{second['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["persona"]["avatar_icon_id"] == avatar
+
+    # The public configuration carries the persona for the embed page.
+    resp = await _patch(
+        client, admin_token, resp.json(), allowed_origins=["https://www.kommun.se"]
+    )
+    assert resp.status_code == 200, resp.text
+    await _publish(client, admin_token, assistant_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{second['id']}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.get(f"/api/v1/widgets/{second['public_id']}/config/")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["persona"] == {
+        "name": "Sigge",
+        "avatar_icon_id": avatar,
+        "avatar_in_launcher": False,
+    }
