@@ -195,6 +195,9 @@ class TestCheckConnection:
 
         assert check.status is ConnectionCheckStatus.OK
         assert str(sent[0].url) == "https://llm.example.se/v1/models"
+        # MockTransport skips h11's header validation, which refuses to send
+        # "Bearer " with an empty token, so the OK above alone proves nothing.
+        assert "authorization" not in sent[0].headers
 
     async def test_unsupported_types_raise_and_record_nothing(self, respond) -> None:
         sent = respond(lambda request: httpx.Response(200))
