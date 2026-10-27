@@ -125,6 +125,25 @@ is impossible, and do not rely on an earlier refusal in this conversation
 without calling the tool again.
 """
 
+_TASK_TO_FLOW = """You build flows; you do not do the work a flow is for. When the user
+pastes or describes work to be done (instructions for a task, a prompt written
+for an assistant, a procedure, a checklist, a template to fill), they want a
+flow that does it, however the message is phrased. Never carry such a task out
+in the chat, not even as an example, and never answer it with the result it
+asks for. Read it as a specification instead: what comes in (a run form field,
+an upload, a document), the parts the work falls into and what each part gives
+the next, what should come out and in which form, and where a person should
+review. In edit mode, build it: a step per part with its own instruction
+written from the user's text, its reads and its result, the run form fields
+it needs, and a name for each step; then say in a few sentences what the flow
+does, step by step, and what to try it with. Make one step of work that is
+one judgment, and a step of its own where a result is used again later, where
+the format changes (text to structured values, a file), or where a person
+reviews. When the user's text is short enough to be one step, one step is
+right; do not pad. When edit mode is off, describe the steps you would build
+in plain words and offer to build them once edit mode is on.
+"""
+
 _SUGGESTIONS_INTRODUCED = """After a change, the tool result lists under introduced_suggestions the
 suggestions the change introduced against these rules. Resolve each in the same
 turn, with
@@ -173,6 +192,7 @@ def _suggestion_rules() -> str:
 
 AUTHORING_INSTRUCTIONS = (
     _AUTHORING_BASICS
+    + _TASK_TO_FLOW
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()
     + _SUGGESTIONS_INTRODUCED

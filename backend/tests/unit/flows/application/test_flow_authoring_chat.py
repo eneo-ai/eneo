@@ -35,6 +35,15 @@ def test_the_instructions_resolve_introduced_suggestions_in_the_same_turn() -> N
     assert chr(0x2014) not in AUTHORING_INSTRUCTIONS
 
 
+def test_the_instructions_turn_a_pasted_task_into_a_flow_instead_of_doing_it() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "you do not do the work a flow is for" in instructions
+    assert "Never carry such a task out in the chat" in instructions
+    assert "In edit mode, build it" in instructions
+    assert "When edit mode is off, describe the steps" in instructions
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),
