@@ -252,6 +252,35 @@ describe("eneo tool metadata", () => {
     expect(isSkillCall({ toolName: "x", callProviderMetadata: { eneo } })).toBe(true);
     expect(eneoToolMetadata({ toolName: "x" })).toEqual({});
   });
+
+  it("lets what a live call returned win over what its announcement knew", async () => {
+    // The input chunk announces the call before it runs: no result status and
+    // no data yet. The output chunk carries both, and a run card drawn from
+    // the data must appear while the answer streams, not first on a reload.
+    const { eneoToolMetadata } = await import("./tool-presentation");
+    const metadata = eneoToolMetadata({
+      toolName: "run_flow",
+      callProviderMetadata: {
+        eneo: {
+          server_name: "flows",
+          is_internal: true,
+          result_status: null,
+          structured_content: null
+        }
+      },
+      resultProviderMetadata: {
+        eneo: {
+          server_name: "flows",
+          is_internal: true,
+          result_status: "succeeded",
+          structured_content: { flow_id: "flow-1", run_id: "run-1" }
+        }
+      }
+    });
+    expect(metadata.result_status).toBe("succeeded");
+    expect(metadata.structured_content).toEqual({ flow_id: "flow-1", run_id: "run-1" });
+    expect(metadata.is_internal).toBe(true);
+  });
 });
 
 describe("toolTarget", () => {

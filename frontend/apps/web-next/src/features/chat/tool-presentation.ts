@@ -26,11 +26,15 @@ type ToolLike = {
 
 /**
  * The `eneo` provider metadata of a tool part (server_name, title, purpose,
- * approved), wherever the AI SDK put it: saved sessions use
- * `providerMetadata`, live streams `callProviderMetadata` /
- * `resultProviderMetadata`.
+ * approved, result_status, structured_content), wherever the AI SDK put it:
+ * saved sessions use `providerMetadata`, live streams `callProviderMetadata`
+ * (the input chunk) and `resultProviderMetadata` (the output chunk). The
+ * output chunk's values win: what a call returned (its result status, the
+ * data a card is drawn from) is known only then, and the input chunk carries
+ * null for it.
  */
 export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
   for (const provider of [
     part.providerMetadata,
     part.callProviderMetadata,
@@ -40,9 +44,12 @@ export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
       provider && typeof provider === "object" && "eneo" in provider
         ? (provider as { eneo?: unknown }).eneo
         : null;
-    if (eneo && typeof eneo === "object") return eneo as Record<string, unknown>;
+    if (!eneo || typeof eneo !== "object") continue;
+    for (const [key, value] of Object.entries(eneo as Record<string, unknown>)) {
+      if (value != null || !(key in merged)) merged[key] = value;
+    }
   }
-  return {};
+  return merged;
 }
 
 /**
