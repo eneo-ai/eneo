@@ -783,7 +783,7 @@ class ModelProviderService:
 
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
+        api_key = str(decrypted_creds.get("api_key") or "").strip()
         provider_type = provider.provider_type.lower()
 
         # Build the litellm model identifier
@@ -884,7 +884,7 @@ class ModelProviderService:
         """
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
+        api_key = str(decrypted_creds.get("api_key") or "").strip()
         provider_type = provider.provider_type.lower()
         endpoint = configured_endpoint(provider.config)
 
@@ -934,9 +934,11 @@ class ModelProviderService:
         """
         provider = await self.repository.get_by_id(provider_id)
         provider_type = provider.provider_type.lower()
+        # Stripped: a whitespace-only or newline-terminated stored key would
+        # otherwise reach the wire as "Bearer \n", which h11 refuses to send.
         api_key = str(
             self._decrypt_credentials(provider.credentials).get("api_key") or ""
-        )
+        ).strip()
         request = connection_check_request(
             provider_type, api_key, configured_endpoint(provider.config)
         )

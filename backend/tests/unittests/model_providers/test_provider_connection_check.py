@@ -199,6 +199,44 @@ class TestCheckConnection:
         # "Bearer " with an empty token, so the OK above alone proves nothing.
         assert "authorization" not in sent[0].headers
 
+    async def test_a_whitespace_only_key_counts_as_no_key(self, respond) -> None:
+        sent = respond(lambda request: httpx.Response(200, json={"data": []}))
+        provider = _provider(
+            provider_type="hosted_vllm",
+            credentials=_encrypted(" \n"),
+            config={"endpoint": "https://llm.example.se"},
+        )
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.status is ConnectionCheckStatus.OK
+        assert "authorization" not in sent[0].headers
+
+    async def test_a_key_pasted_with_a_trailing_newline_is_sent_clean(
+        self, respond
+    ) -> None:
+        sent = respond(lambda request: httpx.Response(200, json={"data": []}))
+        provider = _provider(credentials=_encrypted(f"{KEY}\n"))
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.status is ConnectionCheckStatus.OK
+        assert sent[0].headers["Authorization"] == f"Bearer {KEY}"
+
+    async def test_a_whitespace_only_required_key_fails_without_calling_out(
+        self, respond
+    ) -> None:
+        sent = respond(lambda request: httpx.Response(200))
+        provider = _provider(credentials=_encrypted("  "))
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.error is ConnectionCheckError.MISSING_CREDENTIALS
+        assert sent == []
+
     async def test_unsupported_types_raise_and_record_nothing(self, respond) -> None:
         sent = respond(lambda request: httpx.Response(200))
         provider = _provider(provider_type="perplexity", credentials=_encrypted())

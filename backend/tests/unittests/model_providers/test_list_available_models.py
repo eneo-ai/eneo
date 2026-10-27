@@ -231,6 +231,40 @@ async def test_a_server_without_auth_is_listed_without_a_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_whitespace_only_key_is_listed_without_a_key() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+        captured["headers"] = headers
+        return httpx.Response(200, json={"data": []}, request=httpx.Request("GET", url))
+
+    service, _ = _build_service_with_provider(
+        "hosted_vllm", endpoint="https://llm.example.se", api_key=" \n"
+    )
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        await service.list_available_models(uuid4())
+
+    assert "Authorization" not in captured["headers"]
+
+
+@pytest.mark.asyncio
+async def test_a_key_pasted_with_a_trailing_newline_is_sent_clean() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+        captured["headers"] = headers
+        return httpx.Response(200, json={"data": []}, request=httpx.Request("GET", url))
+
+    service, _ = _build_service_with_provider(
+        "hosted_vllm", endpoint="https://llm.example.se", api_key="sk-abc\n"
+    )
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        await service.list_available_models(uuid4())
+
+    assert captured["headers"]["Authorization"] == "Bearer sk-abc"
+
+
+@pytest.mark.asyncio
 async def test_endpoint_with_v1_suffix_does_not_double() -> None:
     """Regression: users who paste the URL with ``/v1`` should not get
     ``…/v1/v1/models``."""
