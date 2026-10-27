@@ -1,9 +1,4 @@
-import type {
-  CompletionModel,
-  ImageModel,
-  RerankModel,
-  TranscriptionModel
-} from "@eneo/eneo-js";
+import type { CompletionModel, ImageModel, RerankModel, TranscriptionModel } from "@eneo/eneo-js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/paraglide/messages", () => ({

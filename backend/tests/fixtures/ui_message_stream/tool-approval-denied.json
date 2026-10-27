@@ -183,7 +183,8 @@
           "is_bundled": null,
           "app_view": null,
           "approved": false,
-          "result_status": "denied"
+          "result_status": "denied",
+          "structured_content": null
         }
       }
     },
@@ -201,7 +202,8 @@
           "is_bundled": null,
           "app_view": null,
           "approved": false,
-          "result_status": "denied"
+          "result_status": "denied",
+          "structured_content": null
         }
       }
     },
@@ -393,7 +395,8 @@
               "is_bundled": null,
               "app_view": null,
               "approved": false,
-              "result_status": "denied"
+              "result_status": "denied",
+              "structured_content": null
             }
           },
           "resultProviderMetadata": {
@@ -405,7 +408,8 @@
               "is_bundled": null,
               "app_view": null,
               "approved": false,
-              "result_status": "denied"
+              "result_status": "denied",
+              "structured_content": null
             }
           }
         },

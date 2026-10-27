@@ -1380,6 +1380,50 @@ describe("FlowPage", () => {
       expect(assistantReads()).toBe(6);
     });
 
+    it("applies the chat's change without a view transition in a hidden tab, and absorbs a skipped one", async () => {
+      const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+      state.chat = ok({ ...chat, editing: true });
+      state.prompts = {};
+      state.flow = ok(makeFlow({ draft_revision: 5, steps }));
+      // A browser whose transition is skipped (the tab hidden meanwhile): the
+      // change applies, and the transition's promises reject, which the page
+      // must take without an unhandled rejection.
+      const skipped = () => Promise.reject(new Error("Document hidden"));
+      const start = vi.fn((apply: () => void) => {
+        apply();
+        return { ready: skipped(), finished: skipped(), updateCallbackDone: Promise.resolve() };
+      });
+      Object.defineProperty(document, "startViewTransition", { value: start, configurable: true });
+      const visibility = vi.spyOn(document, "visibilityState", "get");
+      try {
+        renderPage();
+        await waitFor(() => expect(assistantReads()).toBe(2));
+
+        visibility.mockReturnValue("hidden");
+        state.flow = ok(
+          makeFlow({
+            draft_revision: 6,
+            steps: [
+              makeStep(1, { user_description: "Sammanfatta" }),
+              makeStep(2, { user_description: "Skriv brev" })
+            ]
+          })
+        );
+        fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+        await screen.findByRole("article", { name: "Steg 2 Skriv brev" });
+        expect(start).not.toHaveBeenCalled();
+
+        visibility.mockReturnValue("visible");
+        state.flow = ok(makeFlow({ draft_revision: 7, steps }));
+        fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+        await screen.findByRole("article", { name: "Steg 2 Skriv svar" });
+        expect(start).toHaveBeenCalledTimes(1);
+      } finally {
+        visibility.mockRestore();
+        delete (document as { startViewTransition?: unknown }).startViewTransition;
+      }
+    });
+
     it("are read again after the chat's tools changed the flow", async () => {
       const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
       state.chat = ok({ ...chat, editing: true });

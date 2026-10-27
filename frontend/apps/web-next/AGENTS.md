@@ -183,7 +183,8 @@ the default name on a backend name collision (9017).
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
   `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.3.patch`
-  makes CommandPalette mark the highlighted option as selected. After an upgrade bun silently skips
+  makes CommandPalette mark the highlighted option as selected, and gives
+  the layers' slide-rule `<style>` the page's CSP nonce. After an upgrade bun silently skips
   the stale patch and the guard tests in `src/components/astryx/` fail:
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
   `.bun-tag-*` file), or drop a part Astryx has fixed.

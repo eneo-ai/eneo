@@ -14,6 +14,27 @@ index 0e3501ed64f2ec2f10a5cbd65fb689ca8edf5fe5..ddee01ce0d1f7516434a0b72247fd219
      "aria-disabled": isDisabled || undefined,
      "data-value": value,
      ...pressable,
+diff --git a/dist/Layer/layerSlideRules.js b/dist/Layer/layerSlideRules.js
+index 853597bf74d8f37bbb75418d2a8119575a91a975..7564aac55ab62ece2544fd4d3dbe092c2cb97a2b 100644
+--- a/dist/Layer/layerSlideRules.js
++++ b/dist/Layer/layerSlideRules.js
+@@ -104,6 +104,15 @@ export function ensureSlideRules(doc) {
+   }
+   const style = doc.createElement('style');
+   style.id = SLIDE_RULES_ID;
++  // Eneo patch: a CSP that allows <style> only with a nonce blocks the sheet
++  // without one, and then no layer can slide or flip. Take the nonce of a
++  // script or style this document was served with (the app may set the
++  // bundler global only after the first layer mounts, and an iframe has its
++  // own), else the bundler global.
++  const nonce = doc.querySelector('script[nonce],style[nonce]')?.nonce || globalThis.__webpack_nonce__;
++  if (nonce) {
++    style.nonce = nonce;
++  }
+   style.textContent = slideRulesCss();
+   doc.head.appendChild(style);
+ }
+\ No newline at end of file
 diff --git a/src/CommandPalette/CommandPaletteItem.tsx b/src/CommandPalette/CommandPaletteItem.tsx
 index 344f861437f4cf7761d35af43ae8a79508d55505..0e48621d7c4dd499341edd4eacf0d22bbe2aab40 100644
 --- a/src/CommandPalette/CommandPaletteItem.tsx
@@ -30,3 +51,25 @@ index 344f861437f4cf7761d35af43ae8a79508d55505..0e48621d7c4dd499341edd4eacf0d22b
        aria-disabled={isDisabled || undefined}
        data-value={value}
        {...pressable}
+diff --git a/src/Layer/layerSlideRules.ts b/src/Layer/layerSlideRules.ts
+index abc050f320eb72f202f53c890aec1451d13f89e4..0912353ab6251e57998446c7fdb026b308cc8c1d 100644
+--- a/src/Layer/layerSlideRules.ts
++++ b/src/Layer/layerSlideRules.ts
+@@ -144,6 +144,17 @@ export function ensureSlideRules(doc: Document): void {
+   }
+   const style = doc.createElement('style');
+   style.id = SLIDE_RULES_ID;
++  // Eneo patch: a CSP that allows <style> only with a nonce blocks the sheet
++  // without one, and then no layer can slide or flip. Take the nonce of a
++  // script or style this document was served with (the app may set the
++  // bundler global only after the first layer mounts, and an iframe has its
++  // own), else the bundler global.
++  const nonce =
++    doc.querySelector<HTMLElement>('script[nonce],style[nonce]')?.nonce ||
++    (globalThis as {__webpack_nonce__?: string}).__webpack_nonce__;
++  if (nonce) {
++    style.nonce = nonce;
++  }
+   style.textContent = slideRulesCss();
+   doc.head.appendChild(style);
+ }
