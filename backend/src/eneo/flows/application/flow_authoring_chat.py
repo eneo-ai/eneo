@@ -11,7 +11,7 @@ from __future__ import annotations
 import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -48,6 +48,11 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.application.capability_resolver import capability_availability
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.sessions.session import SessionAdd
 
@@ -372,6 +377,31 @@ def _no_model() -> FlowBadRequestException:
     )
 
 
+# The functions of the tool runtime the chat may use: reading an uploaded
+# file where it needs to, making a file or a chart, computing. Searching the
+# web and making images are not the chat's business.
+TOOL_RUNTIME_CAPABILITIES: tuple[CapabilityPurpose, ...] = (
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+)
+
+
+def tool_runtime_capabilities(
+    offered: Iterable[str], states: Iterable[CapabilityAvailability]
+) -> list[CapabilityPurpose]:
+    """The tool runtime's functions the chat's assistant gets: those its space
+    offers and a provider is ready for, in a fixed order."""
+    offered_set = set(offered)
+    ready = {state.purpose for state in states if state.available}
+    return [
+        purpose
+        for purpose in TOOL_RUNTIME_CAPABILITIES
+        if purpose in offered_set and purpose in ready
+    ]
+
+
 async def _load_space(container: Container, chat: FlowAuthoringChats) -> Space:
     return await container.space_repo().one(
         id=chat.space_id, hidden_assistant_ids={chat.assistant_id}
@@ -403,6 +433,20 @@ async def _sync_assistant(
         changes["completion_model_kwargs"] = stored.model_copy(
             update={"reasoning_effort": effort}
         )
+    # A file uploaded in the chat is looked up through the files tool where
+    # the model needs it, not put whole in the prompt: the chat is shown
+    # long material (a letter, a transcript) to build a flow around. A model
+    # without tool calling gets the text inlined anyway.
+    if assistant.inline_file_text:
+        changes["inline_file_text"] = False
+    # The tool runtime's functions, as far as the space offers them and a
+    # provider is ready; a space setting that changed is followed here.
+    states = await capability_availability(
+        _session(container), chat.tenant_id, space.security_classification
+    )
+    wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
+    if sorted(wanted) != sorted(assistant.enabled_capabilities):
+        changes["enabled_capabilities"] = wanted
     if changes:
         await container.assistant_service().update_assistant(
             assistant_id=chat.assistant_id,

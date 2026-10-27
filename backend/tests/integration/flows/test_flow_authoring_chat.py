@@ -103,6 +103,19 @@ async def test_chat_bootstrap_is_idempotent_scoped_and_initially_read_only(
     )
     assert mode.status_code == 200, mode.text
     assert mode.json()["editing"] is True
+    # Files uploaded in the chat are looked up where the model needs them,
+    # and the chat has the tool runtime's functions its space offers.
+    assistant = await client.get(
+        f"/api/v1/assistants/{chat['assistant_id']}/", headers=headers
+    )
+    assert assistant.status_code == 200, assistant.text
+    assert assistant.json()["inline_file_text"] is False
+    assert set(assistant.json()["enabled_capabilities"]) <= {
+        "file_analysis",
+        "file_creation",
+        "charts",
+        "compute",
+    }
 
 
 async def test_reopening_a_chat_gives_it_the_current_instructions_once(
