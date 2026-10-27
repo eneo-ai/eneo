@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@d4f8304577bb
+translationSource: guides/embed-widget.mdx@6e2b7a49e21a
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -97,6 +97,21 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
      till fyra föreslagna frågor (som läggs till en i taget), den obligatoriska
      beskrivningen under titeln (som standard en upplysning om att besökaren
      möter AI) och en sidfot med valfri länk.
+   - **Persona** (också under Innehåll): vem som svarar. Ge chatten ett namn
+     (högst 30 tecken, börjar med en bokstav) och gärna en avatar: en
+     kvadratisk illustration eller symbol som laddas upp som en
+     assistentikon, eller kopieras från assistentens ikon. Headern behåller
+     er logotyp och titel; personan öppnar den tomma chatten med sitt namn,
+     orden "AI-assistent" och välkomsttexten, och varje svar får en liten
+     avsändarrad med avatar, namn och ett **AI**-märke. Märket är ingen
+     inställning: en persona får vara vänlig, men besökaren får alltid veta
+     att det är en AI som svarar. Utan avatar visas namnets första bokstav.
+     Lämna namnet tomt så svarar chatten utan avsändare, som tidigare. **Visa
+     avataren som chattknapp** är av som standard, eftersom knappen är det
+     första besökaren ser, innan AI-upplysningen; påslagen ersätter avataren
+     chattbubblan på er webbplats, med en ring i er färg och en liten
+     chattbricka, och knappens tillgängliga namn blir "Öppna chatt med
+     `<namn>`, AI-assistent". Använd inte foton av riktiga personer.
    - **Utseende**: koppla gärna widgeten till en av organisationens mallar; de
      delar mallen låser är då skrivskyddade här tills du kopplar loss den. Här
      väljer du också primärfärg (en kontrastkontroll visar om den blir för
@@ -221,7 +236,7 @@ valfria attributen är till för webbansvariga:
 | `data-color-scheme="light"` eller `"dark"` | Värdsidans färgschema, som används när widgetens färgschema är automatiskt (standard: besökarens systeminställning)                                        |
 | `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                                                                              |
 | `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                                                                             |
-| `data-label="…"`                           | Knappens tillgängliga namn (standard "Öppna chatt" eller "Open chat")                                                                                      |
+| `data-label="…"`                           | Knappens tillgängliga namn (standard "Öppna chatt" eller "Open chat", med persona "Öppna chatt med `<namn>`, AI-assistent" eller "Open chat with `<name>`, AI assistant") |
 | `data-frame-title="…"`                     | Chattramens tillgängliga namn (standard "Chatt" eller "Chat")                                                                                              |
 
 Skriptet exponerar `window.Eneo` med kommandona `open`, `close`, `toggle`,
@@ -272,7 +287,9 @@ in i webbplatsen:
    och i Eneos standardfärg (eller som de valfria `data-*`-attributen anger) i
    stället för widgetens sparade placering, språk och färger, och webbläsaren
    rapporterar ett CSP-brott. Chattens egna nätverksanrop sker inne i ramen från
-   Eneos origin.
+   Eneos origin. En widget som visar personans avatar som chattknapp behöver
+   dessutom Eneos API-origin i `img-src` (avataren hämtas från
+   `/api/v1/icons/…` där); blockeras den visas chattbubblan i stället.
 4. **Gör chatten lätt att hitta.** Skriptet lägger knappen sist på sidan, så
    den som använder tangentbord eller skärmläsare når den sist. Lägg en synlig
    länk som "Chatta med oss" tidigt på sidan, till exempel vid
@@ -340,8 +357,8 @@ behöver åtgärdas.
 
 ### Mallar [#templates]
 
-Mallar innehåller organisationens husstil: texter, färger, logotyp, form och
-språk. Administratörer skapar dem under **Admin → Webbwidgetar →
+Mallar innehåller organisationens husstil: texter, färger, logotyp, form,
+språk och persona (namn, avatar och om avataren är chattknappen). Administratörer skapar dem under **Admin → Webbwidgetar →
 Widgetmallar** och förhandsvisar dem i ljust och mörkt läge. Högst en mall kan
 vara standard och vara förvald för redaktörer; stängs det av är ingen mall
 förvald.
@@ -402,8 +419,8 @@ att ladda om när mallen har ändrat deras widget.
   visar meddelandet om att den inte är tillgänglig vid nästa anrop, och inga
   utmaningar eller besökartoken lämnas ut.
 - **Svar kan inte föra data vidare.** Chattsidans Content Security Policy
-  tillåter bara bilder från Eneo och logotypens adress samt anslutningar till
-  Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
+  tillåter bara bilder från Eneo (personans avatar) och logotypens adress samt
+  anslutningar till Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
   fråga vidare till tredje part.
 - **Besökartoken** är JWT:er knutna till en widget och en pseudonym
   besökaridentitet. De gäller i 15 minuter och förnyas automatiskt. De
