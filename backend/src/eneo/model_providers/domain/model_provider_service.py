@@ -598,6 +598,12 @@ class ModelProviderService:
         next_credentials = (
             credentials if credentials is not None else provider.credentials
         )
+        if credentials is not None or config is not None:
+            # Checked as the provider ends up, not as the edit arrived. Kept
+            # credentials are ciphertext here, which only has to be non-blank.
+            self._validate_required_fields(
+                provider.provider_type, next_credentials, merged_config
+            )
         if embedding_provider_configuration(
             provider.provider_type, provider.credentials, provider.config
         ) != embedding_provider_configuration(

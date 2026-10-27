@@ -271,7 +271,10 @@ class TestUpdateAndCreate:
         assert repository.update.await_args.kwargs == {"clear_connection_check": True}
 
     async def test_an_unchanged_config_keeps_the_check(self) -> None:
-        provider = _provider(config={"endpoint": "https://llm.example.se"})
+        # Keyless on purpose: the edit must not be refused for a missing key.
+        provider = _provider(
+            provider_type="hosted_vllm", config={"endpoint": "https://llm.example.se"}
+        )
         service, repository = _service(provider)
 
         await service.update(
@@ -281,7 +284,9 @@ class TestUpdateAndCreate:
         assert repository.update.await_args.kwargs == {"clear_connection_check": False}
 
     async def test_a_changed_endpoint_clears_the_check(self, monkeypatch) -> None:
-        provider = _provider(config={"endpoint": "https://llm.example.se"})
+        provider = _provider(
+            provider_type="hosted_vllm", config={"endpoint": "https://llm.example.se"}
+        )
         service, repository = _service(provider)
         # A new destination freezes used embedding routes; that lock is a
         # database concern outside this check.
