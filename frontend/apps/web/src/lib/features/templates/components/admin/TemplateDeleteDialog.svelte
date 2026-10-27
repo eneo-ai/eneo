@@ -4,7 +4,7 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { TriangleAlert } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { invalidate } from "$app/navigation";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo.js";

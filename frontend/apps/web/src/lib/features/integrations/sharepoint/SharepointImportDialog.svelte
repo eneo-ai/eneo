@@ -3,18 +3,16 @@
   import { onMount, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { EmbeddingModel, IntegrationKnowledgePreview } from "@eneo/eneo-js";
-  import {
-    Check,
-    CircleCheck,
-    Cloud,
-    FileText,
-    FlaskConical,
-    Earth,
-    LoaderCircle,
-    RefreshCw,
-    Trash2,
-    Users
-  } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Cloud from "@lucide/svelte/icons/cloud";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
+  import Earth from "@lucide/svelte/icons/earth";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Users from "@lucide/svelte/icons/users";
   import HighlightedText from "$lib/components/HighlightedText.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

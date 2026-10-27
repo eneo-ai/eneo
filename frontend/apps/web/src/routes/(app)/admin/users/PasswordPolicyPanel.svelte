@@ -6,7 +6,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { m } from "$lib/paraglide/messages";
-  import { Check, CircleAlert } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
 
   let { policy }: { policy: PasswordLifecyclePolicy } = $props();
 

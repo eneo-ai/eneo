@@ -6,14 +6,12 @@
   import type { components } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import {
-    EllipsisVertical,
-    SquarePen,
-    Trash2,
-    RotateCcw,
-    ArrowUpToLine,
-    ArrowDownToLine
-  } from "@lucide/svelte";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import SquarePen from "@lucide/svelte/icons/square-pen";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import ArrowUpToLine from "@lucide/svelte/icons/arrow-up-to-line";
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { goto, invalidate } from "$app/navigation";
