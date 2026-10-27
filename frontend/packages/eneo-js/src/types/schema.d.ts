@@ -9913,6 +9913,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/websites/crawl-progress/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Website Crawl Progress
+     * @description The running crawls of the websites a space shows, with each website's latest crawl run. Websites that are not crawling are absent. Cheap enough to poll while a crawl runs; the space itself is not loaded.
+     */
+    get: operations["get_website_crawl_progress_api_v1_spaces__id__knowledge_websites_crawl_progress__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/members/": {
     parameters: {
       query?: never;
@@ -35555,6 +35575,8 @@ export interface components {
        * @default false
        */
       can_access?: boolean;
+      /** Candidate Factor */
+      candidate_factor: number;
       /** Credential Provider */
       credential_provider?: string | null;
       /** Deprecation Date */
@@ -35591,6 +35613,8 @@ export interface components {
       is_org_enabled?: boolean;
       /** Lock Reason */
       lock_reason?: string | null;
+      /** Max Candidates */
+      max_candidates: number;
       /** Name */
       name: string;
       /** Nickname */
@@ -35618,6 +35642,8 @@ export interface components {
        * @default false
        */
       can_access?: boolean;
+      /** Candidate Factor */
+      candidate_factor: number;
       /** Credential Provider */
       credential_provider?: string | null;
       /** Deprecation Date */
@@ -35654,6 +35680,8 @@ export interface components {
       is_org_enabled?: boolean;
       /** Lock Reason */
       lock_reason?: string | null;
+      /** Max Candidates */
+      max_candidates: number;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
       /** Name */
@@ -36441,7 +36469,7 @@ export interface components {
       num_chunks?: number;
       /**
        * Rerank
-       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores, chunks beyond the model's max_candidates follow in vector order, and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
        * @default false
        */
       rerank?: boolean;
@@ -39083,6 +39111,12 @@ export interface components {
     /** TenantRerankModelCreate */
     TenantRerankModelCreate: {
       /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       * @default 5
+       */
+      candidate_factor?: number;
+      /**
        * Description
        * @description Model description
        */
@@ -39116,8 +39150,14 @@ export interface components {
        */
       is_default?: boolean;
       /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       * @default 100
+       */
+      max_candidates?: number;
+      /**
        * Name
-       * @description Model identifier as served by the provider (e.g. 'rerank-v3.5', 'jina-reranker-v2-base-multilingual', or the name a TEI endpoint serves)
+       * @description Model identifier as served by the provider, without a provider prefix (e.g. 'rerank-v3.5', 'Qwen/Qwen3-Reranker-4B')
        */
       name: string;
       /**
@@ -39131,6 +39171,11 @@ export interface components {
     };
     /** TenantRerankModelUpdate */
     TenantRerankModelUpdate: {
+      /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       */
+      candidate_factor?: number | null;
       /**
        * Description
        * @description Model description
@@ -39151,6 +39196,11 @@ export interface components {
        * @description Set as tenant default
        */
       is_default?: boolean | null;
+      /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       */
+      max_candidates?: number | null;
       /**
        * Open Source
        * @description Is the model open source
@@ -41351,6 +41401,23 @@ export interface components {
       items: components["schemas"]["WebsiteContentFolderPublic"][];
       /** Next Cursor */
       next_cursor: string | null;
+    };
+    /** WebsiteCrawlProgress */
+    WebsiteCrawlProgress: {
+      latest_crawl: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+    };
+    /**
+     * WebsiteCrawlProgressList
+     * @description Running crawls of the websites a space shows; websites not crawling are absent.
+     */
+    WebsiteCrawlProgressList: {
+      /** Items */
+      items: components["schemas"]["WebsiteCrawlProgress"][];
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -77553,6 +77620,55 @@ export interface operations {
       };
     };
   };
+  get_website_crawl_progress_api_v1_spaces__id__knowledge_websites_crawl_progress__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteCrawlProgressList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   add_space_member_api_v1_spaces__id__members__post: {
     parameters: {
       query?: never;
@@ -82376,6 +82492,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

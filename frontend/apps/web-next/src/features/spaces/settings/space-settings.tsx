@@ -778,15 +778,21 @@ function McpServersSection() {
 
 function DangerSection() {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const deleteSpace = useMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id: space.id } } })),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["spaces"] });
+    onSuccess: async () => {
+      // The list refreshes. The deleted space is only marked stale: nothing
+      // reads it while the page leaves, and coming back to it reads it again.
+      // A read from before the delete must not answer after it and make the
+      // space fresh again.
+      await queryClient.cancelQueries({ queryKey: ["spaces", routeId] });
+      void queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], refetchType: "none" });
       router.push("/spaces/list");
     },
     onError: (error) => toastApiError(error, t)

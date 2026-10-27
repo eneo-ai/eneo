@@ -23,6 +23,23 @@ test("records what the Content-Security-Policy blocks", async ({ page, cspViolat
   cspViolations.length = 0;
 });
 
+test("Astryx layers get their slide rules past the CSP", async ({ page, cspViolations }) => {
+  // The chat mounts Astryx layers (tooltips, popovers) on load; the first one
+  // installs the `@position-try` rules that let a layer slide or flip at the
+  // viewport edge (frontend/patches/@astryxdesign%2Fcore@0.7.3.patch).
+  await page.goto("/spaces/personal/chat");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const rules = document.getElementById("astryx-layer-slide-rules");
+        const sheet = [...document.styleSheets].find((sheet) => sheet.ownerNode === rules);
+        return sheet?.cssRules.length ?? 0;
+      })
+    )
+    .toBeGreaterThan(0);
+  expect(cspViolations, "violations while the chat loaded").toEqual([]);
+});
+
 test("a legacy Select opens without a <style> the CSP blocks", async ({ page, cspViolations }) => {
   // An open Radix Select injects two <style> elements, its viewport's and the
   // page's scroll lock; both need the request nonce (src/components/providers/nonce.tsx).

@@ -39,11 +39,13 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { ACTIVE_CRAWL_REFRESH_MS, IDLE_CRAWL_REFRESH_MS } from "./crawl-progress";
 import { embeddingModelsInUse, formatWebsiteName, type CrawlRun, type Website } from "./knowledge";
 import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterWebsites } from "./table-controls";
 import { KnowledgeLabel, KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
+import { useCrawlProgress } from "./use-crawl-progress";
 import { WebsiteDialog } from "./website-dialog";
 import {
   bulkDeletionWaitsForCrawlerCleanup,
@@ -57,10 +59,7 @@ import {
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { canRequestCrawlStop, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
-import { isActiveCrawl, nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
-
-const ACTIVE_CRAWL_REFRESH_MS = 2_000;
-const IDLE_WEBSITE_REFRESH_MS = 30_000;
+import { nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
 
 /** Which run's failures to show, and of which kind. */
 type FailureSelection = { run: CrawlRun; kind: CrawlFailureKind | null };
@@ -354,22 +353,21 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState("");
 
-  // Watch the same space query used by useSpace. An active crawl gets quick
-  // updates; the slower idle poll also finds crawls started by a schedule or
-  // another user, even when this browser never registered their job.
+  const ownWebsites = useMemo(
+    () => space.knowledge.websites.items.filter((website) => website.space_id === space.id),
+    [space]
+  );
+  // A running crawl is followed through the crawl progress (use-crawl-progress.ts);
+  // this list, with each website's newest run, feeds the table, its sorting and
+  // its actions alike.
+  const { websites, pollSpaceFast } = useCrawlProgress(ownWebsites);
+  // Watch the same space query used by useSpace. The slow poll finds crawls a
+  // schedule or another user starts, even when this browser never registered
+  // their job; it runs quickly only when the crawl progress cannot be read.
   useQuery({
     ...spaceQueryOptions(browserApi, routeId),
-    refetchInterval: (query) =>
-      query.state.data?.knowledge.websites.items.some((website) =>
-        isActiveCrawl(website.latest_crawl)
-      )
-        ? ACTIVE_CRAWL_REFRESH_MS
-        : IDLE_WEBSITE_REFRESH_MS
+    refetchInterval: pollSpaceFast ? ACTIVE_CRAWL_REFRESH_MS : IDLE_CRAWL_REFRESH_MS
   });
-
-  const websites = space.knowledge.websites.items.filter(
-    (website) => website.space_id === space.id
-  );
   const visibleWebsites = filterWebsites(websites, filter);
   // Only what is on screen counts as selected: rows the filter hides and
   // websites that were deleted meanwhile are never synced.

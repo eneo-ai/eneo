@@ -7,6 +7,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { escapeHtml } from "../html";
+import { imageDimensions } from "../images";
 import { relationEntries } from "../pdf-profile";
 import { parsedPart, type StyleMap, type Zip } from "./inspect";
 import { at, attr, children, find, rootElement, walk, type Element } from "./ooxml";
@@ -75,7 +76,8 @@ async function picture(context: Context, drawing: Element): Promise<string> {
   const extension = /\.(png|jpe?g)$/i.exec(mediaName)?.[1]?.toLowerCase();
   const bytes = extension && (await context.zip.file(mediaName)?.async("nodebuffer"));
   if (!bytes) return "";
-  const file = `body-${context.pictures++}.${extension === "jpeg" ? "jpg" : extension}`;
+  const { type } = imageDimensions(bytes);
+  const file = `body-${context.pictures++}.${type}`;
   await writeFile(join(context.assetsDir, file), bytes, { mode: 0o600 });
   const width = (cx / EMU_PER_PT).toFixed(1);
   const height = (cy / EMU_PER_PT).toFixed(1);

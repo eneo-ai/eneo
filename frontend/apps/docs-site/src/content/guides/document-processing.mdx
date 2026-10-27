@@ -312,11 +312,14 @@ When a user asks a question:
 The score is `1 - cosine distance`. Its scale depends on the embedding model,
 which is why `INJECT_KNOWLEDGE_MIN_SCORE` is unset by default.
 
-A rerank model registered under AI models adds an optional second step: the
-reranker scores the question against the best candidates and returns them in
-its own order with its scores. In this release only the collection search API
-uses it, `POST /api/v1/groups/{id}/searches/` with `rerank: true`; a reranker
-failure falls back to the vector order.
+A rerank model adds an optional second step: the reranker scores the question
+against the best candidates and returns them in its own order with its scores.
+An assistant uses the rerank model chosen under **Material handling →
+Result ranking**; the collection search API uses the default rerank model with
+`rerank: true` on `POST /api/v1/groups/{id}/searches/`. How many candidates are
+scored is set per rerank model, see
+[Rerank models](/guides/ai-providers#rerank-models). A reranker failure falls
+back to the vector order.
 
 See [Knowledge Retrieval and MCP](/docs/knowledge-retrieval-and-mcp) for the
 retrieval versions, the search-as-a-tool mode, and how the candidate count is

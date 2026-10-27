@@ -1,4 +1,4 @@
-"""Round-trip flows on by default (202610221000).
+"""Round-trip flows on by default (202610220930).
 
 The upgrade turns the ``flows_core`` flag on and gives predefined Owner and AI
 Configurator roles the flow permissions new tenants receive. The downgrade
@@ -19,7 +19,7 @@ from alembic.config import Config
 pytestmark = pytest.mark.migration_isolation
 
 PRE_REVISION = "202610212300"
-REVISION = "202610221000"
+REVISION = "202610220930"
 OWNER_FLOW_PERMISSIONS = {"flows_view", "flows_run", "flows_manage", "flows_trace"}
 
 

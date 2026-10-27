@@ -79,7 +79,10 @@ async def test_migrated_postgres_saves_and_publishes_copy_input_and_guards_rollb
     async with db_container() as container:
         # Index revisions run outside a transaction, so those above the guard
         # can commit before it refuses; the guarded revision stays applied.
-        assert await container.session().scalar(version) in {
+        # Develop's chains that do not descend from 202610121300 keep their
+        # own version rows beside the flow chain's.
+        stamps = set((await container.session().execute(version)).scalars())
+        assert stamps & {
             revision.revision
             for revision in script.iterate_revisions(head, "202610121300")
         }

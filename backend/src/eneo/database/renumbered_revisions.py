@@ -15,9 +15,11 @@ size retirement and the two transcription service check migrations became
 of October 21 took 202610191000 for develop's What's new marker correction, so
 the branch's transcript speaker names migration became 202610191005; that merge
 also moved the branch's head merge after develop's head, so the repair for that
-stamp applies develop's migrations first. A database stamped at one of the old
-ids by the branch would now be read as develop's migration of that id: Alembic
-would rerun the branch's renamed migrations and skip develop's.
+stamp applies develop's migrations first. The develop merge of October 26
+took 202610221000 for develop's rerank candidate settings, so the branch's
+flows on by default migration became 202610220930. A database stamped at one
+of the old ids by the branch would now be read as develop's migration of that
+id: Alembic would rerun the branch's renamed migrations and skip develop's.
 
 Such a database is recognised by schema the branch had at that stamp, which
 develop's migration of the same id never creates. It is refused with the
@@ -107,6 +109,14 @@ RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
             "alembic upgrade 202610191600 && "
             "alembic stamp --purge 202610191005"
         ),
+    ),
+    # Data-only; the column the branch added just before it is what develop's
+    # migrations never create.
+    RenumberedRevision(
+        old="202610221000",
+        new="202610220930",
+        table="flow_provider_calls",
+        column="digest_call",
     ),
 )
 

@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "./browser";
 import {
   invalidateConversationLists,
+  patchConversationLists,
   RECENT_CONVERSATIONS_LIMIT,
-  recentConversationsQueryOptions
+  recentConversationsQueryOptions,
+  type RecentConversation
 } from "./conversations";
 import { makeQueryClient } from "./query";
 
@@ -50,5 +52,67 @@ describe("invalidateConversationLists", () => {
     expect(invalidated(recent)).toBe(true);
     expect(invalidated(otherHistory)).toBe(false);
     expect(invalidated(detail)).toBe(false);
+  });
+});
+
+const recentRow = (id: string, name: string): RecentConversation => ({
+  id,
+  name,
+  created_at: "2026-10-26T09:00:00Z",
+  last_activity_at: "2026-10-26T10:00:00Z",
+  partner: { id: "assistant-1", name: "Upphandlingsassistenten", type: "assistant" },
+  space: { id: "space-1", name: "Upphandling", organization: false, personal: false }
+});
+
+describe("patchConversationLists", () => {
+  const history = ["conversations", "assistant", "a1"];
+  const recent = recentConversationsQueryOptions(browserApi).queryKey;
+  const row = (id: string, name: string) => ({ id, name, updated_at: "2026-10-26T10:00:00Z" });
+
+  function loaded() {
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(history, {
+      pages: [
+        { items: [row("c1", "Budget"), row("c2", "Protokoll")], total_count: 3, next_cursor: "2" },
+        { items: [row("c3", "Avtal")], total_count: 3, next_cursor: null }
+      ],
+      pageParams: [null, "2"]
+    });
+    queryClient.setQueryData(recent, [recentRow("c3", "Avtal"), recentRow("c9", "Annan")]);
+    return queryClient;
+  }
+
+  it("shows a new name in every loaded page of the history and in the recent list", () => {
+    const queryClient = loaded();
+    patchConversationLists(queryClient, history, "c3", "Ramavtal");
+    expect(queryClient.getQueryData(history)).toEqual({
+      pages: [
+        { items: [row("c1", "Budget"), row("c2", "Protokoll")], total_count: 3, next_cursor: "2" },
+        { items: [row("c3", "Ramavtal")], total_count: 3, next_cursor: null }
+      ],
+      pageParams: [null, "2"]
+    });
+    expect(queryClient.getQueryData(recent)).toEqual([
+      recentRow("c3", "Ramavtal"),
+      recentRow("c9", "Annan")
+    ]);
+  });
+
+  it("drops a deleted conversation from both lists", () => {
+    const queryClient = loaded();
+    patchConversationLists(queryClient, history, "c3", null);
+    const pages = queryClient.getQueryData<{ pages: { items: unknown[] }[] }>(history)!.pages;
+    expect(pages.map((page) => page.items)).toEqual([
+      [row("c1", "Budget"), row("c2", "Protokoll")],
+      []
+    ]);
+    expect(queryClient.getQueryData(recent)).toEqual([recentRow("c9", "Annan")]);
+  });
+
+  it("leaves a list that is not loaded unloaded", () => {
+    const queryClient = makeQueryClient();
+    patchConversationLists(queryClient, history, "c3", "Ramavtal");
+    expect(queryClient.getQueryState(history)).toBeUndefined();
+    expect(queryClient.getQueryState(recent)).toBeUndefined();
   });
 });

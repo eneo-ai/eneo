@@ -538,6 +538,8 @@
             <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
               {#if loginFailureReason === "unavailable"}
                 <p>{m.login_unavailable()}</p>
+              {:else if loginFailureReason === "deactivated"}
+                <p>{m.login_account_deactivated()}</p>
               {:else if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
                 <p>{m.login_too_many_attempts({ minutes: loginRetryAfterMinutes })}</p>
               {:else}
