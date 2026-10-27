@@ -13,6 +13,11 @@ from unittest.mock import MagicMock, patch
 import litellm
 import pytest
 
+from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
+from eneo.model_providers.infrastructure.provider_type_support import (
+    bucket_placements,
+    is_supported_provider_type,
+)
 from eneo.model_providers.presentation.model_provider_router import (
     ModelCostInfo,
     ProviderCapabilities,
@@ -214,3 +219,79 @@ async def test_no_bundled_catalog_name_is_one_of_litellms_prefixed_keys() -> Non
         # repeats the prefix ("openrouter/openrouter/auto" -> "openrouter/auto").
         if name in prefixed_keys[provider]:
             assert f"{provider}/{name}" in model_cost, (provider, name)
+
+
+async def test_pricing_buckets_are_offered_under_the_provider_that_routes_them() -> (
+    None
+):
+    model_cost: dict[str, ModelCostInfo] = {
+        "us.writer.palmyra-x4-v1:0": {
+            "litellm_provider": "bedrock_converse",
+            "mode": "chat",
+        },
+        "gemini-2.5-flash": {
+            "litellm_provider": "vertex_ai-language-models",
+            "mode": "chat",
+        },
+        # LiteLLM lists no supported provider for this bucket's rows.
+        "claude-opus-4": {
+            "litellm_provider": "vertex_ai-anthropic_models",
+            "mode": "chat",
+        },
+        "gpt-4.1": {"litellm_provider": "github_copilot", "mode": "chat"},
+    }
+    models_by_provider = {
+        "bedrock": ["us.writer.palmyra-x4-v1:0"],
+        "vertex_ai": ["gemini-2.5-flash"],
+        "github_copilot": ["gpt-4.1"],
+    }
+
+    with patch("litellm.models_by_provider", models_by_provider):
+        providers = await _catalog(model_cost)
+
+    assert _names(providers, "bedrock", "completion") == ["us.writer.palmyra-x4-v1:0"]
+    assert _names(providers, "vertex_ai", "completion") == ["gemini-2.5-flash"]
+    assert not providers.keys() & {
+        "bedrock_converse",
+        "vertex_ai-language-models",
+        "vertex_ai-anthropic_models",
+        "github_copilot",
+    }
+
+
+async def test_every_offered_provider_type_is_supported() -> None:
+    providers = await _catalog()
+
+    assert providers
+    assert [p for p in providers if not is_supported_provider_type(p)] == []
+
+
+async def test_a_moved_bucket_row_still_resolves_its_defaults() -> None:
+    """``/model-defaults/`` must find the row a moved catalog name came from."""
+    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
+    placements = bucket_placements(
+        cast(dict[str, list[str]], getattr(litellm, "models_by_provider"))
+    )
+    moved = {
+        (provider, key.removeprefix(f"{provider}/"))
+        for key, provider in placements.items()
+        if key in model_cost
+        and not is_supported_provider_type(model_cost[key].get("litellm_provider", ""))
+    }
+    providers = await _catalog()
+    offered = {
+        (provider, model["name"])
+        for provider, data in providers.items()
+        for models in data["models"].values()
+        for model in models
+    }
+
+    # The bundled map must have moved rows, or the check below is vacuous.
+    assert moved & offered
+    for provider, name in moved & offered:
+        assert (
+            resolve_model_defaults(
+                cast(dict[str, dict[str, object]], model_cost), name, provider
+            )
+            is not None
+        ), (provider, name)

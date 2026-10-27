@@ -210,6 +210,72 @@ class TestUpdateValidatesRequiredFields:
         assert updated.is_active is False
 
 
+class TestCreateChecksTheProviderType:
+    """A type LiteLLM cannot route, or one that needs an interactive sign-in,
+    is refused before anything is stored (#1258)."""
+
+    @pytest.mark.parametrize(
+        ("provider_type", "reason"),
+        [
+            ("bedrock_converse", "cannot route"),
+            ("vertex_ai-language-models", "cannot route"),
+            ("github_copilot", "interactive sign-in"),
+            ("chatgpt", "interactive sign-in"),
+        ],
+    )
+    async def test_an_unusable_type_is_refused(self, provider_type, reason):
+        service, repository = _service(_provider())
+
+        with pytest.raises(BadRequestException, match=reason):
+            await service.create(
+                tenant_id=uuid4(),
+                name="new",
+                provider_type=provider_type,
+                credentials={"api_key": "sk-abc"},
+                config={},
+            )
+
+        repository.get_by_name.assert_not_awaited()
+        repository.create.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("sent", "stored", "config"),
+        [
+            ("vllm", "hosted_vllm", {"endpoint": "http://vllm:8000"}),
+            ("OpenAI", "openai", {}),
+        ],
+    )
+    async def test_the_canonical_type_is_stored(self, sent, stored, config):
+        service, repository = _service(_provider())
+        repository.create.side_effect = lambda created: created
+
+        created = await service.create(
+            tenant_id=uuid4(),
+            name="new",
+            provider_type=sent,
+            credentials={"api_key": "sk-abc"},
+            config=config,
+        )
+
+        assert created.provider_type == stored
+
+    async def test_a_stored_provider_of_a_refused_type_stays_editable(self):
+        provider = _provider("bedrock_converse")
+        service, repository = _service(provider)
+
+        updated = await service.update(
+            provider.id,
+            name="renamed",
+            credentials={"api_key": "sk-new"},
+            is_active=False,
+        )
+
+        repository.update.assert_awaited_once()
+        assert updated.provider_type == "bedrock_converse"
+        assert updated.name == "renamed"
+        assert updated.is_active is False
+
+
 class TestUpdateWithNewDestination:
     async def test_endpoint_change_without_credentials_is_rejected_before_writing(self):
         provider = _provider(config={"endpoint": "https://api.example.com"})

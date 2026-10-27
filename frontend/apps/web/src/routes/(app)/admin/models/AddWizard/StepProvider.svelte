@@ -31,6 +31,7 @@
   import {
     formatProviderLabel,
     listProviderOptions,
+    offeredFavoriteTypes,
     type ModelProviderCapabilities
   } from "../modelProviderCapabilities";
 
@@ -72,7 +73,7 @@
   const loadingCapabilities = $derived(!capabilities);
 
   const favoriteCards = $derived(
-    localFavorites.map((value) => {
+    offeredFavoriteTypes(localFavorites, capabilities).map((value) => {
       const found = allCapabilityProviders.find((p) => p.value === value);
       return { value, label: found?.label ?? formatProviderLabel(value) };
     })
