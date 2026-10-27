@@ -147,7 +147,8 @@
             }
           },
           "approved": null,
-          "result_status": null
+          "result_status": null,
+          "structured_content": null
         }
       }
     },
@@ -173,7 +174,8 @@
             }
           },
           "approved": null,
-          "result_status": "succeeded"
+          "result_status": "succeeded",
+          "structured_content": null
         }
       }
     },
@@ -374,7 +376,8 @@
                 }
               },
               "approved": null,
-              "result_status": null
+              "result_status": null,
+              "structured_content": null
             }
           },
           "resultProviderMetadata": {
@@ -392,7 +395,8 @@
                 }
               },
               "approved": null,
-              "result_status": "succeeded"
+              "result_status": "succeeded",
+              "structured_content": null
             }
           }
         },
