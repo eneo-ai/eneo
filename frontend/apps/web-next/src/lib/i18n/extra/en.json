@@ -3887,5 +3887,7 @@
   "tool_flows_read_review": "Reading the review",
   "tool_flows_read_review_done": "Read the review",
   "tool_flows_review_run": "Responding to the review",
-  "tool_flows_review_run_done": "Responded to the review"
+  "tool_flows_review_run_done": "Responded to the review",
+  "flows_chat_settings": "Chat settings",
+  "flows_chat_settings_hint": "Applies to this chat only."
 }

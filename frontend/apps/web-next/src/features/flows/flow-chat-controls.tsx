@@ -1,9 +1,11 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Popover } from "@astryxdesign/core/Popover";
+import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, Sparkles } from "lucide-react";
+import { MessageSquarePlus, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
@@ -27,10 +29,6 @@ import {
 
 type CompletionModel = Schema<"CompletionModelPublic">;
 type Refused = (error: unknown, title: string) => void;
-
-/** The compact (ghost) trigger look the chat composer's pickers share. */
-const PICKER_CLASS =
-  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11";
 
 /**
  * The models the flow chat may use: the space's own (enabled there and
@@ -67,13 +65,46 @@ function useSaveChat(chat: FlowAuthoringChat) {
 }
 
 /**
- * The chat's model and reasoning effort, the same pickers the ordinary chat
- * has beside its composer. The list holds the space's models that support
- * tools; "Använd standard" follows the organisation's default for flow chats
- * (or the space's), which the list marks. A refused choice falls back and is
- * shown with the page's other refusals.
+ * The chat's settings behind one button in the panel's title row, since the
+ * panel is narrow: a popover with the model and reasoning-effort pickers the
+ * ordinary chat has beside its composer, here as labelled fields. The model
+ * list holds the space's models that support tools; "Använd standard"
+ * follows the organisation's default for flow chats (or the space's), which
+ * the list marks. A refused choice falls back and is shown with the page's
+ * other refusals.
  */
-export function FlowChatModelPickers({
+export function FlowChatSettings({
+  chat,
+  onRefused
+}: {
+  chat: FlowAuthoringChat;
+  onRefused: Refused;
+}) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      placement="below"
+      alignment="end"
+      width={320}
+      label={t("flows_chat_settings")}
+      closeButtonLabel={t("close")}
+      content={<FlowChatSettingsFields chat={chat} onRefused={onRefused} />}
+    >
+      <IconButton
+        label={t("flows_chat_settings")}
+        tooltip={t("flows_chat_settings")}
+        icon={<SlidersHorizontal aria-hidden className="size-4" />}
+        variant="ghost"
+        size="sm"
+      />
+    </Popover>
+  );
+}
+
+function FlowChatSettingsFields({
   chat,
   onRefused
 }: {
@@ -108,10 +139,14 @@ export function FlowChatModelPickers({
   }
 
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+    <div className="flex min-w-0 flex-col gap-3">
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+        {t("flows_chat_settings_hint")}
+      </Text>
       <ModelSelector
         models={models}
         selectedId={effectiveId}
+        field={{ label: t("completion_model") }}
         onSelect={(id) =>
           change({ completion_model_id: id }, () =>
             t("flows_chat_model_saved", { model: nameOf(id) })
@@ -128,9 +163,7 @@ export function FlowChatModelPickers({
               })
             )
         }}
-        size="sm"
         showPricing={tenant.show_model_pricing}
-        className={PICKER_CLASS}
       />
       {options.length > 0 ? (
         <ReasoningEffortSelector
@@ -138,6 +171,7 @@ export function FlowChatModelPickers({
           stored={chat.reasoning_effort ?? null}
           policyDefault={null}
           defaultLabel={t("flows_chat_reasoning_model_default")}
+          appearance="field"
           onSelect={(effort) =>
             change({ reasoning_effort: effort }, () => {
               const level = effectiveReasoningEffort({
@@ -152,10 +186,9 @@ export function FlowChatModelPickers({
               });
             })
           }
-          className={PICKER_CLASS}
         />
       ) : null}
-    </span>
+    </div>
   );
 }
 
@@ -195,8 +228,9 @@ export function NewConversationButton({
 
   return (
     <>
-      <Button
+      <IconButton
         label={t("flows_chat_new_conversation")}
+        tooltip={t("flows_chat_new_conversation")}
         variant="ghost"
         size="sm"
         icon={<MessageSquarePlus aria-hidden className="size-4" />}
@@ -225,8 +259,9 @@ export function NewConversationButton({
 export function OptimizeFlowButton({ onAskChat }: { onAskChat: (text: string) => void }) {
   const t = useTranslations();
   return (
-    <Button
+    <IconButton
       label={t("flow_suggestions_optimize")}
+      tooltip={t("flow_suggestions_optimize")}
       variant="ghost"
       size="sm"
       icon={<Sparkles aria-hidden className="size-4" />}

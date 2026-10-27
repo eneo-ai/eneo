@@ -3887,5 +3887,7 @@
   "tool_flows_read_review": "Läser granskningen",
   "tool_flows_read_review_done": "Läste granskningen",
   "tool_flows_review_run": "Svarar på granskningen",
-  "tool_flows_review_run_done": "Svarade på granskningen"
+  "tool_flows_review_run_done": "Svarade på granskningen",
+  "flows_chat_settings": "Chattinställningar",
+  "flows_chat_settings_hint": "Gäller bara den här chatten."
 }

@@ -24,6 +24,11 @@ export type ReasoningEffortSelectorProps = {
   onSelect: (effort: string | null) => void | Promise<unknown>;
   /** The name of the default option; the organisation default unless said otherwise. */
   defaultLabel?: string;
+  /**
+   * `toolbar` (default): the ghost trigger beside the composer, named by the
+   * level in force. `field`: a labelled form field for a settings surface.
+   */
+  appearance?: "toolbar" | "field";
   className?: string;
 };
 
@@ -39,6 +44,7 @@ export function ReasoningEffortSelector({
   policyDefault,
   onSelect,
   defaultLabel,
+  appearance = "toolbar",
   className
 }: ReasoningEffortSelectorProps) {
   const t = useTranslations();
@@ -77,12 +83,13 @@ export function ReasoningEffortSelector({
   return (
     <Selector
       label={label}
-      isLabelHidden
+      isLabelHidden={appearance === "toolbar"}
       // The trigger is named by its label alone: include the level in force.
       aria-label={t("reasoning_effort_value", { value: effectiveText })}
-      variant="ghost"
+      variant={appearance === "toolbar" ? "ghost" : "input"}
       size="md"
       presentation="adaptive"
+      width={appearance === "field" ? "100%" : undefined}
       startIcon={Brain}
       options={selectorOptions}
       value={value}

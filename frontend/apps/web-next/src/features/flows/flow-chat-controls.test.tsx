@@ -5,7 +5,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import {
-  FlowChatModelPickers,
+  FlowChatSettings,
   NewConversationButton,
   OptimizeFlowButton,
   flowChatModelId
@@ -99,12 +99,18 @@ function renderControls(chat: FlowAuthoringChat = CHAT) {
   queryClient.setQueryData(flowKeys.authoringChat(chat.flow_id), chat);
   const view = renderInApp(
     <div>
-      <FlowChatModelPickers chat={chat} onRefused={onRefused} />
+      <FlowChatSettings chat={chat} onRefused={onRefused} />
       <NewConversationButton chat={chat} onRefused={onRefused} />
     </div>,
     { queryClient }
   );
   return { ...view, onRefused, queryClient };
+}
+
+/** Opens the settings popover the pickers live in. */
+async function openSettings() {
+  fireEvent.click(screen.getByRole("button", { name: "Chattinställningar" }));
+  return screen.findByRole("dialog", { name: "Chattinställningar" });
 }
 
 describe("flowChatModelId", () => {
@@ -118,13 +124,25 @@ describe("flowChatModelId", () => {
   });
 });
 
-describe("FlowChatModelPickers", () => {
-  it("lists the space's models that use tools, with the default first and marked", async () => {
+describe("FlowChatSettings", () => {
+  it("keeps the pickers behind one button in the narrow panel", async () => {
     const { container } = renderControls();
+    const trigger = screen.getByRole("button", { name: "Chattinställningar" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await expectNoAxeViolations(container);
+
+    await openSettings();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Gäller bara den här chatten.")).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("lists the space's models that use tools, with the default first and marked", async () => {
+    renderControls();
+    await openSettings();
     const picker = screen.getByRole("button", {
       name: "Chattmodell: Standardmodell (standard)"
     });
-    await expectNoAxeViolations(container);
 
     fireEvent.click(picker);
     const options = await screen.findAllByRole("option");
@@ -141,12 +159,15 @@ describe("FlowChatModelPickers", () => {
   it("saves a chosen model through the chat, says so and keeps the answer", async () => {
     state.reply = ok({ ...CHAT, completion_model_id: "model-strong" });
     const { queryClient } = renderControls();
+    await openSettings();
     fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: / }));
     fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith("Chatten använder nu Stark modell.")
     );
+    // The settings stay open for the next change; only the list closed.
+    expect(screen.getByRole("dialog", { name: "Chattinställningar" })).toBeTruthy();
     expect(api.PATCH).toHaveBeenCalledWith("/api/v1/flows/{id}/authoring-chat/{session_id}/", {
       params: { path: { id: "flow-1", session_id: "session-1" } },
       body: { completion_model_id: "model-strong" }
@@ -160,6 +181,7 @@ describe("FlowChatModelPickers", () => {
   it("returns to the default with null", async () => {
     state.reply = ok(CHAT);
     renderControls({ ...CHAT, completion_model_id: "model-strong" });
+    await openSettings();
     fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Stark modell" }));
     fireEvent.click(await screen.findByRole("option", { name: /^Använd standard/ }));
 
@@ -180,6 +202,7 @@ describe("FlowChatModelPickers", () => {
       code: "flow_authoring_model_below_classification"
     });
     const { onRefused } = renderControls();
+    await openSettings();
     fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: / }));
     fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
 
@@ -198,6 +221,7 @@ describe("FlowChatModelPickers", () => {
   it("offers the reasoning levels of the model in force, and the model's own default", async () => {
     state.reply = ok({ ...CHAT, completion_model_id: "model-strong", reasoning_effort: "high" });
     renderControls({ ...CHAT, completion_model_id: "model-strong" });
+    await openSettings();
     const reasoning = screen.getByRole("combobox", { name: "Resonemangsnivå: Standard" });
     fireEvent.click(reasoning);
     const levels = await screen.findByRole("option", { name: /^Hög/ });
@@ -212,8 +236,10 @@ describe("FlowChatModelPickers", () => {
     });
   });
 
-  it("offers no reasoning level for a model without them", () => {
+  it("offers no reasoning level for a model without them", async () => {
     renderControls();
+    await openSettings();
+    expect(screen.getByRole("button", { name: /^Chattmodell: / })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
   });
 });
