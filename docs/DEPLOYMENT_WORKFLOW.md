@@ -57,7 +57,7 @@ Backflow (patches):
 #### `develop`
 - Integration branch for new features
 - Always deployable to dev environment
-- Protected: requires a PR approved by a member of `@eneo-ai/core-maintainers`, merged through the merge queue
+- Protected: accepts only pull requests that a member of `@eneo-ai/core-maintainers` adds to the merge queue, with all required checks green
 
 #### `release/v1.X`
 - Created from `develop` when ready to release or stabilize a minor version
@@ -417,7 +417,7 @@ move at release time.
 **A:** For any change that adds functionality, fixes a bug, or modifies behavior. Even small changes should go through a PR for code review.
 
 ### Q: Can I push directly to develop or release branches?
-**A:** No. All long-lived branches are protected and require pull requests with approvals.
+**A:** No. `develop` only accepts pull requests through the merge queue, and only Core Maintainers can push to release branches. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 ### Q: Where and how do I create version tags?
 **A:** Always on a `release/v1.X` branch. Use **GitHub Releases** (not the CLI) to create tags — this gives you release notes, pre-release marking, and a clean audit trail. See [Quick Command Reference](#creating-tags-github-ui).

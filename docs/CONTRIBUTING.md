@@ -160,10 +160,13 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 - `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels` must pass. A first-time contributor's first workflow run may need a maintainer's approval before it starts.
 - If you cannot add labels yourself, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
-- A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing; a new commit dismisses an earlier approval, and every conversation must be resolved.
-- A Core Maintainer adds the approved pull request to the merge queue, which tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
+- A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
+- When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
+- If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
-Only Core Maintainers can push to `develop`, `main` or `release/*` and merge pull requests, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+Only Core Maintainers can push to `develop`, `main` or `release/*` and add pull requests to the merge queue, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+
+**For Core Maintainers:** choose **Merge when ready** on your own pull request as soon as you open it (or run `gh pr merge <number> --auto`). It enters the merge queue when the checks are green; no approval from a colleague is required, but ask for one when a second opinion helps. There is no bypass, so nothing reaches `develop` without passing the checks.
 
 ---
 
@@ -534,7 +537,7 @@ The step-by-step flow is in [Quick Start for Contributors](#-quick-start-for-con
 6. **Update Documentation**: Keep docs synchronized with code changes.
 7. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
 8. **Labels**: Every PR needs one change type and at least one area, as described in the [required-label policy](../.github/PROJECT_WORKFLOW.md#required-labels). If you cannot add labels, a maintainer adds them.
-9. **Review**: At least one approval from a member of `@eneo-ai/core-maintainers` is required. GitHub requests the review automatically through `.github/CODEOWNERS`, and only Core Maintainers can merge. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+9. **Review**: GitHub requests a review from `@eneo-ai/core-maintainers` automatically through `.github/CODEOWNERS`. A Core Maintainer approves contributions from outside the team, and only Core Maintainers can add a pull request to the merge queue. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 **PR Template:** GitHub fills in the [pull request template](../.github/pull_request_template.md) when you open a PR. Its sections are **Changes**, **Why**, **Planning**, **User-facing**, **Testing**, **Accessibility** (for UI changes) and **Screenshots**.
 
@@ -871,7 +874,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 - Feature freeze 1 week before minor releases
 - Critical bug fixes accepted during freeze
-- All changes require approval from Core Maintainers, who also cut release branches and publish releases
+- Core Maintainers decide what enters the merge queue, cut release branches and publish releases
 - Changelog updated with each release
 
 ---

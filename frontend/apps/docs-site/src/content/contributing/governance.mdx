@@ -27,8 +27,8 @@ Core Maintainers is the Eneo team at Sundsvalls kommun
 ships. It:
 
 - keeps the codebase in line with the agreed technical roadmap and architecture
-- reviews and approves every change before it is merged
-- merges pull requests and publishes releases
+- reviews and approves contributions from outside the team
+- decides what enters the merge queue and publishes releases
 - responds to security alerts and vulnerability reports
 
 ### Collaborators: building Eneo together
@@ -57,10 +57,15 @@ from a fork, in exactly the same way as Collaborators.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
    pull request against `develop`.
 3. **Checks.** CI, Dependency Review and the PR label check run automatically.
-4. **Review.** A Core Maintainer other than the author approves it.
-5. **Merge.** A Core Maintainer adds it to the merge queue, which tests it
+4. **Review.** A Core Maintainer reviews and approves it.
+5. **Merge.** The Core Maintainer chooses **Merge when ready**. As soon as the
+   checks are green, the pull request enters the merge queue, which tests it
    against the latest `develop` and squash-merges it.
 6. **Release.** Core Maintainers cut a release branch and publish a `v*` tag.
+
+Core Maintainers' own pull requests skip step 4: they choose **Merge when
+ready** themselves, and the same checks and merge queue apply. They ask a
+colleague for a review whenever a second opinion helps.
 
 Each step is described for contributors in
 [Contributing to Eneo](/contributing#contribute-a-change).
@@ -73,9 +78,14 @@ depend on anyone remembering them.
 - **Least privilege.** Only Core Maintainers have write access to the
   repository. Everyone else contributes from forks. Administrator rights are
   limited to a small number of organisation owners.
-- **Four eyes on every change.** Every pull request into `develop` needs an
-  approval from a Core Maintainer other than its author. New commits reset the
-  approval.
+- **Only Core Maintainers decide what is merged.** Only they can add a pull
+  request to the merge queue. A contribution from outside the team is reviewed
+  and approved by a Core Maintainer first. If someone without write access
+  pushes new commits afterwards, GitHub cancels **Merge when ready** and the
+  change must be looked at again.
+- **Green checks, no shortcuts.** Nothing reaches `develop` without passing the
+  required checks. The ruleset has no bypass, so there is no way to skip CI or
+  the merge queue.
 - **Tested before and after merging.** Required checks run on the pull request,
   again in the merge queue and once more on `develop`.
 - **Isolated CI for contributions.** Pull requests from forks cannot read
@@ -106,12 +116,12 @@ default. Any further rights come from the teams above.
 
 ## Protected branches and tags
 
-| Ref          | Rules                                                                                                                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `develop`    | Changes only through pull requests. One approval from Core Maintainers, required checks, resolved conversations and the merge queue. Squash merges only. Cannot be deleted or force-pushed. |
-| `release/**` | Only Core Maintainers can create, update, merge into or delete release branches. Cannot be force-pushed. Pull requests must pass the PR label check.                                        |
-| `main`       | Cannot be deleted or force-pushed.                                                                                                                                                          |
-| `v*` tags    | Only Core Maintainers can create, move or delete version tags.                                                                                                                              |
+| Ref          | Rules                                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `develop`    | Changes only through pull requests that a Core Maintainer adds to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed. |
+| `release/**` | Only Core Maintainers can create, update, merge into or delete release branches. Cannot be force-pushed. Pull requests must pass the PR label check.                                             |
+| `main`       | Cannot be deleted or force-pushed.                                                                                                                                                               |
+| `v*` tags    | Only Core Maintainers can create, move or delete version tags.                                                                                                                                   |
 
 ## Releases
 
@@ -135,17 +145,17 @@ it. The full flow is described in
 [DEPLOYMENT_WORKFLOW.md](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md),
 and the release artefacts in [Release SBOMs](/docs/release-sboms).
 
-## Exceptional merges
+## Urgent fixes
 
-Core Maintainers can bypass the `develop` rules for a single pull request. This
-is meant for urgent fixes, or when no second Core Maintainer is available to
-review. It is not part of the normal flow.
+An urgent fix takes the normal route: open a pull request, choose **Merge when
+ready** and let the checks run. There is no bypass that skips CI or the merge
+queue.
 
 <Callout type="warning">
-  A bypass skips every rule in the ruleset, including the merge queue and the
-  required checks. Only bypass when all checks have already passed on the pull
-  request. State the reason in the pull request so another Core Maintainer can
-  review the change afterwards.
+  If GitHub itself blocks a critical fix, for example because a required check
+  cannot run, an organisation owner can temporarily change the ruleset. GitHub
+  records the change in the audit log. Restore the rule straight away and record
+  what happened in a GitHub issue.
 </Callout>
 
 ## Where this fits in Eneo's governance
@@ -188,9 +198,9 @@ Working from a fork gives you the same ability to propose and test changes.
 
 ### Can I review other people's pull requests?
 
-Yes, and it is encouraged. Anyone can review and comment. Only an approval from
-a Core Maintainer unlocks the merge, but other reviews often surface problems
-early and speed it up.
+Yes, and it is encouraged. Anyone can review and comment. Only a Core
+Maintainer can add a pull request to the merge queue, but other reviews often
+surface problems early and speed it up.
 
 ### Does CI run on my pull request from a fork?
 
@@ -217,8 +227,16 @@ and publishes a patch release.
 
 ### Can Core Maintainers merge their own changes without review?
 
-Not in the normal flow. Another Core Maintainer approves every pull request. A
-bypass exists for urgent cases, and its reason is recorded in the pull request.
+Yes. They choose **Merge when ready** on their own pull request, and it enters
+the merge queue when the checks are green. A formal approval is not required,
+so the team is not slowed down waiting for each other. They can still ask a
+colleague for a review when a second opinion helps, for example on larger or
+riskier changes. The required checks and the merge queue always apply.
+
+### Can a pull request be merged with failing checks?
+
+No. The `develop` ruleset has no bypass, so every pull request must pass the
+required checks and go through the merge queue.
 
 ### How do I report a security vulnerability?
 
