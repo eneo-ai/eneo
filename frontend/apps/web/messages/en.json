@@ -4773,6 +4773,7 @@
   "eneo_error_9064": "The sync has stopped, but crawler cleanup is still in progress. Try removing the source again shortly.",
   "eneo_error_9069": "The prompt is active in the personal assistant governance. Deactivate it there first, then delete it.",
   "eneo_error_9075": "The icon is still shown by an assistant, app, space or group chat. Remove it there first.",
+  "eneo_error_9076": "Only an icon you uploaded can be shown. Upload the image first.",
   "whats_new": "What's new",
   "whats_new_unseen": "New updates",
   "whats_new_intro": "What has changed in Eneo, one release at a time. The newest is selected.",

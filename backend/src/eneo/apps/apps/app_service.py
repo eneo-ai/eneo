@@ -430,6 +430,12 @@ class AppService:
         if requires_context_validation:
             app = await self._lock_app_for_context_validation(app_id)
         previous_icon_id = app.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         completion_model = None
         if completion_model_id is not None:

@@ -156,6 +156,12 @@ class GroupChatService:
 
         group_chat = space.get_group_chat(group_chat_id=id)
         previous_icon_id = group_chat.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
         # If current_assistants is explicitly None, don't update assistants
         # If current_assistants is an empty list, set assistants to empty list (clear all)
         # If current_assistants has items, convert them to GroupChatAssistant objects

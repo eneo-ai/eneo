@@ -76,6 +76,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- Icons ---
   9075: () => m.eneo_error_9075(), // ICON_IN_USE
+  9076: () => m.eneo_error_9076(), // ICON_NOT_ATTACHABLE
 
   // --- Governance ---
   9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE

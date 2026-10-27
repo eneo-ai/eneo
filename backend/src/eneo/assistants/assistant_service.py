@@ -1698,6 +1698,12 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if is_personal_default and reasoning_effort_only_update:

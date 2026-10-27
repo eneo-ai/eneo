@@ -179,6 +179,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9039: "eneo_error_9039", // MODEL_IN_USE
   // Icons
   9075: "eneo_error_9075", // ICON_IN_USE
+  9076: "eneo_error_9076", // ICON_NOT_ATTACHABLE
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle

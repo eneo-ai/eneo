@@ -4,17 +4,26 @@ Icon ids are public: ``GET /icons/{id}/`` is unauthenticated and the id sits in
 every ``<img src>``. Assistants, apps, spaces and group chats reference icons
 with ``ON DELETE SET NULL``, so a delete that only checks the tenant silently
 clears whatever resource uses the icon. A resource releases its icon itself
-when an update replaces or clears it, or when the resource is deleted.
+when an update replaces or clears it, or when the resource is deleted, and
+only an icon the caller uploaded in their tenant can be attached.
 """
 
 import asyncio
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
 import sqlalchemy as sa
 
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
+from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
+from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconInUseError
 from eneo.main.exceptions import ErrorCodes, NotFoundException
 from eneo.main.models import ModelId
@@ -52,7 +61,7 @@ async def owner(db_container, admin_user, patch_auth_service_jwt) -> dict[str, s
 
 
 @pytest.fixture
-async def member(db_container, admin_user, patch_auth_service_jwt) -> dict[str, str]:
+async def member_user(db_container, admin_user):
     async with db_container() as container:
         role = await container.role_repo().create_role(
             RoleCreate(
@@ -61,7 +70,7 @@ async def member(db_container, admin_user, patch_auth_service_jwt) -> dict[str, 
                 tenant_id=admin_user.tenant_id,
             )
         )
-        user = await container.user_repo().add(
+        return await container.user_repo().add(
             UserAdd(
                 email=f"member-{uuid4().hex[:8]}@example.com",
                 username=f"member_{uuid4().hex[:8]}",
@@ -70,7 +79,11 @@ async def member(db_container, admin_user, patch_auth_service_jwt) -> dict[str, 
                 roles=[ModelId(id=role.id)],
             )
         )
-    return await _headers(db_container, user)
+
+
+@pytest.fixture
+async def member(db_container, member_user, patch_auth_service_jwt) -> dict[str, str]:
+    return await _headers(db_container, member_user)
 
 
 @pytest.fixture
@@ -223,40 +236,76 @@ async def test_changing_the_icon_deletes_the_one_it_replaced(
         assert await _icon_status(client, new_icon_id) == 200
 
 
-async def test_sending_the_current_icon_again_keeps_it(client, owner):
+@pytest.mark.parametrize("release", ["clear", "delete"])
+async def test_an_icon_another_resource_shows_survives_a_release(
+    client, owner, release
+):
+    shown_by, icon_id = await _with_icon(client, owner)
+    released_by, _ = await _with_icon(client, owner, icon_id=icon_id)
+
+    if release == "clear":
+        response = await _set_icon(client, owner, "assistant", released_by, None)
+        assert response.status_code == 200, response.text
+    else:
+        response = await client.delete(
+            f"/api/v1/assistants/{released_by}/", headers=owner
+        )
+        assert response.status_code == 204, response.text
+
+    assert await _shown_icon(client, owner, shown_by) == icon_id
+    assert await _icon_status(client, icon_id) == 200
+
+
+@pytest.mark.parametrize("uploader", ["member", "other_tenant"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+async def test_a_resource_refuses_an_icon_the_caller_did_not_upload(
+    client, owner, member, other_tenant, apps_enabled, kind, uploader
+):
+    foreign_icon = await _upload(
+        client, {"member": member, "other_tenant": other_tenant}[uploader]
+    )
+    resource_id = await _create(client, owner, kind)
+
+    response = await _set_icon(client, owner, kind, resource_id, foreign_icon)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["eneo_error_code"] == ErrorCodes.ICON_NOT_ATTACHABLE == 9076
+    assert await _shown_icon(client, owner, resource_id, kind) is None
+    assert await _icon_status(client, foreign_icon) == 200
+
+
+async def test_a_resource_refuses_an_unknown_icon(client, owner):
+    assistant_id = await _create(client, owner, "assistant")
+
+    response = await _set_icon(client, owner, "assistant", assistant_id, str(uuid4()))
+
+    assert response.status_code == 400, response.text
+    assert response.json()["eneo_error_code"] == 9076
+
+
+async def test_another_editor_may_send_the_current_icon_again(
+    client, owner, member, member_user
+):
     assistant_id, icon_id = await _with_icon(client, owner)
+    space_id = (
+        await client.get(f"/api/v1/assistants/{assistant_id}/", headers=owner)
+    ).json()["space_id"]
+    added = await client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": str(member_user.id), "role": "editor"},
+        headers=owner,
+    )
+    assert added.status_code == 200, added.text
+    unattached_icon = await _upload(client, owner)
 
-    resent = await _set_icon(client, owner, "assistant", assistant_id, icon_id)
-
-    assert resent.status_code == 200, resent.text
-    assert await _icon_status(client, icon_id) == 200
-
-
-async def test_clearing_an_icon_keeps_it_for_another_resource_that_shows_it(
-    client, owner, member
-):
-    owned_assistant, icon_id = await _with_icon(client, owner)
-    borrowing_assistant, _ = await _with_icon(client, member, icon_id=icon_id)
-
-    cleared = await _set_icon(client, member, "assistant", borrowing_assistant, None)
-
-    assert cleared.status_code == 200, cleared.text
-    assert await _shown_icon(client, owner, owned_assistant) == icon_id
-    assert await _icon_status(client, icon_id) == 200
-
-
-async def test_deleting_a_resource_keeps_an_icon_another_resource_shows(
-    client, owner, member
-):
-    owned_assistant, icon_id = await _with_icon(client, owner)
-    borrowing_assistant, _ = await _with_icon(client, member, icon_id=icon_id)
-
-    deleted = await client.delete(
-        f"/api/v1/assistants/{borrowing_assistant}/", headers=member
+    resent = await _set_icon(client, member, "assistant", assistant_id, icon_id)
+    swapped = await _set_icon(
+        client, member, "assistant", assistant_id, unattached_icon
     )
 
-    assert deleted.status_code == 204, deleted.text
-    assert await _shown_icon(client, owner, owned_assistant) == icon_id
+    assert resent.status_code == 200, resent.text
+    assert swapped.status_code == 400, swapped.text
+    assert await _shown_icon(client, owner, assistant_id) == icon_id
     assert await _icon_status(client, icon_id) == 200
 
 
@@ -357,3 +406,46 @@ async def test_a_delete_that_waited_for_another_delete_finds_nothing(
 
     with pytest.raises(NotFoundException):
         await second
+
+
+def _upgrade(connection, revision: str) -> None:
+    backend = Path(__file__).resolve().parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    script = ScriptDirectory.from_config(config).get_revision(revision)
+    assert script is not None
+    with Operations.context(MigrationContext.configure(connection)):
+        script.module.upgrade()
+
+
+async def test_the_upgrade_clears_icons_borrowed_from_another_tenant(
+    client, owner, other_tenant, apps_enabled, db_container
+):
+    tables = {
+        "assistant": Assistants,
+        "app": Apps,
+        "space": Spaces,
+        "group_chat": GroupChatsTable,
+    }
+    borrowing = {kind: await _create(client, owner, kind) for kind in tables}
+    foreign_icon = await _upload(client, other_tenant)
+    keeping, own_icon = await _with_icon(client, owner)
+
+    async with db_container() as container:
+        session = container.session()
+        # Before #1228 an update accepted any icon id, so write those rows directly.
+        for kind, resource_id in borrowing.items():
+            table = tables[kind]
+            await session.execute(
+                sa.update(table)
+                .where(table.id == UUID(resource_id))
+                .values(icon_id=UUID(foreign_icon))
+            )
+        connection = await session.connection()
+        await connection.run_sync(_upgrade, "202610261300")
+
+    assert {
+        kind: await _shown_icon(client, owner, resource_id, kind)
+        for kind, resource_id in borrowing.items()
+    } == dict.fromkeys(tables)
+    assert await _shown_icon(client, owner, keeping) == own_icon

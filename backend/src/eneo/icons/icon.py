@@ -21,3 +21,12 @@ class IconInUseError(Exception):
             "The icon is still shown by an assistant, app, space or group chat. "
             "Remove it there first; the icon is deleted when nothing shows it."
         )
+
+
+class IconNotAttachableError(Exception):
+    code = "icon_not_attachable"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Only an icon you uploaded can be shown. Upload the image first."
+        )

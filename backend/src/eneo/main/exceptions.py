@@ -100,6 +100,8 @@ class ErrorCodes(int, Enum):
     # An icon cannot be deleted while an assistant, app, space or group chat
     # shows it.
     ICON_IN_USE = 9075
+    # A resource can only show an icon the caller uploaded in their tenant.
+    ICON_NOT_ATTACHABLE = 9076
 
 
 class NotFoundException(Exception):

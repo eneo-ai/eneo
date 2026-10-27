@@ -13,7 +13,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.spaces_table import Spaces
-from eneo.icons.icon import IconMetadata, IconMetadataCreate
+from eneo.icons.icon import IconMetadata, IconMetadataCreate, IconNotAttachableError
 from eneo.main.models import NotProvided, is_provided
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
@@ -198,6 +198,38 @@ class IconRepository:
             )
         ).scalar_one_or_none()
         return deleted_id is not None
+
+    async def ensure_attachable(
+        self,
+        previous: UUID | None,
+        requested: UUID | None | NotProvided,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        """Refuse an update that would show an icon the user did not upload in
+        their tenant. Icon ids are public, so showing someone else's icon would
+        also keep it from being deleted. Sending the current icon again is fine."""
+        if not is_provided(requested) or requested is None or requested == previous:
+            return
+        uploaded = await self.session.scalar(
+            sa.select(Icons.id)
+            .join(
+                IconContentReferences,
+                sa.and_(
+                    IconContentReferences.icon_id == Icons.id,
+                    IconContentReferences.variant == "primary",
+                ),
+            )
+            .join(ObjectContents, ObjectContents.id == IconContentReferences.content_id)
+            .where(
+                Icons.id == requested,
+                Icons.tenant_id == tenant_id,
+                ObjectContents.created_by_user_id == user_id,
+            )
+        )
+        if uploaded is None:
+            raise IconNotAttachableError()
 
     async def release_replaced(
         self, previous: UUID | None, requested: UUID | None | NotProvided
