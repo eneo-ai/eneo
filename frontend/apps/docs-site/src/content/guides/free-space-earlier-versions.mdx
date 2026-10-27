@@ -1,0 +1,231 @@
+# Free Space Held by Earlier Versions (Eneo 2.3)
+
+import { Callout, Steps } from "nextra/components";
+
+Eneo 2.2.0 up to and including 2.3.0-rc.3 kept the search data of every
+replaced version of a web page or document. Later releases remove it as soon as
+a version is replaced. This guide removes what the older releases left behind,
+once per installation.
+
+## TL;DR
+
+- **The problem.** When a recrawl or a new upload replaced a page or file, Eneo
+  kept the old version's chunks and embeddings. Nothing searched them, but they
+  counted toward the storage quota. On websites that are recrawled often, the
+  quota could fill up so that changed pages were no longer saved (crawl
+  problems show `TENANT_QUOTA_EXCEEDED`).
+- **The fix.** From 2.3.0-rc.4, Eneo removes this data when it replaces a
+  version. A new installation of 2.3 never needs this guide.
+- **What you do.** Run `status`, then `run`, vacuum two tables, and run
+  `status` again. Eneo keeps running, and you can stop and restart the cleanup at
+  any time. Text, originals and citations of earlier versions stay.
+- **How long.** About 16 minutes for 347,000 replaced versions on a test
+  workstation. A production server can be much slower, so on a large
+  installation try it on a restored copy first.
+
+## Before you start
+
+- **Use a worker image with the current command.** 2.3.0-rc.4 has an earlier
+  version whose final count can time out on a large database and hide the
+  result. The current one lists its exit codes in `--help`:
+
+  ```bash
+  docker compose run --rm --no-deps worker \
+    python -m eneo.info_blobs.replaced_versions --help
+  ```
+
+- **Watch WAL if you keep it.** Removing rows writes WAL. If you keep WAL for a
+  replica or an archive, check that it has room.
+- **No PostgreSQL settings to change.** The command turns off parallel query
+  itself, so it works with the default 64 MB `/dev/shm`. If you set
+  `max_parallel_workers_per_gather = 0` because of
+  [shared memory errors](/guides/deployment#database-shared-memory-errors),
+  keep it until the `db` service has `shm_size: 1gb`.
+
+## Run the cleanup
+
+Run the commands on the Docker host, in the directory with your
+`docker-compose.yml`. Each starts a one-off container from the worker's image
+and configuration. With Podman, write `podman-compose` for `docker compose` and
+`podman` for `docker`. Already in a shell in the worker container, for example
+Portainer's console? Use [the commands for inside the
+container](#inside-the-worker-container) instead.
+
+<Steps>
+
+### See what is there
+
+```bash
+docker compose run --rm --no-deps -T worker \
+  python -m eneo.info_blobs.replaced_versions status > replaced-status.json
+cat replaced-status.json
+```
+
+```json
+{
+  "versions_read": 367000,
+  "remaining_observed": 347000,
+  "last_scanned_id": "ffffc952-ee6e-45aa-a436-b4709a1630b3",
+  "pass_complete": true,
+  "detail": "Replaced versions still hold search data. Release it with run."
+}
+```
+
+`versions_read` is the number of replaced versions and `remaining_observed`
+how many still hold search data. Nothing is left only when `status` exits with
+`0` and shows `"pass_complete": true` and `"remaining_observed": 0`. If it
+stopped early (`"outcome": "inconclusive"`), the count means nothing; run it
+again.
+
+### Start the cleanup
+
+```bash
+nohup docker compose run --rm --no-deps -T \
+  --name eneo-replaced-versions worker \
+  python -m eneo.info_blobs.replaced_versions run \
+  > replaced-run.json 2> replaced-run.log &
+```
+
+It runs in the background and keeps running when you log out.
+
+<Callout type="warning">
+  Start it exactly like this. Started directly with `docker compose exec`, it
+  keeps running unseen when the client stops. Started with
+  `podman-compose run -d`, Podman restarts it every time it finishes.
+</Callout>
+
+### Follow or stop it
+
+```bash
+tail -f replaced-run.log
+```
+
+```text
+2026-10-27T19:16:03+00:00 read 94500 replaced versions, released 83113 (1.00 GB), skipped 6 busy, through 428bb271-65a8-4440-a2fd-10c74fb7e88b
+```
+
+`read` counts up to `versions_read` and `released` up to `remaining_observed`
+from `status`. Ctrl-C stops following, not the cleanup. To stop the cleanup:
+
+```bash
+docker stop eneo-replaced-versions
+```
+
+It still writes its result. The batch that was running may or may not have
+been saved, so the numbers can be one batch low. Running it again is safe.
+
+### Read the result
+
+When the cleanup has finished, `replaced-run.json` holds the result:
+
+```bash
+cat replaced-run.json
+```
+
+| Result                                       | Exit code | Meaning                                                                                          | What to do                                                           |
+| -------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `pass_complete: true` and `skipped_busy: 0`  | `0`       | Every replaced version was read and released.                                                    | Vacuum and check.                                                    |
+| `pass_complete: true` and `skipped_busy` > 0 | `2`       | Some versions were skipped because another transaction held them, for example a running crawl.  | Run it again later.                                                  |
+| `"outcome": "incomplete"`                    | `3`       | It stopped before the end.                                                                       | See [Stopped early](#stopped-early), then run it again.              |
+
+`released_versions` and `released_bytes` count what was released, also after a
+stop.
+
+### Vacuum and check
+
+Let PostgreSQL reuse the freed space:
+
+```bash
+docker compose exec -T db psql -U postgres -d eneo \
+  -c "VACUUM (ANALYZE, PARALLEL 0) info_blob_chunks;" \
+  -c "VACUUM (ANALYZE, PARALLEL 0) info_blobs;"
+```
+
+Keep `PARALLEL 0`: a plain `VACUUM` processes indexes in parallel and fails with
+`could not resize shared memory segment` on the default 64 MB `/dev/shm`.
+`VACUUM` runs alongside normal use. Autovacuum would do the same work later,
+throttled to spare the database.
+
+Then run `status` again as in the first step and check that nothing is left.
+Before the vacuum, `status` has to read past every removed row and can be much
+slower.
+
+</Steps>
+
+### Inside the worker container
+
+In a shell in the worker container, run the same steps without `docker`. Work
+in `/tmp`, because the worker cannot write to its own directory:
+
+```sh
+cd /tmp
+python -m eneo.info_blobs.replaced_versions status > replaced-status.json
+cat replaced-status.json
+
+nohup python -m eneo.info_blobs.replaced_versions run \
+  > replaced-run.json 2> replaced-run.log &
+echo $! > replaced-run.pid
+
+tail -f replaced-run.log                # follow
+kill -TERM "$(cat replaced-run.pid)"    # stop
+cat replaced-run.json                   # result, when it has finished
+```
+
+It keeps running when you close the shell. Restarting or recreating the worker
+container stops it; run it again afterwards. Vacuum from the host as in the
+last step.
+
+### On Kubernetes or another platform
+
+Run the same command once in a container with the backend image and the
+worker's environment, for example as a Job with
+`restartPolicy: Never` and `backoffLimit: 0`. `kubectl logs -f` shows progress
+and then the result; `kubectl delete job` stops it like `docker stop`.
+
+## Quota and disk afterwards
+
+Quota usage drops by the search data of history created by Eneo 2.2 or later.
+Web pages crawled by Eneo 2.1 recorded only their text as their size, so
+removing their chunks frees database space without lowering quota usage. Quota
+usage can therefore drop by less than `released_bytes`.
+
+PostgreSQL reuses the freed space but does not return it to the operating
+system. Shrinking the files needs a table rewrite in a maintenance window; see
+[Reclaim disk space](/guides/file-icon-storage-upgrade#reclaim-disk-space-optional).
+
+## Troubleshooting
+
+### Stopped early
+
+The end of `replaced-run.log` names the cause:
+
+- `lock timeout`: another job, such as a migration, held the table for more
+  than 2 seconds. The cleanup gives up instead of waiting. Run it again later.
+- `statement timeout`: one batch took more than 60 seconds, so the database is
+  overloaded. Run it again at a quieter time.
+- `CancelledError`: it was stopped, with `docker stop` or `kill -TERM`.
+
+### Container name already in use
+
+Docker reports `The container name ... is already in use`: an earlier cleanup is still running or was not removed.
+`docker ps -a --filter name=eneo-replaced-versions` shows which. Let a running
+one finish, or remove an exited one with `docker rm eneo-replaced-versions`.
+
+### Started another way
+
+- Directly with `docker compose exec worker python ...`: it can keep running
+  inside the worker container without output. Let it finish and check with `status`, or restart the worker
+  container to stop it.
+- With `podman-compose run -d`: stop and remove it with
+  `podman stop eneo-replaced-versions` and `podman rm eneo-replaced-versions`,
+  then start it as shown above.
+
+## Is this one-time work?
+
+Yes. Since 2.3.0-rc.4 nothing new builds up. Running the cleanup again finds
+nothing to release and changes nothing.
+
+## Related guides
+
+- [Document Processing](/guides/document-processing#update-documents)
+- [Deploy Eneo](/guides/deployment)
