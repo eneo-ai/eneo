@@ -1403,7 +1403,10 @@ describe("FlowPage", () => {
         state.flow = ok(
           makeFlow({
             draft_revision: 6,
-            steps: [steps[0], makeStep(2, { user_description: "Skriv brev" })]
+            steps: [
+              makeStep(1, { user_description: "Sammanfatta" }),
+              makeStep(2, { user_description: "Skriv brev" })
+            ]
           })
         );
         fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
