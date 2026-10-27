@@ -435,9 +435,11 @@ async def test_render_structured_pdf_table_repeats_headers_after_page_break():
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         assert len(pdf.pages) > 1
-        second_page_text = pdf.pages[1].extract_text() or ""
-    assert "Ansvarig" in second_page_text
-    assert "Uppgift" in second_page_text
+        second_page_table = pdf.pages[1].extract_table()
+    assert second_page_table is not None
+    # A narrow column wraps its header inside the cell; the cell still holds it.
+    header = [(cell or "").replace("\n", "") for cell in second_page_table[0]]
+    assert header == ["Ansvarig", "Uppgift"]
 
 
 async def test_pdf_metadata_title_is_the_document_name():
