@@ -47,6 +47,7 @@ from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.mcp_servers.application.capability_resolver import capability_availability
 from eneo.mcp_servers.domain.capabilities import (
@@ -64,6 +65,8 @@ if TYPE_CHECKING:
 def _session(container: Container) -> AsyncSession:
     return cast(AsyncSession, container.session())
 
+
+logger = get_logger(__name__)
 
 _AUTHORING_BASICS = """Help the user configure this flow through the flow tools.
 Read the saved definition and revision before changing it. Preserve settings the
@@ -453,12 +456,30 @@ async def _sync_assistant(
         changes["completion_model_kwargs"] = stored.model_copy(
             update={"reasoning_effort": effort}
         )
+    if changes:
+        await container.assistant_service().update_assistant(
+            assistant_id=chat.assistant_id,
+            update=AssistantUpdateCommand(**changes),
+            include_hidden=True,
+        )
+    await _sync_tools(container, chat, space, assistant)
+    return models.default
+
+
+async def _sync_tools(
+    container: Container, chat: FlowAuthoringChats, space: Space, assistant: Any
+) -> None:
+    """Give the chat's assistant the tool runtime's functions its space offers
+    and look-up mode for uploads. A refusal (a provider that stopped meeting
+    the space's classification, a tool set that does not fit the model) is
+    logged and leaves the chat as it is: the chat is usable without them."""
+    tools: dict[str, Any] = {}
     # A file uploaded in the chat is looked up through the files tool where
     # the model needs it, not put whole in the prompt: the chat is shown
     # long material (a letter, a transcript) to build a flow around. A model
     # without tool calling gets the text inlined anyway.
     if assistant.inline_file_text:
-        changes["inline_file_text"] = False
+        tools["inline_file_text"] = False
     # The tool runtime's functions, as far as the space offers them and a
     # provider is ready; a space setting that changed is followed here.
     states = await capability_availability(
@@ -466,14 +487,21 @@ async def _sync_assistant(
     )
     wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
     if sorted(wanted) != sorted(assistant.enabled_capabilities):
-        changes["enabled_capabilities"] = wanted
-    if changes:
+        tools["enabled_capabilities"] = wanted
+    if not tools:
+        return
+    try:
         await container.assistant_service().update_assistant(
             assistant_id=chat.assistant_id,
-            update=AssistantUpdateCommand(**changes),
+            update=AssistantUpdateCommand(**tools),
             include_hidden=True,
         )
-    return models.default
+    except BadRequestException as exc:
+        logger.warning(
+            "The flow chat's assistant %s did not get its tools: %s",
+            chat.assistant_id,
+            exc,
+        )
 
 
 def _public(

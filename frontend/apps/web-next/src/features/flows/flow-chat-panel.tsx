@@ -30,11 +30,7 @@ import type { ComposerInsert } from "@/features/chat/chat-references";
 import { flowRunCardFor } from "./chat/flow-run-card";
 import { isFlowsToolCall } from "./chat/flows-tool-call";
 import { useFlowChatReferences } from "./chat/use-flow-chat-references";
-import {
-  FlowChatModelPickers,
-  NewConversationButton,
-  OptimizeFlowButton
-} from "./flow-chat-controls";
+import { FlowChatSettings, NewConversationButton, OptimizeFlowButton } from "./flow-chat-controls";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -280,7 +276,12 @@ function AuthoringConversation({
 function unavailableMessage(error: unknown, t: ReturnType<typeof useTranslations>): string | null {
   if (!(error instanceof EneoApiError)) return null;
   if (error.status === 403) return t("flows_chat_no_access");
-  if (error.status === 400) return t("flows_chat_no_model");
+  if (error.status === 400) {
+    // The core names the refusal; only a missing model has a text of its own.
+    return error.reason === "flow_authoring_chat_no_model" || !error.message
+      ? t("flows_chat_no_model")
+      : error.message;
+  }
   return null;
 }
 
@@ -310,24 +311,24 @@ export function FlowChatPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-ax-border flex flex-col gap-3 border-b px-4 py-3">
-        <div className="flex flex-col gap-0.5">
-          <Heading level={2} weight="semibold" className="text-lg">
+      <div className="border-ax-border flex flex-col gap-0.5 border-b px-4 py-3">
+        {/* The panel is narrow: the actions sit in the title row as icon
+            buttons, and the chat's settings are behind one of them. */}
+        <div className="flex items-center justify-between gap-2">
+          <Heading level={2} weight="semibold" className="min-w-0 truncate text-lg">
             {t("flows_chat_heading")}
           </Heading>
-          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-            {t("flows_chat_intro")}
-          </Text>
-        </div>
-        {chat.data ? (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
-            <span className="flex flex-wrap items-center gap-1">
+          {chat.data ? (
+            <span className="-my-1 -me-2 flex shrink-0 items-center gap-0.5">
               {onAskChat ? <OptimizeFlowButton onAskChat={onAskChat} /> : null}
               <NewConversationButton chat={chat.data} onRefused={onRefused} />
+              <FlowChatSettings chat={chat.data} onRefused={onRefused} />
             </span>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flows_chat_intro")}
+        </Text>
       </div>
       {chat.data ? (
         <AuthoringConversation
