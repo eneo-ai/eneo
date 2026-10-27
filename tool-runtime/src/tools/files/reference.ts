@@ -43,13 +43,18 @@ function referenceTo(extensions: readonly string[], checkedInTool = false) {
     .strict();
 }
 export const TABULAR_EXTENSIONS = ["csv", "tsv", "xlsx"] as const;
-/** A table source: CSV or XLSX. */
+/** A table source for charts and spreadsheets: CSV or XLSX. */
 export const fileReference = referenceTo(TABULAR_EXTENSIONS);
+export const JSON_EXTENSIONS = ["json", "jsonl", "ndjson"] as const;
+/** What the table tools read: delimited text, workbooks and JSON (records become sheets). */
+export const TABLE_FILE_EXTENSIONS = [...TABULAR_EXTENSIONS, ...JSON_EXTENSIONS] as const;
 /**
  * A table source as the table tools take it: the tools are the first the model reaches for
  * to read an attached file, so a file of another kind is refused with the way to read it.
  */
-export const tabularReference = referenceTo(TABULAR_EXTENSIONS, true);
+export const tabularReference = referenceTo(TABLE_FILE_EXTENSIONS, true);
+/** A JSON document whose values query_json reads by path. */
+export const jsonReference = referenceTo(JSON_EXTENSIONS, true);
 
 /** Refuses a file whose name does not end in one of `extensions`, naming the tools that would read it. */
 export function requireExtension(

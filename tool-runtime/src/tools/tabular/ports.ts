@@ -1,5 +1,9 @@
 import type { TabularColumn } from "./engine/types";
+import type { JsonExtractOutcome, JsonSummary } from "./engine/json-to-csv";
 import type { TabularConfig } from "./config";
+
+/** How the downloaded bytes are read: by their filename's extension. */
+export type SourceFormat = "csv" | "xlsx" | "json";
 
 /** Formula values come from Excel's saved results; this runtime never recalculates. */
 export type CalculationDiagnostics = {
@@ -22,18 +26,33 @@ export type SheetMetadata = {
   explicitHeader?: boolean;
   /** Lines above the header (a report title) that every read of this sheet skips. */
   skipRows?: number;
+  /** For a sheet of a JSON file: the path of the array (or record) it holds. */
+  jsonPath?: string;
 };
+
+/** What one ingest produced and the cache keeps: the sheets, and for JSON the tree summary. */
+export type IngestResult = { sheets: SheetMetadata[]; json?: JsonSummary };
 
 /** Child job: validate and convert one downloaded file, writing sheet CSVs to `outputDir`. */
 export type IngestJob = {
   kind: "tabular_ingest";
   selection?: import("./selection").SourceSelection;
   inputPath: string;
-  isXlsx: boolean;
+  format: SourceFormat;
   contentType: string;
   outputDir: string;
   config: TabularConfig;
 };
+
+/** Child job: the value at a JSONPath in a downloaded JSON file. */
+export type JsonExtractJob = {
+  kind: "json_extract";
+  inputPath: string;
+  path: string;
+  maxChars: number;
+  config: TabularConfig;
+};
+export type { JsonExtractOutcome };
 
 /** Child job: one read-only query (or a list of checks) over already-parsed sheet CSVs. */
 export type QueryJob = {

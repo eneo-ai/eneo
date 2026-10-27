@@ -9,7 +9,11 @@ import { createHandler, type Endpoint } from "./server";
 import type { ComputeOutcome } from "./tools/compute/ports";
 import { computeTools } from "./tools/compute/tool";
 import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
-import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
+import type {
+  IngestResult,
+  JsonExtractOutcome,
+  QueryJobResult,
+} from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
 import { queryResultView } from "./tools/tabular/view";
 import { computeResultView } from "./tools/compute/view";
@@ -100,12 +104,12 @@ endpoints.push({
       ingest: (job) =>
         slot(
           async () =>
-            (await isolate({ job }, ingestTimeoutMs)) as {
-              sheets: SheetMetadata[];
-            },
+            (await isolate({ job }, ingestTimeoutMs)) as IngestResult,
         ),
       query: (job) =>
         slot(async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult),
+      extractJson: (job) =>
+        slot(async () => (await isolate({ job }, ingestTimeoutMs)) as unknown as JsonExtractOutcome),
     },
   }),
 });

@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { publicError, ToolError } from "./errors";
 import type { ComputeConfig } from "./tools/compute/config";
 import type { ComputeJob } from "./tools/compute/ports";
-import type { IngestJob, QueryJob } from "./tools/tabular/ports";
+import type { IngestJob, JsonExtractJob, QueryJob } from "./tools/tabular/ports";
 import type { BuiltinTemplateJob, InspectJob, RenderJob } from "./tools/documents/ports";
 import type { ChartJob } from "./tools/charts/ports";
 
@@ -12,6 +12,7 @@ export type SandboxJob =
   | { job: ComputeJob; config: ComputeConfig }
   | { job: IngestJob }
   | { job: QueryJob }
+  | { job: JsonExtractJob }
   | { job: RenderJob }
   | { job: InspectJob }
   | { job: BuiltinTemplateJob }
@@ -37,6 +38,10 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
     case "tabular_query": {
       const { executeQuery } = await import("./tools/tabular/execute");
       return executeQuery(input.job);
+    }
+    case "json_extract": {
+      const { executeJsonExtract } = await import("./tools/tabular/execute");
+      return { ...(await executeJsonExtract(input.job)) };
     }
     case "render_document": {
       const { executeRender } = await import("./tools/documents/execute");

@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CacheStore, retain } from "../../cache";
-import type { SheetMetadata } from "./ports";
+import type { IngestResult } from "./ports";
 
-export type CachedFile = { directory: string; sheets: SheetMetadata[] };
+export type CachedFile = IngestResult & { directory: string };
 
 export class SheetCache {
   readonly store: CacheStore;
@@ -24,11 +24,11 @@ export class SheetCache {
   }
   async getOrBuild(
     key: string,
-    build: (directory: string) => Promise<SheetMetadata[]>,
+    build: (directory: string) => Promise<IngestResult>,
   ): Promise<CachedFile> {
     const lease = await this.store.acquire("sheets:" + key, this.reserveBytes, build);
     retain(lease);
-    return { directory: lease.directory, sheets: lease.value };
+    return { directory: lease.directory, ...lease.value };
   }
   evict() {
     return this.store.evict();

@@ -10,6 +10,7 @@ import { tabularConfigSchema } from "../../src/tools/tabular/config";
 import type { downloadFile } from "../../src/tools/tabular/download";
 import {
   executeIngest,
+  executeJsonExtract,
   executeQuery,
   toCsv,
 } from "../../src/tools/tabular/execute";
@@ -41,6 +42,9 @@ const ORIGIN = "http://backend:8000";
 const FILE_A = "11111111-1111-4111-8111-111111111111";
 const FILE_B = "22222222-2222-4222-8222-222222222222";
 const FILE_C = "33333333-3333-4333-8333-333333333333";
+const FILE_D = "44444444-4444-4444-8444-444444444444";
+const FILE_E = "55555555-5555-4555-8555-555555555555";
+const FILE_F = "66666666-6666-4666-8666-666666666666";
 const alice: CallContext = {
   tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -59,6 +63,23 @@ const SALES = Buffer.from("region,amount\nnorth,100\nsouth,250.5\nnorth,50\n");
 const REPORT = Buffer.from(
   "Rapport budgetutfall 2024,,\n,,\nKommun,Belopp,Ar\nSundsvall,100,2024\nTimra,200,2024\n",
 );
+// An API export: an envelope with records at two depths, nested objects and arrays, and
+// one long text value (longer than query_json returns in one call).
+const DOC = Buffer.from(
+  JSON.stringify({
+    meta: { count: 3, source: "api", note: "n".repeat(17_000) },
+    items: [
+      { id: 1, name: "a", amount: 10.5, tags: ["x", "y"], addr: { city: "Sundsvall" } },
+      { id: 2, name: "b", amount: 20, tags: [], addr: { city: "Umeå" } },
+      { id: 3, name: "c", amount: 30, addr: { city: "Sundsvall" } },
+    ],
+    log: { entries: [{ at: "2024-01-01", level: "info" }] },
+  }),
+);
+const LINES = Buffer.from(
+  '{"id":1,"v":{"k":"a"}}\n{"id":2,"v":{"k":"b"}}\n{"id":3,"v":{"k":"a"}}\n',
+);
+const BROKEN = Buffer.from('{"id": 1,,}');
 let workbook: Buffer;
 let root: string;
 
@@ -98,7 +119,13 @@ function setup(
         }
       : raw.includes(FILE_C)
         ? { bytes: REPORT, contentType: "text/csv", name: "rapport.csv" }
-        : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
+        : raw.includes(FILE_D)
+          ? { bytes: DOC, contentType: "application/json", name: "export.json" }
+          : raw.includes(FILE_E)
+            ? { bytes: LINES, contentType: "application/x-ndjson", name: "events.jsonl" }
+            : raw.includes(FILE_F)
+              ? { bytes: BROKEN, contentType: "application/json", name: "broken.json" }
+              : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
   }) as unknown as typeof downloadFile;
   // In-process executor: the sandbox boundary has its own test below.
   const executor: TabularExecutor = {
@@ -107,6 +134,7 @@ function setup(
       return executeIngest(job);
     },
     query: (job) => executeQuery(job),
+    extractJson: (job) => executeJsonExtract(job),
   };
   const tools = tabularTools({
     config: { ...config, ...limits },
@@ -190,7 +218,7 @@ describe("file references", () => {
 
   test("a file of another kind is refused before downloading, with the way to read it", async () => {
     const { tool, downloads } = setup("types");
-    for (const filename of ["a.json", "Analys av risker.md"])
+    for (const filename of ["a.parquet", "Analys av risker.md"])
       await expect(
         tool("inspect_table").execute(
           { files: [{ url: url(FILE_A), filename }] },
@@ -406,6 +434,167 @@ describe("inspect and query", () => {
   });
 });
 
+describe("JSON files", () => {
+  test("arrays of records become sheets named by their path, with the file's structure", async () => {
+    const { tool } = setup("json-inspect");
+    const result = (await tool("inspect_table").execute(
+      { files: [{ url: url(FILE_D), filename: "export.json" }] },
+      alice,
+    )) as {
+      files: Array<{
+        json: { root_type: string; values: number; structure: string; structure_truncated: boolean };
+        sheets: Array<{
+          name: string;
+          json_path: string;
+          parsed_rows: number;
+          columns: Array<{ name: string; type: string }>;
+        }>;
+      }>;
+    };
+    const file = result.files[0]!;
+    expect(file.json).toMatchObject({ root_type: "OBJECT", values: 1, structure_truncated: false });
+    expect(JSON.parse(file.json.structure)).toMatchObject({
+      meta: { count: expect.any(String), source: "VARCHAR" },
+      items: [{ id: expect.any(String), addr: { city: "VARCHAR" } }],
+    });
+    expect(file.sheets.map((s) => [s.name, s.json_path, s.parsed_rows])).toEqual([
+      ["items", '$."items"', 3],
+      ["log.entries", '$."log"."entries"', 1],
+    ]);
+    // Nested objects are dotted columns; arrays stay JSON text; types come from the values.
+    expect(file.sheets[0]!.columns.map((c) => [c.name, c.type])).toEqual([
+      ["id", "BIGINT"],
+      ["name", "VARCHAR"],
+      ["amount", "DOUBLE"],
+      ["tags", "VARCHAR"],
+      ["addr.city", "VARCHAR"],
+    ]);
+  });
+
+  test("records are queried like any sheet, and JSON columns open with json functions", async () => {
+    const { tool } = setup("json-query");
+    const result = await tool("query_table").execute(
+      {
+        file: { url: url(FILE_D), filename: "export.json", sheet: "items" },
+        sql: 'SELECT "addr.city" AS city, SUM(amount) AS total, SUM(json_array_length(tags)) AS tags FROM t GROUP BY city ORDER BY city',
+      },
+      alice,
+    );
+    expect(result).toMatchObject({
+      sheet: "items",
+      columns: ["city", "total", "tags"],
+      rows: [
+        ["Sundsvall", 40.5, "2"],
+        ["Umeå", 20, "0"],
+      ],
+      parsed_rows: 3,
+    });
+    // A file with several sheets needs the sheet named, as a workbook does.
+    await expect(
+      tool("query_table").execute(
+        { file: { url: url(FILE_D), filename: "export.json" }, sql: "SELECT 1" },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "SHEET_REQUIRED" });
+  });
+
+  test("JSON Lines are one sheet of records whose root is the array of lines", async () => {
+    const { tool } = setup("jsonl");
+    const inspected = (await tool("inspect_table").execute(
+      { files: [{ url: url(FILE_E), filename: "events.jsonl" }] },
+      alice,
+    )) as {
+      files: Array<{
+        json: { root_type: string; values: number };
+        sheets: Array<{ name: string; json_path: string; parsed_rows: number; columns: Array<{ name: string }> }>;
+      }>;
+    };
+    expect(inspected.files[0]!.json).toMatchObject({ root_type: "RECORDS", values: 3 });
+    expect(inspected.files[0]!.sheets).toMatchObject([
+      { name: "records", json_path: "$", parsed_rows: 3 },
+    ]);
+    expect(inspected.files[0]!.sheets[0]!.columns.map((c) => c.name)).toEqual(["id", "v.k"]);
+    const counted = await tool("query_table").execute(
+      {
+        file: { url: url(FILE_E), filename: "events.jsonl" },
+        sql: 'SELECT "v.k", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY 1',
+      },
+      alice,
+    );
+    expect(counted).toMatchObject({ rows: [["a", "2"], ["b", "1"]] });
+    expect(
+      await tool("query_json").execute(
+        { file: { url: url(FILE_E), filename: "events.jsonl" }, path: "$[1].v.k" },
+        alice,
+      ),
+    ).toMatchObject({ found: true, type: "VARCHAR", value: '"b"' });
+  });
+
+  test("query_json reads a value, a subtree, every match of a wildcard, or nothing", async () => {
+    const { tool } = setup("json-path");
+    const read = (path: string) =>
+      tool("query_json").execute({ file: { url: url(FILE_D), filename: "export.json" }, path }, alice);
+    expect(await read("$.meta.count")).toMatchObject({
+      found: true,
+      type: "UBIGINT",
+      matches: 1,
+      value: "3",
+      truncated: false,
+    });
+    expect(await read("$.items[#-1].addr")).toMatchObject({
+      type: "OBJECT",
+      value: '{"city":"Sundsvall"}',
+    });
+    expect(await read("$.items")).toMatchObject({ type: "ARRAY", array_length: 3 });
+    expect(await read("$.items[*].name")).toMatchObject({
+      matches: 3,
+      value: '["a","b","c"]',
+    });
+    expect(await read("$.nope.deeper")).toMatchObject({
+      found: false,
+      matches: 0,
+      value: null,
+      hint: expect.stringContaining("Nothing is at this path"),
+    });
+    // A long value is cut and the model is told to narrow the path, not to page.
+    const long = (await read("$.meta.note")) as { truncated: boolean; total_chars: number; value: string; hint: string };
+    expect(long.truncated).toBe(true);
+    expect(long.total_chars).toBe(17_002);
+    expect(long.value).toHaveLength(16_000);
+    expect(long.hint).toContain("Narrow the path");
+    // A path must start at the root, and only JSON files are read this way.
+    await expect(read("items[0]")).rejects.toThrow();
+    await expect(
+      tool("query_json").execute({ file: { url: url(FILE_A), filename: "sales.csv" }, path: "$" }, alice),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+  });
+
+  test("a malformed file is refused as such", async () => {
+    const { tool } = setup("json-broken");
+    await expect(
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_F), filename: "broken.json" }] },
+        alice,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_FILE",
+      message: expect.stringContaining("not valid JSON"),
+    });
+  });
+
+  test("a native row selection filters a JSON sheet before SQL", async () => {
+    const { tool } = setup("json-selection");
+    const result = await tool("query_table").execute(
+      {
+        file: { url: url(FILE_D), filename: "export.json", sheet: "items", source_rows: [2, 4] },
+        sql: "SELECT SUM(amount) AS total FROM t",
+      },
+      alice,
+    );
+    expect(result).toMatchObject({ source_rows: [2, 4], rows: [[40.5]], parsed_rows: 2 });
+  });
+});
+
 describe("export", () => {
   test("the full result becomes a CSV file while the inline rows stay a preview", async () => {
     const { tool } = setup("export", [], {
@@ -503,7 +692,7 @@ describe("cache", () => {
     let builds = 0;
     const build = async () => {
       builds++;
-      return [] as SheetMetadata[];
+      return { sheets: [] as SheetMetadata[] };
     };
     await cache.getOrBuild("k", build);
     await Bun.sleep(5);
@@ -517,7 +706,7 @@ describe("cache", () => {
   test("an idle runtime still removes expired entries from disk", async () => {
     const dir = join(root, "sweep");
     const cache = new SheetCache(dir, 20, config.cache_max_bytes);
-    await cache.getOrBuild("k", async () => [] as SheetMetadata[]);
+    await cache.getOrBuild("k", async () => ({ sheets: [] as SheetMetadata[] }));
     expect(await readdir(dir)).toHaveLength(1);
     const timer = cache.sweepEvery(10);
     try {
@@ -544,7 +733,7 @@ describe("sandbox", () => {
               ? { source_rows: [...selection.source_rows] }
               : undefined,
             inputPath: input,
-            isXlsx: false,
+            format: "csv",
             contentType: "text/csv",
             outputDir: dir,
             config,
@@ -717,6 +906,7 @@ describe("result view", () => {
       executor: {
         ingest: (job) => executeIngest(job),
         query: (job) => executeQuery(job),
+        extractJson: (job) => executeJsonExtract(job),
       },
       download: (async () => ({
         bytes: SALES,

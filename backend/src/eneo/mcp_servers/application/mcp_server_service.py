@@ -203,8 +203,8 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "export, from inline values or a CSV/XLSX file in the conversation."
     ),
     "file-analysis": (
-        "Answers questions about attached files in an isolated sandbox: CSV "
-        "and Excel files are inspected and queried with DuckDB. Files are "
+        "Answers questions about attached files in an isolated sandbox: CSV, "
+        "Excel and JSON files are inspected and queried with DuckDB. Files are "
         "fetched through short-lived signed links."
     ),
     "file-creation": (
