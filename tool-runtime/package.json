@@ -28,7 +28,7 @@
     "xml-js": "1.6.11",
     "marked": "^18.0.13",
     "quickjs-emscripten-core": "0.32.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@astryxdesign/core": "0.6.4",
