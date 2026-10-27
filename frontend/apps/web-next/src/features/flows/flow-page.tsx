@@ -465,14 +465,21 @@ export function FlowPage({ flowId }: { flowId: string }) {
           setChatChanges(changes && hasChanges(changes) ? changes.steps : null);
         });
       // The cards move, appear and leave with a view transition where the
-      // browser has one and the person has not asked for less motion.
+      // browser has one, the person has not asked for less motion and the
+      // tab is on screen: a hidden document gets no transition (the browser
+      // skips it, and says so by rejecting the transition's promises).
       if (
         changes &&
         hasChanges(changes) &&
         typeof document.startViewTransition === "function" &&
+        document.visibilityState === "visible" &&
         !window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ) {
-        document.startViewTransition(apply);
+        const transition = document.startViewTransition(apply);
+        // A transition the browser skips after all (the tab hidden meanwhile)
+        // still applies the change; its promises reject, which is not news.
+        transition.ready.catch(() => undefined);
+        transition.finished.catch(() => undefined);
       } else {
         apply();
       }
