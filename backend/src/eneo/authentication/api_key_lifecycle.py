@@ -918,8 +918,9 @@ class ApiKeyLifecycleService:
                 user_agent=user_agent,
             )
 
-        # sessions.api_key_id is ON DELETE SET NULL, and a session without an
-        # owner violates ck_sessions_user_xor_api_key.
+        # Deleted here, not by the foreign key, so that files only these
+        # sessions used are released and no session loses its owner
+        # (ck_sessions_user_xor_api_key).
         await self.session_repo.delete_owned_by_api_key(key.id)
         await self.api_key_repo.delete(key_id=key.id, tenant_id=key.tenant_id)
 
