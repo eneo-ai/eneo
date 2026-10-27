@@ -352,6 +352,8 @@ class SpaceService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
+        if is_provided(icon_id):
+            await self.repo.lock(id)
         space = await self.get_space(id)
         actor = self._get_actor(space)
 
@@ -737,7 +739,7 @@ class SpaceService:
     async def _delete_with_icons(self, space: Space) -> None:
         """Delete the space; its resources cascade, so their icons are released here."""
         assert space.id is not None
-        icon_ids = await self.icon_repo.shown_in_space(space.id)
+        icon_ids = await self.icon_repo.lock_shown_in_space(space.id)
 
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)

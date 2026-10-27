@@ -327,7 +327,10 @@ class AppRepository:
     async def _get(self, id: UUID, *, for_update: bool) -> App | None:
         stmt = sa.select(Apps).where(Apps.id == id)
         if for_update:
-            stmt = stmt.with_for_update(of=Apps)
+            # Refresh a row an earlier read loaded, or the lock guards stale values.
+            stmt = stmt.with_for_update(of=Apps).execution_options(
+                populate_existing=True
+            )
 
         entry_in_db = await self._get_record_with_options(stmt)
 
@@ -401,9 +404,10 @@ class AppRepository:
             transcription_model=app.transcription_model,
         )
 
-    async def delete(self, id: UUID) -> None:
-        stmt = sa.delete(Apps).where(Apps.id == id)
-        await self.session.execute(stmt)
+    async def delete(self, id: UUID) -> UUID | None:
+        """Delete the app; returns the icon the deleted row showed."""
+        stmt = sa.delete(Apps).where(Apps.id == id).returning(Apps.icon_id)
+        return await self.session.scalar(stmt)
 
     async def get_by_space(self, space_id: UUID) -> list[App]:
         stmt = (

@@ -199,6 +199,24 @@ class IconRepository:
         ).scalar_one_or_none()
         return deleted_id is not None
 
+    async def lock_for_change(
+        self, previous: UUID | None, requested: UUID | None
+    ) -> None:
+        """Lock the icons an update swaps, in id order, so two updates swapping
+        icons cannot deadlock. The previous icon is locked FOR UPDATE, as its
+        release may delete it; the requested one FOR KEY SHARE, as the foreign
+        key check would, so a concurrent delete either commits first or waits.
+
+        Callers lock the resource row first and read ``previous`` under that lock.
+        """
+        for icon_id in sorted(i for i in (previous, requested) if i is not None):
+            shared = icon_id != previous
+            await self.session.execute(
+                sa.select(Icons.id)
+                .where(Icons.id == icon_id)
+                .with_for_update(read=shared, key_share=shared)
+            )
+
     async def ensure_attachable(
         self,
         previous: UUID | None,
@@ -207,10 +225,14 @@ class IconRepository:
         tenant_id: UUID,
         user_id: UUID,
     ) -> None:
-        """Refuse an update that would show an icon the user did not upload in
-        their tenant. Icon ids are public, so showing someone else's icon would
-        also keep it from being deleted. Sending the current icon again is fine."""
-        if not is_provided(requested) or requested is None or requested == previous:
+        """Lock the icons of an icon change, then refuse it if the user did not
+        upload the new icon in their tenant. Icon ids are public, so showing
+        someone else's icon would also keep it from being deleted. Sending the
+        current icon again is fine. Call after locking the resource row."""
+        if not is_provided(requested) or requested == previous:
+            return
+        await self.lock_for_change(previous, requested)
+        if requested is None:
             return
         uploaded = await self.session.scalar(
             sa.select(Icons.id)
@@ -240,17 +262,18 @@ class IconRepository:
             return
         await self.delete_if_unreferenced(previous)
 
-    async def shown_in_space(self, space_id: UUID) -> list[UUID]:
-        """Icons the space and the assistants, apps and group chats in it show,
-        in a stable order so concurrent cleanups lock them alike."""
-        icon_ids = await self.session.scalars(
-            sa.union(
-                sa.select(Spaces.icon_id).where(Spaces.id == space_id),
-                sa.select(Assistants.icon_id).where(Assistants.space_id == space_id),
-                sa.select(Apps.icon_id).where(Apps.space_id == space_id),
-                sa.select(GroupChatsTable.icon_id).where(
-                    GroupChatsTable.space_id == space_id
-                ),
-            )
-        )
+    async def lock_shown_in_space(self, space_id: UUID) -> list[UUID]:
+        """Lock the space, then the assistants, apps and group chats in it, as
+        deleting the space would, and return the icons they show in id order.
+        Their icons cannot change until the delete commits."""
+        icon_ids: set[UUID | None] = set()
+        for shown in (
+            sa.select(Spaces.icon_id).where(Spaces.id == space_id),
+            sa.select(Assistants.icon_id).where(Assistants.space_id == space_id),
+            sa.select(Apps.icon_id).where(Apps.space_id == space_id),
+            sa.select(GroupChatsTable.icon_id).where(
+                GroupChatsTable.space_id == space_id
+            ),
+        ):
+            icon_ids.update(await self.session.scalars(shown.with_for_update()))
         return sorted(icon_id for icon_id in icon_ids if icon_id is not None)
