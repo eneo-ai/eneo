@@ -152,9 +152,13 @@ export async function describeCsv(
     const rejectedRows = toFiniteNumber(rejectReader.getRowsJS()[0]?.[0]);
 
     const sampleReader = await conn.runAndReadAll(`SELECT * FROM src LIMIT 5`);
-    const sampleRows = sampleReader.getRowObjectsJson() as Array<
-      Record<string, unknown>
-    >;
+    const sampleRows = (
+      sampleReader.getRowObjectsJson() as Array<Record<string, unknown>>
+    ).map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([name, value]) => [name, clipped(value)]),
+      ),
+    );
 
     const profiles = await profileColumns(conn, columns);
     const columnsWithProfile: TabularColumn[] = columns.map((c, i) => ({
@@ -194,12 +198,10 @@ async function detectSkippedLines(
     const reader = await conn.runAndReadAll(
       `DESCRIBE SELECT * FROM read_csv_auto(${parts.join(", ")})`,
     );
-    return reader
-      .getRowObjectsJS()
-      .map((r) => ({
-        name: String(r.column_name),
-        type: String(r.column_type),
-      }));
+    return reader.getRowObjectsJS().map((r) => ({
+      name: String(r.column_name),
+      type: String(r.column_type),
+    }));
   };
   const first = await schema(0);
   const generic = first.filter((c) => GENERIC_COLUMN.test(c.name)).length;
@@ -273,6 +275,19 @@ const TEXT_SHAPE_SHARE = 0.9;
  */
 const PROFILE_BATCH_COLUMNS = 40;
 
+/**
+ * Characters of a cell shown in a profile or sample row. A cell can hold a whole JSON
+ * record; the profile shows the model the shape of a column, not its content, and a wide
+ * sheet's metadata has to stay within its size limit.
+ */
+const MAX_PROFILE_TEXT_CHARS = 200;
+
+function clipped<T>(value: T): T | string {
+  if (typeof value !== "string" || value.length <= MAX_PROFILE_TEXT_CHARS)
+    return value;
+  return value.slice(0, MAX_PROFILE_TEXT_CHARS) + "…";
+}
+
 async function profileColumns(
   conn: DuckDBConnection,
   columns: Array<{ name: string; type: string }>,
@@ -336,7 +351,8 @@ async function profileColumns(
       const values = raw
         .filter((v) => v !== null && v !== undefined)
         .map((v) => String(v))
-        .sort(compareValues);
+        .sort(compareValues)
+        .map(clipped);
       valuesByIndex.set(i, values);
     }
   }
@@ -361,7 +377,7 @@ async function profileColumns(
       ...new Set(
         [agg[`e${i}_0`], agg[`e${i}_1`], agg[`e${i}_2`]]
           .filter((v) => v !== null && v !== undefined)
-          .map((v) => String(v)),
+          .map((v) => clipped(String(v))),
       ),
     ];
     return {

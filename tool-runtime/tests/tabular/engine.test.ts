@@ -110,6 +110,26 @@ describe("extracted DuckDB engine", () => {
     });
     expect(described.columns[199]!.profile!.distinctCount).toBe(7);
   });
+  test("shows long cells clipped in the profile and sample rows", async () => {
+    const long = join(directory, "long.csv");
+    const record = JSON.stringify({
+      text: "x".repeat(5_000),
+      tags: ["a", "b"],
+    });
+    await writeFile(
+      long,
+      `id,payload\n1,"${record.replaceAll('"', '""')}"\n2,short\n`,
+    );
+    const described = await describeCsv(long);
+    const payload = described.columns[1]!.profile!;
+    for (const value of [
+      ...(payload.values ?? []),
+      ...(payload.examples ?? []),
+    ])
+      expect(value.length).toBeLessThanOrEqual(201);
+    expect(String(described.sampleRows[0]!.payload)).toHaveLength(201);
+    expect(described.sampleRows[1]!.payload).toBe("short");
+  });
   test("types every column from the whole file, so a late non-numeric value loses no row", async () => {
     const late = join(directory, "late.csv");
     const lines = ["id,amount,code"];
