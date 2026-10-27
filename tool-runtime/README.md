@@ -142,12 +142,14 @@ Vite are development dependencies only. A page larger than the 2 MB a host
 reads fails the build.
 
 The MCP Apps client/core peers are pinned together as development dependencies
-so view builds use the fixed MCP client. The `package.json` resolutions keep
-the indirect body-parser (through Express in the MCP SDK), Hono and UUID
-dependencies on security-fixed releases. Remove each
-resolution once its parent requires a fixed version. ExcelJS uses only UUID's
-CommonJS `v4()` API; UUID 11.1.1 retains that API while fixing the buffer checks
-in other UUID methods.
+so view builds use the fixed MCP client. When a parent's range already admits
+a security-fixed release, `bun.lock` holds it; an exact `package.json`
+resolution would also hold back the releases after it. The one resolution is
+UUID: ExcelJS asks for `uuid ^8.3.0`, and the first release that fixes the
+buffer checks in other UUID methods is 11.1.1. ExcelJS uses only UUID's
+CommonJS `v4()` API, which 11.1.1 retains. `tests/resolutions.test.ts` fails
+once every range in `bun.lock` admits a resolution's version; remove the
+resolution then.
 
 `bun audit` still reports GHSA-vfj7-8cjw-p6xm for `braces` 3.0.3, which has no
 published fixed release. Here it is a development-only dependency of
