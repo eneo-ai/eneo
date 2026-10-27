@@ -869,6 +869,7 @@ class _ConnectionHost:
                 self._ready.set_result(None)
             if client.session is session:
                 client.session = None
+            client.detach_host(self)
 
 
 async def drain_connection_hosts(timeout: float) -> int:
@@ -950,6 +951,8 @@ class MCPClient:
         # The task that owns the SDK's transport and session contexts (see
         # _ConnectionHost). Requests use ``session`` from any task.
         self._host: _ConnectionHost | None = None
+        # Serialises connect(): two connects racing would each start a host.
+        self._connect_lock = asyncio.Lock()
         # Populated after a successful connect() / initialize() round-trip.
         self.server_info_name: Optional[str] = None
         self.server_info_version: Optional[str] = None
@@ -1093,22 +1096,34 @@ class MCPClient:
         teardown. Servers that hold cross-turn state key it to explicit
         handles returned in tool results, not to the transport session.
 
-        Idempotent: while a host is attached, connecting again keeps it
-        rather than opening a second connection beside it; ``disconnect()``
-        detaches it.
+        Idempotent: while a host is attached and running, connecting again
+        keeps it rather than opening a second connection beside it. A host
+        that ended on its own (the server closed the stream, a read timed
+        out) has detached itself; connecting again then opens a new one.
+        ``disconnect()`` detaches it too.
         """
-        if self._host is not None:
-            return
-        headers = await self._build_auth_headers()
-        host = _ConnectionHost(self, headers, self._handle_session_message)
-        try:
-            await host.wait_ready()
-        except BaseException:
-            # A failed handshake has already left its contexts; a cancelled
-            # connector leaves the host to finish on its own and unwind.
-            host.request_stop()
-            raise
-        self._host = host
+        async with self._connect_lock:
+            if self._host is not None and not self._host.task.done():
+                return
+            headers = await self._build_auth_headers()
+            host = _ConnectionHost(self, headers, self._handle_session_message)
+            try:
+                await host.wait_ready()
+            except BaseException:
+                # A failed handshake has already left its contexts; a cancelled
+                # connector leaves the host to finish on its own and unwind.
+                host.request_stop()
+                raise
+            self._host = host
+
+    def detach_host(self, host: "_ConnectionHost") -> None:
+        """Forget ``host`` once it has ended, so ``connect()`` reports reality.
+
+        Called by the host itself as it leaves its contexts, on whichever
+        path ended it; a host already replaced or detached is left alone.
+        """
+        if self._host is host:
+            self._host = None
 
     def record_handshake(
         self, init_result: Any, get_session_id: Callable[[], str | None]

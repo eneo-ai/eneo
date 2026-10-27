@@ -291,3 +291,79 @@ async def test_connecting_twice_keeps_the_one_connection(teardown_errors: Mock):
     assert result["content"][0]["text"] == "once"
     assert not _live_hosts()
     teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_ends_after_its_handshake_is_detached(
+    teardown_errors: Mock,
+):
+    """A read timeout, a closed stream or a transport error ends the host
+    after it published its session. The client must notice: connecting again
+    opens a new connection instead of reporting the dead one as connected."""
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+        await client.connect()
+        host = client._host
+        assert host is not None
+
+        host.task.cancel()
+        await asyncio.wait({host.task})
+
+        assert client._host is None
+        assert client.session is None
+        assert not _live_hosts()
+
+        await client.connect()
+        assert len(_live_hosts()) == 1
+        tools = await client.list_tools()
+        result = await client.call_tool("echo", {"text": "again"})
+        await client.disconnect()
+
+    assert [tool["name"] for tool in tools] == ["echo"]
+    assert result["content"][0]["text"] == "again"
+    assert not _live_hosts()
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_proxy_marks_a_server_failed_when_its_host_ended_between_calls(
+    teardown_errors: Mock,
+):
+    """The proxy reuses a cached client without reconnecting it: a server
+    whose connection ended mid-session fails like any other mid-session
+    failure and is not retried for the rest of the session."""
+    async with _mcp_server() as url:
+        proxy = MCPProxySession([_server_row(url)])
+        first = await proxy.call_tool("probe__echo", {"text": "a"})
+        (client,) = proxy._clients.values()
+        host = client._host
+        assert host is not None
+
+        host.task.cancel()
+        await asyncio.wait({host.task})
+        assert not _live_hosts()
+
+        with pytest.raises(MCPClientError):
+            await proxy.call_tool("probe__echo", {"text": "b"})
+        refused = await proxy.call_tool("probe__echo", {"text": "c"})
+        await proxy.close()
+
+    assert first["content"][0]["text"] == "a"
+    assert refused["is_error"]
+    assert not _live_hosts()
+    teardown_errors.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_connects_open_one_connection(teardown_errors: Mock):
+    async with _mcp_server() as url:
+        client = MCPClient(_server_row(url), None)
+        await asyncio.gather(client.connect(), client.connect(), client.connect())
+        assert len(_live_hosts()) == 1
+
+        result = await client.call_tool("echo", {"text": "once"})
+        await client.disconnect()
+
+    assert result["content"][0]["text"] == "once"
+    assert not _live_hosts()
+    teardown_errors.assert_not_called()
