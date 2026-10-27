@@ -313,11 +313,15 @@ function ConversationView({
       mounted.current = false;
     };
   }, []);
+  // What the context window holds after the last turn: the final provider
+  // request's counts. The cumulative prompt/completion sums every tool round
+  // (each re-sends the conversation) and only stands in for rows saved
+  // before the final request's counts were recorded.
   const [lockedTokens, setLockedTokens] = useState(() => {
-    const last = initialMessages[initialMessages.length - 1];
+    const tokens = initialMessages[initialMessages.length - 1]?.metadata?.tokens;
     return {
-      input: last?.metadata?.tokens?.prompt ?? 0,
-      output: last?.metadata?.tokens?.completion ?? 0
+      input: tokens?.contextPrompt ?? tokens?.prompt ?? 0,
+      output: tokens?.contextCompletion ?? tokens?.completion ?? 0
     };
   });
   // Running conversation total, seeded from history (sum of each turn's
@@ -386,8 +390,8 @@ function ConversationView({
         }
         if (part.type === "data-token-usage") {
           setLockedTokens({
-            input: part.data.prompt_tokens ?? 0,
-            output: part.data.completion_tokens ?? 0
+            input: part.data.context_prompt_tokens ?? part.data.prompt_tokens ?? 0,
+            output: part.data.context_completion_tokens ?? part.data.completion_tokens ?? 0
           });
           timings.markTokens(part.data.completion_tokens ?? 0);
           const turnTokens = part.data.turn_tokens ?? 0;

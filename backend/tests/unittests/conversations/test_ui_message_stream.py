@@ -231,6 +231,33 @@ async def test_golden_transcript():
         "prompt_tokens": 10,
         "completion_tokens": 5,
         "turn_tokens": 15,
+        "context_prompt_tokens": 10,
+        "context_completion_tokens": 5,
+    }
+
+
+async def test_token_usage_carries_final_request_counts_separately():
+    """Tool rounds re-send the conversation, so the cumulative prompt count
+    overstates the context window; the final request's counts travel too."""
+    completions = [
+        Completion(
+            response_type=ResponseType.TOKEN_USAGE,
+            usage=TokenUsage(
+                prompt_tokens=800,
+                completion_tokens=50,
+                context_prompt_tokens=120,
+                context_completion_tokens=10,
+            ),
+        ),
+    ]
+    chunks = await _collect(_response(completions))
+    usage = next(c for c in chunks if c["type"] == "data-token-usage")
+    assert usage["data"] == {
+        "prompt_tokens": 800,
+        "completion_tokens": 50,
+        "turn_tokens": 850,
+        "context_prompt_tokens": 120,
+        "context_completion_tokens": 10,
     }
 
 

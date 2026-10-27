@@ -10,7 +10,8 @@ Custom data parts (consumed by the web-next chat UI):
 - `data-session`: session id, completion model and uploaded files, replacing
   v2's first_chunk metadata.
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
-- `data-token-usage`: transient prompt/completion/turn token counts.
+- `data-token-usage`: transient prompt/completion/turn token counts (cumulative
+  over the turn's provider requests) plus the final request's context counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
   part id (the approval_id), so the decision (approved / denied) or a timeout
   (timeout_denied) updates the pending part. The Redis-backed approval
@@ -465,9 +466,21 @@ async def _ui_message_chunks(
             )
 
         elif response_type == ResponseType.TOKEN_USAGE:
-            prompt = completion.usage.prompt_tokens or 0 if completion.usage else 0
-            generated = (
-                completion.usage.completion_tokens or 0 if completion.usage else 0
+            usage = completion.usage
+            prompt = usage.prompt_tokens or 0 if usage else 0
+            generated = usage.completion_tokens or 0 if usage else 0
+            # prompt/completion accumulate over every provider request in the
+            # turn (tool rounds re-send the whole conversation), so only the
+            # final request's counts describe the context window.
+            context_prompt = (
+                usage.context_prompt_tokens
+                if usage and usage.context_prompt_tokens is not None
+                else prompt
+            )
+            context_completion = (
+                usage.context_completion_tokens
+                if usage and usage.context_completion_tokens is not None
+                else generated
             )
             yield {
                 "type": "data-token-usage",
@@ -475,6 +488,8 @@ async def _ui_message_chunks(
                     "prompt_tokens": prompt,
                     "completion_tokens": generated,
                     "turn_tokens": prompt + generated,
+                    "context_prompt_tokens": context_prompt,
+                    "context_completion_tokens": context_completion,
                 },
                 "transient": True,
             }

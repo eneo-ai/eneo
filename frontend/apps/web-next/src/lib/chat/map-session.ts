@@ -91,7 +91,9 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
         mcpToolReferences: message.mcp_tool_references ?? [],
         tokens: {
           prompt: message.num_tokens_question,
-          completion: message.num_tokens_answer
+          completion: message.num_tokens_answer,
+          contextPrompt: message.context_prompt_tokens ?? null,
+          contextCompletion: message.context_completion_tokens ?? null
         },
         completionModel: message.completion_model
           ? {
