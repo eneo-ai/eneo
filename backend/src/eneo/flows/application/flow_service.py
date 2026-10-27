@@ -55,11 +55,13 @@ from eneo.flows.domain.tool_input import PublishedToolInputConfig
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_transcription import (
+    apply_audio_transcription_defaults,
     fill_default_speaker_service,
     kept_speaker_service_id,
     lacks_speaker_service_choice,
     require_chosen_speaker_service,
     require_usable_speaker_service,
+    requires_audio_transcription,
     transcription_config_for_write,
 )
 from eneo.flows.flow_metadata import (
@@ -363,13 +365,23 @@ class FlowService:
 
         next_metadata = draft_write_metadata(existing.metadata_json, metadata_json)
         space: Space | None = None
+        if steps is not None:
+            # A step that takes audio turns transcription on. The wizard and the
+            # editor's step dialog state that themselves; a client that only
+            # names the step (the flow chat) writes the same draft.
+            next_metadata, space = await self._turn_on_audio_transcription(
+                space_id=existing.space_id,
+                metadata_json=next_metadata,
+                steps=next_steps,
+            )
         if steps is not None or metadata_json is not NOT_PROVIDED:
             # Any draft write stores the default as the choice of a flow that
             # has none, also when the write names no metadata.
-            next_metadata, space = await self._fill_default_speaker_service(
+            next_metadata, loaded = await self._fill_default_speaker_service(
                 space_id=existing.space_id,
                 metadata_json=next_metadata,
             )
+            space = loaded or space
         # A step's own defect is reported before the classification, which
         # reads its configuration (create and publish validate first too).
         refusals = draft_step_refusals(
@@ -870,6 +882,40 @@ class FlowService:
             raise BadRequestException(
                 "Flow steps must reference flow-managed assistants owned by the flow."
             )
+
+    async def _turn_on_audio_transcription(
+        self,
+        *,
+        space_id: UUID,
+        metadata_json: FlowPersistedJsonObject | None,
+        steps: list[FlowStep],
+    ) -> tuple[FlowPersistedJsonObject | None, Space | None]:
+        """The metadata a draft with a step that takes audio is written with:
+        transcription on, and the space's marked default model and the default
+        language where the author chose nothing
+        (``apply_audio_transcription_defaults``). A draft without audio steps
+        is left as written, and a malformed step is left to validation.
+
+        Also returns the space when it was loaded, for the checks that follow."""
+        try:
+            if not requires_audio_transcription(steps):
+                return metadata_json, None
+        except BadRequestException:
+            return metadata_json, None
+        space: Space | None = None
+        default_model_id: UUID | None = None
+        if self.space_service is not None:
+            space = await self.space_service.get_space(space_id)
+            model = space.get_marked_default_transcription_model()
+            default_model_id = None if model is None else model.id
+        return (
+            apply_audio_transcription_defaults(
+                metadata=metadata_json,
+                steps=steps,
+                default_transcription_model_id=default_model_id,
+            ),
+            space,
+        )
 
     async def _fill_default_speaker_service(
         self,
