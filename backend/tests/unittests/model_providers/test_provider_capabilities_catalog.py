@@ -121,6 +121,65 @@ async def test_only_a_whole_prefix_segment_is_stripped() -> None:
     assert _names(providers, "gemini", "completion") == ["geminix/foo"]
 
 
+@pytest.mark.parametrize(
+    ("pricing_key", "provider", "litellm_mode"),
+    [
+        ("bedrock/*/1-month-commitment/cohere.command-text-v14", "bedrock", "chat"),
+        (
+            "bedrock/us-east-1/1-month-commitment/anthropic.claude-v2:1",
+            "bedrock",
+            "chat",
+        ),
+        (
+            "bedrock/us-east-1/6-month-commitment/anthropic.claude-v2:1",
+            "bedrock",
+            "chat",
+        ),
+        ("1024-x-1024/gpt-image-1.5", "openai", "image_generation"),
+        ("azure/hd/1024-x-1024/dall-e-3", "azure", "image_generation"),
+    ],
+)
+async def test_litellm_pricing_templates_are_not_offered(
+    pricing_key: str, provider: str, litellm_mode: str
+) -> None:
+    providers = await _catalog(
+        {pricing_key: {"litellm_provider": provider, "mode": litellm_mode}},
+    )
+
+    # Providers with their own field definitions are listed even when empty.
+    assert not any(
+        models for data in providers.values() for models in data["models"].values()
+    )
+
+
+async def test_the_ids_that_pricing_templates_refer_to_stay() -> None:
+    providers = await _catalog(
+        {
+            "bedrock/*/1-month-commitment/cohere.command-text-v14": {
+                "litellm_provider": "bedrock",
+                "mode": "chat",
+            },
+            "cohere.command-text-v14": {"litellm_provider": "bedrock", "mode": "chat"},
+            "1024-x-1024/gpt-image-1.5": {
+                "litellm_provider": "openai",
+                "mode": "image_generation",
+            },
+            "gpt-image-1.5": {"litellm_provider": "openai", "mode": "image_generation"},
+            # "8x7" is part of the id; only a "<W>-x-<H>/" segment is a size.
+            "together_ai/mistralai/Mixtral-8x7B-Instruct-v0.1": {
+                "litellm_provider": "together_ai",
+                "mode": "chat",
+            },
+        }
+    )
+
+    assert _names(providers, "bedrock", "completion") == ["cohere.command-text-v14"]
+    assert _names(providers, "openai", "image") == ["gpt-image-1.5"]
+    assert _names(providers, "together_ai", "completion") == [
+        "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    ]
+
+
 async def test_no_bundled_catalog_name_is_one_of_litellms_prefixed_keys() -> None:
     model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
 

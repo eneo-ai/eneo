@@ -304,6 +304,9 @@ async def get_provider_capabilities(
     # Supports: YYYY-MM-DD (OpenAI), YYYYMMDD (Anthropic), @YYYYMMDD (Vertex)
     _date_dashed = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
     _date_compact = re.compile(r"(?:@|-)(\d{8})(?:\D|$)|(\d{8})$")
+    # LiteLLM prices image generation per "[<quality>/]<W>-x-<H>/<model>" key
+    # (default_image_cost_calculator); the model id is the last segment.
+    _image_size_segment = re.compile(r"(?:^|/)\d+-x-\d+/")
 
     def _extract_model_date(name: str) -> str:
         """Extract date from model name, normalized to YYYYMMDD for sorting."""
@@ -341,6 +344,15 @@ async def get_provider_capabilities(
 
         # Skip *-latest aliases (the concrete dated versions are more useful)
         if model_key.endswith("-latest"):
+            continue
+
+        # Skip LiteLLM's pricing-only keys: a wildcard is never a model id,
+        # "month-commitment" marks Bedrock provisioned-throughput prices
+        # (litellm.is_bedrock_pricing_only_model), and a size-prefixed key
+        # prices one image format, not a model.
+        if "*" in model_key or "month-commitment" in model_key:
+            continue
+        if _image_size_segment.search(model_key):
             continue
 
         # Skip non-standard model types that aren't useful for text chat/embedding
