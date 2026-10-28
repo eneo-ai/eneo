@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { summarize } from "../../tests/perf/metrics";
 
 // The phase 4 and phase 6 gates compare against the committed Next baseline
 // (perf/, written by tests/perf/baseline.perf.ts). It only counts when it was
@@ -23,7 +24,8 @@ const installedNext = (createRequire(import.meta.url)("next/package.json") as { 
 
 type Baseline = {
   meta: { framework: string; frameworkVersion: string; runs: number };
-  metrics: Record<string, Record<string, { median: number; p75: number }>>;
+  metrics: Record<string, Record<string, { median: number; p75: number; mean: number }>>;
+  samples: Record<string, Record<string, number[]>>;
   build: { coldSeconds: number; warmSeconds: number; peakRssMb: number };
 };
 
@@ -45,10 +47,15 @@ it.each(files)(
     for (const route of ROUTES) {
       const metrics = route === ROUTES[0] ? [...PAGE_METRICS, ...CHAT_METRICS] : PAGE_METRICS;
       for (const metric of metrics) {
-        expect(baseline.metrics[route]?.[metric]?.median, `${route} ${metric}`).toEqual(
-          expect.any(Number)
-        );
+        const values = baseline.samples[route]?.[metric];
+        expect(values, `${route} ${metric}`).toHaveLength(baseline.meta.runs);
+        expect(values?.every(Number.isFinite), `${route} ${metric}`).toBe(true);
       }
+    }
+    // The summaries are the ones the samples give, so a hand edit cannot slip in.
+    expect(baseline.metrics).toEqual(summarize(baseline.samples));
+    for (const value of [baseline.build.coldSeconds, baseline.build.warmSeconds]) {
+      expect(value).toBeGreaterThan(0);
     }
     expect(baseline.build.peakRssMb).toBeGreaterThan(0);
   }
