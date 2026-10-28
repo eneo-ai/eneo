@@ -7,6 +7,9 @@ export function calendarDate(value: string | null | undefined): string | undefin
     : undefined;
 }
 
+/** One formatter per locale and options: a chart formats hundreds of dates. */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 /**
  * A calendar date (YYYY-MM-DD) in words, the same day in every time zone: it
  * is formatted as the UTC midnight it names, in UTC. Instants go through
@@ -19,7 +22,12 @@ export function formatCalendarDate(
 ): string {
   const date = calendarDate(value);
   if (!date) return value;
-  return new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" }).format(
-    new Date(`${date}T00:00:00Z`)
-  );
+  // Bounded: callers pass fixed options, in one of the app's locales.
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" });
+    formatters.set(key, formatter);
+  }
+  return formatter.format(new Date(`${date}T00:00:00Z`));
 }
