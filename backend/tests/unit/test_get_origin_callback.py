@@ -290,11 +290,16 @@ async def test_development_trusts_only_the_exact_loopback_hosts(monkeypatch, ori
         ("http://localhost:5173", "http://localhost:*", True),
         ("http://localhost", "http://localhost:*", True),
         ("http://[::1]:3000", "http://[::1]:*", True),
+        ("http://[::1]", "http://[::1]:*", True),
+        ("http://[::1]", "http://[::1]", True),
+        ("https://[::1]", "https://[::1]", True),
         ("http://127.0.0.1", "http://127.0.0.1:*", True),
+        ("http://127.0.0.1", "http://127.0.0.1", True),
         # One loopback name does not stand in for another, nor http for https.
         ("http://127.0.0.1:5173", "http://localhost:*", False),
         ("http://[::1]:5173", "http://localhost:*", False),
         ("https://localhost:5173", "http://localhost:*", False),
+        ("https://[::1]", "http://[::1]:*", False),
     ],
 )
 async def test_production_accepts_the_loopback_origins_the_allowlist_names(
@@ -302,8 +307,13 @@ async def test_production_accepts_the_loopback_origins_the_allowlist_names(
 ):
     _install_common_fakes(monkeypatch, tenant_origins=(pattern,))
     _environment(monkeypatch, "production")
+    preflight = Headers({"Access-Control-Request-Method": "POST"})
 
     assert await callback_module.get_origin(origin, Headers()) is allowed
+    assert (
+        await callback_module.get_origin(origin, preflight, is_preflight=True)
+        is allowed
+    )
 
 
 @pytest.mark.asyncio
