@@ -6,3 +6,20 @@ export function calendarDate(value: string | null | undefined): string | undefin
     ? value
     : undefined;
 }
+
+/**
+ * A calendar date (YYYY-MM-DD) in words, the same day in every time zone: it
+ * is formatted as the UTC midnight it names, in UTC. Instants go through
+ * ClientTime instead. An invalid date is returned as it is.
+ */
+export function formatCalendarDate(
+  value: string,
+  locale: string,
+  options: Intl.DateTimeFormatOptions
+): string {
+  const date = calendarDate(value);
+  if (!date) return value;
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" }).format(
+    new Date(`${date}T00:00:00Z`)
+  );
+}
