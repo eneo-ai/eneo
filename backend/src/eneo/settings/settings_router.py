@@ -35,6 +35,11 @@ from eneo.settings.settings import (
 
 logger = get_logger(__name__)
 
+_SKILL_POLICY_SEED_ON_GET = (
+    "Seeds the tenant's default skill runtime policy on first read (INSERT ... ON "
+    "CONFLICT DO NOTHING); the result is the default the read reports either way."
+)
+
 router = APIRouter()
 settings_admin_router = APIRouter()
 _TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
@@ -133,6 +138,7 @@ async def unblock_skill_execution(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -202,6 +208,7 @@ async def reset_skill_runtime_policy(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_skill_runtime_model_projections(
     container: Annotated[Container, Depends(get_container(with_user=True))],

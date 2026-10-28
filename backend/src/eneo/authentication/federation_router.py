@@ -36,6 +36,12 @@ from eneo.tenants.tenant import TenantState
 
 logger = get_logger(__name__)
 
+_OIDC_STATE_ON_GET = (
+    "Caches the nonce of a new signed OIDC state (Redis, state TTL). No session is "
+    "involved, the state is only in the response body, which a cross-site page "
+    "cannot read, and the callback POST verifies it and spends the nonce once."
+)
+
 router = APIRouter(
     prefix="/auth",
     tags=["authentication"],
@@ -439,6 +445,7 @@ async def list_tenants(
     authentication=Authentication.PUBLIC,
     authorization=Authorization.PUBLIC,
     reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+    effect_on_get=_OIDC_STATE_ON_GET,
 )
 async def initiate_auth(
     response: Response,

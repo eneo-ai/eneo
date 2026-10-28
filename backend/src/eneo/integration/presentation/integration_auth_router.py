@@ -22,6 +22,12 @@ from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
+_OAUTH_STATE_ON_GET = (
+    "Stores a new single-use OAuth state bound to the caller and integration "
+    "(Redis, 10 minutes). The state is only in the response body, which a "
+    "cross-site page cannot read, and only the caller's callback POST can spend it."
+)
+
 router = APIRouter()
 
 
@@ -36,6 +42,7 @@ router = APIRouter()
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="OAuth2Service binds the integration and callback state to the caller.",
+    effect_on_get=_OAUTH_STATE_ON_GET,
 )
 async def gen_url(
     tenant_integration_id: UUID,

@@ -69,6 +69,12 @@ from eneo.main.models import ResourcePermission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
+_TENANT_HUB_ON_GET = (
+    "Resolving the tenant hub creates it when missing and makes its members exactly "
+    "the tenant's admins. Idempotent, and the outcome follows from tenant state, "
+    "not from the request."
+)
+
 router = APIRouter()
 logger = get_logger(__name__)
 
@@ -300,6 +306,7 @@ async def update_helper_run_status(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="HelperRunService requires edit access to the target and ownership of the run.",
+    effect_on_get=_TENANT_HUB_ON_GET,
 )
 async def get_helper_availability(
     kind: HelperKind,

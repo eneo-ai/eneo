@@ -73,10 +73,18 @@ class EndpointAccess:
     # Reachable by a session that must still replace its local password
     # (eneo.users.password_lifecycle): only what that replacement needs.
     reachable_before_password_change: bool = False
+    # What a GET to this endpoint changes, and why that is safe. A same-origin
+    # navigation carries the browser session cookie, so a cross-site page can
+    # make the user's browser send any GET; GETs must therefore be free of
+    # state changes unless the change is declared and reasoned here. The
+    # integration tests' safe-method tripwire enforces this.
+    effect_on_get: str | None = None
 
     def __post_init__(self) -> None:
         if not self.reason.strip():
             raise ValueError("Endpoint access requires a reason for the grant")
+        if self.effect_on_get is not None and not self.effect_on_get.strip():
+            raise ValueError("A declared effect on GET requires a reason")
         if self.authentication in _USER_AUTHENTICATION:
             if not (
                 isinstance(self.authorization, Permission)
@@ -93,6 +101,7 @@ def endpoint_access(
     authorization: Permission | Authorization,
     reason: str,
     reachable_before_password_change: bool = False,
+    effect_on_get: str | None = None,
 ) -> Callable[[_Endpoint], _Endpoint]:
     """Declare both decisions on an endpoint, immediately below @router.*.
 
@@ -104,6 +113,7 @@ def endpoint_access(
         authorization,
         reason,
         reachable_before_password_change=reachable_before_password_change,
+        effect_on_get=effect_on_get,
     )
 
     def declare(endpoint: _Endpoint) -> _Endpoint:
