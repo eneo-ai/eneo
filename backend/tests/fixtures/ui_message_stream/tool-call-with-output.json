@@ -200,7 +200,9 @@
       "data": {
         "prompt_tokens": 12,
         "completion_tokens": 3,
-        "turn_tokens": 15
+        "turn_tokens": 15,
+        "context_prompt_tokens": 12,
+        "context_completion_tokens": 3
       },
       "transient": true
     },
