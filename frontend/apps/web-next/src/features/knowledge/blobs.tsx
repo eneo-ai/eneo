@@ -49,7 +49,7 @@ import { formatBytes } from "@/lib/format";
 import { useCopy } from "@/lib/hooks/use-copy";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
-import { matchesSearch } from "@/features/spaces/resource-filter";
+import { matchesSearch } from "@/lib/search";
 import type { InfoBlob } from "./knowledge";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 

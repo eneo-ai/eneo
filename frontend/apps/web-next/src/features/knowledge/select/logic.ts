@@ -1,4 +1,5 @@
 import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
+import { matchesSearch } from "@/lib/search";
 
 /**
  * Pure logic for the knowledge picker (unit-tested), ported from the Svelte
@@ -213,8 +214,7 @@ export function availableKnowledge(
   selected: KnowledgeSelections,
   filter?: string
 ): { sections: KnowledgeSection[]; showHeaders: boolean } {
-  const matches = (value?: string | null) =>
-    !filter || (value ?? "").toLowerCase().includes(filter.toLowerCase());
+  const matches = (...fields: (string | null | undefined)[]) => matchesSearch(fields, filter ?? "");
 
   const dominantModelId =
     selected.collections[0]?.embedding_model.id ??
@@ -255,13 +255,13 @@ export function availableKnowledge(
   for (const website of space.knowledge.websites) {
     const section = sectionFor(website.embedding_model);
     if (!section.isCompatible || selectedIds.has(website.id)) continue;
-    if (!(matches(website.url) || matches(website.name))) continue;
+    if (!matches(website.url, website.name)) continue;
     section.websites.push(website);
   }
   for (const knowledge of space.knowledge.integrationKnowledge) {
     const section = sectionFor(knowledge.embedding_model);
     if (!section.isCompatible || selectedIds.has(knowledge.id)) continue;
-    if (!(matches(knowledge.name) || matches(knowledge.wrapper_name))) continue;
+    if (!matches(knowledge.name, knowledge.wrapper_name)) continue;
     section.integrationKnowledge.push(knowledge);
   }
 

@@ -16,6 +16,7 @@ import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, SessionData, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
+import { sanitizeImageSrc, sanitizeWebHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 import { FileTypeTile, useSignedUrl } from "./attachments";
 import { fileExtension, formatBytes } from "@/lib/format";
@@ -65,10 +66,6 @@ function isMcpImageReference(ref: McpToolReference): boolean {
   return (ref.mime_type ?? "").startsWith("image/");
 }
 
-function isHttpUrl(uri: string): boolean {
-  return /^https?:\/\//i.test(uri);
-}
-
 /** Knowledge references identify excerpts by zero-based chunk number in their URI. */
 function knowledgeExcerptNumber(uri: string): number | undefined {
   const match = /^eneo:\/\/info-blob\/[^#]+#chunk-(\d+)$/.exec(uri);
@@ -84,18 +81,6 @@ function mcpSnippetContent(
 ): string | null | undefined {
   if (!content || !uri.startsWith("eneo://info-blob/")) return content;
   return content.replace(/^Title:[^\r\n]*\r?\ndocument_id:[^\r\n]*\r?\n\r?\n/, "");
-}
-
-function safeImageSrc(src: string): string | undefined {
-  const normalized = src
-    .split("")
-    .filter((char) => char.charCodeAt(0) > 0x20)
-    .join("")
-    .toLowerCase();
-  const match = /^([a-z][a-z0-9+.-]*):/.exec(normalized);
-  if (!match) return src;
-  if (match[1] === "data") return /^data:image\//.test(normalized) ? src : undefined;
-  return match[1] === "http" || match[1] === "https" ? src : undefined;
 }
 
 export function sessionDataFromParts(parts: Part[]): SessionData | null {
@@ -154,7 +139,7 @@ export function mergeSources(
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
         // A document's stored url is whatever its editor wrote; only http(s) links out.
-        url: url && isHttpUrl(url) ? url : undefined,
+        url: sanitizeWebHref(url),
         sourceId: source.sourceId
       };
     });
@@ -162,7 +147,7 @@ export function mergeSources(
     (ref) => ({
       key: `web-${ref.id}`,
       title: ref.title || ref.url,
-      url: isHttpUrl(ref.url) ? ref.url : undefined,
+      url: sanitizeWebHref(ref.url),
       sourceId: ref.id
     })
   );
@@ -173,7 +158,7 @@ export function mergeSources(
       const sourceType = asString(meta.sourceType);
       const pageRange = asString(meta.pageRange);
       const section = asString(meta.section);
-      const externalUrl = sourceType === "crawl-page" && isHttpUrl(ref.uri) ? ref.uri : undefined;
+      const externalUrl = sourceType === "crawl-page" ? sanitizeWebHref(ref.uri) : undefined;
       const excerptNumber = knowledgeExcerptNumber(ref.uri);
       return {
         key: `mcp-${ref.id}`,
@@ -211,6 +196,7 @@ export function McpSnippetButton({
   const excerptLabel = snippet.excerptNumber
     ? t("chat_source_excerpt", { number: snippet.excerptNumber })
     : null;
+  const externalHref = sanitizeWebHref(snippet.uri);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Astryx returns focus to what had it at open; this also covers a tap that
@@ -261,12 +247,12 @@ export function McpSnippetButton({
           footer={
             <LayoutFooter>
               <HStack gap={2} hAlign="end">
-                {isHttpUrl(snippet.uri) && (
+                {externalHref && (
                   <AxButton
                     label={t("mcp_resource_open_external")}
                     variant="secondary"
                     icon={<ExternalLink aria-hidden="true" className="size-4" />}
-                    href={snippet.uri}
+                    href={externalHref}
                     target="_blank"
                     rel="noreferrer"
                   />
@@ -518,7 +504,7 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
     .filter(isMcpImageReference)
     .map((reference) => ({
       reference,
-      src: safeImageSrc(reference.uri),
+      src: sanitizeImageSrc(reference.uri),
       title: mcpReferenceTitle(reference)
     }))
     .filter((image): image is { reference: McpToolReference; src: string; title: string } =>

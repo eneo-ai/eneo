@@ -27,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch, searchTerms } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -323,10 +324,9 @@ export function ToolsTab({ serverId }: { serverId: string }) {
   const pending = useMemo(() => (tools ?? []).filter((tool) => tool.requires_approval), [tools]);
   const active = useMemo(() => (tools ?? []).filter((tool) => !tool.requires_approval), [tools]);
   const filteredActive = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return active;
+    if (searchTerms(search).length === 0) return active;
     return active.filter((tool) =>
-      [tool.name, tool.title ?? "", tool.description ?? ""].join(" ").toLowerCase().includes(query)
+      matchesSearch([tool.name, tool.title, tool.description], search)
     );
   }, [active, search]);
 
