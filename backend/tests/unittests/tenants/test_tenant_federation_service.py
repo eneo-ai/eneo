@@ -73,6 +73,17 @@ class TestRevision:
             _config(encrypted_at="2026-10-02T08:00:00+00:00")
         )
 
+    def test_a_legacy_row_hashes_like_the_tenant_loaded_from_it(self):
+        raw = _config(
+            redirect_path="/login/callback/",
+            canonical_public_origin="https://Org.Eneo.test/",
+        )
+
+        loaded = _tenant(dict(raw)).federation_config
+
+        assert loaded["redirect_path"] == "/login/callback"
+        assert federation_revision(raw) == federation_revision(loaded)
+
     def test_moves_with_any_setting(self):
         assert federation_revision(_config()) != federation_revision(
             _config(client_id="other")

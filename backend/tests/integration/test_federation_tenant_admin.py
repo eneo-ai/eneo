@@ -325,6 +325,33 @@ async def test_an_edit_keeps_every_other_stored_setting(
     assert response.json()["revision"] != view["revision"]
 
 
+async def test_a_legacy_row_saves_with_the_revision_its_view_shows(
+    client: AsyncClient, admin_token: str, configured: dict[str, str], test_tenant
+):
+    # Stored before strict validation: the loaded tenant normalises these.
+    await _store(
+        test_tenant.id,
+        {
+            **await _stored(test_tenant.id),
+            "redirect_path": "/login/callback/",
+            "canonical_public_origin": "https://Org.Eneo.test/",
+        },
+    )
+    view = await _view(client, admin_token)
+    assert view["redirect_uris"] == ["https://org.eneo.test/login/callback"]
+
+    saved = await client.patch(
+        URL,
+        json={"revision": view["revision"], "client_id": "after-legacy"},
+        headers=_bearer(admin_token),
+    )
+
+    assert saved.status_code == 200, saved.text
+    after = await _view(client, admin_token)
+    assert saved.json()["revision"] == after["revision"]
+    assert saved.json() == after
+
+
 async def test_a_save_on_a_stale_revision_conflicts(
     client: AsyncClient, admin_token: str, configured: dict[str, str], test_tenant
 ):

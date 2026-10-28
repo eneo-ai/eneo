@@ -343,17 +343,30 @@ def _timestamp(value: object) -> datetime | None:
         return None
 
 
+def canonical_federation_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The config as a loaded tenant holds it: TenantInDB's validator normalises
+    the redirect path, origin and redirect URIs of rows stored before strict
+    validation. A raw row (read under the lock) and a loaded tenant compare
+    alike only in this form."""
+    return TenantInDB.validate_federation_config(dict(config))
+
+
 def federation_revision(config: Mapping[str, Any]) -> str | None:
     """sha256 of the canonical stored config; None when there is none.
 
-    The secret's stored value is left out, so the revision is no guessing
-    oracle for a legacy plaintext secret. Replacing the secret stamps
+    Raw rows and loaded tenants hash alike (canonical_federation_config). The
+    secret's stored value is left out, so the revision is no guessing oracle
+    for a legacy plaintext secret. Replacing the secret stamps
     ``encrypted_at``, which is included, so the revision still moves.
     """
     if not config:
         return None
     canonical = json.dumps(
-        {key: value for key, value in config.items() if key != "client_secret"},
+        {
+            key: value
+            for key, value in canonical_federation_config(config).items()
+            if key != "client_secret"
+        },
         sort_keys=True,
         separators=(",", ":"),
         default=str,
@@ -722,8 +735,12 @@ class TenantFederationService:
                 "updated_fields": sorted(updates.keys()),
             },
         )
+        # The same canonical form a following GET loads, so the views agree.
         return build_admin_view(
-            tenant.model_copy(update={"federation_config": merged}), get_settings()
+            tenant.model_copy(
+                update={"federation_config": canonical_federation_config(merged)}
+            ),
+            get_settings(),
         )
 
     # Operator door
