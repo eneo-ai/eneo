@@ -119,7 +119,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(await readBlob(await item!.items["text/html"]!)).toContain("<math");
     expect(await readBlob(await item!.items["text/plain"]!)).toBe("Arean är \\pi r^2.");
