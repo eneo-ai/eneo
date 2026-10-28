@@ -80,17 +80,42 @@ beforeEach(() => {
 });
 
 describe("AdminUserGroupsPage", () => {
+  /** The group names, in the order the table's rows show them. */
+  const rowNames = () =>
+    screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getByText(/^(Arkiv|Ekonomi|Bygglov)$/).textContent);
+
   it("lists the groups by name with their member counts and a named row menu", async () => {
-    await renderPage([economy, support]);
+    // Name order and member-count order differ, so the two sorts can be told apart.
+    await renderPage([
+      { id: "g1", name: "Ekonomi", users: [anna] },
+      { id: "g2", name: "Arkiv", users: [anna, per, eva] },
+      { id: "g3", name: "Bygglov", users: [] }
+    ]);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användargrupper" })).toBeTruthy();
-    const [, first, second] = screen.getAllByRole("row");
-    expect(within(first!).getByText("Arkiv")).toBeTruthy();
-    expect(within(first!).getByText("0 medlemmar")).toBeTruthy();
-    expect(within(second!).getByText("Ekonomi")).toBeTruthy();
-    expect(within(second!).getByText("2 medlemmar")).toBeTruthy();
+    expect(rowNames()).toEqual(["Arkiv", "Bygglov", "Ekonomi"]);
+    const [, arkiv] = screen.getAllByRole("row");
+    expect(within(arkiv!).getByText("3 medlemmar")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Ekonomi" })).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("sorts the groups by member count from the Members column", async () => {
+    await renderPage([
+      { id: "g1", name: "Ekonomi", users: [anna] },
+      { id: "g2", name: "Arkiv", users: [anna, per, eva] },
+      { id: "g3", name: "Bygglov", users: [] }
+    ]);
+    const members = screen.getByRole("columnheader", { name: /Medlemmar/ });
+
+    fireEvent.click(within(members).getByRole("button"));
+    await waitFor(() => expect(rowNames()).toEqual(["Bygglov", "Ekonomi", "Arkiv"]));
+
+    fireEvent.click(within(members).getByRole("button"));
+    await waitFor(() => expect(rowNames()).toEqual(["Arkiv", "Ekonomi", "Bygglov"]));
   });
 
   it("offers to create the first group when there is none", async () => {
