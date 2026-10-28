@@ -4,7 +4,8 @@
 //
 //   PERF=1 E2E_USER=... E2E_PASSWORD=... bunx playwright test --project=perf
 //
-// Options: RUNS (a positive integer, default 10), PERF_OUT (default
+// Options: RUNS (a positive integer, default 30, the sample count of the
+// committed baseline, fixed before measuring), PERF_OUT (default
 // test-results/perf-baseline.json), PERF_FRAMEWORK (default "next"; the package
 // whose version goes in meta). Two consecutive runs are judged by the stability
 // rule in metrics.ts (compareRuns).

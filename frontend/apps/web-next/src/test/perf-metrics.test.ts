@@ -9,13 +9,16 @@ import {
   type Metrics
 } from "../../tests/perf/metrics";
 
-/** Summaries from medians alone (p75 plays no part in the stability rule). */
-function medians(values: Record<string, Record<string, number>>): Metrics {
+/** Summaries whose every statistic is the given value, so the rule's choice of statistic does not matter. */
+function summaries(values: Record<string, Record<string, number>>): Metrics {
   return Object.fromEntries(
     Object.entries(values).map(([route, byMetric]) => [
       route,
       Object.fromEntries(
-        Object.entries(byMetric).map(([metric, median]) => [metric, { median, p75: median }])
+        Object.entries(byMetric).map(([metric, value]) => [
+          metric,
+          { median: value, p75: value, mean: value }
+        ])
       )
     ])
   );
@@ -42,22 +45,24 @@ describe("perf baseline metrics", () => {
   });
 
   it("rejects RUNS that is not a positive integer", () => {
-    expect(parseRuns(undefined)).toBe(10);
+    expect(parseRuns(undefined)).toBe(30);
     expect(parseRuns("3")).toBe(3);
     for (const bad of ["0", "-1", "2.5", "abc", ""]) {
       expect(() => parseRuns(bad)).toThrow(/RUNS must be a positive integer/);
     }
   });
 
-  it("summarizes medians and p75 per route and metric", () => {
+  it("summarizes median and p75, plus the mean where the stability rule uses it", () => {
     expect(quantile([4, 1, 3, 2], 0.5)).toBe(2.5);
-    expect(summarize({ "/a": { lcp: [1, 2, 3, 4, 5] } })).toEqual({
-      "/a": { lcp: { median: 3, p75: 4 } }
+    expect(
+      summarize({ "/a": { lcp: [1, 2, 3, 4, 5], coldChatReadyMs: [1, 2, 3, 4, 10] } })
+    ).toEqual({
+      "/a": { lcp: { median: 3, p75: 4 }, coldChatReadyMs: { median: 3, p75: 4, mean: 4 } }
     });
   });
 
   it("judges two consecutive runs by the stability rule", () => {
-    const first = medians({
+    const first = summaries({
       [CHAT_ROUTE]: {
         coldLcpMs: 324,
         warmLcpMs: 436,
@@ -69,7 +74,7 @@ describe("perf baseline metrics", () => {
       },
       "/spaces/list": { coldLcpMs: 100, htmlEncodedBytes: 1_000, warmCls: 0 }
     });
-    const second = medians({
+    const second = summaries({
       [CHAT_ROUTE]: {
         coldLcpMs: 460,
         warmLcpMs: 304,
@@ -85,7 +90,7 @@ describe("perf baseline metrics", () => {
       // Informational: the greeting h1 paints after a post-hydration render.
       [`${CHAT_ROUTE} coldLcpMs`]: null,
       [`${CHAT_ROUTE} warmLcpMs`]: null,
-      // Medians within 15% of the larger one: 35 / 235 = 14.9%, 18 / 118 = 15.3%.
+      // Within 15% of the larger one: 35 / 235 = 14.9%, 18 / 118 = 15.3%.
       [`${CHAT_ROUTE} coldChatReadyMs`]: true,
       [`${CHAT_ROUTE} chatTtftMs`]: false,
       // INP within one 8 ms step, CLS within 0.01 (absolute, not a percentage).
@@ -99,11 +104,11 @@ describe("perf baseline metrics", () => {
   });
 
   it("treats a measurement only one run has as unstable, whichever run lacks it", () => {
-    const full = medians({
+    const full = summaries({
       [CHAT_ROUTE]: { coldChatReadyMs: 200, warmChatReadyMs: 150, coldLcpMs: 300 },
       "/admin/users": { coldLcpMs: 100 }
     });
-    const partial = medians({ [CHAT_ROUTE]: { coldChatReadyMs: 200 } });
+    const partial = summaries({ [CHAT_ROUTE]: { coldChatReadyMs: 200 } });
     const expected = {
       [`${CHAT_ROUTE} coldChatReadyMs`]: true,
       [`${CHAT_ROUTE} warmChatReadyMs`]: false,
@@ -113,5 +118,47 @@ describe("perf baseline metrics", () => {
     };
     expect(verdicts(full, partial)).toEqual(expected);
     expect(verdicts(partial, full)).toEqual(expected);
+  });
+
+  it("compares chat readiness by its mean and the other timing metrics by their median", () => {
+    const fast = (count: number) => Array<number>(count).fill(180);
+    const slow = (count: number) => Array<number>(count).fill(450);
+    const first = summarize({
+      [CHAT_ROUTE]: {
+        // Two modes: the mode share moves the median from one mode to the other.
+        coldChatReadyMs: [...fast(5), ...slow(5)],
+        // One mode: an outlier moves the mean, not the median.
+        chatTtftMs: Array<number>(10).fill(150)
+      }
+    });
+    const second = summarize({
+      [CHAT_ROUTE]: {
+        coldChatReadyMs: [...fast(4), ...slow(6)],
+        chatTtftMs: [...Array<number>(9).fill(150), 1_500]
+      }
+    });
+    // Readiness medians 315 vs 450 (30% apart), means 315 vs 342 (8%); TTFT
+    // medians 150 vs 150, means 150 vs 285 (47%).
+    expect(compareRuns(first, second)).toEqual([
+      {
+        route: CHAT_ROUTE,
+        metric: "coldChatReadyMs",
+        statistic: "mean",
+        values: [315, 342],
+        stable: true
+      },
+      {
+        route: CHAT_ROUTE,
+        metric: "chatTtftMs",
+        statistic: "median",
+        values: [150, 150],
+        stable: true
+      }
+    ]);
+    // A readiness summary without its mean is a gap.
+    const withoutMean = { [CHAT_ROUTE]: { warmChatReadyMs: { median: 150, p75: 150 } } };
+    expect(verdicts(withoutMean, withoutMean)).toEqual({
+      [`${CHAT_ROUTE} warmChatReadyMs`]: false
+    });
   });
 });

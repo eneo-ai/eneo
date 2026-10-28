@@ -5,14 +5,15 @@
 export const CHAT_ROUTE = "/spaces/personal/chat";
 
 export type Samples = Record<string, Record<string, number[]>>;
-export type Summary = { median: number; p75: number };
+/** `mean` only for the metrics the stability rule compares by their mean. */
+export type Summary = { median: number; p75: number; mean?: number };
 export type Metrics = Record<string, Record<string, Summary>>;
 /** An Event Timing entry as the page records it. */
 export type EventEntry = { interactionId: number; startTime: number; duration: number };
 
-/** RUNS from the environment: a positive integer, default 10. */
+/** RUNS from the environment: a positive integer, default 30 (the baseline's sample count). */
 export function parseRuns(value: string | undefined) {
-  const runs = Number(value ?? 10);
+  const runs = Number(value ?? 30);
   if (!Number.isInteger(runs) || runs < 1) {
     throw new Error(`RUNS must be a positive integer, got ${JSON.stringify(value)}`);
   }
@@ -27,12 +28,19 @@ export function quantile(values: number[], q: number) {
   return low + (high - low) * (index - Math.floor(index));
 }
 
+/** Metrics the stability rule compares by their mean, not their median (compareRuns says why). */
+const MEAN_METRICS = new Set(["coldChatReadyMs", "warmChatReadyMs"]);
+
 export function summarize(samples: Samples) {
   const metrics: Metrics = {};
   for (const [route, byMetric] of Object.entries(samples)) {
     metrics[route] = {};
     for (const [metric, values] of Object.entries(byMetric)) {
-      metrics[route][metric] = { median: quantile(values, 0.5), p75: quantile(values, 0.75) };
+      const summary: Summary = { median: quantile(values, 0.5), p75: quantile(values, 0.75) };
+      if (MEAN_METRICS.has(metric)) {
+        summary.mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+      }
+      metrics[route][metric] = summary;
     }
   }
   return metrics;
@@ -43,16 +51,21 @@ export function summarize(samples: Samples) {
  * same build and machine are stable when every metric's medians differ by at
  * most 15% of the larger one. INP and CLS are judged in absolute terms
  * (rescope-v1: INP comes in 8 ms Event Timing steps, CLS sits around 0.005):
- * medians at most one 8 ms step or 0.01 apart.
+ * medians at most 8 ms or 0.01 apart.
+ *
+ * Chat readiness (coldChatReadyMs, warmChatReadyMs), the chat page's load
+ * metric, is compared by its mean instead: on Next it is a two-mode mixture.
+ * The page streams in a Suspense boundary that React's $RC script reveals on
+ * the next frame when it arrives before the shell's first frame ($RT), and
+ * otherwise at $RT + 300 ms, so the share of fast loads moves the median from
+ * one mode to the other. The other metrics keep the median, which an outlier
+ * does not move.
  *
  * The chat route's LCP is informational (`stable: null`, and no comparison
  * rule): its largest paint is always the greeting h1, whose text useNow() keeps
  * empty in the server HTML and through hydration, so it paints only after a
  * second, post-hydration React render, later than the composer the user waits
- * for. The chat page's load metric is chat readiness (coldChatReadyMs,
- * warmChatReadyMs). On Next both still fall in two clusters: the page streams in
- * a Suspense boundary that React reveals on the next frame when it arrives
- * before the shell's first frame, and otherwise about 300 ms after that frame.
+ * for.
  *
  * A measurement only one of the runs has is never stable.
  */
@@ -64,8 +77,9 @@ export function compareRuns(first: Metrics, second: Metrics) {
       ...Object.keys(second[route] ?? {})
     ]);
     return [...metrics].map((metric) => {
-      const a = first[route]?.[metric]?.median ?? Number.NaN;
-      const b = second[route]?.[metric]?.median ?? Number.NaN;
+      const statistic = MEAN_METRICS.has(metric) ? "mean" : "median";
+      const a = first[route]?.[metric]?.[statistic] ?? Number.NaN;
+      const b = second[route]?.[metric]?.[statistic] ?? Number.NaN;
       const apart = Math.abs(a - b);
       let stable: boolean | null;
       if (Number.isNaN(apart)) stable = false;
@@ -73,7 +87,7 @@ export function compareRuns(first: Metrics, second: Metrics) {
       else if (metric === "inpMs") stable = apart <= 8;
       else if (metric.endsWith("Cls")) stable = apart <= 0.01;
       else stable = apart <= 0.15 * Math.max(a, b);
-      return { route, metric, medians: [a, b], stable };
+      return { route, metric, statistic, values: [a, b], stable };
     });
   });
 }
