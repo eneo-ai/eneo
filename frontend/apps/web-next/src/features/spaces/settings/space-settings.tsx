@@ -16,7 +16,7 @@ import {
   Sparkles,
   TriangleAlert
 } from "lucide-react";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -27,15 +27,6 @@ import {
 } from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -368,42 +359,28 @@ function SecuritySection() {
               ))}
             </SelectContent>
           </Select>
-          <AlertDialog
+          <ConfirmDialogControlled
             open={pendingImpact !== null}
             onOpenChange={(open) => !open && setPendingImpact(null)}
+            title={t("migration_impact")}
+            description={t("migration_impact_title", { count: pendingImpactTotal })}
+            confirmLabel={update.isPending ? t("saving") : t("confirm")}
+            variant="default"
+            pending={update.isPending}
+            onConfirm={() => void confirmSecurityClassificationChange()}
           >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("migration_impact")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t("migration_impact_title", { count: pendingImpactTotal })}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">{t("affected_resources")}</p>
-                <ul className="text-muted-foreground grid gap-1 text-sm">
-                  {pendingImpactRows.map((row) => (
-                    <li key={row.key} className="flex justify-between gap-4">
-                      <span>{t(SECURITY_IMPACT_LABEL_KEYS[row.key])}</span>
-                      <span className="tabular-nums">{row.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={update.isPending}>{t("cancel")}</AlertDialogCancel>
-                {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-                <Button
-                  aria-busy={update.isPending || undefined}
-                  onClick={() => {
-                    if (!update.isPending) void confirmSecurityClassificationChange();
-                  }}
-                >
-                  {update.isPending ? t("saving") : t("confirm")}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">{t("affected_resources")}</p>
+              <ul className="text-muted-foreground grid gap-1 text-sm">
+                {pendingImpactRows.map((row) => (
+                  <li key={row.key} className="flex justify-between gap-4">
+                    <span>{t(SECURITY_IMPACT_LABEL_KEYS[row.key])}</span>
+                    <span className="tabular-nums">{row.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </ConfirmDialogControlled>
         </SettingsRow>
       )}
       <RetentionSection />

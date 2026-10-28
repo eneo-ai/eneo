@@ -14,15 +14,6 @@ import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -219,28 +210,16 @@ export function IntegrationActions({
         pending={rename.isPending}
         onSave={() => rename.mutate()}
       />
-      <AlertDialog open={showSync} onOpenChange={setShowSync}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("trigger_full_sync")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("confirm_full_sync", { knowledgeName: item.name })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={fullSync.isPending}>{t("cancel")}</AlertDialogCancel>
-            {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-            <Button
-              aria-busy={fullSync.isPending || undefined}
-              onClick={() => {
-                if (!fullSync.isPending) fullSync.mutate();
-              }}
-            >
-              {fullSync.isPending ? t("syncing") : t("start_full_sync")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialogControlled
+        open={showSync}
+        onOpenChange={setShowSync}
+        title={t("trigger_full_sync")}
+        description={t("confirm_full_sync", { knowledgeName: item.name })}
+        confirmLabel={fullSync.isPending ? t("syncing") : t("start_full_sync")}
+        variant="default"
+        pending={fullSync.isPending}
+        onConfirm={() => fullSync.mutate()}
+      />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}
