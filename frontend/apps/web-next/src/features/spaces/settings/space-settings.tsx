@@ -1,7 +1,6 @@
 "use client";
 
 import { Banner } from "@astryxdesign/core/Banner";
-import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
@@ -20,6 +19,7 @@ import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -113,36 +113,6 @@ function modelUpdate(kind: ModelKind, ids: string[]): SpaceUpdate {
     case "transcription":
       return { transcription_models: refs };
   }
-}
-
-function SettingsLoadFailure({
-  title,
-  retrying,
-  onRetry
-}: {
-  title: string;
-  retrying: boolean;
-  onRetry: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Banner
-      status="error"
-      title={title}
-      endContent={
-        <AxButton
-          label={t("try_again")}
-          aria-label={t("space_settings_retry_named", { section: title })}
-          variant="secondary"
-          isLoading={retrying}
-          isInterruptible
-          onClick={() => {
-            if (!retrying) onRetry();
-          }}
-        />
-      }
-    />
-  );
 }
 
 function useUpdateSpace() {
@@ -277,6 +247,7 @@ function SecuritySection() {
     data: security,
     isPending: securityPending,
     isError: securityError,
+    error: securityLoadError,
     isFetching: securityFetching,
     refetch: refetchSecurity
   } = useQuery({
@@ -339,9 +310,10 @@ function SecuritySection() {
     <SettingsGroup title={t("security_and_privacy")}>
       {securityPending ? <LoadingState rows={1} /> : null}
       {securityError ? (
-        <SettingsLoadFailure
+        <ListError
+          error={securityLoadError}
           title={t("space_security_load_failed")}
-          retrying={securityFetching}
+          isRetrying={securityFetching}
           onRetry={() => void refetchSecurity()}
         />
       ) : null}
@@ -575,6 +547,7 @@ function ModelsSection() {
     data: models,
     isPending: modelsPending,
     isError: modelsError,
+    error: modelsLoadError,
     isFetching: modelsFetching,
     refetch: refetchModels
   } = useQuery({
@@ -600,9 +573,10 @@ function ModelsSection() {
     >
       {modelsPending ? <LoadingState rows={3} /> : null}
       {modelsError ? (
-        <SettingsLoadFailure
+        <ListError
+          error={modelsLoadError}
           title={t("space_models_load_failed")}
-          retrying={modelsFetching}
+          isRetrying={modelsFetching}
           onRetry={() => void refetchModels()}
         />
       ) : null}
@@ -666,6 +640,7 @@ function McpServersSection() {
     data: mcpServers,
     isPending,
     isError,
+    error,
     isFetching,
     refetch
   } = useQuery(mcpServersQueryOptions(browserApi));
@@ -713,18 +688,20 @@ function McpServersSection() {
       description={t("select_mcp_servers_description")}
     >
       {isError && mcpServers ? (
-        <SettingsLoadFailure
+        <ListError
+          error={error}
           title={t("space_mcp_servers_load_failed")}
-          retrying={isFetching}
+          isRetrying={isFetching}
           onRetry={() => void refetch()}
         />
       ) : null}
       {isPending ? (
         <LoadingState rows={2} />
       ) : isError && !mcpServers ? (
-        <SettingsLoadFailure
+        <ListError
+          error={error}
           title={t("space_mcp_servers_load_failed")}
-          retrying={isFetching}
+          isRetrying={isFetching}
           onRetry={() => void refetch()}
         />
       ) : candidates.length === 0 ? (

@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import { EneoApiError, errorReferenceLines, getErrorMessage } from "@/lib/api/errors";
 import { LoadingState, type LoadingStateProps } from "./loading-state";
 
 /** The part of a React Query result the boundary reads; any `useQuery` result fits. */
@@ -19,22 +19,31 @@ export type QueryLike<T = unknown> = {
 };
 
 export type ListErrorProps = {
-  /** The failure; its message comes from the error catalog (`getErrorMessage`). */
+  /**
+   * The failure; its message comes from the error catalog (`getErrorMessage`).
+   * Without one (null or undefined) only the title shows.
+   */
   error: unknown;
-  /** Runs the request again (a query's `refetch`). */
-  onRetry: () => void;
+  /** Runs the request again (a query's `refetch`); without it there is no retry button. */
+  onRetry?: () => void;
   /** The retry is in flight: the button shows a spinner and a second press is ignored. */
   isRetrying?: boolean;
-  /** Replaces the generic title ("The content could not be loaded"). */
+  /** Replaces the generic title ("The content could not be loaded"); site-specific copy goes here. */
   title?: string;
+  /**
+   * One line for a failure beside content that stays on screen: the catalog's
+   * message is the title (no generic heading) unless `title` is given.
+   */
+  compact?: boolean;
   className?: string;
 };
 
 /**
- * The one error state for a list or section that failed to load: an Astryx
- * error banner (announced as an alert) with the catalog's message, a
- * "Försök igen" button and, for a backend error, the HTTP status, error code
- * and trace id behind the banner's details toggle.
+ * The one inline error display: an Astryx error banner (announced as an
+ * alert) with the catalog's message, an optional "Försök igen" button and,
+ * for a backend error, the HTTP status, error code and the support references
+ * (`errorReferenceLines`: error id and trace id) behind the banner's details
+ * toggle. Keep errors as `unknown` in state and render them here.
  *
  * @example
  * {query.isError ? <ListError error={query.error} onRetry={() => void query.refetch()} /> : …}
@@ -44,6 +53,7 @@ export function ListError({
   onRetry,
   isRetrying = false,
   title,
+  compact = false,
   className
 }: ListErrorProps) {
   const t = useTranslations();
@@ -52,27 +62,33 @@ export function ListError({
     ? [
         t("query_error_http_status", { status: apiError.status }),
         apiError.code != null ? t("query_error_code", { code: apiError.code }) : null,
-        apiError.traceId ? t("query_error_trace_id", { id: apiError.traceId }) : null
+        ...errorReferenceLines(apiError, t)
       ].filter((line): line is string => line !== null)
     : [];
+  const message = getErrorMessage(error, t);
+  const heading = title ?? (compact ? message : t("query_error_title"));
 
   return (
     <Banner
       status="error"
-      title={title ?? t("query_error_title")}
-      description={getErrorMessage(error, t)}
+      title={heading}
+      description={error == null || heading === message ? undefined : message}
       className={className}
       endContent={
-        <Button
-          size="sm"
-          label={t("retry")}
-          icon={<RefreshCw aria-hidden="true" />}
-          isLoading={isRetrying}
-          isInterruptible
-          onClick={() => {
-            if (!isRetrying) onRetry();
-          }}
-        />
+        onRetry ? (
+          <Button
+            size="sm"
+            label={t("retry")}
+            // Several failed sections on one page: each retry names its own.
+            aria-label={title ? t("query_error_retry_named", { section: title }) : undefined}
+            icon={<RefreshCw aria-hidden="true" />}
+            isLoading={isRetrying}
+            isInterruptible
+            onClick={() => {
+              if (!isRetrying) onRetry();
+            }}
+          />
+        ) : undefined
       }
     >
       {details.length > 0 ? (

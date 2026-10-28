@@ -62,7 +62,7 @@ describe("QueryStateBoundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expandera" }));
     expect(screen.getByText("HTTP-status: 500")).toBeTruthy();
     expect(screen.getByText("Felkod: 9024")).toBeTruthy();
-    expect(screen.getByText("Trace-ID: trace-123")).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     expect(refetch).toHaveBeenCalledTimes(1);
@@ -118,5 +118,56 @@ describe("QueryStateBoundary", () => {
     );
     expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Anna", "Bo"]);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("ListError", () => {
+  it("shows the backend error id and the trace id under their labels", () => {
+    const error = new EneoApiError("An unexpected error occurred.", {
+      status: 500,
+      errorId: "8bc91e0a",
+      traceId: "trace-123"
+    });
+    renderInApp(<ListError error={error} onRetry={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expandera" }));
+    expect(screen.getByText("Fel-ID: 8bc91e0a")).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
+  });
+
+  it("shows no reference labels when the error carries no ids", () => {
+    renderInApp(<ListError error={new EneoApiError("Gone", { status: 404 })} onRetry={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expandera" }));
+    expect(screen.queryByText(/Fel-ID|Spårnings-ID/)).toBeNull();
+  });
+
+  it("names each retry after its section when the error has a title", () => {
+    const retryModels = vi.fn();
+    renderInApp(
+      <>
+        <ListError error={new Error("boom")} title="Modeller" onRetry={retryModels} />
+        <ListError error={new Error("boom")} title="MCP-servrar" onRetry={vi.fn()} />
+      </>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen: Modeller" }));
+    expect(retryModels).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Försök igen: MCP-servrar" })).toBeTruthy();
+  });
+
+  it("offers no retry when there is nothing to run again", () => {
+    renderInApp(<ListError error={new Error("boom")} title="Kunde inte spara" />);
+
+    expect(within(screen.getByRole("alert")).getByText("Kunde inte spara")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
+  });
+
+  it("puts the message in the title when compact", () => {
+    renderInApp(<ListError error={new Error("boom")} onRetry={vi.fn()} compact />);
+
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText("Något gick fel. Försök igen.")).toBeTruthy();
+    expect(within(alert).queryByText("Innehållet kunde inte hämtas")).toBeNull();
   });
 });

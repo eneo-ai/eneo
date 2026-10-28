@@ -48,6 +48,28 @@ export class EneoApiError extends Error {
   }
 }
 
+/**
+ * The ids a user quotes to support for a failed request: the backend's
+ * `error_id` (an unexpected 500 asks for it) and the request's trace id. Both
+ * when present; neither for an error that did not come from the backend.
+ */
+export function errorReference(error: unknown): { errorId?: string; traceId?: string } {
+  if (!(error instanceof EneoApiError)) return {};
+  return {
+    ...(error.errorId ? { errorId: error.errorId } : {}),
+    ...(error.traceId ? { traceId: error.traceId } : {})
+  };
+}
+
+/** `errorReference` as labelled lines ("Fel-ID: …", "Spårnings-ID: …") for every error display. */
+export function errorReferenceLines(error: unknown, t: (key: string) => string): string[] {
+  const { errorId, traceId } = errorReference(error);
+  return [
+    errorId ? `${t("error_id")}: ${errorId}` : null,
+    traceId ? `${t("trace_id")}: ${traceId}` : null
+  ].filter((line): line is string => line !== null);
+}
+
 export function extractTraceId(headers: Headers): string | undefined {
   return headers.get("x-trace-id") ?? headers.get("x-correlation-id") ?? undefined;
 }
@@ -193,8 +215,9 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
 /**
  * Resolves a user-facing message for any error.
  *
- * Resolution order: mapped backend error code → localized message; unmapped
- * backend error → backend's (English) message; anything else → generic
+ * Resolution order: mapped backend error code → localized message; an
+ * unexpected failure (error id, no code) → localized "error occurred";
+ * other backend error → backend's (English) message; anything else → generic
  * "request failed" fallback.
  */
 /**
@@ -224,6 +247,9 @@ export function getErrorMessage(error: unknown, t: (key: string) => string): str
   if (error instanceof EneoApiError) {
     const message = getIntegrationFailureMessage(error, t) ?? getErrorMessageForCode(error.code, t);
     if (message) return message;
+    // An unexpected failure (500 body: error_id, no code) carries a generic
+    // English sentence; the error id it asks for is shown by errorReference.
+    if (error.errorId !== undefined && error.code === undefined) return t("error_occurred");
     if (error.message) return error.message;
   }
   return t("request_failed");
