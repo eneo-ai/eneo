@@ -16,23 +16,24 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Search } from "lucide-react";
 import Link from "@/lib/link";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { Table } from "@/components/astryx/table";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { PageHeader } from "@/components/composites/page-header";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { blockingError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
-import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { MemberStack } from "@/features/spaces/members/member-stack";
 import {
   type CostRate,
   estimateCost,
   formatCost,
+  isDefaultUsageRange,
   MAX_SEARCH_LENGTH,
   readUsageView,
   storageQueryOptions,
@@ -55,6 +56,8 @@ import {
   userUsageCost
 } from "@/features/admin/usage/usage";
 import {
+  CostNote,
+  type CostRates,
   DateRangeBar,
   percent,
   share,
@@ -108,12 +111,6 @@ function SectionHeading({
   );
 }
 
-/** Under a table with an estimated cost: apps/web's tooltip on each cost, said once. */
-function CostNote() {
-  const t = useTranslations();
-  return <p className="text-muted-foreground text-xs">{t("estimated_cost_tooltip")}</p>;
-}
-
 function ShowAllToggle({
   count,
   showAll,
@@ -165,11 +162,11 @@ function TokenOverview({ data }: { data: TokenUsage }) {
 
 function ModelTable({
   data,
-  rates,
+  costRates: { rates, ratecard },
   labelledBy
 }: {
   data: TokenUsage;
-  rates: Map<string, CostRate>;
+  costRates: CostRates;
   labelledBy: string;
 }) {
   const t = useTranslations();
@@ -273,7 +270,7 @@ function ModelTable({
         plugins={{ sort: sortPlugin }}
         className="min-w-160"
       />
-      <CostNote />
+      <CostNote ratecard={ratecard} />
       <ShowAllToggle
         count={rows.length}
         showAll={showAll}
@@ -293,36 +290,38 @@ function TokensTab({
   onRangeChange: (range: UsageRange) => void;
 }) {
   const t = useTranslations();
-  const rates = useCostRates();
+  const costRates = useCostRates();
   const headingId = useId();
-  // As apps/web: the overview stays on the last 30 days and the model table
-  // follows the range. With the default range both are the same query.
+  // As in apps/web, the overview stays on the last 30 days and the model table
+  // follows the range. With the default range both read one query, whose
+  // failure the overview reports alone.
   const overview = useQuery(tokenUsageQueryOptions(browserApi));
   const details = useQuery({
     ...tokenUsageQueryOptions(browserApi, range),
     placeholderData: keepPreviousData
   });
+  const reportedAbove = isDefaultUsageRange(range) && blockingError(overview);
 
   return (
-    <QueryStateBoundary queries={[overview, details]} rows={1} height={256}>
-      {() => (
-        <div className="flex flex-col gap-6">
-          <TokenOverview data={overview.data!} />
-          <DateRangeBar range={range} onChange={onRangeChange} />
-          <Card
-            className="flex flex-col gap-4 p-4"
-            aria-busy={details.isPlaceholderData || undefined}
-          >
-            <SectionHeading
-              id={headingId}
-              title={t("usage_by_model")}
-              description={t("see_token_usage_by_model")}
-            />
-            <ModelTable data={details.data!} rates={rates} labelledBy={headingId} />
-          </Card>
-        </div>
-      )}
-    </QueryStateBoundary>
+    <div className="flex flex-col gap-6">
+      <QueryStateBoundary query={overview} rows={1} height={256}>
+        {(data) => <TokenOverview data={data} />}
+      </QueryStateBoundary>
+      {/* Outside the boundaries: a period that failed can still be changed or reset. */}
+      <DateRangeBar range={range} onChange={onRangeChange} />
+      <Card className="flex flex-col gap-4 p-4" aria-busy={details.isPlaceholderData || undefined}>
+        <SectionHeading
+          id={headingId}
+          title={t("usage_by_model")}
+          description={t("see_token_usage_by_model")}
+        />
+        {reportedAbove ? null : (
+          <QueryStateBoundary query={details} rows={3}>
+            {(data) => <ModelTable data={data} costRates={costRates} labelledBy={headingId} />}
+          </QueryStateBoundary>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -488,9 +487,15 @@ function UserTable({
 function UsersTab({ view, onChange }: { view: UsageView; onChange: ChangeView }) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const rates = useCostRates();
+  const { rates, ratecard } = useCostRates();
   const headingId = useId();
+  // The search box is a draft until submitted; a search from the URL replaces it.
   const [draft, setDraft] = useState(view.search);
+  const [draftFor, setDraftFor] = useState(view.search);
+  if (draftFor !== view.search) {
+    setDraftFor(view.search);
+    setDraft(view.search);
+  }
   const usage = useQuery({
     ...userTokenUsageQueryOptions(browserApi, view.range, {
       page: view.page,
@@ -583,7 +588,7 @@ function UsersTab({ view, onChange }: { view: UsageView; onChange: ChangeView })
                   labelledBy={headingId}
                   onSort={(sortBy, sortOrder) => onChange({ sortBy, sortOrder })}
                 />
-                <CostNote />
+                <CostNote ratecard={ratecard} />
                 {/* Never disabled while a page loads: the previous page stays (aria-busy). */}
                 {total > USER_USAGE_PAGE_SIZE || view.page > 1 ? (
                   <Pagination
@@ -749,19 +754,15 @@ function StorageTab() {
 
 export function UsagePage() {
   const t = useTranslations();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [view, setView] = useState(() => readUsageView(searchParams));
+  // The URL owns the view: a reload, a link or a user's page leads back to it.
+  const view = readUsageView(searchParams);
   // As in apps/web, any change but a page change starts on the first page.
-  const change = useCallback<ChangeView>(
-    (next) => setView((current) => ({ ...current, page: 1, ...next })),
-    []
-  );
-
-  // The URL mirrors the view, so a reload or a user's page leads back to it.
-  useEffect(() => {
-    const search = usageViewSearch(view, window.location.search);
-    if (search !== window.location.search) replaceUrl(`${window.location.pathname}${search}`);
-  }, [view]);
+  const change: ChangeView = (next) =>
+    replaceUrl(
+      `${pathname}${usageViewSearch({ ...view, page: 1, ...next }, searchParams.toString())}`
+    );
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">

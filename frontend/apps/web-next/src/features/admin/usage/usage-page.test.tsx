@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { router } from "@/test/navigation";
+import { router, setRoute } from "@/test/navigation";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
@@ -23,6 +23,8 @@ type Query = Record<string, string | number | undefined>;
 
 const apiState = vi.hoisted(() => ({
   failingPaths: new Set<string>(),
+  /** Token usage periods (start dates) that fail. */
+  failingStarts: new Set<string>(),
   calls: [] as { path: string; query: Query }[],
   models: [] as (typeof model)[],
   spaces: 2
@@ -58,7 +60,7 @@ vi.mock("@/lib/api/browser", () => ({
     GET: (path: string, init?: { params?: { query?: Query } }) => {
       const query = init?.params?.query ?? {};
       apiState.calls.push({ path, query });
-      if (apiState.failingPaths.has(path)) {
+      if (apiState.failingPaths.has(path) || apiState.failingStarts.has(String(query.start_date))) {
         return Promise.resolve({
           error: {
             error: "Internal server error",
@@ -113,6 +115,7 @@ import { UsagePage } from "./usage-page";
 
 function resetApi() {
   apiState.failingPaths.clear();
+  apiState.failingStarts.clear();
   apiState.calls.length = 0;
   apiState.models = [
     model,
@@ -208,10 +211,7 @@ describe("UsagePage", () => {
     await waitFor(() =>
       expect(apiState.calls.at(-1)).toEqual({
         path: "/api/v1/token-usage/",
-        query: {
-          start_date: new Date("2026-09-01T00:00:00").toISOString(),
-          end_date: new Date("2026-09-16T23:59:59").toISOString()
-        }
+        query: { start_date: "2026-09-01", end_date: "2026-09-17" }
       })
     );
     expect(window.location.search).toBe("?from=2026-09-01&to=2026-09-16");
@@ -220,11 +220,60 @@ describe("UsagePage", () => {
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
     await screen.findByRole("table", { name: "Användning per användare" });
-    expect(usersCalls().at(-1)?.query.start_date).toBe(
-      new Date("2026-09-01T00:00:00").toISOString()
-    );
+    expect(usersCalls().at(-1)?.query.start_date).toBe("2026-09-01");
     // 15 days halve the thresholds of 30.
     expect(screen.getByText(/Användare med hög användning \(>250/)).toBeTruthy();
+  });
+
+  it("keeps the date range usable when a period fails, and the overview on screen", async () => {
+    apiState.failingStarts.add("2026-09-01");
+    renderInApp(<UsagePage />, { route: "/admin/usage" });
+    await screen.findByRole("table", { name: "Användning per modell" });
+
+    fireEvent.change(screen.getByLabelText("Från"), { target: { value: "2026-09-01" } });
+    expect(await findError()).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Token-sammanfattning/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Återställ" }));
+    expect(await screen.findByRole("table", { name: "Användning per modell" })).toBeTruthy();
+    expect(screen.queryByText("Vi upplever vissa svårigheter, försök igen senare.")).toBeNull();
+  });
+
+  it("says when the ratecard failed instead of showing every cost as unknown", async () => {
+    apiState.failingPaths.add("/api/v1/ai-models/");
+    renderInApp(<UsagePage />, { route: "/admin/usage" });
+
+    const table = await screen.findByRole("table", { name: "Användning per modell" });
+    const retry = await screen.findByRole("button", {
+      name: "Försök igen: Beräknade kostnader kunde inte hämtas"
+    });
+    expect(within(table).queryByText("$1.80")).toBeNull();
+
+    apiState.failingPaths.delete("/api/v1/ai-models/");
+    fireEvent.click(retry);
+    expect(await within(table).findByText("$1.80")).toBeTruthy();
+    expect(screen.queryByText("Beräknade kostnader kunde inte hämtas")).toBeNull();
+  });
+
+  it("follows a navigation to another view of the page while it is open", async () => {
+    const { rerender } = renderInApp(<UsagePage />, {
+      route: "/admin/usage?tab=users&userSearch=user1"
+    });
+    const search = await screen.findByRole("textbox", { name: /Sök användarnamn/ });
+    expect(search).toHaveProperty("value", "user1");
+
+    // The App Router rerenders the page on a navigation within it.
+    act(() => setRoute("/admin/usage?tab=users&userSearch=user2"));
+    rerender(<UsagePage />);
+    expect(screen.getByRole("textbox", { name: /Sök användarnamn/ })).toHaveProperty(
+      "value",
+      "user2"
+    );
+    await waitFor(() => expect(usersCalls().at(-1)?.query.search).toBe("user2"));
+
+    act(() => setRoute("/admin/usage"));
+    rerender(<UsagePage />);
+    expect(await screen.findByRole("table", { name: "Användning per modell" })).toBeTruthy();
   });
 
   it("pages, searches and sorts users on the server and keeps it all in the URL", async () => {

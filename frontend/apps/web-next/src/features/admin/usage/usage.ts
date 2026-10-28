@@ -34,11 +34,23 @@ export function usageRangeFromSearchParams(
   return { from, to };
 }
 
+export function isDefaultUsageRange(
+  range: UsageRange,
+  defaultRange = defaultUsageRange()
+): boolean {
+  return range.from === defaultRange.from && range.to === defaultRange.to;
+}
+
+/**
+ * The backend's period for a range, as apps/web sends it: the calendar dates,
+ * with the day after `to` as the end so the last day counts in full. The
+ * dates alone decide the period, so it is the same wherever it is computed
+ * (server prefetch or browser) and a query keyed by the range means one period.
+ */
 export function usageRangeQuery(range: UsageRange): { start_date: string; end_date: string } {
-  return {
-    start_date: new Date(`${range.from}T00:00:00`).toISOString(),
-    end_date: new Date(`${range.to}T23:59:59`).toISOString()
-  };
+  const end = new Date(`${range.to}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start_date: range.from, end_date: dateInput(end) };
 }
 
 /** Tenant token usage per model; by default the last 30 days, the page's overview. */
@@ -135,7 +147,7 @@ export function usageViewSearch(
   defaultRange = defaultUsageRange()
 ): string {
   const params = new URLSearchParams(current);
-  const isDefaultRange = view.range.from === defaultRange.from && view.range.to === defaultRange.to;
+  const isDefaultRange = isDefaultUsageRange(view.range, defaultRange);
   const entries: [string, string, boolean][] = [
     ["tab", view.tab, view.tab === "tokens"],
     ["from", view.range.from, isDefaultRange],

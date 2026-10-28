@@ -21,7 +21,6 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { useSearchParams } from "@/lib/navigation";
 import {
-  type CostRate,
   formatCost,
   usageIntensity,
   usageListHref,
@@ -33,6 +32,8 @@ import {
   type UserUsageRow
 } from "@/features/admin/usage/usage";
 import {
+  CostNote,
+  type CostRates,
   DateRangeBar,
   percent,
   share,
@@ -207,7 +208,13 @@ function TopModels({ data }: { data: TokenUsage }) {
   );
 }
 
-function ModelBreakdownTable({ data, rates }: { data: TokenUsage; rates: Map<string, CostRate> }) {
+function ModelBreakdownTable({
+  data,
+  costRates: { rates, ratecard }
+}: {
+  data: TokenUsage;
+  costRates: CostRates;
+}) {
   const t = useTranslations();
   const unknown = t("unknown");
   const headingId = useId();
@@ -269,6 +276,7 @@ function ModelBreakdownTable({ data, rates }: { data: TokenUsage; rates: Map<str
           })}
         </TableBody>
       </Table>
+      <CostNote ratecard={ratecard} />
     </Card>
   );
 }
@@ -284,7 +292,7 @@ export function UserUsagePage({
   const [range, setRange] = useState(initialRange);
   const user = useQuery(userTokenUsageSummaryQueryOptions(browserApi, userId, range));
   const breakdown = useQuery(userModelBreakdownQueryOptions(browserApi, userId, range));
-  const rates = useCostRates();
+  const costRates = useCostRates();
   const searchParams = useSearchParams();
   const userRow = user.data?.user;
 
@@ -312,7 +320,11 @@ export function UserUsagePage({
             </Card>
           ) : (
             <>
-              <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
+              <UserSummary
+                user={userRow}
+                range={range}
+                cost={userUsageCost(userRow, costRates.rates)}
+              />
               <QueryStateBoundary
                 query={breakdown}
                 rows={1}
@@ -323,7 +335,7 @@ export function UserUsagePage({
                   <>
                     <ProviderBreakdown data={data} />
                     <TopModels data={data} />
-                    <ModelBreakdownTable data={data} rates={rates} />
+                    <ModelBreakdownTable data={data} costRates={costRates} />
                   </>
                 )}
               </QueryStateBoundary>

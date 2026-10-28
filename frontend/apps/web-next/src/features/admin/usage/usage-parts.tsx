@@ -1,16 +1,17 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { blockingError, ListError } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
-import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { adminModelsQueryOptions, type ModelsPresentation } from "@/features/admin/models/models";
 import {
   buildRateMap,
   defaultUsageRange,
@@ -29,13 +30,41 @@ export function share(part: number, total: number): number {
   return total > 0 ? part / total : 0;
 }
 
-/** Model id → per-token cost, from the ratecard of the completion and embedding models. */
+/**
+ * Model id → per-token cost, from the ratecard of the completion and embedding
+ * models, and the ratecard's query: `CostNote` reports its failure.
+ */
 export function useCostRates() {
-  const { data } = useQuery(adminModelsQueryOptions(browserApi));
-  return useMemo(
+  const ratecard = useQuery(adminModelsQueryOptions(browserApi));
+  const { data } = ratecard;
+  const rates = useMemo(
     () => buildRateMap([...(data?.completion_models ?? []), ...(data?.embedding_models ?? [])]),
     [data]
   );
+  return { rates, ratecard };
+}
+
+export type CostRates = ReturnType<typeof useCostRates>;
+
+/**
+ * Under a table with an estimated cost: what the estimate is (apps/web's tooltip
+ * on each cost, said once), or, when the ratecard failed, why every cost is
+ * "–" with a retry.
+ */
+export function CostNote({ ratecard }: { ratecard: UseQueryResult<ModelsPresentation> }) {
+  const t = useTranslations();
+  if (blockingError(ratecard)) {
+    return (
+      <ListError
+        error={ratecard.error}
+        title={t("usage_cost_rates_error")}
+        isRetrying={ratecard.isFetching}
+        onRetry={() => void ratecard.refetch()}
+        compact
+      />
+    );
+  }
+  return <p className="text-muted-foreground text-xs">{t("estimated_cost_tooltip")}</p>;
 }
 
 export function DateRangeBar({

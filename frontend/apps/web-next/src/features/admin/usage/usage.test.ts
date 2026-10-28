@@ -39,11 +39,14 @@ describe("usage ranges", () => {
     );
   });
 
-  it("converts date inputs to inclusive backend datetime parameters", () => {
+  it("sends the range's calendar dates with the day after the end, whatever the time zone", () => {
     expect(usageRangeQuery({ from: "2026-06-01", to: "2026-06-30" })).toEqual({
-      start_date: new Date("2026-06-01T00:00:00").toISOString(),
-      end_date: new Date("2026-06-30T23:59:59").toISOString()
+      start_date: "2026-06-01",
+      end_date: "2026-07-01"
     });
+    expect(usageRangeQuery({ from: "2026-12-01", to: "2026-12-31" }).end_date).toBe("2027-01-01");
+    // The last Sunday of March has 23 hours in Stockholm.
+    expect(usageRangeQuery({ from: "2026-03-01", to: "2026-03-29" }).end_date).toBe("2026-03-30");
   });
 
   it("counts the days between the range ends, as apps/web does", () => {
