@@ -1,5 +1,7 @@
 "use client";
 
+import { modelEntries } from "../models/provider-sections";
+
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -386,12 +388,9 @@ function AreaRows({ className }: { className?: string }) {
   // The models the Modeller page lists: those of a provider (built-in global
   // models without one are not managed there).
   const providerModels = models.data
-    ? [
-        ...models.data.completion_models,
-        ...models.data.embedding_models,
-        ...models.data.transcription_models,
-        ...models.data.image_models
-      ].filter((model) => model.provider_id != null)
+    ? modelEntries(models.data)
+        .map(({ model }) => model)
+        .filter((model) => model.provider_id != null)
     : [];
   const summary = crawler.data?.summary;
   const latest = audit.data?.logs[0];

@@ -459,6 +459,11 @@ describe("AdminOverviewPage on a phone (decision 30)", () => {
         completion_models: [
           ...MODELS.completion_models,
           { ...MODELS.completion_models[0], id: "g1", provider_id: null }
+        ],
+        rerank_models: [
+          { id: "r1", provider_id: "p1", is_org_enabled: true },
+          { id: "r2", provider_id: "p1", is_org_enabled: false },
+          { id: "r3", provider_id: null, is_org_enabled: true }
         ]
       }),
       [PROVIDERS]: ok([provider({ masked_api_key: null })])
@@ -467,7 +472,7 @@ describe("AdminOverviewPage on a phone (decision 30)", () => {
     const areas = await screen.findByRole("region", { name: "Läget just nu" });
     expect(
       await within(areas).findByRole("link", {
-        name: /^Modeller ?, Behöver åtgärd ?· 1 av 1 aktiva$/
+        name: /^Modeller ?, Behöver åtgärd ?· 2 av 3 aktiva$/
       })
     ).toBeTruthy();
   });

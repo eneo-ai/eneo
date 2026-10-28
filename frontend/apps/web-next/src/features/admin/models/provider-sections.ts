@@ -35,7 +35,7 @@ export interface ProviderSection {
   models: KindedModel[];
 }
 
-function flatten(presentation: ModelsPresentation): KindedModel[] {
+export function modelEntries(presentation: ModelsPresentation): KindedModel[] {
   return [
     ...presentation.completion_models.map((model) => ({ model, kind: "completion" as const })),
     ...presentation.embedding_models.map((model) => ({ model, kind: "embedding" as const })),
@@ -77,7 +77,7 @@ export function buildProviderSections(
   capabilities: ProviderCapabilities
 ): ProviderSection[] {
   const byProvider = new Map<string, KindedModel[]>();
-  for (const entry of flatten(presentation)) {
+  for (const entry of modelEntries(presentation)) {
     const providerId = (entry.model as { provider_id?: string | null }).provider_id;
     if (!providerId) continue;
     const list = byProvider.get(providerId) ?? [];
