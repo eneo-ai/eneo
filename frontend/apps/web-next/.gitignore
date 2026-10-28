@@ -20,6 +20,10 @@
 # production
 /build
 
+# Vite build output and TanStack Router generator scratch
+/dist
+/.tanstack/
+
 # misc
 .DS_Store
 *.pem
