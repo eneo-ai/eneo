@@ -201,6 +201,33 @@ def test_excluded_identity_response_has_no_vary():
     assert "vary" not in response.headers
 
 
+async def test_repeated_accept_encoding_fields_honour_gzip_rejection():
+    async def app(scope, receive, send):
+        await JSONResponse(BIG)(scope, receive, send)
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def run(headers: list[tuple[bytes, bytes]]) -> list[dict]:
+        sent: list[dict] = []
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "path": "/", "method": "GET", "headers": headers}
+        await SelectiveGZipMiddleware(app)(scope, receive, send)
+        return sent
+
+    repeated = await run(
+        [(b"accept-encoding", b"*"), (b"accept-encoding", b"gzip;q=0, identity;q=1")]
+    )
+    combined = await run([(b"accept-encoding", b"*, gzip;q=0, identity;q=1")])
+
+    for sent in (repeated, combined):
+        assert b"content-encoding" not in dict(sent[0]["headers"])
+        assert json.loads(b"".join(m.get("body", b"") for m in sent[1:])) == BIG
+
+
 def test_production_app_compresses_openapi_json():
     response, body = _raw_get(TestClient(get_application()), "/openapi.json", GZIP)
 

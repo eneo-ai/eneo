@@ -75,7 +75,9 @@ class SelectiveGZipMiddleware(GZipMiddleware):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        if _accepts_gzip(Headers(scope=scope).get("accept-encoding", "")):
+        # Repeated fields mean the same as one comma-joined field.
+        accept_encoding = ", ".join(Headers(scope=scope).getlist("accept-encoding"))
+        if _accepts_gzip(accept_encoding):
             responder = _SelectiveGZipResponder(
                 self.app, self.minimum_size, compresslevel=self.compresslevel
             )
