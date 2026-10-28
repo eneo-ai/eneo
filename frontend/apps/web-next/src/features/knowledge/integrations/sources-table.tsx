@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import type { IntegrationKnowledge } from "../knowledge";
+import { matchesSearch } from "@/lib/search";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
 import { SourceStateLabel, SourceUpdated, SyncProgress } from "./source-status";
@@ -34,6 +34,7 @@ import {
   sourceHref,
   summarizeSource,
   waitingLabel,
+  wrapperPermissions,
   type IntegrationSource,
   type QueuedIds,
   type SourceFilter,
@@ -86,11 +87,6 @@ const COMPARATORS: Partial<Record<SourceSortKey, TableSortComparator<SourceRow>>
     return left === right ? 0 : left < right ? -1 : 1;
   }
 };
-
-function wrapperPermissions(items: IntegrationKnowledge[]) {
-  const permissions = items[0]?.permissions ?? [];
-  return { canEdit: permissions.includes("edit"), canDelete: permissions.includes("delete") };
-}
 
 function SourceNameCell({ source }: { source: IntegrationSource }) {
   const t = useTranslations();
@@ -199,6 +195,7 @@ function SignInStoppedBanner({
 /** One table of sources, sortable by every column but the actions. */
 function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: string }) {
   const t = useTranslations();
+  const { space } = useSpace();
   const format = useFormatter();
   const { sortedData, sortConfig } = useTableSortableState<SourceRow, SourceSortKey>({
     data: rows,
@@ -251,7 +248,7 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
             wrapperId={row.source.id}
             wrapperName={row.name}
             items={row.source.items}
-            {...wrapperPermissions(row.source.items)}
+            {...wrapperPermissions(row.source.items, space.id)}
             syncActive={isSyncActive(row.summary)}
           />
         ) : single ? (
@@ -327,13 +324,9 @@ export function SourcesList({
   const rows = grouped.flatMap((group) => group.rows);
   useSourceListAnnouncements(progressLoaded ? rows : null);
   const counts = countSourceFilters(rows.map((row) => row.summary));
-  const needle = query.trim().toLocaleLowerCase();
   const isVisible = (row: SourceRow) =>
     matchesSourceFilter(row.summary, filter) &&
-    (needle === "" ||
-      [row.name, ...row.source.items.map((item) => item.name)].some((text) =>
-        text.toLocaleLowerCase().includes(needle)
-      ));
+    matchesSearch([row.name, ...row.source.items.map((item) => item.name)], query);
   const shown = grouped
     .map((group) => ({ ...group, rows: group.rows.filter(isVisible) }))
     .filter((group) => group.heading === null || group.rows.length > 0);

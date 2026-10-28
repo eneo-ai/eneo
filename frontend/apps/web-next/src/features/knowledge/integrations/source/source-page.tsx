@@ -29,6 +29,7 @@ import {
   sourceHref,
   sourceTabParam,
   summarizeSource,
+  wrapperPermissions,
   type IntegrationSource,
   type SourceTab
 } from "../sources";
@@ -182,9 +183,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const adminIntegrationsUrl = hydrated
     ? new URL("/admin/integrations", window.location.origin).href
     : "/admin/integrations";
-  const owned = source.items.filter((item) => item.space_id === space.id);
-  const permissions =
-    owned.length === source.items.length ? (owned[0]?.permissions ?? []) : ([] as string[]);
+  const { canEdit, canDelete } = wrapperPermissions(source.items, space.id);
   const firstSync = source.items.every((item) => !item.metadata?.last_synced_at);
   // A folder's own feed already names its file, so only the overview lists them here.
   const nowReading =
@@ -234,13 +233,13 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
   const actions =
     source.kind === "wrapper" ? (
-      permissions.includes("edit") || permissions.includes("delete") ? (
+      canEdit || canDelete ? (
         <WrapperActions
           wrapperId={source.id}
           wrapperName={source.name}
           items={source.items}
-          canEdit={permissions.includes("edit")}
-          canDelete={permissions.includes("delete")}
+          canEdit={canEdit}
+          canDelete={canDelete}
           syncActive={syncActive}
           onDeleted={toList}
         />

@@ -25,6 +25,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
+import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
@@ -213,9 +214,8 @@ function SharePointImportForm({
 
   const groups = useMemo(() => {
     const sites = preview.data ?? [];
-    const query = search.toLowerCase();
     const filtered = sites
-      .filter((entry) => entry.name.toLowerCase().includes(query))
+      .filter((entry) => matchesSearch([entry.name], search))
       .filter((entry) => showPublicTeams || previewCategory(entry) !== "public_teams_not_member");
     return CATEGORY_ORDER.map((category) => ({
       category,

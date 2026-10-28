@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import {
   AUDIT_ACTION_CONFIG_KEY,
@@ -103,16 +104,12 @@ export function AuditConfig() {
     void queryClient.invalidateQueries({ queryKey: AUDIT_ACTION_CONFIG_KEY });
   };
 
-  const query = search.trim().toLowerCase();
+  const query = search.trim();
 
   const actionsByCategory = useMemo(() => {
     const map = new Map<CategoryType, { action: ActionType; enabled: boolean }[]>();
     for (const config of actions) {
-      const matches =
-        !query ||
-        config.action.toLowerCase().includes(query) ||
-        actionLabel(t, config.action).toLowerCase().includes(query);
-      if (!matches) continue;
+      if (!matchesSearch([config.action, actionLabel(t, config.action)], query)) continue;
       const list = map.get(config.category) ?? [];
       list.push({ action: config.action, enabled: config.enabled });
       map.set(config.category, list);

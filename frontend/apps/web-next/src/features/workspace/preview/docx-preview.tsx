@@ -11,6 +11,7 @@ import {
   type Ref
 } from "react";
 import { useNonce } from "@/components/providers/nonce";
+import { sanitizeLinkHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 import type { PreviewPassage } from "./preview-kind";
 import {
@@ -64,22 +65,6 @@ function frameStyle(tokens: CSSStyleDeclaration): string {
   `;
 }
 
-const SAFE_LINK_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
-
-/**
- * The link's target when it is safe to follow: scheme-less (an anchor or a
- * relative path) or one of the safe schemes. Control characters and spaces,
- * which browsers ignore in a URL, are dropped before the scheme is read, so
- * `java\nscript:` is caught too.
- */
-function safeHref(href: string | null): string | null {
-  if (!href) return null;
-  let stripped = "";
-  for (const char of href) if (char.charCodeAt(0) > 0x20) stripped += char;
-  const scheme = /^([a-z][a-z0-9+.-]*):/.exec(stripped.toLowerCase())?.[1];
-  return scheme === undefined || SAFE_LINK_SCHEMES.has(scheme) ? href : null;
-}
-
 /** Every `<style>` in `node`, itself included. */
 function stylesIn(node: Node): Element[] {
   if (!(node instanceof Element)) return [];
@@ -115,7 +100,7 @@ function fillFrame(
     ).backgroundColor;
   }
   for (const link of frameDocument.querySelectorAll("a")) {
-    const href = safeHref(link.getAttribute("href"));
+    const href = sanitizeLinkHref(link.getAttribute("href"));
     if (!href) link.removeAttribute("href");
     else if (!href.startsWith("#")) {
       link.target = "_blank";

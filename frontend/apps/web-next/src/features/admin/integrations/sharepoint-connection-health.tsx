@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { blockingError, RefreshError } from "@/components/composites/query-state";
+import { integrationCallbackUrl } from "@/features/integrations/callback-message";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -137,7 +138,7 @@ function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => 
     mutationFn: () =>
       unwrap(
         browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/reauth", {
-          body: { redirect_uri: window.location.origin + "/integrations/callback/token/" }
+          body: { redirect_uri: integrationCallbackUrl() }
         })
       ),
     onSuccess: (start) => followServiceAccountSignIn(start, t),

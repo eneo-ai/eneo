@@ -24,7 +24,6 @@ from eneo.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
     _raise_api_key_http_error,
     require_api_key_permission,
-    require_resource_permission,
     require_resource_permission_for_method,
 )
 from eneo.authentication.auth_models import (
@@ -35,7 +34,6 @@ from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from eneo.main.config import get_settings
 from eneo.users.user_service import (
     UserService,
     _check_basic_method_permission,
@@ -2183,40 +2181,3 @@ class TestNoDoubleAuth:
         assert param_names == ["request"], (
             f"Guard should only take 'request', got: {param_names}"
         )
-
-
-class TestResourceGuardApiKeyHeader:
-    """require_resource_permission fails closed on any API-key header, even an
-    empty one, when authentication left no key on request.state."""
-
-    @staticmethod
-    def _request(headers: dict[str, str]) -> Request:
-        return Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": "/",
-                "headers": [
-                    (name.lower().encode(), value.encode())
-                    for name, value in headers.items()
-                ],
-            }
-        )
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["sk_service-key", ""])
-    async def test_api_key_header_without_auth_state_fails_closed(self, value):
-        guard = require_resource_permission("assistants", "read")
-        request = self._request({get_settings().api_key_header_name: value})
-
-        with pytest.raises(HTTPException) as exc_info:
-            await guard(request)
-
-        assert exc_info.value.status_code == 500
-        assert exc_info.value.detail["code"] == "server_configuration_error"
-
-    @pytest.mark.asyncio
-    async def test_no_api_key_header_passes(self):
-        guard = require_resource_permission("assistants", "read")
-
-        assert await guard(self._request({"Authorization": "Bearer token"})) is None

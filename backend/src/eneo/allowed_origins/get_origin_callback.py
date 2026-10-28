@@ -1,7 +1,6 @@
 import asyncio
 import time
 from collections.abc import Iterable
-from urllib.parse import urlparse
 
 from starlette.datastructures import URL, Headers
 
@@ -102,9 +101,10 @@ async def get_origin(
 ) -> bool:
     settings = get_settings()
     # A page on the user's own machine gets credentialed CORS only in
-    # development. Elsewhere a loopback origin passes like any other: same
-    # origin, or named in the allowlist (http://localhost:* for a developer).
-    if settings.is_development and urlparse(origin).hostname in LOOPBACK_HOSTS:
+    # development, where each loopback host is allowlisted on any http(s)
+    # port. Elsewhere a loopback origin passes like any other: same origin, or
+    # named in the allowlist (http://localhost:* for a developer).
+    if settings.is_development and _matches(origin, LOOPBACK_HOSTS):
         return True
 
     headers = request_headers or Headers()

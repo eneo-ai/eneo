@@ -6,7 +6,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
-import { isIntegrationCallbackMessage } from "./callback-message";
+import { integrationCallbackUrl, isIntegrationCallbackMessage } from "./callback-message";
 
 type UserIntegration = Schema<"UserIntegration">;
 
@@ -131,7 +131,7 @@ export function useIntegrationAuth(onConnected: (result: ConnectResult) => void)
           browserApi.GET("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
             params: {
               path: { tenant_integration_id: tenantIntegrationId },
-              query: { redirect_uri: window.location.origin + "/integrations/callback/token/" }
+              query: { redirect_uri: integrationCallbackUrl() }
             }
           })
         );
