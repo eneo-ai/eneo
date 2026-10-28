@@ -16,7 +16,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
-from eneo.main.config import Settings, get_settings
+from eneo.main.config import Settings, get_settings, serialize_origin
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -59,25 +59,15 @@ def _http_url(value: str | None) -> str | None:
     return value if _http_parts(value) else None
 
 
-def _origin(url: str | None) -> str | None:
-    """Serialized like a browser origin: no credentials, path or default port."""
-    parts = _http_parts(url)
-    if parts is None or parts.hostname is None:
-        return None
-    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
-    default_port = 443 if parts.scheme == "https" else 80
-    port = "" if parts.port in (None, default_port) else f":{parts.port}"
-    return f"{parts.scheme}://{host}{port}"
-
-
 def build_runtime_config(settings: Settings) -> WebRuntimeConfig:
     links = {field: _http_url(getattr(settings, field)) for field in _LINKS}
     if not settings.show_help_center:
         links["help_center_url"] = None
+    content_base = settings.mcp_app_content_base_url
     return WebRuntimeConfig(
         version=settings.app_version,
         revision=settings.app_revision,
-        mcp_app_content_origin=_origin(settings.mcp_app_content_base_url),
+        mcp_app_content_origin=serialize_origin(content_base) if content_base else None,
         **links,
     )
 

@@ -1,12 +1,55 @@
-"""Tests for validate_public_origin() helper."""
+"""Tests for serialize_origin() and the origin validators built on it."""
 
 import pytest
 
 from eneo.main.config import (
+    serialize_origin,
     validate_public_origin,
     validate_redirect_path,
     validate_redirect_uri,
 )
+
+
+@pytest.mark.parametrize(
+    ("url", "origin"),
+    [
+        ("https://example.com/", "https://example.com"),
+        ("https://Example.COM", "https://example.com"),
+        ("HTTPS://Stockholm.Eneo.SE/", "https://stockholm.eneo.se"),
+        ("https://example.com:8443", "https://example.com:8443"),
+        ("https://example.com:443", "https://example.com"),
+        ("http://example.com:80", "http://example.com"),
+        ("http://example.com:443", "http://example.com:443"),
+        ("https://localhost:3000", "https://localhost:3000"),
+        ("https://192.168.1.1:8443", "https://192.168.1.1:8443"),
+        ("  https://example.com  ", "https://example.com"),
+        ("https://user:secret@example.com/path?q=1#f", "https://example.com"),
+        ("https://[::1]:443/x", "https://[::1]"),
+        ("http://[::1]:3000", "http://[::1]:3000"),
+        ("https://[2001:DB8:0:0::1]:8443/x", "https://[2001:db8::1]:8443"),
+    ],
+)
+def test_serialize_origin_matches_the_browser(url, origin):
+    assert serialize_origin(url) == origin
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "example.com",
+        "/login/callback",
+        "ftp://example.com",
+        "javascript:alert(1)",
+        "https://",
+        "https://example.com:bad",
+        "https://example.com:99999",
+        "http://[::1",
+        "null",
+    ],
+)
+def test_serialize_origin_is_none_without_an_http_origin(url):
+    assert serialize_origin(url) is None
 
 
 def test_validates_https_required():
@@ -111,6 +154,39 @@ def test_strips_whitespace():
     assert result == "https://example.com"
 
 
+@pytest.mark.parametrize(
+    ("origin", "normalized"),
+    [
+        ("https://[::1]", "https://[::1]"),
+        ("https://[::1]:8443/", "https://[::1]:8443"),
+        ("http://[::1]:3000", "http://[::1]:3000"),
+        ("http://127.0.0.1:3000/", "http://127.0.0.1:3000"),
+        ("http://LocalHost:3000", "http://localhost:3000"),
+    ],
+)
+def test_loopback_and_ipv6_origins_are_serialized_like_a_browser(origin, normalized):
+    assert validate_public_origin(origin) == normalized
+
+
+@pytest.mark.parametrize(
+    "origin", ["http://localhost.evil.example", "http://[::ffff:127.0.0.1]"]
+)
+def test_only_loopback_hosts_may_use_http(origin):
+    with pytest.raises(ValueError, match="must use https://"):
+        validate_public_origin(origin)
+
+
+def test_rejects_wildcard_host():
+    """A wildcard host can never equal a request origin."""
+    with pytest.raises(ValueError, match="must not include wildcards"):
+        validate_public_origin("https://*.example.com")
+
+
+def test_rejects_invalid_port():
+    with pytest.raises(ValueError, match="not a valid URL"):
+        validate_public_origin("https://example.com:99999")
+
+
 def test_rejects_empty_string():
     """Empty string is rejected (not treated as None)."""
     with pytest.raises(ValueError, match="cannot be an empty string"):
@@ -131,6 +207,10 @@ def test_rejects_whitespace_only():
         ("http://example.com/callback", None, "must use https://"),
         ("https://example.com", None, "must include an absolute path"),
         ("https://Example.com/callback/", "https://example.com/callback", None),
+        ("https://[::1]:8443/callback/", "https://[::1]:8443/callback", None),
+        ("http://[::1]:3000/callback", "http://[::1]:3000/callback", None),
+        ("http://127.0.0.1:80/callback", "http://127.0.0.1/callback", None),
+        ("https://example.com:99999/callback", None, "not a valid URL"),
     ],
 )
 def test_validate_redirect_uri_branches(uri, expected, error_match):
