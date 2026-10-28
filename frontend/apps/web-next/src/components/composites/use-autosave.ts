@@ -113,8 +113,8 @@ export function useAutosaveField<T, R = unknown>({
   const serverRef = useRef(serverValue);
   // The latest value sent and not yet settled: what the server will hold next.
   const inFlight = useRef<{ value: T } | null>(null);
-  // The latest value sent that the server value has not shown yet, whether its
-  // save is pending or failed: the user's choice, which a landing save keeps.
+  // The latest value sent and not yet accepted, whether its save is pending or
+  // failed: the user's choice, which an earlier save landing must not replace.
   const unacknowledged = useRef<{ value: T } | null>(null);
 
   useEffect(() => {
@@ -168,6 +168,7 @@ export function useAutosaveField<T, R = unknown>({
     unacknowledged.current = flight;
     await autosave(async () => {
       const result = await save(next);
+      if (unacknowledged.current === flight) unacknowledged.current = null;
       onSaved?.(result);
       return result;
     });

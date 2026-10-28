@@ -366,3 +366,20 @@ it("keeps a reverted choice whose save failed, and retries it", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(saves.map((entry) => entry.value)).toEqual(["B", "A", "A"]);
 });
+
+it("adopts a later server change after a revert whose saves both landed unrendered", async () => {
+  const { saves, save } = deferredSaves();
+  const { rerender } = renderWithStatus(<ServerBackedProbe server="A" save={save} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Pick B" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pick A" }));
+  await act(async () => {
+    saves[0]?.done.resolve();
+    saves[1]?.done.resolve();
+  });
+  rerender(withStatus(<ServerBackedProbe server="C" save={save} />));
+
+  expect(draftText()).toBe("C");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(save).toHaveBeenCalledTimes(2);
+});
