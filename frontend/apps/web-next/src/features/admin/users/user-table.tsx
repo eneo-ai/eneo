@@ -35,10 +35,35 @@ function useStateLabel() {
           : t("admin_users_state_deleted");
 }
 
+/** Badges for a user's roles or groups, or a dash (read out as "none") without any. */
+function BadgeList({ items }: { items: { id: string; name: string }[] }) {
+  const t = useTranslations();
+  if (items.length === 0) {
+    return (
+      <>
+        <span aria-hidden="true" className="text-ax-text-secondary">
+          –
+        </span>
+        <span className="sr-only">{t("none")}</span>
+      </>
+    );
+  }
+  return (
+    <ul className="flex flex-wrap gap-1">
+      {items.map((item) => (
+        <li key={item.id} className="flex min-w-0">
+          <Badge label={item.name} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
- * Users as a table: initials avatar with username and email, role badges,
- * status dot with its label, and the row menu. Long names and emails truncate
- * with a tooltip; below the min width the table scrolls in its own region.
+ * Users as a table: initials avatar with username and email, role and user
+ * group badges, status dot with its label, and the row menu. Long names and
+ * emails truncate with a tooltip; below the min width the table scrolls in
+ * its own region.
  */
 export function UserTable({
   users,
@@ -55,12 +80,15 @@ export function UserTable({
 
   // Each set width is also a min width (AGENTS.md → Tables).
   return (
-    <Table aria-label={label} hasHover className="min-w-160 table-fixed">
+    <Table aria-label={label} hasHover className="min-w-200 table-fixed">
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
           <TableHeaderCell scope="col">{t("user")}</TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-2/5">
+          <TableHeaderCell scope="col" className="w-1/4">
             {t("roles")}
+          </TableHeaderCell>
+          <TableHeaderCell scope="col" className="w-1/4">
+            {t("user_groups")}
           </TableHeaderCell>
           <TableHeaderCell scope="col" className="w-36 min-w-36">
             {t("status")}
@@ -92,22 +120,10 @@ export function UserTable({
                 </div>
               </TableCell>
               <TableCell>
-                {user.roles.length > 0 ? (
-                  <ul className="flex flex-wrap gap-1">
-                    {user.roles.map((role) => (
-                      <li key={role.id} className="flex min-w-0">
-                        <Badge label={role.name} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <>
-                    <span aria-hidden="true" className="text-ax-text-secondary">
-                      –
-                    </span>
-                    <span className="sr-only">{t("none")}</span>
-                  </>
-                )}
+                <BadgeList items={user.roles} />
+              </TableCell>
+              <TableCell>
+                <BadgeList items={user.user_groups} />
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap items-center gap-1.5">
