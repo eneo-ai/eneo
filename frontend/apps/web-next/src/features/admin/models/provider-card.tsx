@@ -13,7 +13,8 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -24,6 +25,7 @@ import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
+import { ModelDialogs, type ModelSelection } from "./model-dialogs";
 import { ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
@@ -41,13 +43,15 @@ function ModelTable({
   labelledBy,
   showKind,
   classifications,
-  securityEnabled
+  securityEnabled,
+  onModelAction
 }: {
   models: KindedModel[];
   labelledBy: string;
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  onModelAction: (selection: ModelSelection) => void;
 }) {
   const t = useTranslations();
 
@@ -93,6 +97,7 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
+            onAction={(action) => onModelAction({ model, kind, action })}
           />
         ))}
       </TableBody>
@@ -126,7 +131,10 @@ export function ProviderCard({
   const queryClient = useQueryClient();
   const notices = useProviderNotices();
   const headingId = useId();
+  const cardRef = useRef<HTMLElement>(null);
+  const rescueFocus = useFocusRescue();
   const phone = useMediaMatch(PHONE_QUERY);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   // All of them, not only those the filters show: any one blocks a delete.
@@ -158,6 +166,7 @@ export function ProviderCard({
 
   return (
     <section
+      ref={cardRef}
       id={providerCardId(section.providerId)}
       aria-labelledby={headingId}
       // Focusable from script only: the banner's link to this provider moves
@@ -252,6 +261,7 @@ export function ProviderCard({
                     classifications={classifications}
                     securityEnabled={securityEnabled}
                     showKind={showKind}
+                    onAction={(action) => setModelSelection({ model, kind, action })}
                     layout="list"
                   />
                 ))}
@@ -262,6 +272,7 @@ export function ProviderCard({
             <div className="max-md:hidden">
               <ModelTable
                 models={models}
+                onModelAction={setModelSelection}
                 labelledBy={headingId}
                 showKind={showKind}
                 classifications={classifications}
@@ -272,6 +283,24 @@ export function ProviderCard({
         </>
       )}
 
+      {modelSelection && (
+        <ModelDialogs
+          key={`${modelSelection.kind}:${modelSelection.model.id}`}
+          selection={modelSelection}
+          classifications={classifications}
+          securityEnabled={securityEnabled}
+          onClose={() => {
+            rescueFocus(
+              () =>
+                cardRef.current?.querySelector<HTMLElement>(
+                  `[data-model-id="${CSS.escape(modelSelection.model.id)}"] [aria-haspopup="menu"]`
+                ) ?? cardRef.current
+            );
+            setModelSelection((current) => (current === modelSelection ? null : current));
+          }}
+          onMigrate={() => setModelSelection({ ...modelSelection, action: "migrate" })}
+        />
+      )}
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
       {modelCount > 0 ? (
         <DeleteBlockedDialog

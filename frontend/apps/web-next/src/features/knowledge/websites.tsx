@@ -24,7 +24,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { use, useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
@@ -41,6 +41,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { TableFrame } from "@/components/composites/table-frame";
+import { KnowledgeActionContext } from "./knowledge-action-context";
 import { RowsOrTable } from "./knowledge-list";
 import { websiteRow } from "./knowledge-rows";
 import { useSpace } from "@/features/spaces/use-space";
@@ -160,12 +161,54 @@ function deleteOutcomeToast(
 /** Row menu for a website: edit, delete. */
 export function WebsiteActions({ website }: { website: Website }) {
   const t = useTranslations();
+  const shared = use(KnowledgeActionContext);
+  const [action, setAction] = useState<"edit" | "delete" | null>(null);
+  const open = (next: "edit" | "delete") => {
+    if (shared) shared({ kind: "website", website, action: next });
+    else setAction(next);
+  };
+  const canDelete = website.permissions?.includes("delete") ?? false;
+  const items: DropdownMenuOption[] = [
+    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => open("edit") },
+    ...(canDelete
+      ? [
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => open("delete")
+          }
+        ]
+      : [])
+  ];
+
+  return (
+    <>
+      <MoreMenu
+        label={t("space_more_actions_for", { name: formatWebsiteName(website) })}
+        items={items}
+        alignment="end"
+      />
+      {action && (
+        <WebsiteActionDialog website={website} action={action} onClose={() => setAction(null)} />
+      )}
+    </>
+  );
+}
+
+export function WebsiteActionDialog({
+  website,
+  action,
+  onClose
+}: {
+  website: Website;
+  action: "edit" | "delete";
+  onClose: () => void;
+}) {
+  const t = useTranslations();
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
-  const [showEdit, setShowEdit] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
 
-  const canDelete = website.permissions?.includes("delete") ?? false;
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
   // The bulk endpoint also removes one website, and says when the crawler
@@ -180,37 +223,23 @@ export function WebsiteActions({ website }: { website: Website }) {
     refresh: invalidate,
     onRemoved: (result) => {
       deleteOutcomeToast(result, t);
-      setShowDelete(false);
+      onClose();
     }
   });
 
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
 
-  const items: DropdownMenuOption[] = [
-    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
-    ...(canDelete
-      ? [
-          {
-            label: t("delete"),
-            icon: <Trash2 aria-hidden="true" />,
-            variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
-          }
-        ]
-      : [])
-  ];
-
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
   return (
     <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: formatWebsiteName(website) })}
-        items={items}
-        alignment="end"
-      />
-      {showEdit && <WebsiteDialog website={website} open={showEdit} onOpenChange={setShowEdit} />}
+      {action === "edit" && (
+        <WebsiteDialog website={website} open={action === "edit"} onOpenChange={onOpenChange} />
+      )}
       <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
+        open={action === "delete"}
+        onOpenChange={onOpenChange}
         title={t("remove_website_title")}
         description={`${t("remove_website_description")} ${websiteDisplay}`}
         confirmLabel={deleteWebsite.isPending ? t("deleting") : t("remove_website_confirm")}

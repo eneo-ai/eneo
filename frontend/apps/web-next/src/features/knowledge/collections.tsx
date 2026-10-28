@@ -17,7 +17,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { use, useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import {
@@ -54,6 +54,7 @@ import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { TableFrame } from "@/components/composites/table-frame";
+import { KnowledgeActionContext } from "./knowledge-action-context";
 import { RowsOrTable } from "./knowledge-list";
 import { collectionRow } from "./knowledge-rows";
 import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
@@ -210,30 +211,22 @@ export function CreateCollectionButton() {
 /** Row menu for a collection: rename, delete. */
 export function CollectionActions({ collection }: { collection: Collection }) {
   const t = useTranslations();
-  const invalidateSpace = useInvalidateSpace();
-  const [showEdit, setShowEdit] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-
+  const shared = use(KnowledgeActionContext);
+  const [action, setAction] = useState<"edit" | "delete" | null>(null);
+  const open = (next: "edit" | "delete") => {
+    if (shared) shared({ kind: "collection", collection, action: next });
+    else setAction(next);
+  };
   const canDelete = collection.permissions?.includes("delete") ?? false;
-
-  const deleteCollection = useRemovalMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.DELETE("/api/v1/groups/{id}/", { params: { path: { id: collection.id } } })
-      ),
-    refresh: invalidateSpace,
-    onRemoved: () => setShowDelete(false)
-  });
-
   const items: DropdownMenuOption[] = [
-    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
+    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => open("edit") },
     ...(canDelete
       ? [
           {
             label: t("delete"),
             icon: <Trash2 aria-hidden="true" />,
             variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
+            onClick: () => open("delete")
           }
         ]
       : [])
@@ -246,13 +239,54 @@ export function CollectionActions({ collection }: { collection: Collection }) {
         items={items}
         alignment="end"
       />
-      {showEdit && (
-        <CollectionDialog collection={collection} open={showEdit} onOpenChange={setShowEdit} />
+      {action && (
+        <CollectionActionDialog
+          collection={collection}
+          action={action}
+          onClose={() => setAction(null)}
+        />
       )}
-      {showDelete && (
+    </>
+  );
+}
+
+export function CollectionActionDialog({
+  collection,
+  action,
+  onClose
+}: {
+  collection: Collection;
+  action: "edit" | "delete";
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const invalidateSpace = useInvalidateSpace();
+
+  const deleteCollection = useRemovalMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.DELETE("/api/v1/groups/{id}/", { params: { path: { id: collection.id } } })
+      ),
+    refresh: invalidateSpace,
+    onRemoved: () => onClose()
+  });
+
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
+  return (
+    <>
+      {action === "edit" && (
+        <CollectionDialog
+          collection={collection}
+          open={action === "edit"}
+          onOpenChange={onOpenChange}
+        />
+      )}
+      {action === "delete" && (
         <ConfirmDialogControlled
-          open={showDelete}
-          onOpenChange={setShowDelete}
+          open={action === "delete"}
+          onOpenChange={onOpenChange}
           title={t("delete_collection")}
           description={t("confirm_delete_collection", { name: collection.name })}
           confirmLabel={deleteCollection.isPending ? t("deleting") : t("delete")}

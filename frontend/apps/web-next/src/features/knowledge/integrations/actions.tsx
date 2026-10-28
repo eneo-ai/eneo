@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { use, useId, useRef, useState, type RefObject } from "react";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -35,6 +35,7 @@ import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
+import { KnowledgeActionContext } from "../knowledge-action-context";
 import type { IntegrationKnowledge } from "../knowledge";
 import { KNOWLEDGE_NAME_MAX_LENGTH } from "./knowledge-names";
 import { trackSyncs } from "./pending-syncs";
@@ -91,19 +92,91 @@ export function IntegrationActions({
   onDeleted?: () => void;
 }) {
   const t = useTranslations();
+  const shared = use(KnowledgeActionContext);
+  const [action, setAction] = useState<"rename" | "sync" | "delete" | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const open = (next: "rename" | "sync" | "delete") => {
+    if (shared) shared({ kind: "integration", item, action: next, anchor, onDeleted });
+    else setAction(next);
+  };
+  const canEdit = item.permissions?.includes("edit") ?? false;
+  const canDelete = item.permissions?.includes("delete") ?? false;
+  if (!canEdit && !canDelete) return null;
+  const items: DropdownMenuOption[] = [
+    ...(canEdit
+      ? [
+          {
+            label: t("rename"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => {
+              open("rename");
+            }
+          }
+        ]
+      : []),
+    ...(canEdit && item.integration_type === "sharepoint"
+      ? [
+          {
+            label: syncActive ? t("integration_sync_already_running") : t("trigger_full_sync"),
+            icon: <RefreshCw aria-hidden="true" />,
+            isDisabled: syncActive,
+            onClick: () => open("sync")
+          }
+        ]
+      : []),
+    ...(canDelete
+      ? [
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => open("delete")
+          }
+        ]
+      : [])
+  ];
+
+  return (
+    <>
+      <span ref={anchor} className="contents">
+        <MoreMenu
+          label={t("space_more_actions_for", { name: item.name })}
+          items={items}
+          alignment="end"
+        />
+      </span>
+      {action && (
+        <IntegrationActionDialog
+          item={item}
+          action={action}
+          anchor={anchor}
+          onDeleted={onDeleted}
+          onClose={() => setAction(null)}
+        />
+      )}
+    </>
+  );
+}
+
+export function IntegrationActionDialog({
+  item,
+  action,
+  anchor,
+  onDeleted,
+  onClose
+}: {
+  item: IntegrationKnowledge;
+  action: "rename" | "sync" | "delete";
+  anchor: RefObject<HTMLSpanElement | null>;
+  onDeleted?: () => void;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
   const { space } = useSpace();
   const { trackJob } = useJobs();
   const queryClient = useQueryClient();
   const invalidate = useSpaceInvalidation();
-  const [showRename, setShowRename] = useState(false);
-  const [showSync, setShowSync] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
   const [newName, setNewName] = useState(item.name);
-  // In the item's row, so its removal can hand focus to the next row.
-  const anchor = useRef<HTMLSpanElement>(null);
-
-  const canEdit = item.permissions?.includes("edit") ?? false;
-  const canDelete = item.permissions?.includes("delete") ?? false;
 
   const rename = useMutation({
     mutationFn: () =>
@@ -115,7 +188,7 @@ export function IntegrationActions({
       ),
     onSuccess: () => {
       invalidate();
-      setShowRename(false);
+      onClose();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -136,7 +209,7 @@ export function IntegrationActions({
       void queryClient.invalidateQueries({
         queryKey: ["integrations", "sync-progress", space.id]
       });
-      setShowSync(false);
+      onClose();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -153,60 +226,19 @@ export function IntegrationActions({
       ),
     refresh: invalidate,
     onRemoved: () => {
-      setShowDelete(false);
+      onClose();
       onDeleted?.();
     }
   });
 
-  if (!canEdit && !canDelete) return null;
-
-  const items: DropdownMenuOption[] = [
-    ...(canEdit
-      ? [
-          {
-            label: t("rename"),
-            icon: <Pencil aria-hidden="true" />,
-            onClick: () => {
-              setNewName(item.name);
-              setShowRename(true);
-            }
-          }
-        ]
-      : []),
-    ...(canEdit && item.integration_type === "sharepoint"
-      ? [
-          {
-            label: syncActive ? t("integration_sync_already_running") : t("trigger_full_sync"),
-            icon: <RefreshCw aria-hidden="true" />,
-            isDisabled: syncActive,
-            onClick: () => setShowSync(true)
-          }
-        ]
-      : []),
-    ...(canDelete
-      ? [
-          {
-            label: t("delete"),
-            icon: <Trash2 aria-hidden="true" />,
-            variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
-          }
-        ]
-      : [])
-  ];
-
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
   return (
     <>
-      <span ref={anchor} className="contents">
-        <MoreMenu
-          label={t("space_more_actions_for", { name: item.name })}
-          items={items}
-          alignment="end"
-        />
-      </span>
       <RenameDialog
-        open={showRename}
-        onOpenChange={setShowRename}
+        open={action === "rename"}
+        onOpenChange={onOpenChange}
         title={t("integration_rename_title")}
         name={newName}
         onNameChange={setNewName}
@@ -214,8 +246,8 @@ export function IntegrationActions({
         onSave={() => rename.mutate()}
       />
       <ConfirmDialogControlled
-        open={showSync}
-        onOpenChange={setShowSync}
+        open={action === "sync"}
+        onOpenChange={onOpenChange}
         title={t("trigger_full_sync")}
         description={t("confirm_full_sync", { knowledgeName: item.name })}
         confirmLabel={fullSync.isPending ? t("syncing") : t("start_full_sync")}
@@ -224,8 +256,8 @@ export function IntegrationActions({
         onConfirm={() => fullSync.mutate()}
       />
       <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
+        open={action === "delete"}
+        onOpenChange={onOpenChange}
         title={t("delete_integration_knowledge")}
         description={t("confirm_delete_integration_knowledge", { knowledgeName: item.name })}
         confirmLabel={deleteKnowledge.isPending ? t("deleting") : t("delete")}
@@ -263,21 +295,115 @@ export function WrapperActions({
   onDeleted?: () => void;
 }) {
   const t = useTranslations();
+  const shared = use(KnowledgeActionContext);
+  const [action, setAction] = useState<"rename" | "resync" | "delete" | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const open = (next: "rename" | "resync" | "delete") => {
+    if (shared)
+      shared({
+        kind: "wrapper",
+        wrapperId,
+        wrapperName,
+        items: wrapperItems,
+        action: next,
+        anchor,
+        onDeleted
+      });
+    else setAction(next);
+  };
+  const canResync =
+    canEdit &&
+    wrapperItems.some(
+      (item) =>
+        item.integration_type === "sharepoint" && (item.permissions?.includes("edit") ?? false)
+    );
+  if (!canEdit && !canDelete) return null;
+  const items: DropdownMenuOption[] = [
+    ...(canEdit
+      ? [
+          {
+            label: t("rename_wrapper"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => {
+              open("rename");
+            }
+          }
+        ]
+      : []),
+    ...(canResync
+      ? [
+          {
+            label: syncActive ? t("integration_sync_already_running") : t("resync_all_wrapper"),
+            icon: <RefreshCw aria-hidden="true" />,
+            isDisabled: syncActive,
+            onClick: () => open("resync")
+          }
+        ]
+      : []),
+    ...(canDelete
+      ? [
+          {
+            label: t("delete_wrapper"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => open("delete")
+          }
+        ]
+      : [])
+  ];
+
+  return (
+    <>
+      <span ref={anchor} className="contents">
+        <MoreMenu
+          label={t("space_more_actions_for", { name: wrapperName })}
+          items={items}
+          alignment="end"
+        />
+      </span>
+      {action && (
+        <WrapperActionDialog
+          wrapperId={wrapperId}
+          wrapperName={wrapperName}
+          items={wrapperItems}
+          action={action}
+          anchor={anchor}
+          onDeleted={onDeleted}
+          onClose={() => setAction(null)}
+        />
+      )}
+    </>
+  );
+}
+
+export function WrapperActionDialog({
+  wrapperId,
+  wrapperName,
+  items: wrapperItems,
+  action,
+  anchor,
+  onDeleted,
+  onClose
+}: {
+  wrapperId: string;
+  wrapperName: string;
+  items: IntegrationKnowledge[];
+  action: "rename" | "resync" | "delete";
+  anchor: RefObject<HTMLSpanElement | null>;
+  onDeleted?: () => void;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
   const { space } = useSpace();
   const { trackJob } = useJobs();
   const queryClient = useQueryClient();
   const invalidate = useSpaceInvalidation();
-  const [showRename, setShowRename] = useState(false);
-  const [showResync, setShowResync] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
   const [newName, setNewName] = useState(wrapperName);
-  const anchor = useRef<HTMLSpanElement>(null);
 
   const resyncable = wrapperItems.filter(
     (item) =>
       item.integration_type === "sharepoint" && (item.permissions?.includes("edit") ?? false)
   );
-  const canResync = canEdit && resyncable.length > 0;
 
   // Never rejects: confirming again after a failure would queue the items
   // that were queued already once more. A few at a time: each request also
@@ -322,7 +448,7 @@ export function WrapperActions({
       void queryClient.invalidateQueries({
         queryKey: ["integrations", "sync-progress", space.id]
       });
-      setShowResync(false);
+      onClose();
       const failed = failedNames.length;
       if (failed > 0) {
         toast.error(
@@ -358,7 +484,7 @@ export function WrapperActions({
       ),
     onSuccess: () => {
       invalidate();
-      setShowRename(false);
+      onClose();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -376,60 +502,19 @@ export function WrapperActions({
       ),
     refresh: invalidate,
     onRemoved: () => {
-      setShowDelete(false);
+      onClose();
       onDeleted?.();
     }
   });
 
-  if (!canEdit && !canDelete) return null;
-
-  const items: DropdownMenuOption[] = [
-    ...(canEdit
-      ? [
-          {
-            label: t("rename_wrapper"),
-            icon: <Pencil aria-hidden="true" />,
-            onClick: () => {
-              setNewName(wrapperName);
-              setShowRename(true);
-            }
-          }
-        ]
-      : []),
-    ...(canResync
-      ? [
-          {
-            label: syncActive ? t("integration_sync_already_running") : t("resync_all_wrapper"),
-            icon: <RefreshCw aria-hidden="true" />,
-            isDisabled: syncActive,
-            onClick: () => setShowResync(true)
-          }
-        ]
-      : []),
-    ...(canDelete
-      ? [
-          {
-            label: t("delete_wrapper"),
-            icon: <Trash2 aria-hidden="true" />,
-            variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
-          }
-        ]
-      : [])
-  ];
-
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
   return (
     <>
-      <span ref={anchor} className="contents">
-        <MoreMenu
-          label={t("space_more_actions_for", { name: wrapperName })}
-          items={items}
-          alignment="end"
-        />
-      </span>
       <RenameDialog
-        open={showRename}
-        onOpenChange={setShowRename}
+        open={action === "rename"}
+        onOpenChange={onOpenChange}
         title={t("rename_wrapper")}
         name={newName}
         onNameChange={setNewName}
@@ -437,8 +522,8 @@ export function WrapperActions({
         onSave={() => rename.mutate()}
       />
       <ConfirmDialogControlled
-        open={showResync}
-        onOpenChange={setShowResync}
+        open={action === "resync"}
+        onOpenChange={onOpenChange}
         title={t("resync_all_wrapper")}
         description={
           resyncable.length === 1
@@ -451,8 +536,8 @@ export function WrapperActions({
         onConfirm={() => resync.mutate()}
       />
       <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
+        open={action === "delete"}
+        onOpenChange={onOpenChange}
         title={t("delete_wrapper")}
         description={t("confirm_delete_sharepoint_wrapper", {
           wrapperName,

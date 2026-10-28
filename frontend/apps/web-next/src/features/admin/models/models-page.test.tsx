@@ -370,7 +370,7 @@ describe("ModelsPage", () => {
     await expectNoAxeViolations(document.body);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
-    await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+    await waitFor(() => expect(dialog.isConnected).toBe(false));
     expect(api.DELETE).not.toHaveBeenCalled();
   });
 
@@ -627,6 +627,30 @@ describe("ModelsPage", () => {
 });
 
 describe("ModelsPage on a phone (decision 31)", () => {
+  it("preserves an open model draft when the layout changes in either direction", async () => {
+    setViewport("tablet-portrait");
+    renderPage();
+    const menu = openRowMenu("Claude Opus 4.7");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera" }));
+    const dialog = await screen.findByRole("dialog");
+    const description = within(dialog).getByLabelText("Beskrivning");
+    fireEvent.change(description, { target: { value: "Osparad modellbeskrivning" } });
+    description.focus();
+
+    for (const viewport of ["phone", "tablet-portrait"] as const) {
+      act(() => setViewport(viewport));
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect((description as HTMLTextAreaElement).value).toBe("Osparad modellbeskrivning");
+      expect(document.activeElement).toBe(description);
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Fler åtgärder för Claude Opus 4.7" })
+      )
+    );
+  });
+
   it("lists a provider's models as rows: name, hosting, class, its switch and its menu", async () => {
     setViewport("phone");
     renderPage();

@@ -44,4 +44,33 @@ test.describe("the models on a tablet", () => {
     await expect(page.getByRole("main").getByRole("table").first()).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "Modelltyp" })).toBeVisible();
   });
+
+  test("keep an open model draft when the screen changes between tablet and phone", async ({
+    page
+  }) => {
+    await page.goto("/admin/models");
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /^Fler åtgärder för / })
+      .first()
+      .click();
+    await page.getByRole("menuitem", { name: "Redigera", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const description = dialog.getByLabel("Beskrivning", { exact: true });
+    await description.fill("Osparad beskrivning efter skärmbyte");
+    for (const width of [390, 820]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(dialog).toBeVisible();
+      await expect(description).toHaveValue("Osparad beskrivning efter skärmbyte");
+      await expect(description).toBeFocused();
+    }
+    await dialog.getByRole("button", { name: "Avbryt", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      page
+        .getByRole("main")
+        .getByRole("button", { name: /^Fler åtgärder för / })
+        .first()
+    ).toBeFocused();
+  });
 });

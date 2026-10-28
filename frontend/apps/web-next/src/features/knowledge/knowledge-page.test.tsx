@@ -1193,4 +1193,62 @@ describe("Kunskap on a phone", () => {
       within(table).getByRole("link", { name: "Upphandlingspolicy" })
     );
   });
+
+  it.each([
+    {
+      label: "collection",
+      data: { collections: [makeCollection()] },
+      tab: "collections",
+      name: "Upphandlingspolicy",
+      action: "Redigera",
+      field: "Namn"
+    },
+    {
+      label: "website",
+      data: { websites: [makeWebsite({ name: "Webbplatsen" })] },
+      tab: "websites",
+      name: "Webbplatsen",
+      action: "Redigera",
+      field: "Visningsnamn"
+    },
+    {
+      label: "integration",
+      data: { integrations: [makeIntegration()] },
+      tab: "integrations",
+      name: "Avtalsmallar",
+      action: "Byt namn",
+      field: "Namn"
+    },
+    {
+      label: "wrapper",
+      data: {
+        integrations: [makeIntegration({ wrapper_id: "wrapper-1", wrapper_name: "Avtalsgruppen" })]
+      },
+      tab: "integrations",
+      name: "Avtalsgruppen",
+      action: "Byt namn på grupp",
+      field: "Namn"
+    }
+  ])(
+    "preserves a $label draft across phone and tablet layouts",
+    async ({ data, tab, name: resourceName, action, field }) => {
+      setViewport("tablet-portrait");
+      show(makeSpace(data), tab);
+      fireEvent.click(screen.getByRole("button", { name: `Fler åtgärder för ${resourceName}` }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: action }));
+      const dialog = await screen.findByRole("dialog");
+      const name = within(dialog).getByLabelText(field);
+      fireEvent.change(name, { target: { value: "Osparat namn" } });
+      name.focus();
+
+      for (const viewport of ["phone", "tablet-portrait"] as const) {
+        act(() => setViewport(viewport));
+        expect(screen.getByRole("dialog")).toBe(dialog);
+        expect((name as HTMLInputElement).value).toBe("Osparat namn");
+        expect(document.activeElement).toBe(name);
+      }
+      fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+    }
+  );
 });

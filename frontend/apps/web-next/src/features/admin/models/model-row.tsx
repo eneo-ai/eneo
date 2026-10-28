@@ -25,29 +25,16 @@ import {
   Trash2
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
-import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
-import { DeleteBlockedDialog } from "./delete-blocked-dialog";
-import { EditModelDialog } from "./edit-model-dialog";
-import { MigrateModelDialog } from "./migrate-model-dialog";
 import { useModelTypeLabel } from "./model-type-label";
-import { ModelDetailDialog } from "./model-detail-dialog";
-import {
-  type AdminModel,
-  deleteTenantModel,
-  imageModelUsedBy,
-  type MigratableModelKind,
-  MODELS_KEY,
-  type ModelKind
-} from "./models";
+import { type AdminModel, imageModelUsedBy, MODELS_KEY, type ModelKind } from "./models";
+import type { ModelAction } from "./model-dialogs";
 import { modelLifecycle, modelPrice } from "./provider-sections";
 
 type ModelFlags = {
@@ -201,7 +188,8 @@ export function ModelRow({
   classifications,
   securityEnabled,
   showKind = false,
-  layout = "table"
+  layout = "table",
+  onAction
 }: {
   model: AdminModel;
   kind: ModelKind;
@@ -209,14 +197,11 @@ export function ModelRow({
   securityEnabled: boolean;
   showKind?: boolean;
   layout?: "table" | "list";
+  onAction: (action: ModelAction) => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
-  const [showEdit, setShowEdit] = useState(false);
-  const [showMigrate, setShowMigrate] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
   // Embedding models have no detail view; image models get the properties
   // without a usage tab (no usage endpoint).
   const canViewDetail = kind !== "embedding";
@@ -291,36 +276,6 @@ export function ModelRow({
   // falls back to the saved state when the last write failed.
   const enabled = enable.isPending ? enable.variables : (model.is_org_enabled ?? false);
 
-  // The row, its menu and the dialog go with the model: focus moves to the
-  // page's RemovalFocusScope (the tab panel) once the list has refetched.
-  const remove = useRemovalMutation({
-    mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
-    refresh: refetchModels,
-    onRemoved: () => {
-      setShowDelete(false);
-      toast.success(t("model_deleted_success"));
-    },
-    onError: (error) => {
-      if (
-        error instanceof EneoApiError &&
-        error.code === 9039 &&
-        (kind === "completion" || kind === "transcription")
-      ) {
-        toast.error(getErrorMessage(error, t), {
-          action: {
-            label: t("migrate"),
-            onClick: () => {
-              setShowDelete(false);
-              setShowMigrate(true);
-            }
-          }
-        });
-        return;
-      }
-      toastApiError(error, t);
-    }
-  });
-
   const enableSwitch = (
     <Switch
       label={t("admin_models_enable_model", { name: label })}
@@ -337,7 +292,7 @@ export function ModelRow({
         <button
           type="button"
           aria-haspopup="dialog"
-          onClick={() => setShowDetail(true)}
+          onClick={() => onAction("detail")}
           className={cn(
             "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 min-w-0 items-center text-start font-semibold [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
             enabled ? "text-ax-text" : "text-ax-text-secondary"
@@ -388,17 +343,17 @@ export function ModelRow({
             <DropdownMenuItem
               icon={Info}
               label={t("model_details")}
-              onClick={() => setShowDetail(true)}
+              onClick={() => onAction("detail")}
             />
           )}
           {canEdit && (
-            <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => setShowEdit(true)} />
+            <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => onAction("edit")} />
           )}
           {canMigrate && (
             <DropdownMenuItem
               icon={ArrowLeftRight}
               label={t("migrate")}
-              onClick={() => setShowMigrate(true)}
+              onClick={() => onAction("migrate")}
             />
           )}
           {hasModelActions && hasFlagActions && <DropdownMenuDivider />}
@@ -445,67 +400,17 @@ export function ModelRow({
                   : undefined
               }
               variant="destructive"
-              onClick={() => setShowDelete(true)}
+              onClick={() => onAction("delete")}
             />
           )}
         </DropdownMenu>
       )}
     </>
   );
-  const dialogs = (
-    <>
-      {canEdit && (
-        <EditModelDialog
-          model={model}
-          kind={kind}
-          classifications={classifications}
-          securityEnabled={securityEnabled}
-          open={showEdit}
-          onOpenChange={setShowEdit}
-        />
-      )}
-      {canMigrate && (
-        <MigrateModelDialog
-          model={model}
-          kind={kind as MigratableModelKind}
-          open={showMigrate}
-          onOpenChange={setShowMigrate}
-        />
-      )}
-      {canViewDetail && (
-        <ModelDetailDialog
-          model={model}
-          kind={kind as Exclude<ModelKind, "embedding">}
-          open={showDetail}
-          onOpenChange={setShowDetail}
-        />
-      )}
-      {canDelete && deleteBlocked && (
-        <DeleteBlockedDialog
-          open={showDelete}
-          onOpenChange={setShowDelete}
-          title={t("admin_models_delete_blocked_title", { name: label })}
-          description={t("admin_models_delete_blocked_description", { names: usedByNames })}
-        />
-      )}
-      {canDelete && !deleteBlocked && (
-        <ConfirmDialogControlled
-          open={showDelete}
-          onOpenChange={setShowDelete}
-          title={t("delete_model")}
-          description={`${t("delete_model_confirm", { name: label })} ${t("delete_model_warning")}`}
-          confirmLabel={remove.isPending ? t("deleting") : t("delete")}
-          pending={remove.isPending}
-          onConfirm={() => remove.mutate()}
-        />
-      )}
-    </>
-  );
-
   if (layout === "list") {
     const hosting = (model as { hosting?: string | null }).hosting;
     return (
-      <li className="flex min-h-14 items-center gap-3 py-2">
+      <li data-model-id={model.id} className="flex min-h-14 items-center gap-3 py-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             {name}
@@ -545,13 +450,12 @@ export function ModelRow({
         {/* The track centred in its 44 px touch box, level with the menu. */}
         <div className="[&>*]:flex [&>*]:min-h-11 [&>*]:items-center">{enableSwitch}</div>
         {menu}
-        {dialogs}
       </li>
     );
   }
 
   return (
-    <TableRow>
+    <TableRow data-model-id={model.id}>
       <TableCell>{enableSwitch}</TableCell>
 
       <TableCell>
@@ -593,10 +497,7 @@ export function ModelRow({
         </TableCell>
       )}
 
-      <TableCell className="text-end">
-        {menu}
-        {dialogs}
-      </TableCell>
+      <TableCell className="text-end">{menu}</TableCell>
     </TableRow>
   );
 }

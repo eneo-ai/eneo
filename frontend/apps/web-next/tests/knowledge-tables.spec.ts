@@ -217,4 +217,30 @@ test.describe("knowledge tables on an iPad held upright", () => {
     await expect(actions).toBeVisible();
     expect(await actions.evaluate((el) => getComputedStyle(el).position)).toBe("static");
   });
+
+  test("keeps and saves a collection rename draft through layout changes", async ({ page }) => {
+    const space = await createSpace(page, uniqueName("E2E Utkast"));
+    await page.goto(`${space}/knowledge`);
+    const create = await openCreateCollectionDialog(page);
+    await create.getByLabel(/^(namn|name)$/i).fill("Samling före ändring");
+    await create.getByRole("button", { name: /skapa samling|create collection/i }).click();
+    await page.waitForURL(/\/knowledge\/collections\/[^/]+$/);
+    await page.goto(`${space}/knowledge`);
+    await page.getByRole("button", { name: "Fler åtgärder för Samling före ändring" }).click();
+    await page.getByRole("menuitem", { name: "Redigera", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const name = dialog.getByLabel("Namn", { exact: true });
+    await name.fill("Samling efter skärmbyte");
+    for (const width of [390, 820]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(dialog).toBeVisible();
+      await expect(name).toHaveValue("Samling efter skärmbyte");
+      await expect(name).toBeFocused();
+    }
+    await dialog.getByRole("button", { name: "Spara ändringar", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByRole("link", { name: "Samling efter skärmbyte", exact: true })
+    ).toBeVisible();
+  });
 });

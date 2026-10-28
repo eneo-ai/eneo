@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -14,8 +14,10 @@ vi.mock("@/features/spaces/use-space", async () => {
   return { useSpace: () => useSpaceFromQuery(() => space.current as Space) };
 });
 
-import { makeSpace } from "@/features/spaces/testing/space-fixture";
-import { CreateCollectionButton } from "./collections";
+import { makeCollection, makeSpace } from "@/features/spaces/testing/space-fixture";
+import { CollectionActions, CreateCollectionButton } from "./collections";
+import { KnowledgeActionScope } from "./knowledge-action-scope";
+import type { Collection } from "./knowledge";
 
 // Radix Select scrolls its selected option into view; jsdom has no layout.
 beforeAll(() => {
@@ -60,4 +62,41 @@ it("moves focus to the warning when the space has no embedding model", async () 
   );
   expect(dialog.contains(document.activeElement)).toBe(true);
   expect(api.POST).not.toHaveBeenCalled();
+});
+
+it("keeps a newer draft open when a previous save finishes after its dialog closed", async () => {
+  space.current = makeSpace();
+  let finish!: () => void;
+  api.POST.mockReturnValue(
+    new Promise((resolve) => {
+      finish = () => resolve({ data: { id: "collection-1" }, response: new Response("{}") });
+    })
+  );
+  renderInApp(
+    <KnowledgeActionScope focusTarget={{ current: null }}>
+      <CollectionActions collection={makeCollection() as Collection} />
+      <CollectionActions
+        collection={makeCollection({ id: "collection-2", name: "Avtal" }) as Collection}
+      />
+    </KnowledgeActionScope>
+  );
+  function edit(name: string) {
+    const trigger = screen.getByRole("button", { name: `Fler åtgärder för ${name}` });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera" }));
+  }
+  edit("Upphandlingspolicy");
+  let dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara ändringar" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  edit("Avtal");
+  dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Nytt utkast" } });
+
+  await act(async () => finish());
+
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  expect((within(dialog).getByLabelText("Namn") as HTMLInputElement).value).toBe("Nytt utkast");
 });

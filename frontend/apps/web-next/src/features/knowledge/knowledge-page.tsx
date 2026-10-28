@@ -13,6 +13,7 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import type { SpaceResource } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
+import { KnowledgeActionScope } from "./knowledge-action-scope";
 import { IntegrationsTab } from "./integrations/tab";
 import { WebsitesTab } from "./websites";
 
@@ -135,20 +136,22 @@ export function KnowledgePage({
             className="focus-visible:outline-ring rounded-ax-element focus-visible:outline-2 focus-visible:outline-offset-4"
           >
             <RemovalFocusScope target={panelRef}>
-              {tab === "collections" ? (
-                <CollectionsTab
-                  canCreate={can("create", "collection")}
-                  name={name("collections")}
-                />
-              ) : tab === "websites" ? (
-                <WebsitesTab canCreate={can("create", "website")} name={name("websites")} />
-              ) : (
-                <IntegrationsTab
-                  canCreate={can("create", "integrationKnowledge")}
-                  integrationRequestFormUrl={integrationRequestFormUrl}
-                  name={name("integrations")}
-                />
-              )}
+              <KnowledgeActionScope key={tab} focusTarget={panelRef}>
+                {tab === "collections" ? (
+                  <CollectionsTab
+                    canCreate={can("create", "collection")}
+                    name={name("collections")}
+                  />
+                ) : tab === "websites" ? (
+                  <WebsitesTab canCreate={can("create", "website")} name={name("websites")} />
+                ) : (
+                  <IntegrationsTab
+                    canCreate={can("create", "integrationKnowledge")}
+                    integrationRequestFormUrl={integrationRequestFormUrl}
+                    name={name("integrations")}
+                  />
+                )}
+              </KnowledgeActionScope>
             </RemovalFocusScope>
           </div>
         </div>
