@@ -22,9 +22,12 @@ export async function askChatQuestion(page: Page, question: string) {
   await page.getByRole("button", { name: /skicka meddelande|send message/i }).click();
 }
 
+/** The chat message list's accessible name. */
+export const CONVERSATION_LOG_NAME = /konversation|conversation/i;
+
 /** The chat's message list (a named log); appears once the first question is sent. */
 export function conversationLog(page: Page) {
-  return page.getByRole("log", { name: /konversation|conversation/i });
+  return page.getByRole("log", { name: CONVERSATION_LOG_NAME });
 }
 
 /** An answer's activity pill ("Aktivitet: 2 steg · 1 källa"), which opens the activity panel. */

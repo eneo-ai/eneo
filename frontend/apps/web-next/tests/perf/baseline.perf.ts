@@ -19,12 +19,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { devices, expect, test, type Browser, type Locator, type Page } from "@playwright/test";
-import { STORAGE_STATE } from "../../playwright.config";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import {
   askChatQuestion,
   CHAT_COMPOSER_NAME,
   chatComposer,
+  CONVERSATION_LOG_NAME,
   conversationLog,
   MOCK_REPLY,
   uniqueName
@@ -42,13 +42,16 @@ const RUNS = parseRuns(process.env.RUNS);
 const OUT = process.env.PERF_OUT ?? "test-results/perf-baseline.json";
 const FRAMEWORK = process.env.PERF_FRAMEWORK ?? "next";
 const SETTLE_MS = 2_000;
+const SPACES_LIST = "/spaces/list";
+const SPACES_LIST_HEADING = /^(alla ytor|ytor|all spaces|spaces)$/i;
+// The mock answer's first characters, which the chat shows once it streams in.
+const ANSWER_START = MOCK_REPLY.slice(0, 12);
 // A sample counts only once the requested page itself rendered. These markers
 // are framework-neutral (the Vite build renders the same features), and none of
 // them is part of the error screen.
 const PAGE_MARKERS: Record<string, (page: Page) => Locator> = {
   [CHAT_ROUTE]: (page) => chatComposer(page),
-  "/spaces/list": (page) =>
-    page.getByRole("heading", { level: 1, name: /^(alla ytor|ytor|all spaces|spaces)$/i }),
+  [SPACES_LIST]: (page) => page.getByRole("heading", { level: 1, name: SPACES_LIST_HEADING }),
   "/admin/users": (page) => page.getByRole("heading", { level: 1, name: /^(användare|users)$/i }),
   "/admin/insights": (page) => page.getByRole("button", { name: /^(jämför|compare)$/i })
 };
@@ -74,16 +77,38 @@ function record(samples: Samples, route: string, metric: string, value: number) 
 
 /**
  * Starts buffered LCP, CLS and event-timing observers before the page's own
- * scripts run. On the chat route it also stamps chat readiness: performance.now()
- * in the first animation frame in which the composer is visible, editable and
- * focusable. A frame, not a DOM mutation, because the browser renders nothing
- * before its render-blocking styles and a style change alone can hide the
- * composer; the check is native DOM, so it reads the same in any framework.
+ * scripts run, and gives the page its stamps (performance.now() by name):
+ * `stampClick` takes one when the next click reaches the window, before any app
+ * handler sees it; `stampFrame` takes one in the first animation frame in which
+ * a condition holds. A frame, not a DOM mutation, because the browser renders
+ * nothing before its render-blocking styles and a style change alone can hide
+ * an element; the checks are native DOM, so they read the same in any framework.
+ *
+ * On the chat route it stamps chat readiness (`chatReady`): the first frame in
+ * which the composer is visible, editable and focusable.
  */
 async function observe(page: Page) {
   await page.addInitScript(
     ({ chatRoute, composerName }) => {
-      const perf: PagePerf = { lcp: 0, cls: 0, events: [], chatReadyMs: null, composer: null };
+      const perf: PagePerf = {
+        lcp: 0,
+        cls: 0,
+        events: [],
+        stamps: {},
+        composer: null,
+        stampClick: (stamp) =>
+          addEventListener("click", () => (perf.stamps[stamp] = performance.now()), {
+            capture: true,
+            once: true
+          }),
+        stampFrame: (stamp, holds) => {
+          const frame = () => {
+            if (holds()) perf.stamps[stamp] = performance.now();
+            else requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        }
+      };
       (window as unknown as { __perf: PagePerf }).__perf = perf;
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) perf.lcp = entry.startTime;
@@ -110,55 +135,65 @@ async function observe(page: Page) {
       } as PerformanceObserverInit);
 
       if (location.pathname !== chatRoute) return;
-      const name = new RegExp(composerName);
-      // The textbox chatComposer() finds; chatReadyMs() checks it is the same element.
-      const findComposer = () =>
-        [...document.querySelectorAll<HTMLElement>('textarea, input, [role="textbox"]')].find(
-          (element) => name.test(element.getAttribute("aria-label") ?? "")
-        );
-      const ready = (element: HTMLElement) => {
-        const { width, height } = element.getBoundingClientRect();
-        return (
+      const name = new RegExp(...composerName);
+      perf.stampFrame("chatReady", () => {
+        // The textbox chatComposer() finds; chatReadyMs() checks it is the same element.
+        const composer = [
+          ...document.querySelectorAll<HTMLElement>('textarea, input, [role="textbox"]')
+        ].find((element) => name.test(element.getAttribute("aria-label") ?? ""));
+        if (!composer) return false;
+        const { width, height } = composer.getBoundingClientRect();
+        const ready =
           width > 0 &&
           height > 0 &&
-          element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-          element.matches(":read-write") &&
-          element.tabIndex >= 0 &&
-          !element.closest("[inert]")
-        );
-      };
-      const frame = () => {
-        const composer = findComposer();
-        if (composer && ready(composer)) {
-          perf.chatReadyMs = performance.now();
-          perf.composer = composer;
-        } else {
-          requestAnimationFrame(frame);
-        }
-      };
-      requestAnimationFrame(frame);
+          composer.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+          composer.matches(":read-write") &&
+          composer.tabIndex >= 0 &&
+          !composer.closest("[inert]");
+        if (ready) perf.composer = composer;
+        return ready;
+      });
     },
-    { chatRoute: CHAT_ROUTE, composerName: CHAT_COMPOSER_NAME.source }
+    // addInitScript passes its argument as JSON, so the pattern travels as source and flags.
+    {
+      chatRoute: CHAT_ROUTE,
+      composerName: [CHAT_COMPOSER_NAME.source, CHAT_COMPOSER_NAME.flags] as [string, string]
+    }
   );
 }
 
-/** What the init script records on `window.__perf`. */
+/** What the init script keeps on `window.__perf`. */
 type PagePerf = {
   lcp: number;
   cls: number;
   events: EventEntry[];
-  chatReadyMs: number | null;
+  stamps: Record<string, number>;
+  /** The element the `chatReady` stamp was taken on. */
   composer: Element | null;
+  stampClick: (stamp: string) => void;
+  stampFrame: (stamp: string, holds: () => boolean) => void;
 };
 
 /** Chat readiness of the loaded page, stamped on the element chatComposer() finds. */
 async function chatReadyMs(page: Page) {
   const stamp = await chatComposer(page).evaluate((element) => {
-    const { composer, chatReadyMs } = (window as unknown as { __perf: PagePerf }).__perf;
-    return composer === element ? chatReadyMs : null;
+    const { composer, stamps } = (window as unknown as { __perf: PagePerf }).__perf;
+    return composer === element ? (stamps.chatReady ?? null) : null;
   });
   if (stamp === null) throw new Error("The readiness probe did not stamp the chat composer");
   return stamp;
+}
+
+/** Milliseconds between two of the page's stamps; fails when either was not taken. */
+async function stampedMs(page: Page, from: string, to: string) {
+  const stamps = await page.evaluate(
+    () => (window as unknown as { __perf: PagePerf }).__perf.stamps
+  );
+  const [start, end] = [stamps[from], stamps[to]];
+  if (start === undefined || end === undefined) {
+    throw new Error(`The page stamped ${JSON.stringify(stamps)}, not ${from} and ${to}`);
+  }
+  return end - start;
 }
 
 function readPerf(page: Page) {
@@ -181,14 +216,69 @@ async function load(page: Page, route: string) {
   return { ...vitals, html };
 }
 
+/** A page in a fresh context; the perf project's `use` (playwright.config.ts) sets its options. */
 async function newPage(browser: Browser) {
-  const context = await browser.newContext({
-    ...devices["Desktop Chrome"],
-    storageState: STORAGE_STATE
-  });
-  const page = await context.newPage();
+  const page = await (await browser.newContext()).newPage();
   await observe(page);
   return page;
+}
+
+/**
+ * Side-nav navigation from the chat to the spaces list: from the click to the
+ * first animation frame in which the URL is the list's and its heading is
+ * visible, both stamped in the page. The Playwright checks only gate that the
+ * list rendered.
+ */
+async function navigationToSpacesListMs(page: Page) {
+  await page.evaluate(
+    ({ path, heading }) => {
+      const perf = (window as unknown as { __perf: PagePerf }).__perf;
+      perf.stampClick("navigated");
+      perf.stampFrame(
+        "listShown",
+        () =>
+          location.pathname === path &&
+          [...document.querySelectorAll("h1")].some(
+            (h1) =>
+              heading.test((h1.textContent ?? "").trim()) &&
+              h1.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+          )
+      );
+    },
+    { path: SPACES_LIST, heading: SPACES_LIST_HEADING }
+  );
+  await page
+    .getByRole("navigation", { name: /huvudmeny|main menu/i })
+    .getByRole("link", { name: /^(alla ytor|all spaces)$/i })
+    .click();
+  await page.waitForURL(/\/spaces\/list$/);
+  await expectRendered(page, SPACES_LIST);
+  return stampedMs(page, "navigated", "listShown");
+}
+
+/**
+ * Chat time to first token: from the send click to the first animation frame in
+ * which the conversation log shows the start of the mock answer, both stamped
+ * in the page. The Playwright assertion only gates that the answer rendered.
+ */
+async function chatTtftMs(page: Page) {
+  await page.evaluate(
+    ({ answer, logName }) => {
+      const perf = (window as unknown as { __perf: PagePerf }).__perf;
+      perf.stampClick("asked");
+      perf.stampFrame("answered", () =>
+        [...document.querySelectorAll('[role="log"]')].some(
+          (log) =>
+            logName.test(log.getAttribute("aria-label") ?? "") &&
+            (log.textContent ?? "").includes(answer)
+        )
+      );
+    },
+    { answer: ANSWER_START, logName: CONVERSATION_LOG_NAME }
+  );
+  await askChatQuestion(page, uniqueName("perf ttft"));
+  await expect(conversationLog(page).getByText(ANSWER_START)).toBeVisible({ timeout: 30_000 });
+  return stampedMs(page, "asked", "answered");
 }
 
 function frameworkVersion() {
@@ -226,25 +316,13 @@ test("performance baseline", async ({ browser }) => {
     // Client navigation: side nav from the chat to the spaces list.
     const nav = await newPage(browser);
     await load(nav, CHAT_ROUTE);
-    const started = Date.now();
-    await nav
-      .getByRole("navigation", { name: /huvudmeny|main menu/i })
-      .getByRole("link", { name: /^(alla ytor|all spaces)$/i })
-      .click();
-    await nav.waitForURL(/\/spaces\/list$/);
-    await expectRendered(nav, "/spaces/list");
-    record(samples, CHAT_ROUTE, "navigationToSpacesListMs", Date.now() - started);
+    record(samples, CHAT_ROUTE, "navigationToSpacesListMs", await navigationToSpacesListMs(nav));
     await nav.context().close();
 
     // Chat time to first token, then INP over typing and side-nav toggles.
     const chat = await newPage(browser);
     await load(chat, CHAT_ROUTE);
-    const asked = Date.now();
-    await askChatQuestion(chat, uniqueName("perf ttft"));
-    await expect(conversationLog(chat).getByText(MOCK_REPLY.slice(0, 12))).toBeVisible({
-      timeout: 30_000
-    });
-    record(samples, CHAT_ROUTE, "chatTtftMs", Date.now() - asked);
+    record(samples, CHAT_ROUTE, "chatTtftMs", await chatTtftMs(chat));
 
     // Only interactions from here on: entries of the question just sent stay out.
     const since = await chat.evaluate(() => performance.now());
@@ -311,7 +389,7 @@ test("chat readiness waits for a visible, editable and focusable composer", asyn
         new Promise<number | null>((resolve) =>
           requestAnimationFrame(() =>
             requestAnimationFrame(() =>
-              resolve((window as unknown as { __perf: PagePerf }).__perf.chatReadyMs)
+              resolve((window as unknown as { __perf: PagePerf }).__perf.stamps.chatReady ?? null)
             )
           )
         )
@@ -343,6 +421,13 @@ test("chat readiness waits for a visible, editable and focusable composer", asyn
       "read-only",
       (element) => {
         element.readOnly = false;
+        element.tabIndex = -1;
+      }
+    ],
+    [
+      "unfocusable",
+      (element) => {
+        element.removeAttribute("tabindex");
         document.body.inert = true;
       }
     ]
@@ -360,4 +445,55 @@ test("chat readiness waits for a visible, editable and focusable composer", asyn
   expect(stamp).toBeGreaterThanOrEqual(readySince);
   // Stamped on the element chatComposer() finds.
   expect(await chatReadyMs(page)).toBe(stamp);
+});
+
+// Click-to-render timings come from the page's own stamps: an app that renders
+// 300 ms after the click must measure about 300 ms, not the next poll of the
+// Playwright assertion that gates the render (770 ms on its retry schedule).
+test("click-to-render timings are stamped in the page, not when the assertion passes", async ({
+  page
+}) => {
+  await observe(page);
+  await page.route(`**${CHAT_ROUTE}`, (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<main>
+        <nav aria-label="Main menu"><a href="/spaces/list">All spaces</a></nav>
+        <textarea aria-label="Message to Eneo"></textarea><button>Send message</button>
+      </main>
+      <script>
+        const app = (window.app = {});
+        const main = document.querySelector("main");
+        const renderLater = (html, path) => {
+          app.clickedAt = performance.now();
+          setTimeout(() => {
+            if (path) history.pushState(null, "", path);
+            main.insertAdjacentHTML("beforeend", html);
+            app.renderedAt = performance.now();
+          }, 300);
+        };
+        document.querySelector("button").addEventListener("click", () =>
+          renderLater('<div role="log" aria-label="Conversation">${MOCK_REPLY}</div>')
+        );
+        document.querySelector("a").addEventListener("click", (event) => {
+          event.preventDefault();
+          renderLater("<h1>All spaces</h1>", "/spaces/list");
+        });
+      </script>`
+    })
+  );
+  await page.goto(CHAT_ROUTE);
+  const appDelay = async () => {
+    const { clickedAt, renderedAt } = await page.evaluate(
+      () => (window as unknown as { app: { clickedAt: number; renderedAt: number } }).app
+    );
+    return renderedAt - clickedAt;
+  };
+  for (const measure of [chatTtftMs, navigationToSpacesListMs]) {
+    const measured = await measure(page);
+    const delay = await appDelay();
+    expect(measured, measure.name).toBeGreaterThanOrEqual(delay);
+    // Within a frame or two of the render.
+    expect(measured, measure.name).toBeLessThan(delay + 50);
+  }
 });
