@@ -257,6 +257,25 @@ describe("TemplateEditorDialog", () => {
     expect(lastBody(api.PATCH).completion_model_kwargs).toEqual({ temperature: 0.25 });
   });
 
+  it("moves focus to a custom temperature above the model's maximum", async () => {
+    renderEditor({
+      kind: "apps",
+      template: appTemplate({
+        completion_model_id: "capped",
+        completion_model_kwargs: { temperature: 1.5 }
+      })
+    });
+    const dialog = screen.getByRole("dialog", { name: "Redigera mall" });
+    const temperature = await within(dialog).findByLabelText("Temperatur");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    expect(document.activeElement).toBe(temperature);
+    expect(temperature.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Ange ett tal från 0 till 1.")).toBeTruthy();
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
   it("stores a picked icon the way the Svelte app reads it", async () => {
     renderEditor({ kind: "assistants" });
     const dialog = screen.getByRole("dialog", { name: "Ny mall" });
