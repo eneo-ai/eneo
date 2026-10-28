@@ -351,12 +351,11 @@ export function updateRequest(
   if (metadataOnly) return update;
   const rateLimit = rateLimitBody(draft);
   if (rateLimit !== (key.rate_limit ?? null)) update.rate_limit = rateLimit;
+  // Against the access the form opened with, so a key without stored
+  // per-resource access (a legacy key) sends it only when it was edited.
   const permissions = resourcePermissionsBody(draft);
-  const stored = key.resource_permissions;
-  if (
-    !stored ||
-    RESOURCE_KEYS.some((resource) => levelOf(stored[resource]) !== permissions[resource])
-  ) {
+  const opened = resourcePermissionsBody(draftFromApiKey(key));
+  if (RESOURCE_KEYS.some((resource) => opened[resource] !== permissions[resource])) {
     update.resource_permissions = permissions;
   }
   if (key.key_type === "pk_" && !sameList(draft.allowedOrigins, key.allowed_origins ?? [])) {

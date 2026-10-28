@@ -247,6 +247,28 @@ describe("updateRequest", () => {
     });
   });
 
+  it("sends a legacy key's access (none stored) only when it was edited", () => {
+    const legacy = {
+      ...key,
+      key_type: "sk_",
+      scope_type: "tenant",
+      permission: "write",
+      allowed_origins: null,
+      resource_permissions: null
+    } as ApiKey;
+    const opened = draftFromApiKey(legacy);
+    expect(updateRequest(opened, legacy)).toEqual({});
+    expect(updateRequest({ ...opened, description: "Ny" }, legacy)).toEqual({ description: "Ny" });
+    const narrowed = {
+      ...opened,
+      resourcePermissions: { ...opened.resourcePermissions, spaces: "read" as const }
+    };
+    expect(updateRequest(narrowed, legacy).resource_permissions).toMatchObject({
+      spaces: "read",
+      assistants: "write"
+    });
+  });
+
   it("clears a secret key's IP allowlist with null", () => {
     const secret = {
       ...key,

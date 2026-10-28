@@ -270,6 +270,42 @@ describe("ApiKeyActions", () => {
     );
   });
 
+  it("sends only this edit for a legacy key restricted elsewhere while the dialog was open", async () => {
+    serve();
+    api.PATCH.mockReturnValue(ok(activeKey));
+    const legacy = {
+      ...activeKey,
+      key_type: "sk_",
+      permission: "write",
+      allowed_origins: null,
+      allowed_ips: null,
+      resource_permissions: null
+    } as ApiKey;
+    const { rerender } = renderInApp(
+      <EditApiKeyDialog apiKey={legacy} mode="admin" open onOpenChange={() => {}} />,
+      { appContext: testAppContext({ permissions: ["admin"] }) }
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
+    const description = await within(dialog).findByLabelText("Beskrivning");
+    rerender(
+      <EditApiKeyDialog
+        apiKey={{ ...legacy, permission: "read", resource_permissions: { spaces: "read" } }}
+        mode="admin"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    fireEvent.change(description, { target: { value: "Roterad av drift" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/admin/api-keys/{id}", {
+        params: { path: { id: "key-1" } },
+        body: { description: "Roterad av drift" }
+      })
+    );
+  });
+
   it("sends only this edit when the key changed elsewhere while the dialog was open", async () => {
     serve();
     api.PATCH.mockReturnValue(ok(activeKey));
