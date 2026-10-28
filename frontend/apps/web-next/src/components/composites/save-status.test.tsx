@@ -436,6 +436,24 @@ it("adopts another editor's change after a revert whose saves both failed", asyn
   expect(save).toHaveBeenCalledTimes(2);
 });
 
+it("adopts the server's form of a landed save, so a later change by another editor is not overwritten", async () => {
+  const { saves, save } = deferredSaves();
+  const { rerender, unmount } = renderWithStatus(<ServerBackedProbe server="30" save={save} />);
+  const input = screen.getByRole("textbox", { name: "Text field" });
+
+  fireEvent.change(input, { target: { value: "07" } });
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => saves[0]?.done.resolve());
+  // The server stores 7 and returns it in its own form.
+  rerender(withStatus(<ServerBackedProbe server="7" save={save} />));
+  expect(draftText()).toBe("7");
+
+  rerender(withStatus(<ServerBackedProbe server="3" save={save} />));
+  expect(draftText()).toBe("3");
+  unmount();
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
 it("sends a revert whose debounce ends after the earlier save landed but before it renders", async () => {
   vi.useFakeTimers();
   try {

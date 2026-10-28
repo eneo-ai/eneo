@@ -122,11 +122,17 @@ export function useAutosaveField<T, R = unknown>({
     serverRef.current = serverValue;
     // A server value this hook's own save produced never replaces the draft:
     // the draft is the user's latest choice (it may revert what just landed).
-    // Any other value is someone else's change, which a draft the user has not
-    // diverged from adopts, also after this hook's own saves failed.
-    const own = landed.current !== null && equals(landed.current.value, serverValue);
+    // Any other value is someone else's change, or the server's canonical form
+    // of what this hook saved ("07" comes back as "7"), which a draft the user
+    // has not diverged from adopts, also after this hook's own saves failed.
+    const mine = landed.current;
+    const own = mine !== null && equals(mine.value, serverValue);
     landed.current = null;
-    setDraft((current) => (!own && equals(current, previousServer) ? serverValue : current));
+    setDraft((current) =>
+      !own && (equals(current, previousServer) || (mine !== null && equals(current, mine.value)))
+        ? serverValue
+        : current
+    );
   }, [serverValue, equals]);
 
   const dirty = !equals(draft, serverValue);
