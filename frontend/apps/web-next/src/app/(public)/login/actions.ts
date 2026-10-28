@@ -14,6 +14,8 @@ export interface LoginFormState {
   attemptsRemaining?: number | null;
   /** How long the account stays blocked, in seconds, when the backend said. */
   retryAfterSeconds?: number | null;
+  /** Signed in: the page to continue to, loaded as a new document by LoginForm. */
+  redirectTo?: string;
 }
 
 export async function loginAction(
@@ -40,5 +42,7 @@ export async function loginAction(
   }
 
   await setSessionCookie(result.session);
-  redirect(safeNextPath(typeof next === "string" ? next : null));
+  // Not redirect(): from a server action that is a client-side navigation, and
+  // the new session must not start in the previous one's memory.
+  return { redirectTo: safeNextPath(typeof next === "string" ? next : null) };
 }

@@ -11,11 +11,16 @@ setup("authenticate", async ({ page }) => {
   await page.goto("/login");
   await page.locator('input[name="email"]').fill(EMAIL);
   await page.locator('input[name="password"]').fill(PASSWORD);
+  await page.evaluate(() => {
+    Object.assign(window, { eneoLoginDocument: true });
+  });
   await page.locator('button[type="submit"]').click();
 
   // Successful login leaves /login for the landing page.
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 });
   await expect(page).not.toHaveURL(/\/login/);
+  // ...in a new document: nothing of a previous session stays in memory.
+  expect(await page.evaluate(() => "eneoLoginDocument" in window)).toBe(false);
 
   await page.context().storageState({ path: STORAGE_STATE });
 });

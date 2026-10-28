@@ -28,10 +28,17 @@ function retryAfterMinutes(seconds: number | null | undefined): number | null {
  * action returns it as the field's default) and moves focus to the error.
  * After a wrong password the message counts the attempts left; once the
  * account is blocked it says how long to wait instead.
+ *
+ * A successful login continues with a full page load, never a client-side
+ * navigation: a new identity starts in a new document, so nothing the
+ * previous session left in memory (the query cache with its user, tenant and
+ * settings) renders for the new one.
  */
 export function LoginForm({ next }: { next?: string }) {
   const t = useTranslations();
   const [state, formAction, pending] = useActionState(loginAction, {});
+  // Signed in: still busy until the new page replaces this one.
+  const busy = pending || state.redirectTo !== undefined;
   const errorRef = useRef<HTMLDivElement>(null);
   const errorId = useId();
   const retryMinutes = retryAfterMinutes(state.retryAfterSeconds);
@@ -48,7 +55,8 @@ export function LoginForm({ next }: { next?: string }) {
 
   // Every failed attempt (a new state object) moves focus to its message.
   useEffect(() => {
-    if (state.error) errorRef.current?.focus();
+    if (state.redirectTo) window.location.assign(state.redirectTo);
+    else if (state.error) errorRef.current?.focus();
   }, [state]);
 
   return (
@@ -56,7 +64,7 @@ export function LoginForm({ next }: { next?: string }) {
       action={formAction}
       // Busy, Logga in stays enabled so it keeps focus; a second submit is ignored.
       onSubmit={(event) => {
-        if (pending) event.preventDefault();
+        if (busy) event.preventDefault();
       }}
       className="flex flex-col gap-4"
     >
@@ -104,7 +112,7 @@ export function LoginForm({ next }: { next?: string }) {
           required
         />
       </div>
-      <Button type="submit" aria-busy={pending || undefined}>
+      <Button type="submit" aria-busy={busy || undefined}>
         {t("login")}
       </Button>
     </form>
