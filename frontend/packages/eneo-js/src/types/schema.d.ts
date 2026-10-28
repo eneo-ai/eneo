@@ -24719,8 +24719,6 @@ export interface components {
       version: string;
       /** Revision */
       revision: string;
-      /** Show Web Search */
-      show_web_search: boolean;
       /** Help Center Url */
       help_center_url: string | null;
       /** Legacy App Url */

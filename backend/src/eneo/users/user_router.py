@@ -41,7 +41,7 @@ from eneo.authentication.login_attempts import (
 )
 from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
-from eneo.main.config import validate_public_origin
+from eneo.main.config import serialize_origin, validate_public_origin
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
 from eneo.main.logging import get_logger, redact_values
@@ -196,18 +196,7 @@ async def _resolve_single_tenant_redirect_uri(
     if not parsed_redirect.scheme or not parsed_redirect.hostname:
         return redirect_uri
 
-    default_port = 443 if parsed_redirect.scheme == "https" else 80
-    parsed_port = (
-        f":{parsed_redirect.port}"
-        if parsed_redirect.port and parsed_redirect.port != default_port
-        else ""
-    )
-    canonical_origin = (
-        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip(
-            "/"
-        )
-    )
-    if normalized_request_origin == canonical_origin:
+    if normalized_request_origin == serialize_origin(redirect_uri):
         return redirect_uri
 
     if not settings.oidc_tenant_id:

@@ -13,12 +13,15 @@ const api = vi.hoisted(() => ({
   }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
 
 import { ResultDetail } from "./result-detail";
 
 afterEach(() => {
   cleanup();
   api.POST.mockClear();
+  toast.error.mockClear();
   vi.restoreAllMocks();
 });
 
@@ -105,15 +108,37 @@ describe("ResultDetail", () => {
 
   it("downloads failed-run input files through the app's authenticated proxy", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const run = makeRun({ status: "failed", output: null });
+    run.input.files[0]!.transcription = null;
+    renderResult(run);
+    fireEvent.click(screen.getByRole("button", { name: 'Ladda ner "intervju.mp3"' }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(anchor.getAttribute("href")).toBe(
+      `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`
+    );
+    expect(anchor.download).toBe("intervju.mp3");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("says why a failed-run download could not be signed, with its trace id", async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    api.POST.mockResolvedValueOnce({
+      data: undefined as never,
+      error: { message: "Filen finns inte längre" },
+      response: new Response("{}", { status: 404, headers: { "x-trace-id": "trace-9" } })
+    } as never);
     const run = makeRun({ status: "failed", output: null });
     run.input.files[0]!.transcription = null;
     renderResult(run);
     fireEvent.click(screen.getByRole("button", { name: 'Ladda ner "intervju.mp3"' }));
     await waitFor(() =>
-      expect(open).toHaveBeenCalledWith(
-        `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`,
-        "_blank"
+      expect(toast.error).toHaveBeenCalledWith(
+        "Filen finns inte längre",
+        expect.objectContaining({ description: expect.stringContaining("trace-9") })
       )
     );
+    expect(click).not.toHaveBeenCalled();
   });
 });

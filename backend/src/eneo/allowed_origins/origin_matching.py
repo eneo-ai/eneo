@@ -31,9 +31,11 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
 
     origin_scheme = origin_parsed.scheme.lower()
     origin_host = origin_parsed.hostname.lower()
-    origin_port_raw = _safe_port(origin_parsed)
-    if origin_port_raw is None and ":" in origin_parsed.netloc.rsplit("@", 1)[-1]:
-        # Inbound Origin had a malformed port — fail closed.
+    try:
+        origin_port_raw = origin_parsed.port
+    except ValueError:
+        # Inbound Origin had a malformed port — fail closed. (A bracketed IPv6
+        # host has colons but no port, so the netloc alone cannot tell.)
         return False
     origin_port = origin_port_raw or (443 if origin_scheme == "https" else 80)
 

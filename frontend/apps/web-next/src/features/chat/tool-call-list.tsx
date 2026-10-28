@@ -2,7 +2,6 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Item } from "@astryxdesign/core/Item";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
@@ -22,6 +21,7 @@ import {
   toolTarget,
   type AttachedFile
 } from "./tool-presentation";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 /**
  * The calls of one tool step in the Steg tab: a row per call (what it did,
@@ -122,7 +122,7 @@ function CallArguments({ part, files }: { part: ToolPart; files: AttachedFile[] 
 function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { copy } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy } = useCopy();
   const finished = part.state === "output-available" || part.state === "output-error";
   const canLoad = Boolean(sessionId && part.toolCallId && finished);
   const result = useQuery({

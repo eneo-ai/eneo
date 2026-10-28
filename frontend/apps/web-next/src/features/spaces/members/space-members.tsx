@@ -1,11 +1,13 @@
 "use client";
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Typeahead } from "@/components/astryx/typeahead";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -19,7 +21,6 @@ import {
   DialogTitle,
   DialogTrigger
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -32,6 +33,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
@@ -138,6 +140,19 @@ function MemberRow({ member }: { member: SpaceMember }) {
   );
 }
 
+/** Users to add as members: those whose email matches, or the first ones without a search. */
+function memberCandidatesQueryOptions(email: string | null) {
+  return queryOptions({
+    queryKey: ["users", "search", email],
+    queryFn: async () => {
+      const page = await unwrap(
+        browserApi.GET("/api/v1/users/", { params: { query: { email, limit: 10 } } })
+      );
+      return page.items;
+    }
+  });
+}
+
 /**
  * "Lägg till medlem": adds an existing user to the space. The members page
  * shows it as its primary action; `variant="header"` is the quieter button in
@@ -149,27 +164,30 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<SearchableItem | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const userProblem = submitted && !selectedId ? t("form_problem_choose_user") : null;
+  const searchRef = useRef<HTMLDivElement>(null);
+  const userProblem = submitted && !selected ? t("form_problem_choose_user") : null;
 
-  const memberIds = new Set(space.members.items.map((member) => member.id));
-  const { data: candidates } = useQuery({
-    queryKey: ["users", "search", filter],
-    queryFn: async () => {
-      const page = await unwrap(
-        browserApi.GET("/api/v1/users/", {
-          params: { query: { email: filter || null, limit: 10 } }
-        })
-      );
-      return page.items;
-    },
-    enabled: open
-  });
+  // Users who are not members yet: the first ones on focus, then those matching
+  // the typed email once typing pauses (any length, as the Svelte app).
+  const members = space.members.items;
+  const candidates = useMemo<SearchSource<SearchableItem>>(() => {
+    const memberIds = new Set(members.map((member) => member.id));
+    const load = async (email: string | null) => {
+      const users = await queryClient.query(memberCandidatesQueryOptions(email));
+      return users
+        .filter((user) => !memberIds.has(user.id))
+        .map((user) => ({ id: user.id, label: user.email }));
+    };
+    return {
+      search: (query) => load(query.trim() || null),
+      bootstrap: () => load(null)
+    };
+  }, [members, queryClient]);
 
   const addMember = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
@@ -182,23 +200,20 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
     onSuccess: () => {
       invalidate();
       setOpen(false);
-      setSelectedId(null);
-      setFilter("");
+      setSelected(null);
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const selectable = (candidates ?? []).filter((user) => !memberIds.has(user.id));
-
   function add() {
     if (addMember.isPending) return;
-    if (!selectedId) {
+    if (!selected) {
       // Rendered before focus moves, so the field is read with its error.
       flushSync(() => setSubmitted(true));
-      searchRef.current?.focus();
+      searchRef.current?.querySelector("input")?.focus();
       return;
     }
-    addMember.mutate({ id: selectedId, role });
+    addMember.mutate({ id: selected.id, role });
   }
 
   return (
@@ -225,40 +240,19 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <DialogTitle>{t("add_member")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="member-search">{t("email")}</Label>
-            <Input
-              ref={searchRef}
-              id="member-search"
-              value={filter}
-              placeholder={t("member_search_placeholder")}
-              onChange={(event) => {
-                setFilter(event.target.value);
-                setSelectedId(null);
-              }}
-              {...fieldProblemProps("member-search", userProblem)}
-            />
-            <FieldProblem id="member-search" problem={userProblem} />
-            <div className="flex max-h-48 flex-col overflow-y-auto rounded-md border">
-              {selectable.length === 0 ? (
-                <p className="text-muted-foreground p-3 text-sm">{t("no_results")}</p>
-              ) : (
-                selectable.map((user) => (
-                  <button
-                    key={user.id}
-                    type="button"
-                    onClick={() => setSelectedId(user.id)}
-                    aria-pressed={selectedId === user.id}
-                    className={`hover:bg-muted px-3 py-2 text-left text-sm ${
-                      selectedId === user.id ? "bg-muted font-medium" : ""
-                    }`}
-                  >
-                    {user.email}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
+          <Typeahead
+            ref={searchRef}
+            label={t("email")}
+            placeholder={t("member_search_placeholder")}
+            searchSource={candidates}
+            value={selected}
+            onChange={setSelected}
+            hasEntriesOnFocus
+            debounceMs={SEARCH_DEBOUNCE_MS}
+            emptySearchResultsText={t("no_results")}
+            status={userProblem ? { type: "error", message: userProblem } : undefined}
+            width="100%"
+          />
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>
             <Select value={role} onValueChange={(next) => setRole(next as SpaceRoleValue)}>

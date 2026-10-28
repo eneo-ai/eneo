@@ -478,9 +478,8 @@ value and a comment.
     `OIDC_*`/federation keys so the two files can be kept in sync; the web app
     itself needs only `PUBLIC_ORIGIN` for the login flow.
 
-    **Optional:** the web app reads the UI flags `SHOW_WEB_SEARCH` and
-    `SHOW_HELP_CENTER`, plus `HELP_CENTER_URL` and
-    `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
+    **Optional:** the web app reads the UI flag `SHOW_HELP_CENTER`, plus
+    `HELP_CENTER_URL` and `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
     `env_frontend.template` (`FEEDBACK_FORM_URL`, `SUPPORT_EMAIL`,
     `SALES_EMAIL`) and `LOGLEVEL` are not read by the current web app.
 
@@ -687,6 +686,11 @@ whose `Origin` is `https://` on the same `Host` still passes CORS without an
 `allowed_origins` entry; `X-Forwarded-Host` is never compared. Requests that
 carry an API key keep their key and tenant origin policies. Existing
 `allowed_origins` entries for the app's own host can stay.
+
+A page on `localhost`, `127.0.0.1` or `[::1]` no longer passes CORS by default:
+only with `ENVIRONMENT=development`. A deployment that serves the web app to
+browsers from a loopback address on another port than the backend registers
+that origin in `allowed_origins`.
 
 **Requirements:**
 
@@ -1401,7 +1405,7 @@ releases say when to turn them on.
 | --- | --- | --- |
 | `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
 | `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. |
-| `SHOW_WEB_SEARCH`, `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
+| `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
 | `HELP_CENTER_URL`, `LEGACY_APP_URL`, `ACCESSIBILITY_STATEMENT_URL`, `REQUEST_INTEGRATION_FORM_URL` | unset | Same values as in `env_web_next.env`; blank counts as unset. |
 
 The backend gives these to the web app at `GET /api/v1/runtime-config`. When a

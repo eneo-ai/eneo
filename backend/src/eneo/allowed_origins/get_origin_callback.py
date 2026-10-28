@@ -18,8 +18,9 @@ from eneo.authentication.auth_models import (
     compute_effective_state,
 )
 from eneo.database.database import sessionmanager
-from eneo.main.config import get_settings
+from eneo.main.config import LOOPBACK_HOSTS, get_settings
 from eneo.main.logging import get_logger
+from eneo.server.dependencies.auth_definitions import is_api_key_request
 
 logger = get_logger(__name__)
 
@@ -99,14 +100,18 @@ async def get_origin(
     is_preflight: bool = False,
     request_url: URL | None = None,
 ) -> bool:
-    parsed = urlparse(origin)
-    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+    settings = get_settings()
+    # A page on the user's own machine gets credentialed CORS only in
+    # development. Elsewhere a loopback origin passes like any other: same
+    # origin, or named in the allowlist (http://localhost:* for a developer).
+    if settings.is_development and urlparse(origin).hostname in LOOPBACK_HOSTS:
         return True
 
     headers = request_headers or Headers()
-    settings = get_settings()
     # Password and bearer requests to the API itself do not require CORS opt-in.
-    # API-key requests still enforce their key and tenant origin policies.
+    # A request whose credential is an API key (any key header, even empty,
+    # and no Bearer token, which authentication would prefer) still enforces
+    # its key and tenant origin policies.
     # Behind a TLS-terminating proxy the request arrives as http, because
     # gunicorn does not trust X-Forwarded-Proto, so an http request also
     # matches an https page on the same Host. X-Forwarded-* is never read, and
@@ -114,7 +119,7 @@ async def get_origin(
     if (
         not is_preflight
         and request_url is not None
-        and not headers.get(settings.api_key_header_name)
+        and (_has_bearer_token(headers) or not is_api_key_request(headers, settings))
         and (
             _is_same_origin(origin, request_url)
             or (
