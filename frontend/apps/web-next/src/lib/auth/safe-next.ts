@@ -26,9 +26,16 @@ export function safeNextPath(next: string | null | undefined): string {
     if (url.origin !== origin) return DEFAULT_LANDING;
     // Sign-ins continue through /login: never back to it (a nested next), and
     // never to /login/switch-organisation or /logout, which end the session
-    // (an auth redirect loop).
-    for (const page of ["/login", "/logout"]) {
-      if (url.pathname === page || url.pathname.startsWith(`${page}/`)) return DEFAULT_LANDING;
+    // (an auth redirect loop). Never to a route that is not a page either: the
+    // API (the BFF, and FastAPI itself under Vite), the SSO handlers or Next's
+    // assets. The continuation is a same-origin navigation, so it would carry
+    // Sec-Fetch-Site: same-origin past the browser-session gate. Servers route
+    // on the decoded path (`/%61pi` is `/api`), so both forms are checked.
+    const pathnames = [url.pathname, new URL(decoded, origin).pathname];
+    for (const prefix of ["/login", "/logout", "/api", "/auth", "/_next"]) {
+      for (const pathname of pathnames) {
+        if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return DEFAULT_LANDING;
+      }
     }
   } catch {
     return DEFAULT_LANDING;

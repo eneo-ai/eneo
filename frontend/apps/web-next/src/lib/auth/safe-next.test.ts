@@ -43,6 +43,27 @@ describe("safeNextPath", () => {
     expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
   );
 
+  // The continuation is a same-origin navigation: to a route handler it would
+  // carry Sec-Fetch-Site: same-origin past the browser-session gate.
+  it.each([
+    "/api",
+    "/api/eneo/api/v1/users/me/",
+    "/api/v1/users/me/",
+    "/api/chat",
+    "/auth/login",
+    "/auth/callback?code=x&state=y",
+    "/_next/static/chunks/main.js",
+    "/spaces/../api/v1/users/me/",
+    "/%61pi/v1/users/me/"
+  ])("never continues to a route that is not a page: %s", (value) =>
+    expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
+  );
+
+  it.each(["/apis", "/authors", "/spaces/api", "/module-login?state=x"])(
+    "keeps pages that only share a prefix: %s",
+    (value) => expect(safeNextPath(value)).toBe(value)
+  );
+
   it("preserves opaque query encoding after validation", () => {
     const next = "/module-login?state=a%2Bb%252Fc";
     expect(safeNextPath(next)).toBe(next);
