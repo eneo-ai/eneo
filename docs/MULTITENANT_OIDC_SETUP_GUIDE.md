@@ -81,8 +81,10 @@ Once the operator has registered an IdP, an admin of that organisation (`Permiss
 |---|---|---|
 | Provider label, client ID, allowed email domains | read and edit | edit |
 | Client secret | replace (write-only; never read) | edit |
-| Discovery endpoint, issuer, redirect URIs, scopes, token auth method | read | edit |
-| Other endpoints from discovery, claim mapping, `canonical_public_origin`, `redirect_path`, `additional_redirect_uris` | no | edit |
+| Discovery endpoint | read | edit |
+| Issuer, token auth method and the other endpoints | issuer and token auth method: read | set from the discovery document whenever the discovery endpoint is set |
+| Scopes, claim mapping | scopes: read | defaults (`openid email profile`; email from `email`); not editable through this API |
+| `canonical_public_origin`, `redirect_path`, `additional_redirect_uris` | the resulting redirect URIs: read | edit |
 | First registration, replacing the IdP, delete | no | yes |
 
 - The admin never sees the secret, not even its last characters: only that one is set and when it was replaced. A value that looks like a masked secret is refused (`400 federation_secret_looks_masked`).
