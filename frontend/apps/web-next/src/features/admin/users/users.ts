@@ -32,6 +32,15 @@ export type UsersQueryParams = {
 
 export const ADMIN_PASSWORD_POLICY_KEY = ["admin-password-policy"] as const;
 
+/**
+ * Every change the user editor makes for one user (its save and its group
+ * changes) runs under this mutation key, so the dialog can tell while any of
+ * them is in flight (`useIsMutating`) and hold its save and close until done.
+ */
+export function userEditorMutationKey(userId: string | undefined) {
+  return ["admin-user-editor", userId ?? "new"] as const;
+}
+
 /** When local passwords in this organisation must be replaced (admin only). */
 export function adminPasswordPolicyQueryOptions(api: EneoClient) {
   return queryOptions({

@@ -6,7 +6,7 @@ import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -28,7 +28,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { UserGroupField } from "./user-group-field";
-import type { AdminUser } from "./users";
+import { userEditorMutationKey, type AdminUser } from "./users";
 
 function RolePicker({
   selected,
@@ -125,6 +125,7 @@ function UserEditorForm({
   }
 
   const create = useMutation({
+    mutationKey: userEditorMutationKey(user?.id),
     mutationFn: (password: string) =>
       unwrap(
         browserApi.POST("/api/v1/admin/users/", {
@@ -141,6 +142,7 @@ function UserEditorForm({
   });
 
   const updateUser = useMutation({
+    mutationKey: userEditorMutationKey(user?.id),
     mutationFn: (password: string | null) => {
       if (!user?.username) throw new Error("missing username");
       return unwrap(
@@ -161,6 +163,10 @@ function UserEditorForm({
   });
 
   const pending = create.isPending || updateUser.isPending;
+  // A group change (it saves on its own) still running, its refetch included:
+  // the save waits for it, as a refreshed list may drop this user's row and,
+  // with it, the one-time password view the save can open.
+  const busy = useIsMutating({ mutationKey: userEditorMutationKey(user?.id) }) > 0;
   const needsPassword = mode === "create" || replacePassword;
   const policyUnavailable = !policyQuery.isPending && policy === null;
   const errors: Record<Field, string | undefined> = {
@@ -182,7 +188,7 @@ function UserEditorForm({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending || policyQuery.isPending) return;
+    if (busy || policyQuery.isPending) return;
     const first = (Object.keys(errors) as Field[]).find((field) => errors[field]);
     if (first) {
       revealProblems(() => setSubmitted(true), fields[first].current);
@@ -294,14 +300,15 @@ function UserEditorForm({
       {user ? <UserGroupField user={user} isDisabled={pending} /> : null}
 
       <DialogFooter>
-        <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
+        <Button label={t("cancel")} isDisabled={busy} onClick={() => onDone()} />
         <Button
           type="submit"
           form={formId}
           variant="primary"
           label={mode === "create" ? t("create_user") : t("save_changes")}
-          // Keeps focus while saving; a second press is ignored above.
-          isLoading={pending}
+          // Busy while saving or while a group change runs; it keeps focus
+          // and a press then is ignored above.
+          isLoading={busy}
           isInterruptible
         />
       </DialogFooter>
@@ -327,10 +334,17 @@ export function UserEditorDialog({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [issued, setIssued] = useState<IssuedPassword | null>(null);
+  const busy = useIsMutating({ mutationKey: userEditorMutationKey(user?.id) }) > 0;
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        // Escape, the close button and Cancel wait for a save or group change.
+        onOpenChange={(next) => {
+          if (next || !busy) onOpenChange(next);
+        }}
+      >
         {open && (
           <UserEditorForm
             user={user}

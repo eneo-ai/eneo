@@ -28,12 +28,12 @@ const eva = { id: "u3", email: "eva.ek@kommun.se", username: "eva.ek" };
 type Group = { id: string; name: string; users: (typeof anna | typeof per)[] };
 
 /** The backend: groups (changed by the test as the requests land) and the user directory. */
-function serve(initial: Group[]) {
+function serve(initial: Group[], directory = [anna, per, eva]) {
   let groups = initial;
   api.GET.mockImplementation((path: string) => {
     if (path === "/api/v1/user-groups/") return ok({ items: groups, count: groups.length });
     if (path === "/api/v1/users/") {
-      return ok({ items: [anna, per, eva], total_count: 3, next_cursor: null });
+      return ok({ items: directory, total_count: directory.length, next_cursor: null });
     }
     throw new Error(`unexpected GET ${path}`);
   });
@@ -44,8 +44,8 @@ function serve(initial: Group[]) {
   };
 }
 
-async function renderPage(groups: Group[]) {
-  const backend = serve(groups);
+async function renderPage(groups: Group[], directory?: (typeof anna | typeof per)[]) {
+  const backend = serve(groups, directory);
   const { queryClient } = renderInApp(<AdminUserGroupsPage />, { appContext });
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   if (groups.length > 0) await screen.findByRole("table", { name: "Användargrupper" });
@@ -171,13 +171,15 @@ describe("AdminUserGroupsPage", () => {
 });
 
 describe("AdminUserGroupsPage members", () => {
-  async function openMembers(groups: Group[]) {
-    const page = await renderPage(groups);
+  async function openMembers(groups: Group[], directory?: (typeof anna | typeof per)[]) {
+    const page = await renderPage(groups, directory);
     fireEvent.click(
       within(openRowMenu("Ekonomi")).getByRole("menuitem", { name: "Hantera medlemmar" })
     );
     const dialog = await screen.findByRole("dialog", { name: "Hantera medlemmar i Ekonomi" });
-    await within(dialog).findByRole("checkbox", { name: /eva\.ek@kommun\.se/ });
+    if (directory?.length !== 0) {
+      await within(dialog).findByRole("checkbox", { name: /eva\.ek@kommun\.se/ });
+    }
     return { ...page, dialog };
   }
 
@@ -250,6 +252,38 @@ describe("AdminUserGroupsPage members", () => {
     expect(within(dialog).getByRole("button", { name: /^Lägg till valda/ }).textContent).toContain(
       "(1)"
     );
+
+    // Per, who was added, is removed again: he must not come back ticked, nor
+    // be re-added by the retry.
+    backend.set([{ ...economy, users: [] }]);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Ta bort per.berg@kommun.se från gruppen" })
+    );
+    expect(
+      await within(dialog).findByRole("heading", { name: "Nuvarande medlemmar (0)" })
+    ).toBeTruthy();
+    const perBox = within(dialog).getByRole("checkbox", { name: /per\.berg@kommun\.se/ });
+    expect((perBox as HTMLInputElement).checked).toBe(false);
+
+    api.POST.mockClear();
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Lägg till valda/ }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/user-groups/{id}/users/{user_id}/", {
+      params: { path: { id: "g1", user_id: "u3" } }
+    });
+  });
+
+  it("says at the search field that a user must be chosen when none is found", async () => {
+    const { dialog } = await openMembers([economy], []);
+    expect(await within(dialog).findByText("Inga användare hittades")).toBeTruthy();
+    const search = within(dialog).getByRole("textbox", { name: "Sök användare på e-post" });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Lägg till valda/ }));
+
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(search.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Välj en användare i listan.")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
   });
 
   it("removes a member at once", async () => {

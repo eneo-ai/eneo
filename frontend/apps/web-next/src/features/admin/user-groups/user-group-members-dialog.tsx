@@ -32,9 +32,9 @@ import {
 /**
  * Adds users to the group: search by e-mail (sent once typing pauses), tick
  * any number across searches and pages, then add them all at once. Members
- * are listed but cannot be ticked. A user who was added drops out of the
- * selection, so after a partial failure only the ones still missing stay
- * ticked for a retry.
+ * are listed but cannot be ticked. Each user leaves the selection as soon as
+ * they are added, so after a partial failure only the ones still missing
+ * stay ticked for a retry (and one removed again meanwhile is not re-added).
  */
 function AddMembers({
   group,
@@ -71,6 +71,7 @@ function AddMembers({
             params: { path: { id: group.id, user_id: user.id } }
           })
         );
+        setPicked((current) => current.filter((other) => other.id !== user.id));
       }
     },
     onMutate: () => onPendingChange(true),
@@ -81,7 +82,7 @@ function AddMembers({
       announce(t("admin_user_groups_members_added", { count: users.length, name: group.name }));
     },
     onError: (error) => toastApiError(error, t),
-    // Also after a partial failure: the users that were added show as members.
+    // Also after a partial failure: those that were added show as members.
     onSettled: async () => {
       await refreshUserGroups(queryClient);
       onPendingChange(false);
@@ -121,6 +122,8 @@ function AddMembers({
         onChange={setSearchInput}
         hasClear
         autoComplete="off"
+        // With no list to tick in, the problem shows here, where focus goes.
+        status={problem && users.length === 0 ? { type: "error", message: problem } : undefined}
         width="100%"
       />
       {selected.length > 0 ? (
