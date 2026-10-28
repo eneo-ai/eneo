@@ -30,10 +30,17 @@ describe("safeNextPath", () => {
   );
 
   // A sign-in continues through /login (signedInContinuation): next=/login
-  // would nest it, and /login/switch-organisation would end the new session.
-  it.each(["/login", "/login?next=%2Fdashboard", "/login/switch-organisation", "/login/../login"])(
-    "never continues to the login pages: %s",
-    (value) => expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
+  // would nest it, and /login/switch-organisation or /logout would end the new
+  // session (an auth redirect loop).
+  it.each([
+    "/login",
+    "/login?next=%2Fdashboard",
+    "/login/switch-organisation",
+    "/login/../login",
+    "/logout",
+    "/logout?reason=expired"
+  ])("never continues to the login or logout pages: %s", (value) =>
+    expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
   );
 
   it("preserves opaque query encoding after validation", () => {

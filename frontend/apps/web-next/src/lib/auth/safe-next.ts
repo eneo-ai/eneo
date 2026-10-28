@@ -25,8 +25,11 @@ export function safeNextPath(next: string | null | undefined): string {
     const url = new URL(next, origin);
     if (url.origin !== origin) return DEFAULT_LANDING;
     // Sign-ins continue through /login: never back to it (a nested next), and
-    // never to /login/switch-organisation, which ends the session.
-    if (url.pathname === "/login" || url.pathname.startsWith("/login/")) return DEFAULT_LANDING;
+    // never to /login/switch-organisation or /logout, which end the session
+    // (an auth redirect loop).
+    for (const page of ["/login", "/logout"]) {
+      if (url.pathname === page || url.pathname.startsWith(`${page}/`)) return DEFAULT_LANDING;
+    }
   } catch {
     return DEFAULT_LANDING;
   }
