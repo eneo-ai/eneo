@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
@@ -24,7 +25,7 @@ import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./u
 
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
-const NARROW_QUERY = "(width < 40rem)";
+const NARROW_QUERY = `not all and ${MEDIA.sm}`;
 
 /** Sync the current filter state into the URL for shareable links. */
 function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {

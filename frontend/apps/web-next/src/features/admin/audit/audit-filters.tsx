@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
@@ -232,7 +233,7 @@ function AuditFilterFields({
 function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: OnChange }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const wide = useMediaQuery("(min-width: 768px)");
+  const wide = useMediaQuery(MEDIA.md);
   const count = activeFilterCount(filters);
   const label = count > 0 ? t("audit_filters_button_count", { count }) : t("audit_filters_button");
   const fields = (

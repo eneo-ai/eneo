@@ -23,6 +23,7 @@ import { ClientTime, useClientTimeText } from "@/components/composites/client-ti
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { formatBytes } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
@@ -47,7 +48,7 @@ import type { InPlaceLink } from "./in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
-const NARROW_QUERY = "(width < 40rem)";
+const NARROW_QUERY = `not all and ${MEDIA.sm}`;
 
 type DocumentsView = "searchable" | "skipped";
 type DocumentRow = IntegrationDocument;
