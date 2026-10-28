@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { brokenRule, readPasswordPolicy } from "@/features/auth/password-policy";
@@ -247,6 +247,51 @@ describe("UserEditorDialog", () => {
     const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
     within(reveal).getByText(sentPassword(0));
     expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/admin/users/{username}/");
+  });
+
+  it("stays open on Escape, without its close button, while the save runs", async () => {
+    let release: () => void = () => {};
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ data: {}, response: new Response("{}") });
+        })
+    );
+    const { dialog } = await renderEditor(existing);
+    expect(within(dialog).getByRole("button", { name: "Stäng" })).toBeTruthy();
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    // Closed now, the password the save sets would have nowhere to show.
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
+    expect(within(dialog).queryByRole("button", { name: "Stäng" })).toBeNull();
+
+    await act(async () => release());
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    within(reveal).getByText(sentPassword(0));
+  });
+
+  it("hands the password over to the e-mail that was saved, not one typed meanwhile", async () => {
+    let release: () => void = () => {};
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ data: {}, response: new Response("{}") });
+        })
+    );
+    const { dialog } = await renderEditor();
+    type(dialog, /^Användarnamn/, "eva.ek");
+    type(dialog, /^E-post/, "eva.ek@example.se");
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    type(dialog, /^E-post/, "anna.lind@example.se");
+    await act(async () => release());
+
+    const reveal = await screen.findByRole("dialog", { name: "Kontot har skapats" });
+    within(reveal).getByText(/^Lämna lösenordet till eva\.ek@example\.se\./);
   });
 
   it("refreshes the list when the one-time view is closed with its close button", async () => {

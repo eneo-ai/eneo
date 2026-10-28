@@ -89,8 +89,9 @@ export function AdminUsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   // Passwords the editor set, shown one at a time in the order the saves
   // landed. Held here, not in the row whose editor set them: a refetch may
-  // drop that row. A queue, as a save keeps running after its editor closes,
-  // so another save can land before a password has been handed over.
+  // drop that row mid-save, and the save then lands with its editor gone. A
+  // queue, as the admin may save another user meanwhile, so a second password
+  // can land before the first has been handed over.
   const [issued, setIssued] = useState<{ key: number; password: IssuedPassword }[]>([]);
   const issuedCount = useRef(0);
   function showIssued(password: IssuedPassword) {

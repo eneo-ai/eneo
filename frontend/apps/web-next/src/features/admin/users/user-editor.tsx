@@ -78,6 +78,9 @@ type Field = "username" | "email" | "policy";
 /** A password the backend has just set, for the one-time display. */
 type NewPassword = { password: string; email: string };
 
+/** What a save sends that the one-time display names: the password (if any) and the e-mail. */
+type Save = { password: string | null; email: string };
+
 /** A set password, for `IssuedPasswordDialog`: a new account's, or a replaced one. */
 export type IssuedPassword = NewPassword & { replaced: boolean };
 
@@ -93,10 +96,13 @@ export type IssuedPassword = NewPassword & { replaced: boolean };
  */
 function UserEditorForm({
   user,
-  onDone
+  onDone,
+  onPendingChange
 }: {
   user?: AdminUser;
   onDone: (issued?: NewPassword) => void;
+  /** The save is running: the dialog holds still until it has landed. */
+  onPendingChange: (pending: boolean) => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -118,39 +124,47 @@ function UserEditorForm({
   const retryRef = useRef<HTMLButtonElement>(null);
 
   // A set password is handed over first; the list refreshes once it is closed.
-  function finish(password: string | null) {
+  // Both come from what the save sent, not from the fields, which can change
+  // while it runs.
+  function finish({ password, email }: Save) {
     if (password) {
-      onDone({ password, email: email.trim() });
+      onDone({ password, email });
     } else {
       void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       onDone();
     }
   }
 
+  const saveCallbacks = {
+    onMutate: () => onPendingChange(true),
+    onSettled: () => onPendingChange(false),
+    onSuccess: (_data: unknown, save: Save) => finish(save),
+    onError: (error: Error) => toastApiError(error, t)
+  };
+
   const create = useMutation({
-    mutationFn: (password: string) =>
+    mutationFn: ({ password, email }: Save & { password: string }) =>
       unwrap(
         browserApi.POST("/api/v1/admin/users/", {
           body: {
-            email: email.trim(),
+            email,
             username: username.trim() || null,
             password,
             roles: [...roleIds].map((id) => ({ id }))
           }
         })
       ),
-    onSuccess: (_, password) => finish(password),
-    onError: (error) => toastApiError(error, t)
+    ...saveCallbacks
   });
 
   const updateUser = useMutation({
-    mutationFn: (password: string | null) => {
+    mutationFn: ({ password, email }: Save) => {
       if (!user?.username) throw new Error("missing username");
       return unwrap(
         browserApi.POST("/api/v1/admin/users/{username}/", {
           params: { path: { username: user.username } },
           body: {
-            email: email.trim(),
+            email,
             // Sent only when changed: a new username signs the user out.
             username: username.trim() !== user.username ? username.trim() : undefined,
             password: password ?? undefined,
@@ -159,8 +173,7 @@ function UserEditorForm({
         })
       );
     },
-    onSuccess: (_, password) => finish(password),
-    onError: (error) => toastApiError(error, t)
+    ...saveCallbacks
   });
 
   const pending = create.isPending || updateUser.isPending;
@@ -205,15 +218,17 @@ function UserEditorForm({
         return;
       }
     }
-    if (mode === "update") updateUser.mutate(password);
-    else if (password) create.mutate(password);
+    if (mode === "update") updateUser.mutate({ password, email: email.trim() });
+    else if (password) create.mutate({ password, email: email.trim() });
   }
 
   const usernameError = shown("username");
   const emailError = shown("email");
 
   return (
-    <DialogContent className="max-h-[85vh] overflow-y-auto">
+    // No close button while saving (Escape waits too, in the dialog): the
+    // password the save sets must reach its one-time view.
+    <DialogContent className="max-h-[85vh] overflow-y-auto" showCloseButton={!pending}>
       <DialogHeader>
         <DialogTitle>{mode === "create" ? t("create_a_new_user") : t("edit_user")}</DialogTitle>
         <DialogDescription>
@@ -315,10 +330,12 @@ function UserEditorForm({
 /**
  * Create or edit a user. Update targets POST /api/v1/admin/users/{username}/
  * with the current username; a changed one goes in the body. Editing also
- * assigns user groups, which save on their own as they change. A password
- * the save sets goes to `onIssued`, for an `IssuedPasswordDialog` owned by
- * the page: an edit dialog lives in its table row, which a refetch may drop
- * (a renamed user under a username filter) before the password is copied.
+ * assigns user groups, which save on their own as they change. While the
+ * save runs the dialog cannot be closed (Cancel, Escape, close button), as in
+ * the Svelte app. A password the save sets goes to `onIssued`, for an
+ * `IssuedPasswordDialog` owned by the page: an edit dialog lives in its table
+ * row, which a refetch may still drop mid-save (a renamed user under a
+ * username filter), taking the dialog with it.
  */
 export function UserEditorDialog({
   open,
@@ -332,11 +349,19 @@ export function UserEditorDialog({
   user?: AdminUser;
   onIssued: (issued: IssuedPassword) => void;
 }) {
+  // The save only; a group change (it saves on its own) does not hold it.
+  const [saving, setSaving] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next || !saving) onOpenChange(next);
+      }}
+    >
       {open && (
         <UserEditorForm
           user={user}
+          onPendingChange={setSaving}
           onDone={(next) => {
             onOpenChange(false);
             if (next) onIssued({ ...next, replaced: user !== undefined });
@@ -348,8 +373,10 @@ export function UserEditorDialog({
 }
 
 /**
- * The one-time view of a password the user editor set. The list is refreshed
- * once it closes, so its rows hold still while the password is on screen.
+ * The one-time view of a password the user editor set. The users list is
+ * invalidated only once it closes, but a background refetch (window focus,
+ * a group change) can still change or drop rows while it is open, so the page
+ * owns this view, never a table row.
  */
 export function IssuedPasswordDialog({
   issued,

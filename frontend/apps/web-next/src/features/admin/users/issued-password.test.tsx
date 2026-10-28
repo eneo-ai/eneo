@@ -157,12 +157,14 @@ describe("AdminUsersPage issued password", () => {
   });
 
   /**
-   * Bo's password reset and a new account save at the same time (the reset's
-   * editor closed while it saved): each password is shown in turn, in the
-   * order the saves land, and none replaces one not yet handed over.
+   * Bo's password reset and a new account save at the same time: the reset's
+   * row (and its editor) went in a refetch while it saved, and the admin
+   * created an account meanwhile. Each password is shown in turn, in the
+   * order the saves land, each with its own e-mail, and none replaces one not
+   * yet handed over.
    */
   async function overlappingSaves(order: "reset first" | "create first") {
-    serve();
+    const backend = serve();
     const settle: Record<string, () => void> = {};
     api.POST.mockImplementation(
       (path: string) =>
@@ -170,7 +172,9 @@ describe("AdminUsersPage issued password", () => {
           settle[path] = () => resolve({ data: {}, response: new Response("{}") });
         })
     );
-    renderInApp(<AdminUsersPage />, { appContext: testAppContext({ user: { id: "me" } }) });
+    const { queryClient } = renderInApp(<AdminUsersPage />, {
+      appContext: testAppContext({ user: { id: "me" } })
+    });
 
     const trigger = await screen.findByRole("button", {
       name: "Fler åtgärder för bo.ek@kommun.se"
@@ -185,7 +189,8 @@ describe("AdminUsersPage issued password", () => {
     );
     fireEvent.click(within(editor).getByRole("button", { name: "Spara ändringar" }));
     await waitFor(() => expect(settle["/api/v1/admin/users/{username}/"]).toBeDefined());
-    fireEvent.click(within(editor).getByRole("button", { name: "Stäng" }));
+    backend.dropRenamed();
+    await act(() => queryClient.invalidateQueries({ queryKey: ["admin-users"] }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "Skapa användare" }));
@@ -208,11 +213,13 @@ describe("AdminUsersPage issued password", () => {
       ).body.password;
     const reset = {
       title: "Nytt lösenord har satts",
-      password: passwordFor("/api/v1/admin/users/{username}/")
+      password: passwordFor("/api/v1/admin/users/{username}/"),
+      handover: /^Lämna lösenordet till bo\.ek@kommun\.se\./
     };
     const created = {
       title: "Kontot har skapats",
-      password: passwordFor("/api/v1/admin/users/")
+      password: passwordFor("/api/v1/admin/users/"),
+      handover: /^Lämna lösenordet till eva\.ek@kommun\.se\./
     };
     const [first, second] = order === "reset first" ? [reset, created] : [created, reset];
     const paths =
@@ -223,6 +230,7 @@ describe("AdminUsersPage issued password", () => {
     await act(async () => settle[paths[0]!]!());
     const shown = await screen.findByRole("dialog", { name: first.title });
     within(shown).getByText(first.password);
+    within(shown).getByText(first.handover);
     await act(async () => settle[paths[1]!]!());
     // The first is still the one on screen, not replaced.
     expect(screen.getByRole("dialog", { name: first.title })).toBeTruthy();
@@ -231,6 +239,7 @@ describe("AdminUsersPage issued password", () => {
     fireEvent.click(within(shown).getByRole("button", { name: "Klar" }));
     const next = await screen.findByRole("dialog", { name: second.title });
     within(next).getByText(second.password);
+    within(next).getByText(second.handover);
   }
 
   it("shows a reset's and a new account's passwords in turn when the reset lands first", () =>
