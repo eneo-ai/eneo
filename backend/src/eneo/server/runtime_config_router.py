@@ -115,6 +115,7 @@ def log_unlinked_runtime_values(settings: Settings) -> None:
         "Public and never cached."
     ),
     response_model=WebRuntimeConfig,
+    responses={200: {"description": "Web app runtime config"}},
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
