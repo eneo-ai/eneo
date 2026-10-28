@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { errors, expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import {
   askChatQuestion,
   CHAT_COMPOSER_NAME,
@@ -184,16 +184,33 @@ async function chatReadyMs(page: Page) {
   return stamp;
 }
 
-/** Milliseconds between two of the page's stamps; fails when either was not taken. */
+/**
+ * Milliseconds between two of the page's stamps. It waits in the page for both:
+ * a frame stamp lands on the animation frame after the change, which can be
+ * later than the Playwright check that saw the change.
+ */
 async function stampedMs(page: Page, from: string, to: string) {
-  const stamps = await page.evaluate(
-    () => (window as unknown as { __perf: PagePerf }).__perf.stamps
-  );
-  const [start, end] = [stamps[from], stamps[to]];
-  if (start === undefined || end === undefined) {
+  try {
+    const stamped = await page.waitForFunction(
+      (names) => {
+        const { stamps } = (window as unknown as { __perf: PagePerf }).__perf;
+        return (
+          names.from in stamps &&
+          names.to in stamps && { start: stamps[names.from], end: stamps[names.to] }
+        );
+      },
+      { from, to },
+      { polling: "raf", timeout: 30_000 }
+    );
+    const { start, end } = (await stamped.jsonValue()) as { start: number; end: number };
+    return end - start;
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+    const stamps = await page.evaluate(
+      () => (window as unknown as { __perf: PagePerf }).__perf.stamps
+    );
     throw new Error(`The page stamped ${JSON.stringify(stamps)}, not ${from} and ${to}`);
   }
-  return end - start;
 }
 
 function readPerf(page: Page) {
@@ -462,27 +479,39 @@ test("click-to-render timings are stamped in the page, not when the assertion pa
         <textarea aria-label="Message to Eneo"></textarea><button>Send message</button>
       </main>
       <script>
+        // window.app.reply comes from the test as data, rendered as text.
         const app = (window.app = {});
         const main = document.querySelector("main");
-        const renderLater = (html, path) => {
+        const renderLater = (render) => {
           app.clickedAt = performance.now();
           setTimeout(() => {
-            if (path) history.pushState(null, "", path);
-            main.insertAdjacentHTML("beforeend", html);
+            render();
             app.renderedAt = performance.now();
           }, 300);
         };
         document.querySelector("button").addEventListener("click", () =>
-          renderLater('<div role="log" aria-label="Conversation">${MOCK_REPLY}</div>')
+          renderLater(() => {
+            const log = main.appendChild(document.createElement("div"));
+            log.setAttribute("role", "log");
+            log.setAttribute("aria-label", "Conversation");
+            log.textContent = app.reply;
+          })
         );
         document.querySelector("a").addEventListener("click", (event) => {
           event.preventDefault();
-          renderLater("<h1>All spaces</h1>", "/spaces/list");
+          renderLater(() => {
+            history.pushState(null, "", "/spaces/list");
+            main.insertAdjacentHTML("beforeend", "<h1>All spaces</h1>");
+          });
         });
       </script>`
     })
   );
   await page.goto(CHAT_ROUTE);
+  await page.evaluate(
+    (reply) => ((window as unknown as { app: { reply: string } }).app.reply = reply),
+    MOCK_REPLY
+  );
   const appDelay = async () => {
     const { clickedAt, renderedAt } = await page.evaluate(
       () => (window as unknown as { app: { clickedAt: number; renderedAt: number } }).app
