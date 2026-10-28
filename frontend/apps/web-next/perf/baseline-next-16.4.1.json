@@ -1,79 +1,79 @@
 {
   "meta": {
-    "commit": "ee766dc52d9f4c9b90a2f6746c240efc3d020c03",
+    "commit": "03f39667d8e6bbfc58ab8db61d8a50dff98f70b5",
     "framework": "next",
     "frameworkVersion": "16.4.1",
     "node": "v22.23.1",
     "os": "darwin 27.0.0",
     "cpu": "Apple M4 Pro",
-    "date": "2026-10-28T05:51:39.803Z",
+    "date": "2026-10-28T06:24:07.975Z",
     "runs": 10,
     "appCommit": "e0ae2866cb321da289b9edc23241a022d742b12f",
-    "note": "Measured on origin/develop e0ae2866c with only the perf harness added (meta.commit is the harness commit; the harness fixes for page markers, interaction-only INP and mean were in the working tree). Local e2e stack (docker-compose.e2e.ci.yml, OrbStack 6 CPU / 16 GiB), next start on port 3210, Playwright Desktop Chrome. The shared-machine speech-to-text job held a guarded slot during part of the run (1-minute load 4-7.7 on 14 cores). Chat LCP is bimodal (the greeting h1 paints at about 350 or 450 ms), so its median moves up to 31% between runs while p75 and mean stay within 8%. Which statistic a gate compares is decided in P0-baseline-thresholds. Build peak RSS is the largest single process (macOS /usr/bin/time -l), like GNU time -v in CI."
+    "note": "Measured on origin/develop e0ae2866c with only the perf harness added (meta.commit is the harness commit). Quiet window: the shared-machine speech-to-text job paused its heavy steps (confirmed), 1-minute load 0.9-2.8 on 14 cores, only this run's guarded slot. Local e2e stack (docker-compose.e2e.ci.yml, OrbStack 6 CPU / 16 GiB), next start on port 3210, Playwright Desktop Chrome. Run 8 of two consecutive RUNS=10 runs. Chat LCP is bimodal (the greeting h1 paints at about 300-350 or 430-490 ms), so its median moves 30-43% between runs; which statistic a gate compares is decided in P0-baseline-thresholds. Build peak RSS is the largest single process (macOS /usr/bin/time -l), like GNU time -v in CI."
   },
   "metrics": {
     "/spaces/personal/chat": {
       "coldLcpMs": {
-        "median": 470,
-        "p75": 489,
-        "mean": 475.6
+        "median": 324,
+        "p75": 456,
+        "mean": 404
       },
       "coldCls": {
-        "median": 0.003761142333348592,
+        "median": 0.004937025308609009,
         "p75": 0.004937025308609009,
-        "mean": 0.0037417901198069257
+        "mean": 0.00469701066017151
       },
       "htmlEncodedBytes": {
-        "median": 147841.5,
-        "p75": 148157,
-        "mean": 146516.9
+        "median": 144494,
+        "p75": 147994,
+        "mean": 145664.9
       },
       "htmlDecodedBytes": {
-        "median": 602013,
+        "median": 600986.5,
         "p75": 602013,
-        "mean": 601417.1
+        "mean": 601026.5
       },
       "warmLcpMs": {
-        "median": 454,
-        "p75": 462,
-        "mean": 430.8
+        "median": 436,
+        "p75": 444,
+        "mean": 399.2
       },
       "warmCls": {
         "median": 0.004937025308609009,
         "p75": 0.004937025308609009,
-        "mean": 0.00493702530860901
+        "mean": 0.004456996011734009
       },
       "navigationToSpacesListMs": {
-        "median": 86,
-        "p75": 92,
-        "mean": 89.5
+        "median": 89.5,
+        "p75": 90.75,
+        "mean": 87.6
       },
       "chatTtftMs": {
-        "median": 160,
-        "p75": 164.25,
-        "mean": 156.9
+        "median": 163,
+        "p75": 164,
+        "mean": 160.1
       },
       "inpMs": {
         "median": 24,
-        "p75": 30,
-        "mean": 25.6
+        "p75": 32,
+        "mean": 27.2
       }
     },
     "/spaces/list": {
       "coldLcpMs": {
-        "median": 160,
-        "p75": 178,
-        "mean": 163.6
+        "median": 126,
+        "p75": 132,
+        "mean": 145.2
       },
       "coldCls": {
-        "median": 0.0030798339843750005,
+        "median": 0.0006796875000000001,
         "p75": 0.0030798339843750005,
-        "mean": 0.0025998046875000008
+        "mean": 0.0016397460937500005
       },
       "htmlEncodedBytes": {
-        "median": 138986,
-        "p75": 138987.75,
-        "mean": 138986.2
+        "median": 138981.5,
+        "p75": 138984,
+        "mean": 138980.2
       },
       "htmlDecodedBytes": {
         "median": 566460,
@@ -81,21 +81,21 @@
         "mean": 566460
       },
       "warmLcpMs": {
-        "median": 140,
-        "p75": 146,
-        "mean": 172.4
+        "median": 128,
+        "p75": 128,
+        "mean": 146
       },
       "warmCls": {
-        "median": 0.0030798339843750005,
+        "median": 0.0006796875000000001,
         "p75": 0.0030798339843750005,
-        "mean": 0.0021197753906250006
+        "mean": 0.0016397460937500005
       }
     },
     "/admin/users": {
       "coldLcpMs": {
-        "median": 162,
-        "p75": 178,
-        "mean": 172.4
+        "median": 140,
+        "p75": 147,
+        "mean": 141.6
       },
       "coldCls": {
         "median": 0,
@@ -103,9 +103,9 @@
         "mean": 0
       },
       "htmlEncodedBytes": {
-        "median": 142882.5,
-        "p75": 142888.5,
-        "mean": 142882
+        "median": 142876,
+        "p75": 142879.5,
+        "mean": 142876.3
       },
       "htmlDecodedBytes": {
         "median": 592353,
@@ -113,9 +113,9 @@
         "mean": 592353
       },
       "warmLcpMs": {
-        "median": 164,
-        "p75": 172,
-        "mean": 186
+        "median": 144,
+        "p75": 147,
+        "mean": 162.8
       },
       "warmCls": {
         "median": 0,
@@ -125,9 +125,9 @@
     },
     "/admin/insights": {
       "coldLcpMs": {
-        "median": 160,
-        "p75": 174,
-        "mean": 184.4
+        "median": 124,
+        "p75": 128,
+        "mean": 126.8
       },
       "coldCls": {
         "median": 0,
@@ -135,9 +135,9 @@
         "mean": 0
       },
       "htmlEncodedBytes": {
-        "median": 140297.5,
-        "p75": 140298.75,
-        "mean": 140296.4
+        "median": 140296,
+        "p75": 140296.75,
+        "mean": 140295.4
       },
       "htmlDecodedBytes": {
         "median": 579162,
@@ -145,9 +145,9 @@
         "mean": 579162
       },
       "warmLcpMs": {
-        "median": 136,
-        "p75": 154,
-        "mean": 139.2
+        "median": 126,
+        "p75": 150,
+        "mean": 166.4
       },
       "warmCls": {
         "median": 0,
@@ -158,70 +158,70 @@
   },
   "samples": {
     "/spaces/personal/chat": {
-      "coldLcpMs": [616, 372, 428, 468, 468, 480, 468, 492, 472, 492],
+      "coldLcpMs": [536, 324, 324, 324, 320, 444, 668, 460, 320, 320],
       "coldCls": [
+        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
         0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.002536878824234009,
-        0.0025852593580881753, 0.002536878824234009, 0.002536878824234009, 0.004937025308609009,
-        0.004937025308609009, 0.002536878824234009
-      ],
-      "htmlEncodedBytes": [
-        143936, 143922, 143927, 148154, 145065, 148158, 148164, 148142, 148160, 147541
-      ],
-      "htmlDecodedBytes": [
-        600060, 600060, 600060, 602013, 601913, 602013, 602013, 602013, 602013, 602013
-      ],
-      "warmLcpMs": [348, 452, 388, 456, 444, 468, 464, 476, 456, 356],
-      "warmCls": [
-        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
-        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
         0.004937025308609009, 0.004937025308609009
       ],
-      "navigationToSpacesListMs": [104, 84, 93, 105, 89, 84, 84, 83, 88, 81],
-      "chatTtftMs": [158, 151, 165, 162, 165, 162, 152, 165, 132, 157],
-      "inpMs": [32, 24, 24, 24, 16, 24, 32, 24, 24, 32]
+      "htmlEncodedBytes": [
+        145063, 143918, 143915, 143925, 147529, 148155, 148149, 148149, 143924, 143922
+      ],
+      "htmlDecodedBytes": [
+        601913, 600060, 600060, 600060, 602013, 602013, 602013, 602013, 600060, 600060
+      ],
+      "warmLcpMs": [452, 444, 304, 436, 444, 300, 448, 436, 300, 428],
+      "warmCls": [
+        0.002536878824234009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009, 0.002536878824234009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009
+      ],
+      "navigationToSpacesListMs": [93, 80, 83, 89, 87, 98, 91, 90, 75, 90],
+      "chatTtftMs": [163, 164, 169, 163, 164, 156, 167, 152, 152, 151],
+      "inpMs": [24, 24, 32, 24, 24, 24, 32, 24, 32, 32]
     },
     "/spaces/list": {
-      "coldLcpMs": [136, 144, 140, 160, 204, 172, 180, 184, 160, 156],
+      "coldLcpMs": [132, 132, 116, 116, 344, 132, 132, 112, 116, 120],
       "coldCls": [
-        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005,
-        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005,
+        0.0006796875000000001, 0.0006796875000000001, 0.0006796875000000001, 0.0030798339843750005,
+        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0006796875000000001,
         0.0006796875000000001, 0.0006796875000000001
       ],
       "htmlEncodedBytes": [
-        138988, 138988, 138985, 138985, 138985, 138986, 138987, 138986, 138984, 138988
+        138984, 138973, 138976, 138985, 138973, 138981, 138982, 138978, 138986, 138984
       ],
       "htmlDecodedBytes": [
         566460, 566460, 566460, 566460, 566460, 566460, 566460, 566460, 566460, 566460
       ],
-      "warmLcpMs": [140, 136, 496, 148, 148, 140, 120, 132, 124, 140],
+      "warmLcpMs": [120, 128, 120, 124, 120, 132, 128, 128, 332, 128],
       "warmCls": [
-        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0006796875000000001,
+        0.0006796875000000001, 0.0030798339843750005, 0.0006796875000000001, 0.0006796875000000001,
         0.0006796875000000001, 0.0006796875000000001, 0.0030798339843750005, 0.0030798339843750005,
         0.0006796875000000001, 0.0030798339843750005
       ]
     },
     "/admin/users": {
-      "coldLcpMs": [164, 156, 156, 224, 160, 160, 172, 196, 180, 156],
+      "coldLcpMs": [144, 148, 132, 132, 132, 168, 148, 132, 136, 144],
       "coldCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       "htmlEncodedBytes": [
-        142873, 142885, 142880, 142868, 142889, 142892, 142876, 142878, 142887, 142892
+        142878, 142882, 142877, 142873, 142868, 142880, 142875, 142884, 142872, 142874
       ],
       "htmlDecodedBytes": [
         592353, 592353, 592353, 592353, 592353, 592353, 592353, 592353, 592353, 592353
       ],
-      "warmLcpMs": [156, 172, 184, 404, 160, 168, 156, 140, 172, 148],
+      "warmLcpMs": [136, 128, 144, 136, 152, 148, 144, 140, 144, 356],
       "warmCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     },
     "/admin/insights": {
-      "coldLcpMs": [396, 148, 148, 180, 160, 148, 168, 160, 176, 160],
+      "coldLcpMs": [128, 128, 124, 124, 120, 120, 140, 136, 124, 124],
       "coldCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       "htmlEncodedBytes": [
-        140297, 140300, 140298, 140291, 140298, 140303, 140290, 140292, 140296, 140299
+        140300, 140292, 140296, 140295, 140292, 140296, 140296, 140298, 140297, 140292
       ],
       "htmlDecodedBytes": [
         579162, 579162, 579162, 579162, 579162, 579162, 579162, 579162, 579162, 579162
       ],
-      "warmLcpMs": [136, 148, 156, 156, 124, 124, 132, 160, 120, 136],
+      "warmLcpMs": [328, 112, 124, 340, 128, 112, 156, 112, 120, 132],
       "warmCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     }
   },
