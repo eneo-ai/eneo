@@ -54,51 +54,60 @@ def _same_origin(first: str, second: str) -> bool:
     return origin(first) == origin(second)
 
 
-# Printable ASCII without space or backslash: a browser reads such a URL as
-# written, while it would encode, trim or reinterpret anything else.
-_BROWSER_LITERAL_URL = re.compile(r"[!-\[\]-~]+")
-_HOST_LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")
+# Printable ASCII without space, backslash, "?" or "#": a browser reads such a
+# URL as written, while it would encode, trim or reinterpret anything else, and
+# the view links append a path and a query to it.
+_BROWSER_LITERAL_URL = re.compile(r"[!-~]+")
+_HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+# WHATWG parses a host whose last label is a number (decimal or 0x hex) as IPv4.
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
 
 
 def validate_content_base_url(url: str) -> str:
-    """An absolute http(s) URL whose host a browser reads exactly as written.
+    """An absolute http(s) URL, stored the way a browser serializes it.
 
     The content origin is framed, compared with the Host header and put in a
-    CSP, so every reader must agree on it. Non-ASCII hosts are refused rather
+    CSP, so every reader must agree on it: the host is lowercased, an IPv6
+    address compressed and a default port dropped, and any form a browser
+    would rewrite differently is refused. Non-ASCII hosts are refused rather
     than IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ
-    (ß), and the stored value is used verbatim. Messages never repeat the URL.
+    (ß). Messages never repeat the URL.
     """
     url = url.strip()
-    if not _BROWSER_LITERAL_URL.fullmatch(url):
+    if not _BROWSER_LITERAL_URL.fullmatch(url) or any(c in url for c in "\\?#"):
         raise ValueError(
-            "must be printable ASCII without spaces or backslashes; write an "
-            "international host name in punycode (xn--...)"
+            "must be printable ASCII without spaces, backslashes, a query or a "
+            "fragment; write an international host name in punycode (xn--...)"
         )
     try:
         parts = urlsplit(url)
-        _ = parts.port  # a malformed port raises too
+        port = parts.port
     except ValueError:
         raise ValueError("is not a valid URL") from None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("must be an absolute http or https URL")
     if "@" in parts.netloc:
         raise ValueError("must not contain credentials")
-    if parts.query or parts.fragment:
-        raise ValueError("must not include a query or fragment")
-    host = parts.hostname
+    host = parts.hostname  # lowercased by urlsplit
     try:
         if parts.netloc.startswith("["):
-            ipaddress.IPv6Address(host)
-        elif host.rstrip(".").rsplit(".", 1)[-1].isdigit():
-            # A browser parses a host ending in a number as IPv4.
-            ipaddress.IPv4Address(host)
+            address = ipaddress.IPv6Address(host)
+            if address.scope_id or address.ipv4_mapped:
+                raise ValueError
+            host = f"[{address.compressed}]"
+        elif _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
+            # Dotted decimal only: no hex, octal or shortened forms.
+            host = str(ipaddress.IPv4Address(host))
         elif not all(_HOST_LABEL.fullmatch(label) for label in host.split(".")):
             raise ValueError
     except ValueError:
         raise ValueError(
-            "must name a DNS host, an IPv4 address or a bracketed IPv6 address"
+            "must name a DNS host, a dotted-decimal IPv4 address or a bracketed "
+            "IPv6 address"
         ) from None
-    return url
+    default_port = 443 if parts.scheme == "https" else 80
+    authority = host if port in (None, default_port) else f"{host}:{port}"
+    return f"{parts.scheme}://{authority}{parts.path}"
 
 
 def validate_public_origin(origin: str | None) -> str | None:
