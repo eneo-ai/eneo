@@ -17,6 +17,7 @@
 Even with a single tenant, you may want `FEDERATION_PER_TENANT_ENABLED=true` if you prefer to:
 - Manage OIDC settings via the sysadmin API instead of environment variables
 - Change IdP configuration without restarting the backend
+- Let the organisation's admins change the client ID, secret and allowed domains in the web app
 - Use the same API-based workflow as multi-tenant deployments
 
 ### Single-Tenant via Environment Variables (Default)
@@ -39,7 +40,7 @@ Key components
 1. **Database** – `tenants.slug`, `tenants.federation_config` (Fernet-encrypted client secrets)
 2. **CredentialResolver** – deterministic lookup order: tenant config → global env → error
 3. **Public endpoints** – `/auth/tenants`, `/auth/initiate`, `/auth/callback`
-4. **Admin endpoints** – `/api/v1/sysadmin/tenants/{tenant_id}/federation[...]`
+4. **Admin endpoints** – `/api/v1/sysadmin/tenants/{tenant_id}/federation[...]` (operator, super API key) and `/api/v1/admin/federation` (the organisation's own admins, signed-in session)
 5. **Observability toggle** – `/api/v1/sysadmin/observability/oidc-debug/` for correlation-based triage
 
 ---
@@ -61,7 +62,9 @@ Admin APIs (super API key required)
 | `DELETE /federation`                                    | Remove per-tenant IdP              |
 | `POST /federation/test`                                 | Dry-run discovery + field checks   |
 
-Secrets (`client_secret`) are encrypted; responses only return masked tails.
+Secrets (`client_secret`) are encrypted; operator responses only return masked tails.
+
+After registration, an organisation's own admins can change the provider label, client ID, client secret and allowed email domains through `GET/PATCH /api/v1/admin/federation` (web app: **Admin → Sign-in (SSO)**). Everything else stays with the operator, the secret is never returned to them, and every change is audited regardless of the organisation's audit settings. See the [setup guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#21-what-the-organisations-admins-can-change-themselves) and its recovery runbook.
 
 ---
 

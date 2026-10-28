@@ -1,6 +1,6 @@
 # Multi-Tenant OIDC Setup Guide
 
-**Updated:** 2026-01-05
+**Updated:** 2026-10-28
 **Audience:** Platform & support engineers
 **Goal:** Let each tenant authenticate against its own IdP while keeping a single Eneo deployment.
 
@@ -74,6 +74,21 @@ curl -X PATCH "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federa
 
 Use `PUT` when you want to provide a full new federation definition or replace the current one.
 
+### 2.1 What the organisation's admins can change themselves
+Once the operator has registered an IdP, an admin of that organisation (`Permission.ADMIN`, signed in to the web app; API keys are refused) can change four settings at `GET/PATCH /api/v1/admin/federation`, under **Admin → Sign-in (SSO)**:
+
+| Setting | Org admin | Operator (super API key) |
+|---|---|---|
+| Provider label, client ID, client secret (write-only), allowed email domains | edit | edit |
+| Discovery endpoint, issuer and every endpoint derived from it | read | edit |
+| Redirect URIs (`canonical_public_origin`, `redirect_path`, `additional_redirect_uris`) | read and copy | edit |
+| Scopes, claim mapping, token auth method | read | edit |
+| First registration, replacing the IdP, delete | no | yes |
+
+- The admin never sees the secret, not even its last characters: only that one is set and when it was replaced.
+- Each save sends the `revision` it was made against; a save against settings someone else changed meanwhile gets `409 federation_config_revision_conflict`.
+- Every change, from either door, is written to the audit log as `federation_updated` with each field from what to what (the secret only as `{"replaced": true}`). This action is logged even when the organisation switched off auditing, the admin-actions category or the action itself.
+
 ---
 
 ## 3. Runtime Debugging (Correlation-ID Based)
@@ -116,7 +131,23 @@ curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
 
 ---
 
-## 4. Support Playbook (TL;DR)
+## 4. Recovery: SSO sign-in broke after a settings change
+A wrong client ID, secret or domain list stops SSO sign-in for everyone in that organisation. The admin who saved it keeps their current session until it expires; local-password accounts still sign in at `/login?showUsernameAndPassword=true`.
+
+1. **Find the change.** In the organisation's audit log, filter on `federation_updated`. The newest entry names who changed which field from what to what.
+2. **Restore it with one operator call.** Send the previous values (a replaced secret is not in the log; take the current one from the IdP's client registration):
+   ```bash
+   curl -X PATCH "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+     -H "X-API-Key: {SUPER_API_KEY}" \
+     -H "Content-Type: application/json" \
+     -d '{"client_id": "{previous-client-id}", "client_secret": "{secret-from-the-idp}"}'
+   ```
+   The operator call is audited too.
+3. **Verify** with a fresh SSO sign-in; if it still fails, use the correlation-ID flow in section 3.
+
+---
+
+## 5. Support Playbook (TL;DR)
 1. **Report comes in** → enable debug toggle (10 min window)
 2. **Reproduce or ask user to retry** → capture `correlationId`
 3. **Filter logs** → identify breadcrumb from table above
@@ -127,7 +158,7 @@ curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
 
 ---
 
-## 5. References
+## 6. References
 - [`FEDERATION_PER_TENANT.md`](./FEDERATION_PER_TENANT.md) – architecture & migration notes
 - [AI Providers](https://docs.eneo.ai/guides/ai-providers) – provider configuration & credential management
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) – incident catalogue

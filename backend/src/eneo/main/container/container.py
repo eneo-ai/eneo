@@ -378,6 +378,7 @@ from eneo.templates.assistant_template.assistant_template_service import (
 )
 from eneo.templates.templates_service import TemplateService
 from eneo.tenants.tenant import TenantInDB
+from eneo.tenants.tenant_federation_service import TenantFederationService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.tenants.tenant_service import TenantService
 from eneo.token_usage.application.token_usage_service import TokenUsageService
@@ -896,6 +897,12 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    tenant_federation_service = providers.Factory(
+        TenantFederationService,
+        tenant_repo=tenant_repo,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
     )
 
     # Completion model adapters

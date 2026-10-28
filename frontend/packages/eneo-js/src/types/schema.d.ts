@@ -1142,7 +1142,9 @@ export interface paths {
      *
      *     **Behavior:**
      *     - Updates the `audit_logging_enabled` feature flag for your tenant
-     *     - When disabled: No audit logs are created for any action (global kill switch)
+     *     - When disabled: No audit logs are created (global kill switch), except for
+     *       changes to the organisation's sign-in settings (`federation_updated`), which
+     *       are always logged
      *     - When enabled: Audit logging resumes with category and action-level filtering
      *     - This is independent from category/action configuration
      *     - Change takes effect immediately for all workers
@@ -9061,6 +9063,30 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/federation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the organisation's sign-in settings
+     * @description The identity provider the operator registered for the caller's organisation. The client secret is never returned, only whether it is set and when it was last replaced.
+     */
+    get: operations["get_federation_api_v1_admin_federation_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Change the organisation's sign-in settings
+     * @description Change the label, client ID, client secret or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited.
+     */
+    patch: operations["patch_federation_api_v1_admin_federation_patch"];
     trace?: never;
   };
   "/api/v1/module-auth/tickets/": {
@@ -22553,6 +22579,45 @@ export interface components {
       description?: string | null;
     };
     /**
+     * TenantAdminFederationPatch
+     * @description What an org admin may change in their tenant's registered IdP.
+     *
+     *     Every other field (the authorization server and its endpoints, redirect
+     *     topology, scopes, claim mapping, token auth method) is operator-owned and
+     *     refused as an unknown field.
+     */
+    TenantAdminFederationPatch: {
+      /**
+       * Revision
+       * @description The revision from GET that this change was made against. A save against an older revision is refused with 409.
+       */
+      revision: string;
+      /**
+       * Provider
+       * @description Identity provider label
+       */
+      provider?: string | null;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id?: string | null;
+      /**
+       * Client Secret
+       * @description Replacement OAuth client secret. Write-only: never returned.
+       */
+      client_secret?: string | null;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed to sign in (e.g., ['stockholm.se'])
+       * @example [
+       *       "stockholm.se",
+       *       "stockholm.gov.se"
+       *     ]
+       */
+      allowed_domains?: string[] | null;
+    };
+    /**
      * TenantAppTestResult
      * @description Result of testing tenant app credentials.
      */
@@ -22823,6 +22888,64 @@ export interface components {
       is_default?: boolean | null;
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * TenantFederationAdminView
+     * @description A tenant's federation settings as its admin sees them. Never the secret
+     *     or any part of it.
+     */
+    TenantFederationAdminView: {
+      /**
+       * Configured
+       * @description Whether the operator has registered an identity provider
+       */
+      configured: boolean;
+      /** Provider */
+      provider?: string | null;
+      /**
+       * Discovery Endpoint
+       * @description Operator-owned. Shown as text, never as a link.
+       */
+      discovery_endpoint?: string | null;
+      /**
+       * Issuer
+       * @description Operator-owned, from discovery
+       */
+      issuer?: string | null;
+      /** Client Id */
+      client_id?: string | null;
+      /**
+       * Client Secret Set
+       * @default false
+       */
+      client_secret_set?: boolean;
+      /** Client Secret Updated At */
+      client_secret_updated_at?: string | null;
+      /** Encryption Status */
+      encryption_status?: ("encrypted" | "plaintext") | null;
+      /** Allowed Domains */
+      allowed_domains?: string[];
+      /**
+       * Redirect Uris
+       * @description Operator-owned callback URIs to register at the IdP
+       */
+      redirect_uris?: string[];
+      /**
+       * Redirect Uris Problem
+       * @description Set when the redirect URIs cannot be computed
+       */
+      redirect_uris_problem?: "unresolvable" | null;
+      /** Scopes */
+      scopes?: string[];
+      /** Token Endpoint Auth Method */
+      token_endpoint_auth_method?: string | null;
+      /**
+       * Revision
+       * @description Send back with PATCH; changes whenever the settings do
+       */
+      revision?: string | null;
+      /** Configured At */
+      configured_at?: string | null;
     };
     /** TenantImageModelCreate */
     TenantImageModelCreate: {
@@ -24729,6 +24852,8 @@ export interface components {
       request_integration_form_url: string | null;
       /** Mcp App Content Origin */
       mcp_app_content_origin: string | null;
+      /** Federation Enabled */
+      federation_enabled: boolean;
     };
     /**
      * WebsiteBulkActionError
@@ -56518,6 +56643,122 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_federation_api_v1_admin_federation_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantFederationAdminView"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  patch_federation_api_v1_admin_federation_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantAdminFederationPatch"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantFederationAdminView"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
