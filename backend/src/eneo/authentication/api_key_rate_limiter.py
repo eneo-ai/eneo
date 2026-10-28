@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, cast
+from typing import Any
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyV2InDB
@@ -10,16 +10,10 @@ from eneo.redis.rate_limit import (
     RateLimitConfig,
     RateLimitResult,
     RateLimitServiceUnavailableError,
-)
-from eneo.redis.rate_limit import (
-    check_rate_limit as _raw_check_rate_limit,  # pyright: ignore[reportUnknownVariableType]
+    check_rate_limit,
 )
 
 logger = get_logger(__name__)
-CheckRateLimit = Callable[
-    [Any, str, RateLimitConfig | None], Awaitable[RateLimitResult]
-]
-_check_rate_limit = cast(CheckRateLimit, _raw_check_rate_limit)  # pyright: ignore[reportUnknownVariableType]
 
 
 class ApiKeyRateLimiter:
@@ -51,7 +45,7 @@ class ApiKeyRateLimiter:
         key_name = self._build_key(key)
 
         try:
-            result: RateLimitResult = await _check_rate_limit(
+            result: RateLimitResult = await check_rate_limit(
                 self.redis_client, key_name, config
             )
         except RateLimitServiceUnavailableError as exc:
