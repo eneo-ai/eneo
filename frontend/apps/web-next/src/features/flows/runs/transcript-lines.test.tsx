@@ -1000,7 +1000,8 @@ describe("TranscriptLines with audio, a long transcript", { timeout: 30_000 }, (
   });
 });
 
-describe("TranscriptLines, marking text in a long transcript", () => {
+// Two hundred lines take a couple of seconds in jsdom, more on a loaded runner.
+describe("TranscriptLines, marking text in a long transcript", { timeout: 30_000 }, () => {
   const COUNT = 200;
   // Every third line is SPEAKER_00, so turns hold one or two lines.
   const long = parseSegments(
