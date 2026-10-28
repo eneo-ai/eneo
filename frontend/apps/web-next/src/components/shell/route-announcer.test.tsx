@@ -1,52 +1,34 @@
 // @vitest-environment jsdom
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  HeadContent,
-  Outlet,
-  RouterProvider
-} from "@tanstack/react-router";
-import { act, render, waitFor } from "@testing-library/react";
-import { createTranslator } from "use-intl";
+import { createRoute, HeadContent, type AnyRootRoute } from "@tanstack/react-router";
+import { act, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import messages from "@/lib/i18n/messages/sv.json";
-import { testQueryClient } from "@/test/render";
-import { createAppRouter } from "@/router";
+import { renderWithRouter } from "@/test/router";
 import { RouteAnnouncer } from "./route-announcer";
 
 const announce = vi.hoisted(() => vi.fn());
-vi.mock("@astryxdesign/core/hooks", () => ({ useAnnounce: () => announce }));
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => announce
+}));
 
 beforeEach(() => announce.mockClear());
 
-function routeTree() {
-  const root = createRootRoute({
-    component: () => (
-      <>
-        <HeadContent />
-        <RouteAnnouncer />
-        <Outlet />
-      </>
-    )
+const page = (root: AnyRootRoute, path: string, title: string) =>
+  createRoute({
+    getParentRoute: () => root,
+    path,
+    head: () => ({ meta: [{ title }] }),
+    component: () => <h1>{title}</h1>
   });
-  const page = (path: string, title: string) =>
-    createRoute({
-      getParentRoute: () => root,
-      path,
-      head: () => ({ meta: [{ title }] }),
-      component: () => <h1>{title}</h1>
-    });
-  return root.addChildren([page("/a", "A · Eneo"), page("/b", "B · Eneo")]);
-}
 
 async function renderAt(route: string) {
-  const router = createAppRouter(
-    { queryClient: testQueryClient(), t: createTranslator({ locale: "sv", messages }) },
-    { routeTree: routeTree(), history: createMemoryHistory({ initialEntries: [route] }) }
+  const { router } = await renderWithRouter(
+    <>
+      <HeadContent />
+      <RouteAnnouncer />
+    </>,
+    { route, routes: (root) => [page(root, "/a", "A · Eneo"), page(root, "/b", "B · Eneo")] }
   );
-  render(<RouterProvider router={router} />);
-  await act(() => router.load());
   return router;
 }
 
@@ -64,7 +46,7 @@ it("announces nothing on the first page load", async () => {
 it("announces the new page's title once, without moving focus", async () => {
   const router = await renderAt("/a");
 
-  await act(() => router.navigate({ to: "/b" }));
+  await act(() => router.navigate({ href: "/b" }));
 
   await waitFor(() => expect(announce).toHaveBeenCalledWith("B · Eneo"));
   await nextFrame();
@@ -75,7 +57,7 @@ it("announces the new page's title once, without moving focus", async () => {
 it("announces nothing when only the query changes", async () => {
   const router = await renderAt("/a");
 
-  await act(() => router.navigate({ to: "/a", search: { x: "1" } }));
+  await act(() => router.navigate({ href: "/a?x=1" }));
   await nextFrame();
 
   expect(router.state.location.href).toBe("/a?x=1");

@@ -11,6 +11,9 @@
  * `setRoute`), and `router` records where the app navigates. Both reset after
  * every test (src/test/setup-dom.ts). `replaceUrl` rerenders the hooks' users,
  * as both routers do; after `setRoute`, rerender yourself.
+ *
+ * A route component, or the TanStack navigation itself, is tested in a real
+ * router instead: `renderWithRouter` (src/test/router.tsx).
  */
 import { createElement, useSyncExternalStore } from "react";
 import { vi } from "vitest";

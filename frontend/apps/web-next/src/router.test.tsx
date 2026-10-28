@@ -1,19 +1,10 @@
 // @vitest-environment jsdom
 import { useSuspenseQuery } from "@tanstack/react-query";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  Outlet,
-  RouterProvider
-} from "@tanstack/react-router";
+import { createRoute, type AnyRootRoute } from "@tanstack/react-router";
 import { act, fireEvent, screen } from "@testing-library/react";
-import { createTranslator } from "use-intl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
-import messages from "@/lib/i18n/messages/sv.json";
-import { renderInApp, testQueryClient } from "@/test/render";
-import { createAppRouter } from "./router";
+import { renderWithRouter } from "@/test/router";
 
 let loaders: { slow: () => Promise<void>; failing: () => Promise<void> };
 let readData: () => Promise<string>;
@@ -21,7 +12,9 @@ let readData: () => Promise<string>;
 beforeEach(() => {
   loaders = { slow: async () => {}, failing: async () => {} };
   readData = async () => "data";
+  // A failed route logs its error (RouteError) and TanStack warns about it.
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -29,47 +22,37 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function routeTree() {
-  const root = createRootRoute({ component: Outlet });
-  return root.addChildren([
-    createRoute({ getParentRoute: () => root, path: "/", component: () => <h1>Start</h1> }),
-    createRoute({
-      getParentRoute: () => root,
-      path: "/admin/users",
-      component: () => <h1>Users</h1>
-    }),
-    createRoute({
-      getParentRoute: () => root,
-      path: "/slow",
-      loader: () => loaders.slow(),
-      component: () => <h1>Slow</h1>
-    }),
-    createRoute({
-      getParentRoute: () => root,
-      path: "/failing",
-      loader: () => loaders.failing(),
-      component: () => <h1>Loaded</h1>
-    }),
-    createRoute({
-      getParentRoute: () => root,
-      path: "/query",
-      component: function QueryPage() {
-        const { data } = useSuspenseQuery({ queryKey: ["page"], queryFn: () => readData() });
-        return <h1>{data}</h1>;
-      }
-    })
-  ]);
-}
+const routes = (root: AnyRootRoute) => [
+  createRoute({ getParentRoute: () => root, path: "/", component: () => <h1>Start</h1> }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/admin/users",
+    component: () => <h1>Users</h1>
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/slow",
+    loader: () => loaders.slow(),
+    component: () => <h1>Slow</h1>
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/failing",
+    loader: () => loaders.failing(),
+    component: () => <h1>Loaded</h1>
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/query",
+    component: function QueryPage() {
+      const { data } = useSuspenseQuery({ queryKey: ["page"], queryFn: () => readData() });
+      return <h1>{data}</h1>;
+    }
+  })
+];
 
 async function renderRouter(route: string) {
-  const queryClient = testQueryClient();
-  const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
-    { routeTree: routeTree(), history: createMemoryHistory({ initialEntries: [route] }) }
-  );
-  renderInApp(<RouterProvider router={router} />, { queryClient });
-  await act(() => router.load());
-  return router;
+  return (await renderWithRouter(null, { route, routes })).router;
 }
 
 it("drops a trailing slash and keeps the query", async () => {
@@ -122,7 +105,7 @@ it("shows the pending page only after a load has taken 200 ms", async () => {
   let finish = () => {};
   loaders.slow = () => new Promise((resolve) => (finish = resolve));
 
-  act(() => void router.navigate({ to: "/slow" }));
+  act(() => void router.navigate({ href: "/slow" }));
   await act(() => vi.advanceTimersByTimeAsync(150));
   expect(screen.queryByRole("status")).toBeNull();
   expect(screen.getByRole("heading", { name: "Start" })).toBeTruthy();
