@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { formatBytes } from "@/lib/format";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
@@ -74,6 +75,11 @@ export function AudioRecorderInput({
 
   const captureRef = useRef<Capture | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+
+  // A reload loses a recording until it is queued for the run and uploaded.
+  useBeforeUnloadWarning(
+    recording || (recorded !== null && files.length === 0) || files.some((file) => file.uploading)
+  );
 
   useEffect(
     () => () => {
