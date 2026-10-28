@@ -396,6 +396,7 @@ def _form_fields_from_metadata(
             label=field.label or field.name,
             required=field.required,
             options=field.options,
+            role=field.role,
         )
         for field in form_schema.fields
     ]

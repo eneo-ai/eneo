@@ -814,6 +814,48 @@ def test_export_preserves_form_fields_from_flow_metadata() -> None:
     assert envelope.draft.spec.form_fields[0].required is True
 
 
+def test_a_form_fields_role_goes_through_the_package_into_the_imported_form() -> None:
+    from eneo.flows.application.flow_draft_materialization import (
+        build_flow_draft_metadata_json,
+    )
+    from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+
+    assistant_id = uuid4()
+    fields = [
+        {"name": "meeting", "type": "text", "label": "Möte", "role": "run_label"},
+        {"name": "held_on", "type": "date", "label": "Datum", "role": "run_date"},
+        {"name": "case", "type": "text", "label": "Ärende"},
+    ]
+    envelope = _build_envelope(
+        flow=_flow(
+            metadata_json={"form_schema": {"fields": fields}},
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_bindings={"question": "{{ flow_input.case }}"},
+                )
+            ],
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    # What the package file holds, read back as an import reads it.
+    packaged = FlowDraftSpecCore.model_validate_json(
+        envelope.draft.spec.model_dump_json()
+    )
+    imported = build_flow_draft_metadata_json(spec=packaged, steps=[])
+
+    assert imported is not None
+    assert [
+        (field["name"], field.get("role"))
+        for field in imported["form_schema"]["fields"]
+    ] == [("meeting", "run_label"), ("held_on", "run_date"), ("case", None)]
+    # A field without a role packs as before, so packages and their hashes do not move.
+    assert "role" not in packaged.form_fields[2].model_dump(mode="json")
+
+
 @pytest.mark.parametrize(
     "step_kwargs",
     [

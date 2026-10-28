@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
@@ -1009,6 +1009,8 @@ class FlowRuns(BasePublic):
         sa.DateTime(timezone=True), nullable=True
     )
     run_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+    # The day the run is about (a meeting's), from the form field with role run_date.
+    run_date: Mapped[Optional[date]] = mapped_column(sa.Date(), nullable=True)
     input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
@@ -388,6 +388,7 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "principal_type": "user",
     "started_by": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
     "run_label": "Case 123",
+    "run_date": None,
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -1073,7 +1074,9 @@ class FlowRunCreateRequest(BaseModel):
         description=(
             "Caller-supplied run label. Normalized to Unicode NFC and trimmed on "
             "creation; must contain 1–120 characters and no line breaks or control "
-            "characters. Omitted or null labels are stored as null. The label is "
+            "characters. Omitted or null, the run takes the value of the flow's "
+            "form field with the role `run_label` (made one line and cut to 120 "
+            "characters), else no label. The label is "
             "run metadata: the content-free list and status reads return it and "
             "the list searches it, so name the run rather than describe its content."
         ),
@@ -1551,13 +1554,24 @@ class FlowRunSummaryPublic(BaseModel):
         min_length=1,
         max_length=ONE_LINE_TEXT_MAX_CHARS,
         description=(
-            "The run's name, as the caller supplied it on creation (NFC, trimmed, "
-            "one line). It is run metadata, not run content: it is returned by the "
+            "The run's name, as the caller supplied it on creation or else the "
+            "value of the flow's form field with the role `run_label` (NFC, "
+            "trimmed, one line). It also heads the names of the documents the run "
+            "generates. It is run metadata, not run content: it is returned by the "
             "content-free list and status reads and matched by the list's "
             "`search`, so it should name the run (a case number, a meeting), not "
-            "carry what the run is about. Null when the run was started without one."
+            "carry what the run is about. Null when the run has none."
         ),
         examples=["Case 123"],
+    )
+    run_date: date | None = Field(
+        default=None,
+        description=(
+            "The day the run is about (a meeting's), from the value of the flow's "
+            "form field with the role `run_date`. Run metadata like `run_label`; "
+            "null when the flow has no such field or it was left empty."
+        ),
+        examples=["2026-10-01"],
     )
     tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
     trace_id: UUID = Field(

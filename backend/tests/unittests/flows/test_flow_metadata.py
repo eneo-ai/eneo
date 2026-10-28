@@ -566,3 +566,82 @@ def test_flow_evidence_policy_persisted_read_keeps_a_stored_boolean(
     assert serialize_flow_metadata(parsed) == {
         "evidence_policy": {"allow_export": allowed}
     }
+
+
+def test_a_text_field_can_name_the_run_and_a_date_field_date_it() -> None:
+    parsed = parse_flow_form_schema(
+        _metadata(
+            [
+                {"name": "meeting", "type": "text", "role": "run_label"},
+                {"name": "held_on", "type": "date", "role": "run_date"},
+                {"name": "notes", "type": "text"},
+            ]
+        ),
+        mode=FlowFormSchemaParseMode.WRITE,
+    )
+
+    assert parsed is not None
+    assert [field.role for field in parsed.fields] == ["run_label", "run_date", None]
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        (
+            [{"name": "held_on", "type": "date", "role": "run_label"}],
+            "metadata_json.form_schema.fields[0].role 'run_label' is only valid for a text field.",
+        ),
+        (
+            [{"name": "meeting", "type": "text", "role": "run_date"}],
+            "metadata_json.form_schema.fields[0].role 'run_date' is only valid for a date field.",
+        ),
+        (
+            [{"name": "meeting", "type": "text", "role": "title"}],
+            "metadata_json.form_schema.fields[0].role must be 'run_label' or 'run_date'.",
+        ),
+        (
+            [
+                {"name": "meeting", "type": "text", "role": "run_label"},
+                {"name": "case", "type": "text", "role": "run_label"},
+            ],
+            "metadata_json.form_schema.fields[1].role 'run_label' is already on another field.",
+        ),
+    ],
+)
+def test_a_field_role_that_cannot_hold_is_refused_on_write(
+    fields: list[dict[str, object]], message: str
+) -> None:
+    with pytest.raises(BadRequestException, match=re.escape(message)):
+        parse_flow_form_schema(_metadata(fields), mode=FlowFormSchemaParseMode.WRITE)
+
+
+def test_a_stored_role_that_cannot_hold_is_dropped_and_its_field_kept() -> None:
+    parsed = parse_flow_metadata(
+        _metadata(
+            [
+                {"name": "meeting", "type": "text", "role": "run_label"},
+                {"name": "case", "type": "text", "role": "run_label"},
+                {"name": "held_on", "type": "date", "role": "title"},
+            ]
+        ),
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+    assert serialize_flow_metadata(parsed) == _metadata(
+        [
+            {"name": "meeting", "type": "text", "role": "run_label"},
+            {"name": "case", "type": "text"},
+            {"name": "held_on", "type": "date"},
+        ]
+    )
+
+
+def test_a_field_without_a_role_is_saved_without_one() -> None:
+    parsed = parse_flow_metadata(
+        _metadata([{"name": "meeting", "type": "text", "role": None}]),
+        mode=FlowMetadataParseMode.WRITE,
+    )
+
+    assert serialize_flow_metadata(parsed) == _metadata(
+        [{"name": "meeting", "type": "text"}]
+    )

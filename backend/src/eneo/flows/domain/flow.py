@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
@@ -269,6 +269,7 @@ class FlowRunStatusSnapshot(BaseModel):
     job_id: Optional[UUID] = None
     evidence_classification_level: int | None = Field(default=None, ge=0)
     run_label: str | None = None
+    run_date: date | None = None
     created_at: datetime
     updated_at: datetime
 

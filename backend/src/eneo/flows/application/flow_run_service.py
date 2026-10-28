@@ -5,7 +5,7 @@ import json
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import partial
 from typing import Any, Sequence, cast
 from uuid import UUID
@@ -81,7 +81,10 @@ from eneo.flows.flow_run_input_envelope import (
     read_single_recording_steps,
     with_admitted_audio_seconds,
 )
-from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
+from eneo.flows.flow_run_input_payload import (
+    normalize_and_validate_flow_run_payload,
+    run_identity_from_form,
+)
 from eneo.flows.flow_run_payload_validation import (
     ensure_inline_payload_size_allowed,
     reject_reserved_input_payload_keys,
@@ -254,6 +257,7 @@ class _PublishedRunDefinition:
 class _PreparedRunCreation:
     input_payload_json: FlowPersistedJsonObject | None
     run_label: str | None
+    run_date: date | None
     preseed_steps: list[PreseedStep]
     step_input_files: list[FlowRunStepInputFileProjection]
     request_fingerprint: str
@@ -456,7 +460,7 @@ class FlowRunService:
                     flow_id=flow_id,
                     flow_version=published.flow_version,
                     input_payload_json=payload,
-                    run_label=run_label,
+                    run_label=prepared.run_label,
                     step_input_files=prepared.step_input_files,
                     purpose=purpose,
                 ),
@@ -649,6 +653,13 @@ class FlowRunService:
             payload=input_payload_json,
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
+        # The form names and dates the run when the flow says which fields do;
+        # a caller's own label wins.
+        form_label, run_date = run_identity_from_form(
+            metadata=definition.metadata(), payload=normalized_inline_payload
+        )
+        if run_label is None:
+            run_label = form_label
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps: list[PreseedStep] = [
             {
@@ -742,6 +753,7 @@ class FlowRunService:
         return _PreparedRunCreation(
             input_payload_json=prepared_payload,
             run_label=run_label,
+            run_date=run_date,
             preseed_steps=preseed_steps,
             step_input_files=step_input_file_projections,
             request_fingerprint=request_fingerprint,
@@ -830,6 +842,7 @@ class FlowRunService:
                 tenant_id=self.user.tenant_id,
                 input_payload_json=prepared.input_payload_json,
                 run_label=prepared.run_label,
+                run_date=prepared.run_date,
                 preseed_steps=prepared.preseed_steps,
                 step_input_files=prepared.step_input_files,
                 idempotency_key=idempotency_key,

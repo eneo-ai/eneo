@@ -934,6 +934,8 @@ class FlowRunExecutor:
                 flow_name=published_definition.name,
                 steps=steps,
                 run_created_at=run.created_at,
+                run_label=run.run_label,
+                run_date=run.run_date,
             )
         except PublishedDefinitionChecksumMismatchError as exc:
             await self._terminalize_run(

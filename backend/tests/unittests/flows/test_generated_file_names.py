@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import PureWindowsPath
 from unittest.mock import patch
 from uuid import uuid4
@@ -50,6 +50,63 @@ def test_one_document_is_named_after_the_flow_and_the_run_day() -> None:
     )
 
     assert names.name(step_order=2, output_type="pdf") == "Nämndmöte 2026-09-23.pdf"
+
+
+def test_a_named_and_dated_run_names_its_documents_after_itself() -> None:
+    steps = (_step(1, "text", "Transkribera"), _step(2, "docx", "Protokoll"))
+    names = GeneratedFileNames.for_run(
+        flow_name="Generell mötesantecknare med talare",
+        steps=steps,
+        run_created_at=RUN_CREATED_AT,
+        run_label="Testmöte 2",
+        run_date=date(2026, 10, 1),
+    )
+
+    assert names.name(step_order=2, output_type="docx") == "Testmöte 2 2026-10-01.docx"
+    assert names.stem(step_order=2, output_type="docx") == "Testmöte 2 2026-10-01"
+
+
+@pytest.mark.parametrize(
+    ("run_label", "run_date", "expected"),
+    [
+        ("Testmöte 2", None, "Testmöte 2 2026-09-23.pdf"),
+        (None, date(2026, 10, 1), "Nämndmöte 2026-10-01.pdf"),
+        (None, None, "Nämndmöte 2026-09-23.pdf"),
+        ("Möte: 3/4", None, "Möte 3 4 2026-09-23.pdf"),
+        ("../..", None, "Nämndmöte 2026-09-23.pdf"),
+    ],
+)
+def test_a_runs_name_and_day_each_stand_in_for_the_flows_and_the_run_day(
+    run_label: str | None, run_date: date | None, expected: str
+) -> None:
+    names = GeneratedFileNames.for_run(
+        flow_name="Nämndmöte",
+        steps=(_step(1, "pdf", "Protokoll"),),
+        run_created_at=RUN_CREATED_AT,
+        run_label=run_label,
+        run_date=run_date,
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == expected
+
+
+def test_a_named_runs_documents_of_one_type_still_carry_their_steps() -> None:
+    names = GeneratedFileNames.for_run(
+        flow_name="Nämndmöte",
+        steps=(_step(1, "pdf", "Protokoll"), _step(2, "pdf", "Beslut")),
+        run_created_at=RUN_CREATED_AT,
+        run_label="Testmöte 2",
+        run_date=date(2026, 10, 1),
+    )
+
+    assert (
+        names.name(step_order=1, output_type="pdf")
+        == "Testmöte 2 Protokoll 2026-10-01.pdf"
+    )
+    assert (
+        names.name(step_order=2, output_type="pdf")
+        == "Testmöte 2 Beslut 2026-10-01.pdf"
+    )
 
 
 def test_steps_sharing_a_document_type_add_their_names() -> None:

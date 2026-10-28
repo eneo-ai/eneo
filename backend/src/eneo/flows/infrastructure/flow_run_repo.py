@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Collection, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -591,6 +591,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.job_id,
     FlowRuns.evidence_classification_level,
     FlowRuns.run_label,
+    FlowRuns.run_date,
     FlowRuns.created_at,
     FlowRuns.updated_at,
 )
@@ -653,6 +654,7 @@ class FlowRunRepository:
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
         run_label: str | None = None,
+        run_date: date | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> FlowRun:
         now_utc = datetime.now(timezone.utc)
@@ -681,6 +683,7 @@ class FlowRunRepository:
                 idempotency_key=idempotency_key,
                 request_fingerprint=request_fingerprint,
                 run_label=run_label,
+                run_date=run_date,
                 purpose=purpose.value,
                 status=FlowRunStatus.QUEUED.value,
                 **start_flow_dispatch_epoch(now_utc),

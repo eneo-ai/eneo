@@ -36,7 +36,8 @@ _WINDOWS_DEVICE_NAMES = frozenset(
 class GeneratedFileNames:
     """Names every document of one run from the definition the run is pinned to.
 
-    ``<flow name> <YYYY-MM-DD>.<ext>``. When the definition has more than one
+    ``<flow name> <YYYY-MM-DD>.<ext>``, or for a run with a name and a day (a
+    meeting's, from its form) that name and that day. When the definition has more than one
     step producing a document type, each such document also carries its
     step's name before the date, and when two of them would still share a name,
     every document of that type carries ``Steg <n>`` too. Both are decided from
@@ -57,13 +58,17 @@ class GeneratedFileNames:
         flow_name: str,
         steps: Sequence[RuntimeStep],
         run_created_at: datetime,
+        run_label: str | None = None,
+        run_date: date | None = None,
     ) -> GeneratedFileNames:
         if run_created_at.tzinfo is None:
             run_created_at = run_created_at.replace(tzinfo=timezone.utc)
         return cls(
-            flow_name=flow_name,
-            # Eneo has no user or tenant time zone: a run is dated by its UTC day.
-            run_day=run_created_at.astimezone(timezone.utc).date(),
+            # A run's own name, when a file name can keep any of it.
+            flow_name=run_label if run_label and _clean(run_label) else flow_name,
+            # Eneo has no user or tenant time zone: a run without a day of its
+            # own is dated by its UTC day.
+            run_day=run_date or run_created_at.astimezone(timezone.utc).date(),
             step_names={step.step_order: step.user_description or "" for step in steps},
             documents={
                 output_type: tuple(

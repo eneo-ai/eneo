@@ -6,7 +6,7 @@ import logging
 import weakref
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import UUID, uuid4
@@ -574,11 +574,28 @@ def _attempt_start() -> FlowStepAttemptStart:
 
 
 @pytest.mark.asyncio
-async def test_documents_are_named_from_the_pinned_definition_and_creation_day(user):
+@pytest.mark.parametrize(
+    ("identity", "head", "day"),
+    [
+        ({}, "Nämndmöte", "2026-09-01"),
+        # A run named and dated by its form names its documents so.
+        (
+            {"run_label": "Testmöte 2", "run_date": date(2026, 8, 20)},
+            "Testmöte 2",
+            "2026-08-20",
+        ),
+    ],
+)
+async def test_documents_are_named_from_the_pinned_definition_and_creation_day(
+    user, identity, head, day
+):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     # Created a minute before midnight: the names keep that day, whenever it runs.
     run = _run(status=FlowRunStatus.RUNNING, user=user).model_copy(
-        update={"created_at": datetime(2026, 9, 1, 23, 59, tzinfo=timezone.utc)}
+        update={
+            "created_at": datetime(2026, 9, 1, 23, 59, tzinfo=timezone.utc),
+            **identity,
+        }
     )
     flow_run_repo.get = AsyncMock(return_value=run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
@@ -627,13 +644,8 @@ async def test_documents_are_named_from_the_pinned_definition_and_creation_day(u
     )
 
     names = executor._file_names()
-    assert (
-        names.name(step_order=1, output_type="pdf")
-        == "Nämndmöte Protokoll 2026-09-01.pdf"
-    )
-    assert (
-        names.name(step_order=2, output_type="pdf") == "Nämndmöte Beslut 2026-09-01.pdf"
-    )
+    assert names.name(step_order=1, output_type="pdf") == f"{head} Protokoll {day}.pdf"
+    assert names.name(step_order=2, output_type="pdf") == f"{head} Beslut {day}.pdf"
 
 
 @pytest.mark.asyncio

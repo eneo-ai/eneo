@@ -28,6 +28,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_capability_manifest import requires_completion_model
 from eneo.flows.flow_metadata import (
+    FlowFormFieldRole,
     parse_flow_form_field_type,
     parse_saved_form_field_type,
 )
@@ -188,6 +189,10 @@ class FormFieldSpec(BaseModel):
     label: str
     required: bool = False
     options: list[str] | None = None
+    # Left out when unset, so a spec without roles hashes and packs as before.
+    role: FlowFormFieldRole | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("type")
     @classmethod
@@ -250,6 +255,7 @@ def authoring_form_field(
     if not name:
         return None
     options = field.get("options")
+    role = field.get("role")
     return FormFieldSpec(
         name=name,
         type=parse_saved_form_field_type(field, index=index).value,
@@ -260,6 +266,7 @@ def authoring_form_field(
             if isinstance(options, list)
             else None
         ),
+        role=role if role in ("run_label", "run_date") else None,
     )
 
 
@@ -270,6 +277,7 @@ def authoring_form_field_payload(field: FormFieldSpec) -> FlowPersistedJsonObjec
         "label": field.label,
         "required": field.required,
         **({"options": field.options} if field.options is not None else {}),
+        **({"role": field.role} if field.role is not None else {}),
     }
 
 

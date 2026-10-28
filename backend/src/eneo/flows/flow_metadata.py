@@ -35,6 +35,13 @@ class FlowFormFieldType(str, Enum):
     LIST = "list"
 
 
+# What a field's value is to the run besides an input: its name (a text field) or its day (a date field).
+FlowFormFieldRole = Literal["run_label", "run_date"]
+_ROLE_FIELD_TYPES: dict[str, FlowFormFieldType] = {
+    "run_label": FlowFormFieldType.TEXT,
+    "run_date": FlowFormFieldType.DATE,
+}
+
 CareDataApprovalMode = Literal["single_reviewer_outside_flow"]
 CareDataPreApprovalVisibility = Literal["uploader_and_reviewers"]
 SUPPORTED_CARE_DATA_APPROVAL_MODES = frozenset({"single_reviewer_outside_flow"})
@@ -64,6 +71,7 @@ class FlowFormField(BaseModel):
     required: bool = False
     options: list[str] | None = None
     order: int | None = None
+    role: FlowFormFieldRole | None = None
 
 
 class FlowFormSchema(BaseModel):
@@ -202,6 +210,7 @@ def parse_flow_form_schema(
     parsed_fields: list[FlowFormField] = []
     seen_names: set[str] = set()
     seen_orders: set[int] = set()
+    seen_roles: set[str] = set()
     for index, field in enumerate(field_values):
         if not isinstance(field, Mapping):
             if mode is FlowFormSchemaParseMode.PERSISTED_READ:
@@ -217,6 +226,7 @@ def parse_flow_form_schema(
                 mode=mode,
                 seen_names=seen_names,
                 seen_orders=seen_orders,
+                seen_roles=seen_roles,
             )
         )
 
@@ -466,12 +476,16 @@ def _parse_form_field(
     mode: FlowFormSchemaParseMode,
     seen_names: set[str],
     seen_orders: set[int],
+    seen_roles: set[str],
 ) -> FlowFormField:
     field_name = _parse_field_name(field, index=index, mode=mode, seen_names=seen_names)
     field_type = parse_saved_form_field_type(field, index=index)
     required = _parse_required(field, index=index, mode=mode)
     order = _parse_order(field, index=index, mode=mode, seen_orders=seen_orders)
     options = _parse_options(field, index=index, field_type=field_type, mode=mode)
+    role = _parse_role(
+        field, index=index, field_type=field_type, mode=mode, seen_roles=seen_roles
+    )
 
     payload = dict(field)
     payload["name"] = field_name
@@ -483,6 +497,10 @@ def _parse_form_field(
         payload["order"] = order
     if "options" in field or options is not None:
         payload["options"] = options
+    if role is None:
+        payload.pop("role", None)
+    else:
+        payload["role"] = role
     return FlowFormField.model_validate(payload)
 
 
@@ -679,6 +697,37 @@ def _parse_options(
             "select or multiselect."
         )
     return None
+
+
+def _parse_role(
+    field: Mapping[str, object],
+    *,
+    index: int,
+    field_type: FlowFormFieldType,
+    mode: FlowFormSchemaParseMode,
+    seen_roles: set[str],
+) -> FlowFormFieldRole | None:
+    """The field's role, which one field of its type at most holds. A stored
+    role that cannot hold is dropped; the field stays."""
+    role = field.get("role")
+    if role is None:
+        return None
+    path = f"metadata_json.form_schema.fields[{index}].role"
+    if not isinstance(role, str) or role not in _ROLE_FIELD_TYPES:
+        problem = f"{path} must be 'run_label' or 'run_date'."
+    elif _ROLE_FIELD_TYPES[role] is not field_type:
+        problem = (
+            f"{path} '{role}' is only valid for a "
+            f"{_ROLE_FIELD_TYPES[role].value} field."
+        )
+    elif role in seen_roles:
+        problem = f"{path} '{role}' is already on another field."
+    else:
+        seen_roles.add(role)
+        return cast(FlowFormFieldRole, role)
+    if mode is FlowFormSchemaParseMode.PERSISTED_READ:
+        return None
+    raise BadRequestException(problem)
 
 
 def parse_form_field_options(options: list[object], *, index: int) -> list[str]:

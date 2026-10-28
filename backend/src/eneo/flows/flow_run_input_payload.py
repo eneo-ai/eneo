@@ -4,6 +4,7 @@ import math
 from datetime import date
 from typing import Any, cast
 
+from eneo.flows.domain.one_line_text import one_line_start
 from eneo.flows.domain.speaker_labels import parse_participants
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import FlowMetadata
@@ -23,6 +24,29 @@ def _flow_payload_error(
     if field_type is not None:
         context["field_type"] = field_type
     return BadRequestException(message, code=code.value, context=context or None)
+
+
+def run_identity_from_form(
+    *, metadata: FlowMetadata | None, payload: dict[str, Any] | None
+) -> tuple[str | None, date | None]:
+    """The run's name and day, from the normalized payload's values of the form
+    fields with the roles ``run_label`` and ``run_date``. A value that names or
+    dates nothing is none; it never refuses the run."""
+    form_schema = metadata.form_schema if metadata is not None else None
+    if form_schema is None or not payload:
+        return None, None
+    label: str | None = None
+    day: date | None = None
+    for field in form_schema.fields:
+        value = payload.get(field.name)
+        if field.role == "run_label" and isinstance(value, str):
+            label = one_line_start(value)
+        elif field.role == "run_date" and isinstance(value, str) and value:
+            try:
+                day = date.fromisoformat(value)
+            except ValueError:
+                day = None
+    return label, day
 
 
 def normalize_and_validate_flow_run_payload(

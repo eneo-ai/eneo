@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -5479,3 +5479,140 @@ async def test_create_run_idempotency_includes_normalized_run_label(
         assert replay.created is False
         assert replay.run.id == first.run.id
     assert run_repo.create.await_count == 1
+
+
+@pytest.fixture
+def named_creation(user):
+    flow = _flow(
+        user=user,
+        published_version=2,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": "Möte", "type": "text", "role": "run_label"},
+                    {"name": "Datum", "type": "date", "role": "run_date"},
+                    {"name": "Ärende", "type": "text"},
+                ]
+            }
+        },
+    )
+    flow_repo = _flow_repo()
+    _seed_flow_repo(flow_repo, flow)
+    run_repo = flow_run_repo_mock()
+    run_repo.count_active_runs.return_value = 0
+    run_repo.get_idempotent_run.return_value = None
+    run_repo.create.return_value = _run(user=user, flow_id=flow.id)
+    version_repo = AsyncMock()
+    version_repo.get.return_value = _version(user=user, flow=flow, version=2)
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=run_repo,
+        flow_version_repo=version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    return service, flow, run_repo
+
+
+@pytest.mark.asyncio
+async def test_create_run_names_and_dates_the_run_from_the_fields_with_those_roles(
+    named_creation,
+):
+    service, flow, run_repo = named_creation
+    await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={
+            "Möte": "  Testmöte\n 2 ",
+            "Datum": "2026-10-01",
+            "Ärende": "x",
+        },
+    )
+    kwargs = run_repo.create.await_args.kwargs
+    assert kwargs["run_label"] == "Testmöte 2"
+    assert kwargs["run_date"] == date(2026, 10, 1)
+
+
+@pytest.mark.asyncio
+async def test_create_run_keeps_the_callers_label_and_still_dates_the_run_from_the_form(
+    named_creation,
+):
+    service, flow, run_repo = named_creation
+    await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={"Möte": "Testmöte 2", "Datum": "2026-10-01"},
+        run_label="Ärende 7",
+    )
+    kwargs = run_repo.create.await_args.kwargs
+    assert kwargs["run_label"] == "Ärende 7"
+    assert kwargs["run_date"] == date(2026, 10, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "typed,expected",
+    [
+        ("Möte‮ 2", "Möte 2"),
+        ("x" * 300, "x" * 120),
+        ("a" * 119 + " b", "a" * 119),
+        ("", None),
+        ("​", None),
+        ("Årsmöte", "Årsmöte"),
+    ],
+)
+async def test_a_name_from_the_form_is_one_short_line_and_never_refuses_the_run(
+    named_creation, typed, expected
+):
+    service, flow, run_repo = named_creation
+    await service.create_run(flow_id=flow.id, input_payload_json={"Möte": typed})
+    derived = run_repo.create.await_args.kwargs["run_label"]
+    assert derived == expected
+    assert run_repo.create.await_args.kwargs["run_date"] is None
+    if derived is not None:
+        # A regeneration or a retry sends it back as the caller's label.
+        await service.create_run(
+            flow_id=flow.id, input_payload_json=None, run_label=derived
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_prefix_seed", [False, True])
+async def test_a_replay_naming_the_run_as_its_form_did_is_the_same_request(
+    named_creation, with_prefix_seed
+):
+    from eneo.flows.domain.step_output import inline_transcript
+
+    service, flow, run_repo = named_creation
+    seed = (
+        FlowRunPrefixSeed(
+            kind="reviewed_transcript_snapshot",
+            source_run_id=uuid4(),
+            transcript=inline_transcript(
+                text="Reviewed text",
+                source_step_id=uuid4(),
+                source_attempt_no=3,
+                selector_path=("output", "text"),
+            ),
+            provenance={"version": 1},
+            results=(),
+        )
+        if with_prefix_seed
+        else None
+    )
+    payload = {"Möte": "Testmöte 2"}
+    first = await service.create_run(
+        flow_id=flow.id,
+        input_payload_json=payload,
+        idempotency_key="named-key",
+        prefix_seed=seed,
+    )
+    fingerprint = run_repo.create.await_args.kwargs["request_fingerprint"]
+    run_repo.get_idempotent_run.return_value = (first.run, fingerprint)
+    replay = await service.create_run(
+        flow_id=flow.id,
+        input_payload_json=payload,
+        run_label="Testmöte 2",
+        idempotency_key="named-key",
+        prefix_seed=seed,
+    )
+    assert replay.created is False
