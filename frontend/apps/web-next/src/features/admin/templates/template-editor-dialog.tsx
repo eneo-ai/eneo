@@ -34,8 +34,12 @@ import { toast } from "@/lib/toast";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { isInputFieldType, InputTypeSelect } from "@/features/apps/editor/input-type-select";
 import type { InputFieldType } from "@/features/apps/apps";
-import { filterSupportedKwargs, type ModelKwargs } from "@/features/assistants/editor/model-kwargs";
-import { ModelKwargsRows } from "@/features/assistants/editor/model-kwargs-rows";
+import {
+  filterSupportedKwargs,
+  firstInvalidNumericKwarg,
+  type ModelKwargs
+} from "@/features/assistants/editor/model-kwargs";
+import { ModelKwargsRows, modelKwargFieldId } from "@/features/assistants/editor/model-kwargs-rows";
 import { TemplateCategoryField } from "./template-category-field";
 import { TemplateIconPicker } from "./template-icon-picker";
 import {
@@ -227,13 +231,18 @@ function TemplateEditorForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (save.isPending) return;
+        // A number the model setting cannot take would save, then fail when an
+        // app or assistant is created from the template.
+        const invalidKwarg = firstInvalidNumericKwarg(model, kwargs);
         const firstProblem = !name.trim()
           ? nameRef.current
           : !category.trim()
             ? categoryRef.current
             : isApp && !inputType
               ? "template-input-type"
-              : null;
+              : invalidKwarg
+                ? modelKwargFieldId("template", invalidKwarg)
+                : null;
         if (firstProblem) {
           revealProblems(() => setSubmitted(true), firstProblem);
           return;
@@ -334,6 +343,7 @@ function TemplateEditorForm({
         behaviourDescription={
           isApp ? t("model_behaviour_description") : t("select_preset_behavior")
         }
+        showProblems={submitted}
         onChange={setKwargs}
       />
 

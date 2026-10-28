@@ -239,6 +239,7 @@
   "template_category_transcription_description": "Apps that help transcribe and document speech and meetings.",
   "template_category_misc_apps_description": "Assorted apps for different functions and needs.",
   "help_about": "Help: {topic}",
+  "form_problem_number_between": "Enter a number from {min} to {max}.",
   "embedding_models_singular": "Embedding",
   "transcription_models_singular": "Transcription",
   "key_missing": "Key missing",

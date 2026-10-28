@@ -7,8 +7,9 @@ import type { LucideProps } from "lucide-react";
  * Template icons are picked by name from the whole Lucide set, so they cannot
  * be imported one by one. lucide-react's dynamic entry lists every name (and
  * the aliases Lucide keeps for renamed icons, `home` for `house`) and fetches
- * each icon as its own small chunk when it is first drawn; nothing of it is
- * on the startup path.
+ * each icon as its own small chunk when it is first drawn. The list (about
+ * 60 KB gzipped with its chunk map) goes with the code that imports this
+ * module, so keep it to the template surfaces.
  */
 export const TEMPLATE_ICON_NAMES: readonly IconName[] = iconNames;
 
@@ -29,6 +30,17 @@ export function templateIconName(name: string | null | undefined): IconName | nu
   if (!name) return null;
   byCompactName ??= new Map(TEMPLATE_ICON_NAMES.map((icon) => [compactIconName(icon), icon]));
   return byCompactName.get(compactIconName(name)) ?? null;
+}
+
+/**
+ * The name a picked icon is stored under: its Lucide name without a dash
+ * before a digit (`building-2` → `building2`, `arrow-down-0-1` →
+ * `arrow-down01`). That is the form the Svelte app stores and the only one its
+ * reader resolves, since it capitalises just the letters after a dash;
+ * templateIconName reads both forms.
+ */
+export function storedTemplateIconName(name: IconName): string {
+  return name.replace(/-(?=\d)/g, "");
 }
 
 /** A template's Lucide icon by its stored name; nothing for an unset or unknown name. */

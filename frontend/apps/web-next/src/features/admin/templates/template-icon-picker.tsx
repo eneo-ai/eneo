@@ -1,12 +1,12 @@
 "use client";
 
 import { Check, Sparkles } from "lucide-react";
+import type { IconName } from "lucide-react/dynamic";
 import { useTranslations } from "next-intl";
 import { useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -19,6 +19,7 @@ import {
   TEMPLATE_ICON_NAMES,
   TemplateIcon,
   compactIconName,
+  storedTemplateIconName,
   templateIconName
 } from "@/features/templates/template-icon";
 import { cn } from "@/lib/utils";
@@ -49,7 +50,7 @@ const POPULAR_ICONS = [
   "music",
   "code",
   "database"
-] as const;
+] as const satisfies readonly IconName[];
 
 /** Search results drawn at once; refining the search finds the rest. */
 const MAX_RESULTS = 200;
@@ -91,8 +92,8 @@ export function TemplateIconPicker({
 
   const label = value ? t("change_icon_current", { iconName: value }) : t("choose_template_icon");
 
-  function iconButton(name: string) {
-    const isSelected = name === selected;
+  function iconButton(name: IconName) {
+    const isSelected = value !== null && compactIconName(name) === compactIconName(value);
     return (
       <li key={name}>
         <button
@@ -100,7 +101,7 @@ export function TemplateIconPicker({
           aria-label={t("select_icon", { iconName: name })}
           aria-pressed={isSelected}
           title={name}
-          onClick={() => choose(name)}
+          onClick={() => choose(storedTemplateIconName(name))}
           className={cn(
             "rounded-ax-inner focus-visible:outline-ring relative flex size-11 items-center justify-center border-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
             isSelected ? "border-primary bg-accent" : "hover:bg-muted border-transparent"
@@ -179,18 +180,14 @@ export function TemplateIconPicker({
             {t("no_icons_found", { query: search.trim() })}
           </p>
         )}
-        <DialogFooter>
-          {value && (
+        {/* The corner ✕ and Escape close it; clearing is the one footer action. */}
+        {value && (
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => choose(null)}>
               {t("clear_selection")}
             </Button>
-          )}
-          <DialogClose asChild>
-            <Button type="button" variant="outline">
-              {t("close")}
-            </Button>
-          </DialogClose>
-        </DialogFooter>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

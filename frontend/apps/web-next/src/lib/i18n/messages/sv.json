@@ -5459,6 +5459,7 @@
   "template_category_transcription_description": "Appar som hjälper till med att transkribera och dokumentera tal och möten.",
   "template_category_misc_apps_description": "Diverse appar för olika funktioner och behov.",
   "help_about": "Hjälp: {topic}",
+  "form_problem_number_between": "Ange ett tal från {min} till {max}.",
   "embedding_models_singular": "Inbäddning",
   "transcription_models_singular": "Transkribering",
   "key_missing": "Nyckel saknas",

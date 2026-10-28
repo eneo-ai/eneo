@@ -194,18 +194,19 @@ export function templateCategoryInfo(
 }
 
 /**
- * The completion model a template form starts with: the template's own (by
- * id, or by name for a model since replaced), else the first available.
+ * The completion model a template form starts with: the template's own by id,
+ * else by name (a model since replaced), else the first available. The id
+ * goes first: models may share a name.
  */
 export function findTemplateModel<T extends { id: string; name: string }>(
   models: readonly T[],
   template?: { completion_model_id?: string | null; completion_model_name?: string | null }
 ): T | null {
-  const match =
-    template &&
-    models.find(
-      (model) =>
-        model.id === template.completion_model_id || model.name === template.completion_model_name
-    );
-  return match || models[0] || null;
+  const byId = template?.completion_model_id
+    ? models.find((model) => model.id === template.completion_model_id)
+    : undefined;
+  const byName = template?.completion_model_name
+    ? models.find((model) => model.name === template.completion_model_name)
+    : undefined;
+  return byId ?? byName ?? models[0] ?? null;
 }

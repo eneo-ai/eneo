@@ -22,7 +22,8 @@ const MODELS = [
   // Presets and top_p.
   model("gpt-4o", "GPT-4o", {
     temperature: { supported: true, minimum: 0, maximum: 2 },
-    top_p: { supported: true, minimum: 0, maximum: 1 }
+    top_p: { supported: true, minimum: 0, maximum: 1 },
+    top_k: { supported: true, minimum: 1, maximum: 100 }
   }),
   // No temperature, so no presets; reasoning effort instead.
   model("o3", "o3", {
@@ -196,6 +197,66 @@ describe("TemplateEditorDialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
     expect(lastBody(api.PATCH).completion_model_kwargs).toEqual({ reasoning_effort: "high" });
+  });
+
+  it("will not save a number a model setting cannot take", async () => {
+    renderEditor({
+      kind: "apps",
+      template: appTemplate({ completion_model_kwargs: { top_p: 1.5, top_k: 2.5 } })
+    });
+    const dialog = screen.getByRole("dialog", { name: "Redigera mall" });
+    const topP = await within(dialog).findByLabelText("Top P");
+    const topK = within(dialog).getByLabelText("Top K");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    expect(topP.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Ange ett tal från 0 till 1.")).toBeTruthy();
+    // top_k is a whole number: a fraction would fail when an app is created from the template.
+    expect(topK.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Ange ett heltal från 1 till 100.")).toBeTruthy();
+    expect(document.activeElement).toBe(topP);
+    expect(api.PATCH).not.toHaveBeenCalled();
+
+    fireEvent.change(topP, { target: { value: "0.9" } });
+    fireEvent.change(topK, { target: { value: "40" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    expect(lastBody(api.PATCH).completion_model_kwargs).toEqual({ top_p: 0.9, top_k: 40 });
+  });
+
+  it("stores a picked icon the way the Svelte app reads it", async () => {
+    renderEditor({ kind: "assistants" });
+    const dialog = screen.getByRole("dialog", { name: "Ny mall" });
+    fireEvent.change(await within(dialog).findByLabelText("Mallnamn"), {
+      target: { value: "Fastighetsstöd" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Välj mallikon" }));
+    const picker = await screen.findByRole("dialog", { name: "Välj en ikon" });
+    fireEvent.change(
+      within(picker).getByLabelText("Sök ikoner... (t.ex. 'raket', 'mejl', 'diagram')"),
+      { target: { value: "building 2" } }
+    );
+    fireEvent.click(within(picker).getByRole("button", { name: "Välj ikon: building-2" }));
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Ändra ikon, nuvarande: building2" })
+    );
+    // Reopened, the stored name marks its icon as chosen.
+    const again = await screen.findByRole("dialog", { name: "Välj en ikon" });
+    fireEvent.change(
+      within(again).getByLabelText("Sök ikoner... (t.ex. 'raket', 'mejl', 'diagram')"),
+      { target: { value: "building 2" } }
+    );
+    expect(
+      within(again)
+        .getByRole("button", { name: "Välj ikon: building-2" })
+        .getAttribute("aria-pressed")
+    ).toBe("true");
+    fireEvent.keyDown(again, { key: "Escape" });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(lastBody(api.POST)).toMatchObject({ icon_name: "building2" });
   });
 
   it("picks the icon by searching, shows it, and can clear it", async () => {
