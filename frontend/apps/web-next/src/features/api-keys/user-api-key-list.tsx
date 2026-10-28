@@ -1,7 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useRef, useState, type ReactNode } from "react";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
@@ -15,7 +16,6 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -96,6 +96,8 @@ export function UserApiKeyList({
   const t = useTranslations();
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
   const panelRef = useRef<HTMLDivElement>(null);
+  const tabsId = useId();
+  const panelId = `${tabsId}-panel`;
 
   const keys = usePaginatedQuery({
     queryKey: [...API_KEYS_KEY, scope?.type, scope?.id, stateFilter],
@@ -119,24 +121,38 @@ export function UserApiKeyList({
   });
 
   return (
-    <Tabs
-      value={stateFilter}
-      onValueChange={(value) => setStateFilter(value as ApiKeyStateFilter)}
-      className="gap-4"
-    >
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <TabsList>
+        <TabList
+          role="tablist"
+          aria-label={t("api_keys")}
+          value={stateFilter}
+          onChange={(value) => setStateFilter(value as ApiKeyStateFilter)}
+          className="max-w-full min-w-0"
+          hasDivider
+        >
           {API_KEY_STATE_FILTERS.map((state) => (
-            <TabsTrigger key={state} value={state}>
-              {t(stateFilterLabelKey(state))}
-            </TabsTrigger>
+            <Tab
+              key={state}
+              id={`${tabsId}-${state}`}
+              value={state}
+              label={t(stateFilterLabelKey(state))}
+              panelId={panelId}
+            />
           ))}
-        </TabsList>
+        </TabList>
         {toolbar}
       </div>
 
       {/* The keys in the selected state: the state tabs' panel. */}
-      <TabsContent ref={panelRef} value={stateFilter} className="flex flex-col gap-4">
+      <div
+        ref={panelRef}
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={`${tabsId}-${stateFilter}`}
+        tabIndex={0}
+        className="focus-visible:outline-ring flex flex-col gap-4 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
         <RemovalFocusScope target={panelRef}>
           {keys.items.length === 0 && !keys.isPending ? (
             <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
@@ -212,7 +228,7 @@ export function UserApiKeyList({
             </>
           )}
         </RemovalFocusScope>
-      </TabsContent>
-    </Tabs>
+      </div>
+    </div>
   );
 }

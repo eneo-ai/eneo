@@ -98,6 +98,15 @@ test.describe("an editor on a small phone", () => {
           return main.scrollWidth - main.clientWidth;
         });
         expect(overflow, `section ${id}`).toBeLessThanOrEqual(0);
+        if (id === "api-keys") {
+          const tabs = page.getByRole("tablist", { name: "API-nycklar" }).getByRole("tab");
+          await tabs.first().focus();
+          await page.keyboard.press("End");
+          await expect(tabs.last()).toBeFocused();
+          await page.keyboard.press("Enter");
+          await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
+          await expect(tabs.last()).toBeInViewport();
+        }
       }
     });
   }
