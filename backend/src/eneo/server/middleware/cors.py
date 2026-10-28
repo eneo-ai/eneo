@@ -316,12 +316,23 @@ async def add_cors_headers(request: Request, response: Response) -> None:
     Starlette's ServerErrorMiddleware answers an unhandled exception outside
     every user middleware, so without this a browser cannot read the 500, its
     `error_id` or its trace headers.
+
+    The origin check may need the database, which can be what failed. A check
+    that fails leaves the origin unlisted (fail closed) rather than replacing
+    the JSON 500 with Starlette's plain-text fallback.
     """
     origin = request.headers.get("origin")
     if origin is None:
         return
     cors = CORSMiddleware(request.app, **CORS_OPTIONS)
-    origin_allowed = await cors.is_allowed_origin(
-        origin=origin, request_headers=request.headers, request_url=request.url
-    )
+    try:
+        origin_allowed = await cors.is_allowed_origin(
+            origin=origin, request_headers=request.headers, request_url=request.url
+        )
+    except Exception:
+        logger.warning(
+            "CORS origin check failed while answering an error; origin not allowed",
+            exc_info=True,
+        )
+        origin_allowed = False
     cors.add_simple_headers(response.headers, origin, origin_allowed)

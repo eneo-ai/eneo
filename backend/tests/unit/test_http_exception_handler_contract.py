@@ -12,6 +12,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.server.main import get_application
+from eneo.server.middleware import cors as cors_module
 
 
 def _build_client_for_exception(detail, status_code=503):
@@ -275,19 +276,48 @@ def test_validation_error_keeps_its_list_shape():
     assert isinstance(response.json()["detail"], list)
 
 
-def test_unhandled_error_carries_cors_trace_and_error_id():
+def _origin_checks(monkeypatch, *results):
+    """Answer the CORS origin checks in order: a bool, or an exception to raise."""
+    answers = iter(results)
+
+    async def check(*_args, **_kwargs):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setitem(cors_module.CORS_OPTIONS, "callback", check)
+
+
+def test_unhandled_error_carries_cors_trace_and_error_id(monkeypatch):
+    # The middleware's check, then the 500 handler's own.
+    _origin_checks(monkeypatch, True, True)
     response = _contract_app().get(
-        "/_test-unhandled", headers={"Origin": "http://localhost:3000"}
+        "/_test-unhandled", headers={"Origin": "https://app.example.com"}
     )
 
     assert response.status_code == 500
     payload = response.json()
     assert len(payload["error_id"]) == 8
     GeneralError.model_validate(payload)
-    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"
     assert response.headers["x-trace-id"]
     expose = response.headers["access-control-expose-headers"].lower()
     assert "x-trace-id" in expose and "x-correlation-id" in expose
+
+
+def test_unhandled_error_keeps_its_json_body_when_the_origin_check_fails(monkeypatch):
+    """The origin check can need the database the 500 came from."""
+    _origin_checks(monkeypatch, True, RuntimeError("database unavailable"))
+    response = _contract_app().get(
+        "/_test-unhandled", headers={"Origin": "https://app.example.com"}
+    )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert len(payload["error_id"]) == 8
+    GeneralError.model_validate(payload)
+    assert "access-control-allow-origin" not in response.headers
 
 
 def test_rate_limit_body_is_readable_flat_and_through_detail():
