@@ -4,14 +4,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { SkillForm } from "./skill-form";
 import { SkillRevisionHistory } from "./skill-revision-history";
@@ -24,7 +26,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [dirty, setDirty] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<unknown>(null);
   const key = skillQueryKey({ type: "space", spaceId: space.id });
   const base = `/spaces/${routeId}/skills`;
   const skill = useQuery({
@@ -53,7 +55,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
       queryClient.setQueryData([...key, skillId], next);
       await queryClient.invalidateQueries({ queryKey: key });
     },
-    { onSaved: () => {}, onError: (cause) => setStatusError(getErrorMessage(cause, t)) }
+    { onSaved: () => {}, onError: (cause) => setStatusError(cause) }
   );
 
   function setActive(value: boolean) {
@@ -61,24 +63,22 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
     saveActive(value);
   }
 
-  if (skill.isPending) return <p role="status">{t("loading")}</p>;
-  if (skill.isError)
+  if (blockingError(skill))
     return (
-      <Alert variant="destructive" role="alert">
-        <AlertTitle>{t("request_failed")}</AlertTitle>
-        <AlertDescription>
-          <Button variant="outline" onClick={() => void skill.refetch()}>
-            {t("retry")}
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <ListError
+        error={skill.error}
+        isRetrying={skill.isFetching}
+        onRetry={() => void skill.refetch()}
+      />
     );
+  if (!skill.data) return <LoadingState rows={4} />;
   const value = skill.data;
   const editable = can("edit", "skill");
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
       <PageHeader title={value.display_name} />
+      <RefreshError queries={[skill]} />
       <Button asChild variant="link" className="w-fit px-0">
         <Link href={base}>{t("skills")}</Link>
       </Button>
@@ -157,11 +157,8 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
               onCheckedChange={setActive}
             />
           </div>
-          {statusError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_status_error")}</AlertTitle>
-              <AlertDescription>{statusError}</AlertDescription>
-            </Alert>
+          {statusError != null && (
+            <ListError error={statusError} title={t("skills_library_status_error")} />
           )}
         </aside>
       </section>

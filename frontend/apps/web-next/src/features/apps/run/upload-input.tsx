@@ -2,13 +2,12 @@
 
 import { Loader2, Upload, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { FileFormatDetails } from "@/features/files/file-format-details";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
 import type { RunFile } from "./use-app-run";
@@ -85,8 +84,8 @@ export function UploadInput({
 }) {
   const t = useTranslations();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
   const rules = inputFieldRules(field);
+  const { dragging, handlers } = useFileDrop((dropped) => onAddFiles(dropped, rules));
 
   const acceptedLabel = [
     ...new Set(rules.perTypeLimits.map((limit) => friendlyType(limit.mimetype)))
@@ -113,23 +112,7 @@ export function UploadInput({
             dragging && "border-primary bg-muted"
           )}
           onClick={() => inputRef.current?.click()}
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setDragging(true);
-          }}
-          onDragOver={(event) => event.preventDefault()}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragging(false);
-            void collectDroppedFiles(event.dataTransfer)
-              .then((dropped) => {
-                if (dropped.length > 0) onAddFiles(dropped, rules);
-              })
-              .catch(() => toast.error(t("file_upload_error")));
-          }}
+          {...handlers}
         >
           <Upload className="text-muted-foreground size-5" />
           <span className="text-sm font-medium">

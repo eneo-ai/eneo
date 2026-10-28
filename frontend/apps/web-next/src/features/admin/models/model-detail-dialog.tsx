@@ -3,9 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -178,7 +178,7 @@ function UsageTab({
     return key ? t(key) : type;
   };
 
-  if (isPending) return <Skeleton className="h-40 w-full" />;
+  if (isPending) return <LoadingState rows={1} height={160} />;
   if (!data || data.items.length === 0)
     return <p className="text-muted-foreground py-4 text-sm">{t("model_usage_empty")}</p>;
 

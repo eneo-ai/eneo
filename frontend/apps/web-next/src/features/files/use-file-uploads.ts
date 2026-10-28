@@ -201,6 +201,15 @@ export function useFileUploads({ previews = false } = {}) {
     });
   }
 
+  /**
+   * The list as it is now, before React renders it. Plan additions against
+   * this, so two that land before a render still count each other (limits,
+   * duplicates).
+   */
+  function current(): FileUpload[] {
+    return owned.current;
+  }
+
   function remove(key: string) {
     const removed = owned.current.filter((file) => file.key === key);
     replace(owned.current.filter((file) => file.key !== key));
@@ -232,5 +241,5 @@ export function useFileUploads({ previews = false } = {}) {
     replace([...taken, ...owned.current.filter((file) => !keys.has(file.key))]);
   }
 
-  return { files, add, reuse, awaitUploads, remove, discard, detach, restore };
+  return { files, current, add, reuse, awaitUploads, remove, discard, detach, restore };
 }

@@ -4,11 +4,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import {
-  useAutosave,
-  useAutosaveField,
-  useDirtySaveStatus
-} from "@/components/composites/use-autosave";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,13 +56,56 @@ function parseJsonSchema(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+type OutputDraft = { format: ServiceOutputFormat | null; schema: string };
+
+/** JSON with object keys sorted (arrays keep their order): JSONB keeps no key order. */
+function sortedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedKeys);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortedKeys((value as Record<string, unknown>)[key])])
+  );
+}
+
+/** A schema's content for comparison; text that is no schema yet stays as typed. */
+function canonicalSchema(text: string): string {
+  try {
+    return JSON.stringify(sortedKeys(parseJsonSchema(text)));
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * The schema only counts while the output format is JSON, and by content: a
+ * saved schema renders pretty-printed, so the typed text never matches it.
+ */
+function outputEquals(a: OutputDraft, b: OutputDraft): boolean {
+  return (
+    a.format === b.format &&
+    (a.format !== "json" || canonicalSchema(a.schema) === canonicalSchema(b.schema))
+  );
+}
+
+function outputSchemaProblem(output: OutputDraft): "required_field" | "invalid_format" | null {
+  if (output.format !== "json") return null;
+  if (!output.schema.trim()) return "required_field";
+  try {
+    parseJsonSchema(output.schema);
+    return null;
+  } catch {
+    return "invalid_format";
+  }
+}
+
 export function ServiceEditor({ service }: { service: Service }) {
   const t = useTranslations();
   const { space } = useSpace();
   const { tenant } = useAppContext();
   const update = useUpdateService(service.id);
   const autosaveAi = useAutosave("service-ai");
-  const autosaveOutput = useAutosave("service-output");
 
   const name = useAutosaveField({
     key: "service-edit-name",
@@ -144,70 +183,24 @@ export function ServiceEditor({ service }: { service: Service }) {
     }
   }
 
-  const savedOutputFormat = service.output_format ?? null;
-  const savedJsonSchema = useMemo(() => schemaText(service.json_schema), [service.json_schema]);
-  const [outputFormat, setOutputFormat] = useState<ServiceOutputFormat | null>(savedOutputFormat);
-  const [jsonSchema, setJsonSchema] = useState(savedJsonSchema);
-  const [schemaError, setSchemaError] = useState<string | null>(null);
-
-  const savedOutputKey = JSON.stringify([savedOutputFormat, savedJsonSchema]);
-  const savedOutputRef = useRef(savedOutputKey);
-  useEffect(() => {
-    if (savedOutputRef.current === savedOutputKey) return;
-    const previous = savedOutputRef.current;
-    savedOutputRef.current = savedOutputKey;
-    if (JSON.stringify([outputFormat, jsonSchema]) === previous) {
-      setOutputFormat(savedOutputFormat);
-      setJsonSchema(savedJsonSchema);
-      setSchemaError(null);
-    }
-  }, [savedOutputKey, savedOutputFormat, savedJsonSchema, outputFormat, jsonSchema]);
-
-  const outputDirty =
-    outputFormat !== savedOutputFormat ||
-    (outputFormat === "json" && jsonSchema !== savedJsonSchema);
-  useDirtySaveStatus("service-output", outputDirty);
-
-  const persistOutput = useCallback(
-    (nextFormat: ServiceOutputFormat | null = outputFormat, nextJsonSchema = jsonSchema) => {
-      let parsedSchema: Record<string, unknown> | null = null;
-      if (nextFormat === "json") {
-        if (!nextJsonSchema.trim()) {
-          setSchemaError(t("required_field"));
-          return Promise.resolve(undefined);
-        }
-        try {
-          parsedSchema = parseJsonSchema(nextJsonSchema);
-        } catch {
-          setSchemaError(t("invalid_format"));
-          return Promise.resolve(undefined);
-        }
-      }
-      setSchemaError(null);
-      return autosaveOutput(() =>
-        update.mutateAsync({
-          output_format: nextFormat,
-          json_schema: nextFormat === "json" ? parsedSchema : null
-        })
-      );
-    },
-    [autosaveOutput, jsonSchema, outputFormat, t, update]
+  const savedOutput = useMemo<OutputDraft>(
+    () => ({ format: service.output_format ?? null, schema: schemaText(service.json_schema) }),
+    [service.output_format, service.json_schema]
   );
-
-  useEffect(() => {
-    if (!outputDirty) return;
-    const timer = window.setTimeout(() => void persistOutput(), 750);
-    return () => window.clearTimeout(timer);
-  }, [outputDirty, persistOutput]);
-
-  useEffect(() => {
-    if (!outputDirty) return;
-    const handler = () => {
-      if (document.visibilityState === "hidden") void persistOutput();
-    };
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, [outputDirty, persistOutput]);
+  const output = useAutosaveField({
+    key: "service-output",
+    value: savedOutput,
+    equals: outputEquals,
+    validate: (draft) => outputSchemaProblem(draft) === null,
+    save: (draft) =>
+      update.mutateAsync({
+        output_format: draft.format,
+        json_schema: draft.format === "json" ? parseJsonSchema(draft.schema) : null
+      }),
+    commitDebounceMs: 750,
+    commitOnVisibilityChange: true
+  });
+  const schemaProblem = outputSchemaProblem(output.value);
 
   return (
     <div className="flex flex-col gap-6 py-4">
@@ -372,11 +365,14 @@ export function ServiceEditor({ service }: { service: Service }) {
       <SettingsGroup title={t("output_format")}>
         <SettingsRow title={t("output_format")} htmlFor="service-output-format">
           <Select
-            value={outputFormat ?? NONE}
+            value={output.value.format ?? NONE}
             onValueChange={(value) => {
-              const nextFormat = value === NONE ? null : (value as ServiceOutputFormat);
-              setOutputFormat(nextFormat);
-              void persistOutput(nextFormat, jsonSchema);
+              const next = {
+                ...output.value,
+                format: value === NONE ? null : (value as ServiceOutputFormat)
+              };
+              output.setValue(next);
+              void output.commit(next);
             }}
           >
             <SelectTrigger id="service-output-format" className="w-full">
@@ -391,18 +387,21 @@ export function ServiceEditor({ service }: { service: Service }) {
           </Select>
         </SettingsRow>
 
-        {outputFormat === "json" && (
+        {output.value.format === "json" && (
           <SettingsRow title={t("json_schema")} htmlFor="service-json-schema">
             <Textarea
               id="service-json-schema"
-              value={jsonSchema}
+              value={output.value.schema}
               rows={12}
               className="font-mono text-sm"
-              aria-invalid={schemaError ? true : undefined}
-              onChange={(event) => setJsonSchema(event.target.value)}
-              onBlur={() => void persistOutput(outputFormat, jsonSchema)}
+              aria-invalid={schemaProblem ? true : undefined}
+              onChange={(event) => {
+                const schema = event.target.value;
+                output.setValue((current) => ({ ...current, schema }));
+              }}
+              onBlur={() => void output.commit()}
             />
-            {schemaError && <p className="text-destructive text-sm">{schemaError}</p>}
+            {schemaProblem && <p className="text-destructive text-sm">{t(schemaProblem)}</p>}
           </SettingsRow>
         )}
       </SettingsGroup>

@@ -1,7 +1,6 @@
 "use client";
 
 import { Banner } from "@astryxdesign/core/Banner";
-import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
@@ -16,10 +15,11 @@ import {
   Sparkles,
   TriangleAlert
 } from "lucide-react";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
 import { LoadingState } from "@/components/composites/loading-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -27,15 +27,6 @@ import {
 } from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,6 +52,7 @@ import {
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
+import { parseRetentionDays } from "@/features/spaces/retention-days";
 import type { Space } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -113,36 +105,6 @@ function modelUpdate(kind: ModelKind, ids: string[]): SpaceUpdate {
     case "transcription":
       return { transcription_models: refs };
   }
-}
-
-function SettingsLoadFailure({
-  title,
-  retrying,
-  onRetry
-}: {
-  title: string;
-  retrying: boolean;
-  onRetry: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Banner
-      status="error"
-      title={title}
-      endContent={
-        <AxButton
-          label={t("try_again")}
-          aria-label={t("space_settings_retry_named", { section: title })}
-          variant="secondary"
-          isLoading={retrying}
-          isInterruptible
-          onClick={() => {
-            if (!retrying) onRetry();
-          }}
-        />
-      }
-    />
-  );
 }
 
 function useUpdateSpace() {
@@ -273,16 +235,11 @@ function SecuritySection() {
     impact: SpaceSecurityImpact;
   } | null>(null);
 
-  const {
-    data: security,
-    isPending: securityPending,
-    isError: securityError,
-    isFetching: securityFetching,
-    refetch: refetchSecurity
-  } = useQuery({
+  const securityQuery = useQuery({
     queryKey: ["security-classifications"],
     queryFn: () => unwrap(browserApi.GET("/api/v1/security-classifications/"))
   });
+  const security = securityQuery.data;
 
   const NONE = "__none__";
   const currentClassificationId = space.security_classification?.id ?? NONE;
@@ -337,13 +294,16 @@ function SecuritySection() {
 
   return (
     <SettingsGroup title={t("security_and_privacy")}>
-      {securityPending ? <LoadingState rows={1} /> : null}
-      {securityError ? (
-        <SettingsLoadFailure
+      <RefreshError queries={[securityQuery]} />
+      {blockingError(securityQuery) ? (
+        <ListError
+          error={securityQuery.error}
           title={t("space_security_load_failed")}
-          retrying={securityFetching}
-          onRetry={() => void refetchSecurity()}
+          isRetrying={securityQuery.isFetching}
+          onRetry={() => void securityQuery.refetch()}
         />
+      ) : securityQuery.isPending ? (
+        <LoadingState rows={1} />
       ) : null}
       {security?.security_enabled && (
         <SettingsRow
@@ -367,42 +327,28 @@ function SecuritySection() {
               ))}
             </SelectContent>
           </Select>
-          <AlertDialog
+          <ConfirmDialogControlled
             open={pendingImpact !== null}
             onOpenChange={(open) => !open && setPendingImpact(null)}
+            title={t("migration_impact")}
+            description={t("migration_impact_title", { count: pendingImpactTotal })}
+            confirmLabel={update.isPending ? t("saving") : t("confirm")}
+            variant="default"
+            pending={update.isPending}
+            onConfirm={() => void confirmSecurityClassificationChange()}
           >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("migration_impact")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t("migration_impact_title", { count: pendingImpactTotal })}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">{t("affected_resources")}</p>
-                <ul className="text-muted-foreground grid gap-1 text-sm">
-                  {pendingImpactRows.map((row) => (
-                    <li key={row.key} className="flex justify-between gap-4">
-                      <span>{t(SECURITY_IMPACT_LABEL_KEYS[row.key])}</span>
-                      <span className="tabular-nums">{row.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={update.isPending}>{t("cancel")}</AlertDialogCancel>
-                {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-                <Button
-                  aria-busy={update.isPending || undefined}
-                  onClick={() => {
-                    if (!update.isPending) void confirmSecurityClassificationChange();
-                  }}
-                >
-                  {update.isPending ? t("saving") : t("confirm")}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">{t("affected_resources")}</p>
+              <ul className="text-muted-foreground grid gap-1 text-sm">
+                {pendingImpactRows.map((row) => (
+                  <li key={row.key} className="flex justify-between gap-4">
+                    <span>{t(SECURITY_IMPACT_LABEL_KEYS[row.key])}</span>
+                    <span className="tabular-nums">{row.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </ConfirmDialogControlled>
         </SettingsRow>
       )}
       <RetentionSection />
@@ -422,19 +368,17 @@ function RetentionSection() {
   const canEditRetention = can("edit", "space");
   const [daysVisited, setDaysVisited] = useState(false);
 
-  const validDays = (value: string) =>
-    value === "" ||
-    (/^[0-9]+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1);
-
   const days = useAutosaveField({
     key: "retention-days",
     value: space.data_retention_days?.toString() ?? "",
-    save: (value) =>
-      update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),
-    // Empty means "keep forever"; otherwise require a positive whole number.
-    validate: validDays
+    save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
+    // Empty means "keep forever".
+    validate: (value) => parseRetentionDays(value) !== undefined
   });
-  const daysProblem = daysVisited && !validDays(days.value) ? t("space_retention_invalid") : null;
+  const daysProblem =
+    daysVisited && parseRetentionDays(days.value) === undefined
+      ? t("space_retention_invalid")
+      : null;
 
   return (
     <SettingsRow
@@ -571,17 +515,12 @@ function ModelsSection() {
     }
   }, [space, overrides]);
 
-  const {
-    data: models,
-    isPending: modelsPending,
-    isError: modelsError,
-    isFetching: modelsFetching,
-    refetch: refetchModels
-  } = useQuery({
+  const modelsQuery = useQuery({
     queryKey: ["ai-models", space.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/ai-models/", { params: { query: { space_id: space.id } } }))
   });
+  const models = modelsQuery.data;
 
   const completionModels = (models?.completion_models ?? []).filter(
     (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
@@ -598,13 +537,16 @@ function ModelsSection() {
       title={t("space_settings_models_title")}
       description={t("space_settings_models_description")}
     >
-      {modelsPending ? <LoadingState rows={3} /> : null}
-      {modelsError ? (
-        <SettingsLoadFailure
+      <RefreshError queries={[modelsQuery]} />
+      {blockingError(modelsQuery) ? (
+        <ListError
+          error={modelsQuery.error}
           title={t("space_models_load_failed")}
-          retrying={modelsFetching}
-          onRetry={() => void refetchModels()}
+          isRetrying={modelsQuery.isFetching}
+          onRetry={() => void modelsQuery.refetch()}
         />
+      ) : modelsQuery.isPending ? (
+        <LoadingState rows={3} />
       ) : null}
       {models ? (
         <>
@@ -662,13 +604,8 @@ function McpServersSection() {
   const update = useUpdateSpace();
   const autosave = useAutosave("mcp-servers");
 
-  const {
-    data: mcpServers,
-    isPending,
-    isError,
-    isFetching,
-    refetch
-  } = useQuery(mcpServersQueryOptions(browserApi));
+  const servers = useQuery(mcpServersQueryOptions(browserApi));
+  const mcpServers = servers.data;
   const savedIds = (space.mcp_servers ?? []).map((server) => server.id);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(savedIds));
 
@@ -712,21 +649,16 @@ function McpServersSection() {
       title={t("mcp_servers")}
       description={t("select_mcp_servers_description")}
     >
-      {isError && mcpServers ? (
-        <SettingsLoadFailure
+      <RefreshError queries={[servers]} />
+      {blockingError(servers) ? (
+        <ListError
+          error={servers.error}
           title={t("space_mcp_servers_load_failed")}
-          retrying={isFetching}
-          onRetry={() => void refetch()}
+          isRetrying={servers.isFetching}
+          onRetry={() => void servers.refetch()}
         />
-      ) : null}
-      {isPending ? (
+      ) : servers.isPending ? (
         <LoadingState rows={2} />
-      ) : isError && !mcpServers ? (
-        <SettingsLoadFailure
-          title={t("space_mcp_servers_load_failed")}
-          retrying={isFetching}
-          onRetry={() => void refetch()}
-        />
       ) : candidates.length === 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-muted-foreground text-sm">{t("enable_mcp_servers_in_admin")}</p>

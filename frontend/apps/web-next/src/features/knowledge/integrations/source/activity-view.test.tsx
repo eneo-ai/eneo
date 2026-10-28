@@ -398,7 +398,9 @@ describe("ActivityView", () => {
 
     logs.a = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.a];
     serve(logs);
-    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Försök igen: Kunde inte läsa in synkhistoriken" })
+    );
     expect(await screen.findByText("7 filer synkade")).toBeTruthy();
     expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
   });
@@ -473,7 +475,9 @@ describe("ActivityView", () => {
     expect(showOlder()).toBeTruthy();
 
     serve(logs);
-    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Försök igen: Kunde inte läsa in synkhistoriken" })
+    );
     await waitFor(() => expect(timelineRows()).toHaveLength(12));
     expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
   });

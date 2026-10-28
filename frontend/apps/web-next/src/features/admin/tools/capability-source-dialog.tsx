@@ -4,12 +4,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +30,7 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { modelProvidersQueryOptions } from "@/features/admin/governance/governance";
 import type { Capability } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { createMcpServer, MCP_KEY, updateMcpServer, type McpServer } from "../mcp/mcp";
 import {
@@ -67,13 +71,6 @@ const FIELD_IDS: Partial<Record<FormField, string>> = {
   toolDefinitionMaxKiB: "source-max-definition"
 };
 
-/** Fields inside the collapsed "advanced options". */
-const ADVANCED: ReadonlySet<FormField> = new Set([
-  "toolCatalogMaxCount",
-  "toolCatalogMaxMiB",
-  "toolDefinitionMaxKiB"
-]);
-
 export function CapabilitySourceDialog({
   purpose,
   server,
@@ -89,11 +86,10 @@ export function CapabilitySourceDialog({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => sourceDraft(server));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
   const [tokenConfirmation, setTokenConfirmation] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const advancedRef = useRef<HTMLDetailsElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
   const tokenConfirmationRef = useRef<HTMLInputElement>(null);
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
@@ -159,16 +155,15 @@ export function CapabilitySourceDialog({
     if (tokenMismatch) withProblems.add("tokenConfirmation");
     const firstProblem = FIELD_ORDER.find((field) => withProblems.has(field));
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      if (ADVANCED.has(firstProblem) && advancedRef.current) advancedRef.current.open = true;
-      const element =
+      // Advanced fields sit in a closed details, which revealProblems opens.
+      revealProblems(
+        () => setSubmitted(true),
         firstProblem === "token"
           ? tokenRef.current
           : firstProblem === "tokenConfirmation"
             ? tokenConfirmationRef.current
-            : document.getElementById(FIELD_IDS[firstProblem] ?? "");
-      (element?.matches("fieldset") ? element.querySelector("input") : element)?.focus();
+            : FIELD_IDS[firstProblem]
+      );
       return;
     }
     setBusy(true);
@@ -183,7 +178,7 @@ export function CapabilitySourceDialog({
         queryClient.invalidateQueries({ queryKey: ["spaces"] })
       ]).catch((cause) => toastApiError(cause, t));
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
     } finally {
       setBusy(false);
     }
@@ -205,11 +200,7 @@ export function CapabilitySourceDialog({
         </DialogHeader>
         {/* Problems show at their fields on submit, and focus moves to the first. */}
         <form className="space-y-5" noValidate onSubmit={(event) => void submit(event)}>
-          {error && (
-            <p className="text-destructive text-sm" role="alert">
-              {error}
-            </p>
-          )}
+          {error != null && <ListError error={error} title={t("save_failed")} />}
           {purpose === "image_generation" && (
             <div className="space-y-2">
               <Label htmlFor="source-type">{t("mcp_source_label")}</Label>
@@ -251,22 +242,18 @@ export function CapabilitySourceDialog({
                 ))}
               </select>
               <FieldProblem id="source-model" problem={problemAt("imageModel")} />
-              {(models.isPending || providers.isPending) && (
-                <p className="text-muted-foreground text-sm">{t("loading")}</p>
-              )}
-              {(models.isError || providers.isError) && (
-                <p className="text-destructive text-sm" role="alert">
-                  {t("request_failed")}
-                </p>
-              )}
-              {!models.isPending && !providers.isPending && imageModels.length === 0 && (
-                <p className="text-muted-foreground text-sm">
-                  {t("mcp_builtin_no_image_models")}{" "}
-                  <Link className="underline" href="/admin/models">
-                    {t("models")}
-                  </Link>
-                </p>
-              )}
+              <QueryStateBoundary queries={[models, providers]} rows={1}>
+                {() =>
+                  imageModels.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      {t("mcp_builtin_no_image_models")}{" "}
+                      <Link className="underline" href="/admin/models">
+                        {t("models")}
+                      </Link>
+                    </p>
+                  ) : null
+                }
+              </QueryStateBoundary>
             </div>
           ) : (
             <div className="space-y-4">
@@ -405,31 +392,31 @@ export function CapabilitySourceDialog({
               {...fieldProblemProps("source-groups", problemAt("groups"))}
             >
               <legend className="px-1 text-sm font-medium">{t("mcp_audience_groups")}</legend>
-              {groups.isPending ? (
-                <p>{t("loading")}</p>
-              ) : groups.isError ? (
-                <p role="alert">{t("request_failed")}</p>
-              ) : groups.data?.length ? (
-                groups.data.map((group) => (
-                  <label key={group.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={draft.groupIds.includes(group.id)}
-                      onChange={(event) =>
-                        set(
-                          "groupIds",
-                          event.target.checked
-                            ? [...draft.groupIds, group.id]
-                            : draft.groupIds.filter((id) => id !== group.id)
-                        )
-                      }
-                    />
-                    {group.name}
-                  </label>
-                ))
-              ) : (
-                <p className="text-muted-foreground text-sm">{t("mcp_audience_no_groups")}</p>
-              )}
+              <QueryStateBoundary query={groups} rows={2}>
+                {(items) =>
+                  items.length ? (
+                    items.map((group) => (
+                      <label key={group.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={draft.groupIds.includes(group.id)}
+                          onChange={(event) =>
+                            set(
+                              "groupIds",
+                              event.target.checked
+                                ? [...draft.groupIds, group.id]
+                                : draft.groupIds.filter((id) => id !== group.id)
+                            )
+                          }
+                        />
+                        {group.name}
+                      </label>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">{t("mcp_audience_no_groups")}</p>
+                  )
+                }
+              </QueryStateBoundary>
               <FieldProblem id="source-groups" problem={problemAt("groups")} />
             </fieldset>
           )}
@@ -446,7 +433,7 @@ export function CapabilitySourceDialog({
             />
             <FieldProblem id="source-priority" problem={problemAt("priority")} />
           </div>
-          <details ref={advancedRef} className="rounded-lg border p-3">
+          <details className="rounded-lg border p-3">
             <summary className="cursor-pointer text-sm font-medium">
               {t("skills_advanced_options")}
             </summary>

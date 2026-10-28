@@ -36,6 +36,45 @@ const add = (dialog: HTMLElement) =>
   within(dialog).getByRole("button", { name: "Lägg till MCP-server" }) as HTMLButtonElement;
 
 describe("McpServerDialog", () => {
+  it("keeps a pending add pending when closed and reopened, so it is not sent twice", async () => {
+    api.GET.mockImplementation(() => ok({ security_enabled: false, security_classifications: [] }));
+    api.POST.mockImplementation(() => new Promise(() => {}));
+    const fill = () => {
+      fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+      fireEvent.change(screen.getByLabelText("URL"), {
+        target: { value: "https://diariet.example.se/mcp" }
+      });
+    };
+    const { rerender } = renderInApp(<McpServerDialog open onOpenChange={() => {}} />);
+    fill();
+    fireEvent.click(add(screen.getByRole("dialog")));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    rerender(<McpServerDialog open={false} onOpenChange={() => {}} />);
+    rerender(<McpServerDialog open onOpenChange={() => {}} />);
+    const dialog = await screen.findByRole("dialog");
+    fill();
+    const busy = within(dialog).getByRole("button", { name: "Ansluter…" });
+    fireEvent.click(busy);
+
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(api.POST).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts empty again when reopened after a cancelled add", async () => {
+    api.GET.mockImplementation(() => ok({ security_enabled: false, security_classifications: [] }));
+    const { rerender } = renderInApp(<McpServerDialog open onOpenChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+    fireEvent.click(add(screen.getByRole("dialog")));
+
+    rerender(<McpServerDialog open={false} onOpenChange={() => {}} />);
+    rerender(<McpServerDialog open onOpenChange={() => {}} />);
+
+    const name = within(await screen.findByRole("dialog")).getByLabelText("Namn");
+    expect((name as HTMLInputElement).value).toBe("");
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("shows each problem at its field when added, and moves focus to the first", async () => {
     const dialog = renderDialog();
     // Never disabled: a disabled button says nothing about what is missing.

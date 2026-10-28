@@ -6,10 +6,13 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -208,9 +211,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   function add() {
     if (addMember.isPending) return;
     if (!selected) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      searchRef.current?.querySelector("input")?.focus();
+      revealProblems(() => setSubmitted(true), searchRef.current?.querySelector("input"));
       return;
     }
     addMember.mutate({ id: selected.id, role });
@@ -392,9 +393,7 @@ function AddGroupMemberDialog() {
   function add() {
     if (addGroup.isPending) return;
     if (!selectedId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      groupRef.current?.focus();
+      revealProblems(() => setSubmitted(true), groupRef.current);
       return;
     }
     addGroup.mutate({ id: selectedId, role });

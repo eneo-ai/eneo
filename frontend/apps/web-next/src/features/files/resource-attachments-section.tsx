@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
 import { saveUrl, signedFileUrl, toastDownloadError } from "./signed-file-url";
 import { FileFormatDetails } from "@/features/files/file-format-details";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -270,7 +270,6 @@ export function ResourceAttachmentsSection({
   const saved: Attachment[] = useMemo(() => attachments, [attachments]);
   const [files, setFiles] = useState<Attachment[]>(saved);
   const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [query, setQuery] = useState("");
   const [sortAscending, setSortAscending] = useState(true);
@@ -395,6 +394,10 @@ export function ResourceAttachmentsSection({
     }
   }
 
+  const { dragging, handlers } = useFileDrop((dropped) => void uploadFiles(dropped), {
+    onError: (error) => toastApiError(error, t)
+  });
+
   return (
     <SettingsGroup
       title={t("attachments")}
@@ -504,21 +507,10 @@ export function ResourceAttachmentsSection({
           </div>
 
           <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              void collectDroppedFiles(event.dataTransfer)
-                .then(uploadFiles)
-                .catch((error: unknown) => toastApiError(error, t));
-            }}
+            {...handlers}
             className={cn(
               "flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-5 text-center",
-              dragActive && "border-primary bg-primary/5"
+              dragging && "border-primary bg-primary/5"
             )}
           >
             <span className="bg-muted grid size-10 place-items-center rounded-full">
@@ -536,9 +528,7 @@ export function ResourceAttachmentsSection({
               // Uploading, it stays enabled so it keeps focus (the busy
               // spinner replaces its icon); a press meanwhile is ignored.
               aria-busy={uploading || undefined}
-              onClick={() => {
-                if (!uploading) fileInput.current?.click();
-              }}
+              onClick={() => fileInput.current?.click()}
             >
               {!uploading && <Paperclip className="size-4" />}
               {t("attach_files")}

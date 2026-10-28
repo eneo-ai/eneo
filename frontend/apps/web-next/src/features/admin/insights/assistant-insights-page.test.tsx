@@ -165,6 +165,27 @@ describe("AssistantInsightsPage", () => {
     expect(spies.announce).not.toHaveBeenCalledWith("De flesta frågor gäller LOU.");
   });
 
+  it("shows a failed question as an error and asks again from the question field", async () => {
+    const { browserApi } = await import("@/lib/api/browser");
+    vi.mocked(browserApi.POST).mockImplementationOnce(async () => ({
+      error: { message: "Model unavailable" },
+      response: new Response(null, { status: 503 })
+    }));
+    renderPage();
+    const question = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(question, { target: { value: "Vad frågar folk mest om?" } });
+    fireEvent.keyDown(question, { key: "Enter" });
+
+    const message = await screen.findByText("Model unavailable");
+    const alert = message.closest<HTMLElement>('[role="alert"]')!;
+    // No retry inside the error: it would unmount under focus while the
+    // question runs. Asking again is the retry, and its control stays put.
+    expect(within(alert).queryByRole("button", { name: /Försök igen/ })).toBeNull();
+
+    fireEvent.keyDown(question, { key: "Enter" });
+    expect(await screen.findByText("De flesta frågor gäller LOU.")).toBeTruthy();
+  });
+
   it("announces how many questions a search found once its results are in", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "Frågehistorik" }));

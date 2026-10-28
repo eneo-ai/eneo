@@ -4,8 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { LoadingState } from "@/components/composites/loading-state";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { FileKindIcon } from "@/features/chat/attachments";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
@@ -35,6 +38,7 @@ import {
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import {
   buildTemplateCreate,
   templateHasWizard,
@@ -169,6 +173,7 @@ function TemplateWizard({
 }) {
   const t = useTranslations();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { dragging, handlers } = useFileDrop(onAddFiles);
   const wizard = template.wizard;
 
   return (
@@ -216,14 +221,11 @@ function TemplateWizard({
         >
           {wizard.attachments.required ? (
             <div
-              className="flex flex-col gap-3 rounded-lg border-2 border-dashed p-4"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                void collectDroppedFiles(event.dataTransfer)
-                  .then(onAddFiles)
-                  .catch(() => toast.error(t("file_upload_error")));
-              }}
+              className={cn(
+                "flex flex-col gap-3 rounded-lg border-2 border-dashed p-4",
+                dragging && "border-primary bg-primary/5"
+              )}
+              {...handlers}
             >
               <input
                 ref={fileInputRef}
@@ -245,9 +247,7 @@ function TemplateWizard({
                 variant="outline"
                 className="w-fit"
                 aria-busy={uploading || undefined}
-                onClick={() => {
-                  if (!uploading) fileInputRef.current?.click();
-                }}
+                onClick={() => fileInputRef.current?.click()}
               >
                 {!uploading && <Paperclip className="size-4" />}
                 {t("upload_files")}
@@ -351,12 +351,11 @@ export function TemplateGalleryDialog({
 
   // What is missing (a template, its name) shows on submit, and focus moves there.
   async function submit() {
-    if (pending) return;
     if (!selected || !name.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      if (!selected) templatesRef.current?.querySelector("button")?.focus();
-      else nameRef.current?.focus();
+      revealProblems(
+        () => setSubmitted(true),
+        selected ? nameRef.current : templatesRef.current?.querySelector("button")
+      );
       return;
     }
 
@@ -411,7 +410,7 @@ export function TemplateGalleryDialog({
         {step === "gallery" ? (
           <>
             {templates.isPending ? (
-              <Skeleton className="h-48 w-full" />
+              <LoadingState rows={1} height={192} />
             ) : (templates.data ?? []).length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">{t("no_results")}</p>
             ) : (

@@ -25,7 +25,7 @@ export function useAppRunInputs() {
   const files = uploads.files;
 
   async function addFiles(incoming: File[], rules: FileUploadRules) {
-    const plan = planFileUploads(incoming, files, rules);
+    const plan = planFileUploads(incoming, uploads.current(), rules);
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
     await uploads.add(plan.accepted);

@@ -154,6 +154,26 @@ describe("admin skill runtime policy", () => {
     expect(document.activeElement).toBe(save);
   });
 
+  it("shows a failed save with the error id and trace id for support", async () => {
+    put.mockImplementationOnce(() =>
+      Promise.resolve({
+        error: { message: "Unexpected", error_id: "8bc91e0a" },
+        response: new Response(null, { status: 500, headers: { "x-trace-id": "trace-1" } })
+      })
+    );
+    show();
+    fireEvent.click(
+      await screen.findByRole("switch", { name: "skills_runtime_policy_selective_title" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "skills_runtime_policy_save" }));
+
+    const title = await screen.findByText("skills_runtime_policy_save_error");
+    const alert = title.closest<HTMLElement>('[role="alert"]')!;
+    fireEvent.click(alert.querySelector<HTMLElement>("[aria-expanded]")!);
+    expect(within(alert).getByText("error_id: 8bc91e0a")).toBeTruthy();
+    expect(within(alert).getByText("trace_id: trace-1")).toBeTruthy();
+  });
+
   it("requires confirmation to reset the policy", async () => {
     show();
     fireEvent.click(await screen.findByRole("button", { name: "skills_runtime_policy_reset" }));

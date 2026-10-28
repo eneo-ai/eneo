@@ -299,7 +299,7 @@ describe("ChatView when generation fails", () => {
       within(list)
         .getAllByRole("listitem")
         .map((item) => item.textContent)
-    ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-id trace-1"]);
+    ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-ID: trace-1"]);
     await expectNoAxeViolations(document.body);
   });
 

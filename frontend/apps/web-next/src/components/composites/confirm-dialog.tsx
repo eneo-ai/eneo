@@ -1,9 +1,12 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -20,9 +23,11 @@ import { Label } from "@/components/ui/label";
 
 /**
  * Controlled confirmation dialog without a trigger, for actions launched from
- * dropdown menus (the menu closes before the dialog opens). While `pending`,
- * neither Cancel nor Escape closes it, and the confirm button stays enabled
- * (so it keeps focus) but ignores a press.
+ * dropdown menus (the menu closes before the dialog opens) and every other
+ * confirmation a caller opens itself. While `pending`, neither Cancel, Escape
+ * nor an outside click closes it, and the confirm button stays enabled (so it
+ * keeps focus) but ignores a press. `children` renders under the description
+ * (an impact or risk list, a hint).
  */
 export function ConfirmDialogControlled({
   open,
@@ -32,7 +37,8 @@ export function ConfirmDialogControlled({
   confirmLabel,
   variant = "destructive",
   pending,
-  onConfirm
+  onConfirm,
+  children
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -42,6 +48,7 @@ export function ConfirmDialogControlled({
   variant?: "default" | "destructive";
   pending?: boolean;
   onConfirm: () => void;
+  children?: ReactNode;
 }) {
   const t = useTranslations();
   return (
@@ -56,15 +63,10 @@ export function ConfirmDialogControlled({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          <Button
-            variant={variant}
-            aria-busy={pending || undefined}
-            onClick={() => {
-              if (!pending) onConfirm();
-            }}
-          >
+          <Button variant={variant} aria-busy={pending || undefined} onClick={() => onConfirm()}>
             {confirmLabel}
           </Button>
         </AlertDialogFooter>
@@ -123,9 +125,7 @@ export function ConfirmDialog({
   async function confirm() {
     if (busy) return;
     if (blocked) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      inputRef.current?.focus();
+      revealProblems(() => setSubmitted(true), inputRef.current);
       return;
     }
     setRunning(true);

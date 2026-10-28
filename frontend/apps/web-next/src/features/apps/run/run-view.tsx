@@ -5,8 +5,11 @@ import { AppWindow, Play } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { iconUrl } from "@/components/composites/icon-field";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
@@ -63,12 +66,10 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   function submit() {
     if (run.isPending) return;
     if (!inputs.hasInput) {
-      // Rendered before focus moves, so the input is read with the problem.
-      flushSync(() => setSubmitted(true));
-      document
-        .getElementById("app-run-inputs")
-        ?.querySelector<HTMLElement>("textarea, button")
-        ?.focus();
+      revealProblems(
+        () => setSubmitted(true),
+        document.getElementById("app-run-inputs")?.querySelector<HTMLElement>("textarea, button")
+      );
       return;
     }
     if (inputs.uploading) {

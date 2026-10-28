@@ -20,8 +20,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import {
   isSkillInUse,
   ORGANIZATION_SKILLS_KEY,
@@ -96,17 +98,16 @@ export function OrganizationSkillsPage() {
 
   const skills = useInfiniteQuery({
     queryKey: [...ORGANIZATION_SKILLS_KEY, search, removed],
-    initialPageParam: null as string | null,
+    ...cursorPagination,
     queryFn: ({ pageParam }) =>
       unwrap(
         browserApi.GET("/api/v1/skills/organization/", {
           params: { query: { cursor: pageParam, search: search || undefined, removed } }
         })
       ),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
     retry: false
   });
-  const items = skills.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = flattenPages(skills.data?.pages);
   const chosen = selectedSkills(items, selectedIds);
   const selectable = items.slice(0, SKILL_SELECTION_LIMIT);
   const allSelected =
@@ -221,201 +222,169 @@ export function OrganizationSkillsPage() {
           </Button>
         )}
       </form>
-      {skills.isPending ? (
-        <p role="status" className="text-muted-foreground text-sm">
-          {t("loading")}
-        </p>
-      ) : skills.isError && !skills.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" size="sm" onClick={() => void skills.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : items.length === 0 ? (
-        <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
-          <BookOpenCheck className="text-muted-foreground size-9" />
-          {/* Under the tab's h2. */}
-          <h3 className="font-medium">
-            {removed && !search
-              ? t("organization_skills_removed_empty")
-              : search
-                ? t("skills_library_no_results")
-                : t("organization_skills_empty_manage_title")}
-          </h3>
-          {!removed && !search && (
-            <>
-              <p className="text-muted-foreground text-sm">
-                {t("organization_skills_empty_manage_description")}
-              </p>
-              <Button asChild>
-                <Link href={`${LIST_PATH}/new`}>{t("skills_library_create_first")}</Link>
-              </Button>
-            </>
-          )}
-        </div>
-      ) : (
-        <>
-          {!removed && (
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-muted-foreground text-sm" aria-live="polite">
-                {t("organization_skills_selection_count", {
-                  count: String(selectedIds.length),
-                  limit: String(SKILL_SELECTION_LIMIT)
-                })}
-              </p>
-              {chosen.length > 0 && (
+      <QueryStateBoundary query={skills} rows={3}>
+        {() =>
+          items.length === 0 ? (
+            <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+              <BookOpenCheck className="text-muted-foreground size-9" />
+              {/* Under the tab's h2. */}
+              <h3 className="font-medium">
+                {removed && !search
+                  ? t("organization_skills_removed_empty")
+                  : search
+                    ? t("skills_library_no_results")
+                    : t("organization_skills_empty_manage_title")}
+              </h3>
+              {!removed && !search && (
                 <>
-                  <Button variant="outline" size="sm" onClick={() => setRemovalTargets(chosen)}>
-                    <Trash2 className="size-4" />
-                    {t("organization_skills_remove_selected")}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
-                    {t("clear")}
+                  <p className="text-muted-foreground text-sm">
+                    {t("organization_skills_empty_manage_description")}
+                  </p>
+                  <Button asChild>
+                    <Link href={`${LIST_PATH}/new`}>{t("skills_library_create_first")}</Link>
                   </Button>
                 </>
               )}
             </div>
-          )}
-          <div className="overflow-x-auto rounded-xl border">
-            <table className="w-full min-w-[700px] text-sm" aria-labelledby={headingId}>
-              <thead>
-                <tr className="border-b text-left">
-                  {!removed && (
-                    <th className="w-12 p-3">
-                      <input
-                        type="checkbox"
-                        className="accent-primary size-4"
-                        aria-label={t("organization_skills_select_shown", {
-                          count: String(selectable.length)
-                        })}
-                        checked={allSelected}
-                        onChange={(event) =>
-                          setSelectedIds(
-                            event.target.checked ? selectable.map((item) => item.id) : []
-                          )
-                        }
-                      />
-                    </th>
+          ) : (
+            <>
+              {!removed && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-muted-foreground text-sm" aria-live="polite">
+                    {t("organization_skills_selection_count", {
+                      count: String(selectedIds.length),
+                      limit: String(SKILL_SELECTION_LIMIT)
+                    })}
+                  </p>
+                  {chosen.length > 0 && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => setRemovalTargets(chosen)}>
+                        <Trash2 className="size-4" />
+                        {t("organization_skills_remove_selected")}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+                        {t("clear")}
+                      </Button>
+                    </>
                   )}
-                  <th className="p-3">{t("name")}</th>
-                  <th className="p-3">{t("description")}</th>
-                  <th className="p-3">{t("status")}</th>
-                  <th className="p-3">{t("skills_library_revision_column")}</th>
-                  <th className="p-3">{t("skills_library_updated_column")}</th>
-                  {!removed && (
-                    <th className="p-3">
-                      <span className="sr-only">{t("actions")}</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((skill) => (
-                  <tr key={skill.id} className="border-b align-top last:border-0">
-                    {!removed && (
-                      <td className="p-3">
-                        <input
-                          type="checkbox"
-                          className="accent-primary size-4"
-                          aria-label={t("organization_skills_select_skill", {
-                            name: skill.display_name
-                          })}
-                          checked={selectedIds.includes(skill.id)}
-                          disabled={
-                            selectedIds.length >= SKILL_SELECTION_LIMIT &&
-                            !selectedIds.includes(skill.id)
-                          }
-                          onChange={(event) => select(skill.id, event.target.checked)}
-                        />
-                      </td>
-                    )}
-                    <td className="min-w-48 p-3">
-                      <Link
-                        className="font-medium underline-offset-2 hover:underline"
-                        href={`${LIST_PATH}/${skill.id}`}
-                      >
-                        {skill.display_name}
-                      </Link>
-                      <p className="text-muted-foreground text-xs break-all">{skill.slug}</p>
+                </div>
+              )}
+              <div className="overflow-x-auto rounded-xl border">
+                <table className="w-full min-w-[700px] text-sm" aria-labelledby={headingId}>
+                  <thead>
+                    <tr className="border-b text-left">
                       {!removed && (
-                        <p className="text-muted-foreground mt-2 text-xs">
-                          {usageLabel(skill.usage) ?? t("organization_skills_usage_none")}
-                          {skill.usage.personal_chat_pinned &&
-                            ` · ${t("organization_skills_usage_personal_chat")}`}
-                        </p>
+                        <th className="w-12 p-3">
+                          <input
+                            type="checkbox"
+                            className="accent-primary size-4"
+                            aria-label={t("organization_skills_select_shown", {
+                              count: String(selectable.length)
+                            })}
+                            checked={allSelected}
+                            onChange={(event) =>
+                              setSelectedIds(
+                                event.target.checked ? selectable.map((item) => item.id) : []
+                              )
+                            }
+                          />
+                        </th>
                       )}
-                    </td>
-                    <td className="text-muted-foreground max-w-md p-3">{skill.description}</td>
-                    <td className="p-3">
-                      <Badge
-                        variant={
-                          skill.publication_state === "published" && !skill.execution_blocked
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {statusLabel(skill)}
-                      </Badge>
-                    </td>
-                    <td className="p-3 tabular-nums">
-                      {t("organization_skills_version", {
-                        version: String(skill.current_revision_number)
-                      })}
-                    </td>
-                    <td className="p-3 tabular-nums">
-                      {new Date(skill.updated_at).toLocaleString(locale, {
-                        dateStyle: "short",
-                        timeStyle: "short"
-                      })}
-                    </td>
-                    {!removed && (
-                      <td className="p-3">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t("organization_skills_remove_aria", {
-                            name: skill.display_name
+                      <th className="p-3">{t("name")}</th>
+                      <th className="p-3">{t("description")}</th>
+                      <th className="p-3">{t("status")}</th>
+                      <th className="p-3">{t("skills_library_revision_column")}</th>
+                      <th className="p-3">{t("skills_library_updated_column")}</th>
+                      {!removed && (
+                        <th className="p-3">
+                          <span className="sr-only">{t("actions")}</span>
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((skill) => (
+                      <tr key={skill.id} className="border-b align-top last:border-0">
+                        {!removed && (
+                          <td className="p-3">
+                            <input
+                              type="checkbox"
+                              className="accent-primary size-4"
+                              aria-label={t("organization_skills_select_skill", {
+                                name: skill.display_name
+                              })}
+                              checked={selectedIds.includes(skill.id)}
+                              disabled={
+                                selectedIds.length >= SKILL_SELECTION_LIMIT &&
+                                !selectedIds.includes(skill.id)
+                              }
+                              onChange={(event) => select(skill.id, event.target.checked)}
+                            />
+                          </td>
+                        )}
+                        <td className="min-w-48 p-3">
+                          <Link
+                            className="font-medium underline-offset-2 hover:underline"
+                            href={`${LIST_PATH}/${skill.id}`}
+                          >
+                            {skill.display_name}
+                          </Link>
+                          <p className="text-muted-foreground text-xs break-all">{skill.slug}</p>
+                          {!removed && (
+                            <p className="text-muted-foreground mt-2 text-xs">
+                              {usageLabel(skill.usage) ?? t("organization_skills_usage_none")}
+                              {skill.usage.personal_chat_pinned &&
+                                ` · ${t("organization_skills_usage_personal_chat")}`}
+                            </p>
+                          )}
+                        </td>
+                        <td className="text-muted-foreground max-w-md p-3">{skill.description}</td>
+                        <td className="p-3">
+                          <Badge
+                            variant={
+                              skill.publication_state === "published" && !skill.execution_blocked
+                                ? "secondary"
+                                : "outline"
+                            }
+                          >
+                            {statusLabel(skill)}
+                          </Badge>
+                        </td>
+                        <td className="p-3 tabular-nums">
+                          {t("organization_skills_version", {
+                            version: String(skill.current_revision_number)
                           })}
-                          onClick={() => setRemovalTargets([skill])}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {skills.hasNextPage && (
-            <div className="flex justify-center">
-              {/* Loading, it stays enabled so it keeps focus; a second press is ignored. */}
-              <Button
-                variant="outline"
-                aria-busy={skills.isFetchingNextPage || undefined}
-                onClick={() => {
-                  if (!skills.isFetchingNextPage) void skills.fetchNextPage();
-                }}
-              >
-                {skills.isFetchingNextPage ? t("loading") : t("load_more")}
-              </Button>
-            </div>
-          )}
-          {skills.isFetchNextPageError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("organization_skills_load_more_error")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" size="sm" onClick={() => void skills.fetchNextPage()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
+                        </td>
+                        <td className="p-3 tabular-nums">
+                          {new Date(skill.updated_at).toLocaleString(locale, {
+                            dateStyle: "short",
+                            timeStyle: "short"
+                          })}
+                        </td>
+                        {!removed && (
+                          <td className="p-3">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={t("organization_skills_remove_aria", {
+                                name: skill.display_name
+                              })}
+                              onClick={() => setRemovalTargets([skill])}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <LoadMore query={skills} label={t("load_more")} />
+            </>
+          )
+        }
+      </QueryStateBoundary>
       {removalTargets.length > 0 && (
         <SkillRemovalDialog
           key={removalTargets.map((skill) => skill.id).join(",")}
@@ -447,7 +416,7 @@ export function SkillRemovalDialog({
   const usageLabel = useUsageLabel();
   const [busy, setBusy] = useState(false);
   const [detachBindings, setDetachBindings] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [serverBlocked, setServerBlocked] = useState<string[]>([]);
   const blockers = skills.filter(
     (skill) => removalBlocked(skill.usage) || serverBlocked.includes(skill.id)
@@ -464,7 +433,7 @@ export function SkillRemovalDialog({
       );
       await onRemoved(result);
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
       if (cause instanceof EneoApiError && cause.code === 9051)
         setServerBlocked(serverBlockingIds(cause.details));
     } finally {
@@ -568,12 +537,7 @@ export function SkillRemovalDialog({
             </AlertDescription>
           </Alert>
         )}
-        {error && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>{t("organization_skills_remove_error")}</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+        {error != null && <ListError error={error} title={t("organization_skills_remove_error")} />}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
           {/* Busy, it stays enabled so it keeps focus; remove() ignores a second press. */}

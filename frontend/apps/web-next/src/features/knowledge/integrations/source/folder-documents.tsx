@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
@@ -451,49 +451,53 @@ export function FolderDocuments({
             />
           </div>
 
-          {documents.isPending || pastTheEnd ? (
+          {pastTheEnd ? (
             <LoadingState label={t("integration_documents_loading")} rows={5} />
-          ) : documents.isError ? (
-            <ListError
-              error={documents.error}
-              title={t("integration_documents_load_failed")}
-              isRetrying={documents.isFetching}
-              onRetry={() => void documents.refetch()}
-            />
-          ) : data && data.items.length > 0 ? (
-            <>
-              <div aria-busy={documents.isFetching || undefined}>
-                <Table
-                  data={data.items}
-                  columns={columns}
-                  idKey="id"
-                  aria-label={t("integration_documents_table_label", { name: item.name })}
-                  plugins={{ sort: sortPlugin }}
-                />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                <p className="text-ax-text-secondary">
-                  {rangeText} ·{" "}
-                  {t("integration_documents_total_size", {
-                    size: formatBytes(data.total_size, locale)
-                  })}
-                </p>
-                {/* Never disabled while a page loads: that would take focus from the
-                    pressed button. The previous page stays visible (aria-busy). */}
-                {lastPage > 1 ? (
-                  <Pagination
-                    page={Math.min(page, lastPage)}
-                    totalPages={lastPage}
-                    onChange={changePage}
-                    variant={isNarrow ? "compact" : "pages"}
-                    size="sm"
-                    label={t("integration_documents_pagination_label", { name: item.name })}
-                  />
-                ) : null}
-              </div>
-            </>
           ) : (
-            <p className="text-ax-text-secondary py-8 text-sm">{emptyText}</p>
+            <QueryStateBoundary
+              query={documents}
+              rows={5}
+              loadingLabel={t("integration_documents_loading")}
+              errorTitle={t("integration_documents_load_failed")}
+            >
+              {(data) =>
+                data.items.length > 0 ? (
+                  <>
+                    <div aria-busy={documents.isFetching || undefined}>
+                      <Table
+                        data={data.items}
+                        columns={columns}
+                        idKey="id"
+                        aria-label={t("integration_documents_table_label", { name: item.name })}
+                        plugins={{ sort: sortPlugin }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                      <p className="text-ax-text-secondary">
+                        {rangeText} ·{" "}
+                        {t("integration_documents_total_size", {
+                          size: formatBytes(data.total_size, locale)
+                        })}
+                      </p>
+                      {/* Never disabled while a page loads: that would take focus from the
+                    pressed button. The previous page stays visible (aria-busy). */}
+                      {lastPage > 1 ? (
+                        <Pagination
+                          page={Math.min(page, lastPage)}
+                          totalPages={lastPage}
+                          onChange={changePage}
+                          variant={isNarrow ? "compact" : "pages"}
+                          size="sm"
+                          label={t("integration_documents_pagination_label", { name: item.name })}
+                        />
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-ax-text-secondary py-8 text-sm">{emptyText}</p>
+                )
+              }
+            </QueryStateBoundary>
           )}
         </>
       )}

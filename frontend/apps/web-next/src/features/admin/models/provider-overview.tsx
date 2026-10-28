@@ -14,7 +14,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import {
   highestFirst,
@@ -225,25 +225,7 @@ export function ProviderOverview({
   ];
 
   let content: React.ReactNode;
-  if (providers.isError || capabilities.isError) {
-    content = (
-      <EmptyState
-        title={t("admin_models_providers_load_failed")}
-        actions={
-          <Button
-            label={t("retry")}
-            onClick={() => {
-              if (providers.isError) void providers.refetch();
-              if (capabilities.isError) void capabilities.refetch();
-            }}
-            variant="secondary"
-          />
-        }
-      />
-    );
-  } else if (providers.isPending || capabilities.isPending) {
-    content = <LoadingState rows={4} />;
-  } else if (rendered.length === 0) {
+  if (rendered.length === 0) {
     content =
       sections.length === 0 ? (
         <EmptyState
@@ -334,7 +316,13 @@ export function ProviderOverview({
 
       <AttentionBanner attention={attention} onShowProvider={showProvider} />
 
-      {content}
+      <QueryStateBoundary
+        queries={[providers, capabilities]}
+        rows={4}
+        errorTitle={t("admin_models_providers_load_failed")}
+      >
+        {() => content}
+      </QueryStateBoundary>
     </div>
   );
 }

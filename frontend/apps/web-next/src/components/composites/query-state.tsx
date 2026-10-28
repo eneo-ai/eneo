@@ -4,8 +4,8 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ReactNode } from "react";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import { useState, type ReactNode } from "react";
+import { EneoApiError, errorReferenceLines, getErrorMessage } from "@/lib/api/errors";
 import { LoadingState, type LoadingStateProps } from "./loading-state";
 
 /** The part of a React Query result the boundary reads; any `useQuery` result fits. */
@@ -15,35 +15,76 @@ export type QueryLike<T = unknown> = {
   isError: boolean;
   error: unknown;
   isFetching: boolean;
+  errorUpdatedAt: number;
+  dataUpdatedAt: number;
+  /** "paused": a request waits offline (React Query's `fetchStatus`). */
+  fetchStatus?: "fetching" | "paused" | "idle";
+  /** An infinite query's next page failed: `LoadMore` reports that, not the boundary. */
+  isFetchNextPageError?: boolean;
   refetch: () => unknown;
 };
 
+/**
+ * A failure that leaves nothing to show: the query failed without data, or
+ * it is retrying such a failure. React Query reports that retry as pending
+ * (fetching, or paused while offline) and clears isError, so this reads
+ * `errorUpdatedAt > dataUpdatedAt` to keep the retry button under the user's
+ * focus instead of swapping in a skeleton. A failure with data on screen is
+ * not blocking: the data stays.
+ */
+export function blockingError(
+  query: Pick<QueryLike, "data" | "isError" | "isPending" | "errorUpdatedAt" | "dataUpdatedAt">
+): boolean {
+  if (query.data !== undefined) return false;
+  return query.isError || (query.isPending && query.errorUpdatedAt > query.dataUpdatedAt);
+}
+
 export type ListErrorProps = {
-  /** The failure; its message comes from the error catalog (`getErrorMessage`). */
+  /**
+   * The failure; its message comes from the error catalog (`getErrorMessage`).
+   * Without one (null or undefined) only the title shows.
+   */
   error: unknown;
-  /** Runs the request again (a query's `refetch`). */
-  onRetry: () => void;
+  /** Runs the request again (a query's `refetch`); without it there is no retry button. */
+  onRetry?: () => void;
   /** The retry is in flight: the button shows a spinner and a second press is ignored. */
   isRetrying?: boolean;
-  /** Replaces the generic title ("The content could not be loaded"). */
+  /** Replaces the generic title ("The content could not be loaded"); site-specific copy goes here. */
   title?: string;
+  /**
+   * One line for a failure beside content that stays on screen: the catalog's
+   * message is the title (no generic heading) unless `title` is given.
+   */
+  compact?: boolean;
   className?: string;
 };
 
 /**
- * The one error state for a list or section that failed to load: an Astryx
- * error banner (announced as an alert) with the catalog's message, a
- * "Försök igen" button and, for a backend error, the HTTP status, error code
- * and trace id behind the banner's details toggle.
+ * The one inline error display: an Astryx error banner (announced as an
+ * alert) with the catalog's message, an optional "Försök igen" button and,
+ * for a backend error, the HTTP status, error code and the support references
+ * (`errorReferenceLines`: error id and trace id) behind the banner's details
+ * toggle. Keep errors as `unknown` in state and render them here.
+ *
+ * A failed read goes through `QueryStateBoundary`, or `blockingError` plus
+ * `RefreshError` where content cannot sit in a boundary: a plain `isError`
+ * check drops the retry button under focus and hides data on a failed
+ * refetch. Use ListError directly for a failed save or other mutation.
  *
  * @example
- * {query.isError ? <ListError error={query.error} onRetry={() => void query.refetch()} /> : …}
+ * {saveError != null && <ListError error={saveError} title={t("skills_bindings_save_error")} />}
+ *
+ * @example
+ * {blockingError(query) ? (
+ *   <ListError error={query.error} isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
+ * ) : …}
  */
 export function ListError({
   error,
   onRetry,
   isRetrying = false,
   title,
+  compact = false,
   className
 }: ListErrorProps) {
   const t = useTranslations();
@@ -52,27 +93,33 @@ export function ListError({
     ? [
         t("query_error_http_status", { status: apiError.status }),
         apiError.code != null ? t("query_error_code", { code: apiError.code }) : null,
-        apiError.traceId ? t("query_error_trace_id", { id: apiError.traceId }) : null
+        ...errorReferenceLines(apiError, t)
       ].filter((line): line is string => line !== null)
     : [];
+  const message = getErrorMessage(error, t);
+  const heading = title ?? (compact ? message : t("query_error_title"));
 
   return (
     <Banner
       status="error"
-      title={title ?? t("query_error_title")}
-      description={getErrorMessage(error, t)}
+      title={heading}
+      description={error == null || heading === message ? undefined : message}
       className={className}
       endContent={
-        <Button
-          size="sm"
-          label={t("retry")}
-          icon={<RefreshCw aria-hidden="true" />}
-          isLoading={isRetrying}
-          isInterruptible
-          onClick={() => {
-            if (!isRetrying) onRetry();
-          }}
-        />
+        onRetry ? (
+          <Button
+            size="sm"
+            label={t("retry")}
+            // Several failed sections on one page: each retry names its own.
+            aria-label={title ? t("query_error_retry_named", { section: title }) : undefined}
+            icon={<RefreshCw aria-hidden="true" />}
+            isLoading={isRetrying}
+            isInterruptible
+            onClick={() => {
+              if (!isRetrying) onRetry();
+            }}
+          />
+        ) : undefined
       }
     >
       {details.length > 0 ? (
@@ -89,6 +136,8 @@ export function ListError({
 type LoadingProps = Pick<LoadingStateProps, "rows" | "variant" | "height"> & {
   /** Screen-reader label while loading; defaults to "Laddar…". */
   loadingLabel?: string;
+  /** Title of the error that replaces the content (ListError's `title`). */
+  errorTitle?: string;
 };
 
 type SingleQueryProps<T> = LoadingProps & {
@@ -110,9 +159,11 @@ type ManyQueriesProps = LoadingProps & {
 export type QueryStateBoundaryProps<T> = SingleQueryProps<T> | ManyQueriesProps;
 
 /**
- * Renders a query's three states the same way everywhere: `LoadingState`
- * skeleton rows while pending, `ListError` with a retry when it failed
- * (retrying the failed queries only) and the children once there is data.
+ * Renders a query's states the same way everywhere: `LoadingState` skeleton
+ * rows while pending, `ListError` with a retry when a failure leaves nothing
+ * to show (`blockingError`; retrying the failed queries only) and the children
+ * once there is data. A refetch that fails while data is shown keeps the
+ * children and puts a compact `ListError` above them.
  *
  * @example
  * <QueryStateBoundary query={logs} rows={5}>
@@ -125,17 +176,17 @@ export type QueryStateBoundaryProps<T> = SingleQueryProps<T> | ManyQueriesProps;
  * </QueryStateBoundary>
  */
 export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
-  const { rows, variant, height, loadingLabel } = props;
+  const { rows, variant, height, loadingLabel, errorTitle } = props;
   const queries: readonly QueryLike[] = props.queries ?? [props.query];
-  const failed = queries.filter((query) => query.isError);
-
-  if (failed.length > 0) {
+  const blocking = queries.filter(blockingError);
+  if (blocking.length > 0) {
     return (
       <ListError
-        error={failed[0]!.error}
-        isRetrying={failed.some((query) => query.isFetching)}
+        error={blocking.find((query) => query.error != null)?.error ?? null}
+        title={errorTitle}
+        isRetrying={blocking.some((query) => query.isFetching)}
         onRetry={() => {
-          for (const query of failed) void query.refetch();
+          for (const query of blocking) void query.refetch();
         }}
       />
     );
@@ -143,6 +194,133 @@ export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
   if (queries.some((query) => query.isPending)) {
     return <LoadingState rows={rows} variant={variant} height={height} label={loadingLabel} />;
   }
-  if (props.queries) return <>{props.children()}</>;
-  return <>{props.children(props.query.data as T)}</>;
+  return (
+    <>
+      <RefreshError queries={queries} />
+      {props.queries ? props.children() : props.children(props.query.data as T)}
+    </>
+  );
+}
+
+type FailureKind = "refresh" | "next-page" | null;
+
+/** Which failure a query with data on screen holds: its refresh or its next page. */
+function failureKind(query: Pick<QueryLike, "data" | "isError" | "isFetchNextPageError">) {
+  if (!query.isError || query.data === undefined) return null;
+  return query.isFetchNextPageError ? "next-page" : "refresh";
+}
+
+type FailureSource = Pick<
+  QueryLike,
+  "data" | "isError" | "isFetching" | "fetchStatus" | "isFetchNextPageError"
+>;
+
+/**
+ * The failure each query last settled with. While a request is in flight
+ * (fetching, or paused offline) React Query describes that request (its
+ * direction), not the failure on screen: a failed refresh would read as a
+ * failed next page once "Visa fler" is pressed, and a failed next page as a
+ * failed refresh once a focus refetch starts. The kind is kept until the
+ * request settles, and only while the query still holds a failure: a query
+ * that has none (another filter's placeholder data) reports none.
+ */
+function useSettledFailures(queries: readonly FailureSource[]): FailureKind[] {
+  const [settled, setSettled] = useState<FailureKind[]>(() => queries.map(failureKind));
+  const kinds = queries.map((query, index) => {
+    const current = failureKind(query);
+    if (current === null) return null;
+    const inFlight = query.isFetching || query.fetchStatus === "paused";
+    return inFlight ? (settled[index] ?? current) : current;
+  });
+  if (kinds.length !== settled.length || kinds.some((kind, index) => kind !== settled[index])) {
+    setSettled(kinds);
+  }
+  return kinds;
+}
+
+/**
+ * The compact error above content that stays on screen when a refetch of it
+ * failed (focus, invalidation, polling): "could not be refreshed, the last
+ * loaded data is shown" with a retry of the failed queries. Renders nothing
+ * otherwise; a failure with nothing to show is `blockingError`'s, and a failed
+ * next page is `LoadMore`'s. `QueryStateBoundary` renders it; use it directly
+ * where content cannot sit in a boundary.
+ */
+export function RefreshError({ queries }: { queries: readonly QueryLike[] }) {
+  const t = useTranslations();
+  const kinds = useSettledFailures(queries);
+  const failed = queries.filter((_, index) => kinds[index] === "refresh");
+  if (failed.length === 0) return null;
+  return (
+    <ListError
+      error={failed[0]!.error}
+      title={t("query_error_refresh_title")}
+      isRetrying={failed.some((query) => query.isFetching)}
+      onRetry={() => {
+        for (const query of failed) void query.refetch();
+      }}
+      compact
+    />
+  );
+}
+
+/** The part of a `useInfiniteQuery` result `LoadMore` reads. */
+export type InfiniteQueryLike = {
+  data: unknown;
+  isError: boolean;
+  isFetching: boolean;
+  fetchStatus: "fetching" | "paused" | "idle";
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  isFetchNextPageError: boolean;
+  error: unknown;
+  fetchNextPage: () => unknown;
+};
+
+/**
+ * The "load more" control under a paged list. While the next page loads the
+ * button stays enabled (it keeps focus) and a second press is ignored. A
+ * failed next page keeps the loaded rows: a compact `ListError` above the
+ * button retries that page only.
+ *
+ * @example
+ * <LoadMore query={sessions} label={t("load_more_conversations")} />
+ */
+export function LoadMore({
+  query,
+  label,
+  onLoad
+}: {
+  query: InfiniteQueryLike;
+  label: string;
+  /** Replaces `fetchNextPage`, e.g. to move focus to the first new row once it renders. */
+  onLoad?: () => void;
+}) {
+  const t = useTranslations();
+  const [failure] = useSettledFailures([query]);
+  const failed = failure === "next-page";
+  if (!query.hasNextPage && !failed) return null;
+  const load = () => {
+    if (query.isFetchingNextPage) return;
+    if (onLoad) onLoad();
+    else void query.fetchNextPage();
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {failed ? (
+        <ListError
+          error={query.error}
+          title={t("query_error_load_more_title")}
+          isRetrying={query.isFetchingNextPage}
+          onRetry={load}
+          compact
+          className="w-full"
+        />
+      ) : null}
+      {query.hasNextPage ? (
+        <Button label={label} isLoading={query.isFetchingNextPage} isInterruptible onClick={load} />
+      ) : null}
+    </div>
+  );
 }

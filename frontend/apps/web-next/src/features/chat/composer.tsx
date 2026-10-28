@@ -18,14 +18,13 @@ import {
 import { useTranslations } from "next-intl";
 import {
   useId,
-  useRef,
   useState,
   type ClipboardEvent,
-  type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref
 } from "react";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -114,43 +113,6 @@ function ComposerTextarea({
       className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-48 min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-[15px] leading-normal focus:outline-none"
     />
   );
-}
-
-/** Tracks a file drag over the composer for drop feedback. */
-function useFileDrop(onFiles: (files: File[]) => void, enabled: boolean) {
-  const [dragging, setDragging] = useState(false);
-  const depth = useRef(0);
-  const hasFiles = (event: DragEvent) => event.dataTransfer?.types?.includes("Files") ?? false;
-
-  return {
-    dragging: enabled && dragging,
-    handlers: enabled
-      ? {
-          onDragEnter: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current += 1;
-            setDragging(true);
-          },
-          onDragOver: (event: DragEvent) => {
-            if (hasFiles(event)) event.preventDefault();
-          },
-          onDragLeave: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            depth.current = Math.max(0, depth.current - 1);
-            if (depth.current === 0) setDragging(false);
-          },
-          onDrop: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current = 0;
-            setDragging(false);
-            const files = Array.from(event.dataTransfer.files ?? []);
-            if (files.length > 0) onFiles(files);
-          }
-        }
-      : {}
-  };
 }
 
 /**
@@ -316,10 +278,9 @@ export function Composer({
   const t = useTranslations();
   const hintId = useId();
   const canAttach = attachments.maxFiles !== 0;
-  const { dragging, handlers } = useFileDrop(
-    (files) => void attachments.addFiles(files),
-    canAttach && attachments.canAddMore
-  );
+  const { dragging, handlers } = useFileDrop((files) => void attachments.addFiles(files), {
+    enabled: canAttach && attachments.canAddMore
+  });
   const hasAttachments = attachments.attachments.length > 0;
 
   const send = () => {

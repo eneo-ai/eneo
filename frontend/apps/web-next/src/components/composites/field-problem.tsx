@@ -1,6 +1,7 @@
 "use client";
 
 import { FieldStatus } from "@astryxdesign/core/FieldStatus";
+import { flushSync } from "react-dom";
 
 /*
  * A form's problems show at their fields once it is submitted, and focus
@@ -25,4 +26,30 @@ export function FieldProblem({ id, problem }: { id: string; problem: string | nu
 export function fieldProblemProps(id: string, problem: string | null, describedBy?: string) {
   const ids = [problem ? problemId(id) : null, describedBy].filter(Boolean).join(" ");
   return { "aria-invalid": problem ? true : undefined, "aria-describedby": ids || undefined };
+}
+
+/**
+ * Submit time: `reveal` renders the problems (synchronously), then focus moves
+ * to `target` (an element or its id), so the field is read with its error. A
+ * closed `<details>` around it opens; a fieldset hands focus to its first
+ * enabled input.
+ */
+export function revealProblems(
+  reveal: () => void,
+  target: HTMLElement | string | null | undefined
+) {
+  flushSync(reveal);
+  const element = typeof target === "string" ? document.getElementById(target) : target;
+  if (!element) return;
+  for (
+    let details = element.closest("details");
+    details;
+    details = details.parentElement?.closest("details") ?? null
+  ) {
+    details.open = true;
+  }
+  (element instanceof HTMLFieldSetElement
+    ? element.querySelector<HTMLElement>("input:enabled")
+    : element
+  )?.focus();
 }
