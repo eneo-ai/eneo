@@ -12,6 +12,7 @@ import {
   Plug,
   Send,
   ShieldCheck,
+  MessageSquareCode,
   SlidersHorizontal,
   Sparkles
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-h
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
+import { AssistantWidgetSection } from "@/features/widget/admin/assistant-widget-section";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
@@ -153,6 +155,16 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
             label: t("publishing"),
             icon: Send,
             node: <PublishingSection assistant={assistant} />
+          }
+        ]
+      : []),
+    ...(permissions.includes("edit")
+      ? [
+          {
+            id: "widget",
+            label: t("widget_admin_title"),
+            icon: MessageSquareCode,
+            node: <AssistantWidgetSection assistantId={assistant.id} />
           }
         ]
       : [])

@@ -45,7 +45,15 @@ reaches the backend. `src/proxy.ts` decides an embed page's frame policy,
 language and colour scheme from the widget's configuration, and the root
 layout renders it without the app's chrome. The loader bundle is read from
 `packages/widget-loader` (build it with `bun run --filter '@eneo/widget-loader'
-build`; the image does). The admin side of widgets is not ported yet.
+build`; the image does).
+
+The widget's admin page lives under its assistant
+(`/spaces/<space>/assistants/<assistant>/widget`, `src/features/widget/admin`):
+the editor with its autosave store, the live preview (the embed page framed
+with a preview token, so the app's CSP allows same-origin frames), "Test in
+Eneo" with the real loader, the install snippet (pointing at `APP_ORIGIN`)
+and the usage table. Widget templates, the organisation's widget overview and
+its usage pages are not ported yet.
 
 ## Auth
 

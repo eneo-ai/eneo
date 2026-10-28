@@ -23041,7 +23041,7 @@ export interface components {
      *     widget.
      * @enum {string}
      */
-    TemplateLockGroup: "appearance" | "language" | "legal_texts" | "wording";
+    TemplateLockGroup: "appearance" | "language" | "legal_texts" | "persona" | "wording";
     /** TemplatePlaceholderPublic */
     TemplatePlaceholderPublic: {
       /** Name */
@@ -25758,6 +25758,30 @@ export interface components {
       /** Unhelpful 30D */
       unhelpful_30d: number;
     };
+    /**
+     * WidgetPersona
+     * @description The voice the visitor talks to: a name and a face shown inside the
+     *     conversation, while the header keeps the organisation's logo and title.
+     *
+     *     An empty name is the neutral mode every widget starts in: answers carry
+     *     no sender. The name is presentation only; the assistant's own prompt
+     *     decides tone and behaviour. The AI marker beside the name is not a
+     *     setting, so a persona can never read as a person (AI Act article 50).
+     */
+    WidgetPersona: {
+      /**
+       * Name
+       * @default
+       */
+      name?: string;
+      /** Avatar Icon Id */
+      avatar_icon_id?: string | null;
+      /**
+       * Avatar In Launcher
+       * @default false
+       */
+      avatar_in_launcher?: boolean;
+    };
     /** WidgetPolicyPublic */
     WidgetPolicyPublic: {
       /** Max Daily Token Budget */
@@ -25842,6 +25866,7 @@ export interface components {
       name: string;
       texts: components["schemas"]["WidgetTexts"];
       theme: components["schemas"]["WidgetTheme"];
+      persona: components["schemas"]["WidgetPersona"];
       limits: components["schemas"]["WidgetLimits"];
       privacy: components["schemas"]["WidgetPrivacy"];
       language: components["schemas"]["WidgetLanguage"];
@@ -25890,6 +25915,8 @@ export interface components {
       name: string;
       texts: components["schemas"]["WidgetTexts"];
       theme: components["schemas"]["WidgetTheme"];
+      /** @description The name and avatar answers are presented under; an empty name means answers carry no sender. The avatar is `/icons/{id}/`. */
+      persona: components["schemas"]["WidgetPersona"];
       language: components["schemas"]["WidgetLanguage"];
       bot_protection: components["schemas"]["BotProtection"];
       /** Max Question Chars */
@@ -25972,14 +25999,15 @@ export interface components {
       name: string;
       /**
        * Locked Groups
-       * @description Parts of the widget that follow the template and cannot be edited on the widget: appearance, language, legal_texts (disclosure and footer) and/or wording (title, welcome, placeholder).
+       * @description Parts of the widget that follow the template and cannot be edited on the widget: appearance, language, legal_texts (disclosure and footer), persona (name and avatar) and/or wording (title, welcome, placeholder).
        */
       locked_groups: components["schemas"]["TemplateLockGroup"][];
     };
     /**
      * WidgetTemplatePublic
-     * @description The draft (texts, theme, language, locked_groups) plus its publication
-     *     state. Followers are linked to and locked by the published release.
+     * @description The draft (texts, theme, persona, language, locked_groups) plus its
+     *     publication state. Followers are linked to and locked by the published
+     *     release.
      */
     WidgetTemplatePublic: {
       /**
@@ -25993,6 +26021,7 @@ export interface components {
       description: string;
       texts: components["schemas"]["WidgetTexts"];
       theme: components["schemas"]["WidgetTheme"];
+      persona: components["schemas"]["WidgetPersona"];
       language: components["schemas"]["WidgetLanguage"];
       /** Is Default */
       is_default: boolean;
@@ -26038,6 +26067,7 @@ export interface components {
     WidgetTemplateReleasePublic: {
       texts: components["schemas"]["WidgetTexts"];
       theme: components["schemas"]["WidgetTheme"];
+      persona: components["schemas"]["WidgetPersona"];
       language: components["schemas"]["WidgetLanguage"];
       /** Locked Groups */
       locked_groups: components["schemas"]["TemplateLockGroup"][];
@@ -26050,6 +26080,7 @@ export interface components {
       description?: string | null;
       texts?: components["schemas"]["WidgetTexts"] | null;
       theme?: components["schemas"]["WidgetTheme"] | null;
+      persona?: components["schemas"]["WidgetPersona"] | null;
       language?: components["schemas"]["WidgetLanguage"] | null;
       /** Is Default */
       is_default?: boolean | null;
@@ -26145,6 +26176,11 @@ export interface components {
        * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
        */
       theme?: components["schemas"]["WidgetTheme"];
+      /**
+       * Persona
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. Only an icon the caller uploaded can be the avatar (`icon_not_attachable` otherwise).
+       */
+      persona?: components["schemas"]["WidgetPersona"];
       /**
        * Limits
        * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.

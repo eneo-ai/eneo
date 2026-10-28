@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
-async function uploadIcon(file: File): Promise<{ id: string }> {
+/** Uploads an image to the icons endpoint; the caller stores the id on its resource. */
+export async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
   const response = await fetch("/api/eneo/api/v1/icons/", { method: "POST", body: form });

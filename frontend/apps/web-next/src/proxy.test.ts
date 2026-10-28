@@ -124,16 +124,16 @@ it("builds a strict production script policy with a request nonce", () => {
   expect(script).not.toContain("'unsafe-eval'");
   expect(directive(csp, "script-src-attr")).toBe("script-src-attr 'none'");
   expect(directive(csp, "style-src")).toBe("style-src 'self' 'nonce-test-nonce'");
-  expect(directive(csp, "frame-src")).toBe("frame-src blob:");
+  expect(directive(csp, "frame-src")).toBe("frame-src 'self' blob:");
   expect(directive(csp, "frame-ancestors")).toBe("frame-ancestors 'self'");
   expect(csp).toContain("upgrade-insecure-requests");
 });
 
 it("frames interactive tool views from their content origin only", () => {
   const csp = buildContentSecurityPolicy("test-nonce", "production", ["https://views.eneo.test"]);
-  expect(directive(csp, "frame-src")).toBe("frame-src blob: https://views.eneo.test");
+  expect(directive(csp, "frame-src")).toBe("frame-src 'self' blob: https://views.eneo.test");
   expect(directive(buildContentSecurityPolicy("n", "production", []), "frame-src")).toBe(
-    "frame-src blob:"
+    "frame-src 'self' blob:"
   );
 });
 

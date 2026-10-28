@@ -82,13 +82,14 @@ export type SpaceRoute =
       isSectionRoot: boolean;
     };
 
-/** `/spaces/x/assistants/<id>/edit`, `/apps/<id>/edit`, `/group-chats/<id>/edit`. */
+/**
+ * `/spaces/x/assistants/<id>/edit`, `/apps/<id>/edit`, `/group-chats/<id>/edit`,
+ * and an assistant's `/widget` page, which owns its surface the same way.
+ */
 function isEditorRoute(first: string | undefined, rest: readonly string[]): boolean {
-  return (
-    (first === "assistants" || first === "apps" || first === "group-chats") &&
-    rest.length === 2 &&
-    rest[1] === "edit"
-  );
+  if (rest.length !== 2) return false;
+  if (first === "assistants") return rest[1] === "edit" || rest[1] === "widget";
+  return (first === "apps" || first === "group-chats") && rest[1] === "edit";
 }
 
 /**
