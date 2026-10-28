@@ -682,6 +682,12 @@ These are the exact prefixes the shipped Traefik labels route to the backend.
 - `X-Forwarded-For` - client IP address
 - `Host` - original host header
 
+Behind TLS termination the backend sees browser requests as `http`. A request
+whose `Origin` is `https://` on the same `Host` still passes CORS without an
+`allowed_origins` entry; `X-Forwarded-Host` is never compared. Requests that
+carry an API key keep their key and tenant origin policies. Existing
+`allowed_origins` entries for the app's own host can stay.
+
 **Requirements:**
 
 - WebSocket support (for real-time features)
