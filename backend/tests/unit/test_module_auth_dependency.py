@@ -4,14 +4,34 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
-from eneo.main.config import get_settings
+from eneo.main.config import get_settings, set_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.modules.module_auth import ModuleRequestPrincipal
 from eneo.server.dependencies.module_auth import authenticate_module_request
 
+# A same-origin browser session cookie never stands in for either module
+# credential: both still come from the headers.
+SESSION_COOKIE = [
+    (b"cookie", b"__Host-eneo_web=session-cookie; eneo_web=session-cookie"),
+    (b"sec-fetch-site", b"same-origin"),
+]
 
-def make_request(*, authorization: str | None, api_key: str | None) -> Request:
-    headers: list[tuple[bytes, bytes]] = []
+
+@pytest.fixture(autouse=True)
+def browser_session_enabled():
+    original = get_settings()
+    set_settings(original.model_copy(update={"browser_session_enabled": True}))
+    yield
+    set_settings(original)
+
+
+def make_request(
+    *,
+    authorization: str | None,
+    api_key: str | None,
+    extra: list[tuple[bytes, bytes]] | None = None,
+) -> Request:
+    headers: list[tuple[bytes, bytes]] = list(extra or [])
     if authorization is not None:
         headers.append((b"authorization", authorization.encode()))
     if api_key is not None:
@@ -21,10 +41,14 @@ def make_request(*, authorization: str | None, api_key: str | None) -> Request:
     return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
 
 
-async def test_module_dependency_resolves_service_key_and_module_token_together():
+@pytest.mark.parametrize("extra", [None, SESSION_COOKIE])
+async def test_module_dependency_resolves_service_key_and_module_token_together(
+    extra,
+):
     request = make_request(
         authorization="Bearer module-user-token",
         api_key="sk_module-service-key",
+        extra=extra,
     )
     resolved_key = MagicMock(id=uuid4())
     service_user = MagicMock(active_api_key=resolved_key)
@@ -64,6 +88,7 @@ async def test_module_dependency_resolves_service_key_and_module_token_together(
     assert request.state.module_principal is principal
 
 
+@pytest.mark.parametrize("extra", [None, SESSION_COOKIE])
 @pytest.mark.parametrize(
     ("authorization", "api_key"),
     [
@@ -72,13 +97,17 @@ async def test_module_dependency_resolves_service_key_and_module_token_together(
         ("Bearer module-user-token", None),
     ],
 )
-async def test_module_dependency_requires_both_credentials(authorization, api_key):
+async def test_module_dependency_requires_both_credentials(
+    authorization, api_key, extra
+):
     container = MagicMock()
 
     with pytest.raises(AuthenticationException, match="both Bearer and API key"):
         await authenticate_module_request(
             module_key="speech-to-text",
-            request=make_request(authorization=authorization, api_key=api_key),
+            request=make_request(
+                authorization=authorization, api_key=api_key, extra=extra
+            ),
             container=container,
         )
 
