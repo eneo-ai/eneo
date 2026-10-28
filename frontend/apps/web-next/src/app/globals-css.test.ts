@@ -207,26 +207,72 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
   });
 
-  it("self-hosts the fonts from public/fonts and names them on :root", () => {
-    const faces: Record<string, string>[] = [];
+  it("self-hosts every subset Next's font loader served, from public/fonts", () => {
+    // family → subsets, from the file names (<family>-<subset>-wght-normal.woff2)
+    const subsets = new Map<string, string[]>();
     postcss.parse(css).walkAtRules("font-face", (face: AtRule) => {
       const declarations: Record<string, string> = {};
       face.walkDecls((decl) => {
         declarations[decl.prop] = decl.value;
       });
-      faces.push(declarations);
-    });
-    const hosted = faces.filter((face) => face.src?.includes('url("/fonts/'));
-    expect(hosted.map((face) => face["font-family"])).toEqual([
-      '"Figtree"',
-      '"JetBrains Mono"',
-      '"Source Serif 4"'
-    ]);
-    for (const face of hosted) {
-      expect(face["font-display"]).toBe("swap");
-      const file = face.src?.match(/url\("\/fonts\/([^"]+)"\)/)?.[1] ?? "";
+      const file = declarations.src?.match(/url\("\/fonts\/([^"]+)"\)/)?.[1];
+      if (!file) return;
+      expect(declarations["font-display"], file).toBe("swap");
+      expect(declarations["unicode-range"], file).toMatch(/^U\+/);
       expect(existsSync(path.join(appDir, "public/fonts", file)), file).toBe(true);
-    }
+      const family = declarations["font-family"] ?? "";
+      const subset = file.match(
+        /^[a-z0-9-]+?-((?:latin|cyrillic|greek|vietnamese)(?:-ext)?)-wght/
+      )?.[1];
+      subsets.set(family, [...(subsets.get(family) ?? []), subset ?? file]);
+    });
+    const all = ["cyrillic-ext", "cyrillic", "greek", "vietnamese", "latin-ext", "latin"];
+    expect(Object.fromEntries(subsets)).toEqual({
+      '"Figtree"': ["latin-ext", "latin"],
+      '"JetBrains Mono"': all,
+      '"Source Serif 4"': all
+    });
+  });
+
+  it("names the fonts on :root with the metric-matched fallbacks Next generated", () => {
+    // The fallback faces size a local font to the web font's metrics, so the
+    // swap to the web font does not move text (the values Next's font loader generated).
+    const fallbacks = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("font-face", (face: AtRule) => {
+      const declarations: Record<string, string> = {};
+      face.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      if (declarations.src?.startsWith("local(")) {
+        fallbacks.set(declarations["font-family"] ?? "", declarations);
+      }
+    });
+    expect(Object.fromEntries(fallbacks)).toEqual({
+      '"Figtree Fallback"': {
+        "font-family": '"Figtree Fallback"',
+        src: 'local("Arial")',
+        "ascent-override": "94.32%",
+        "descent-override": "24.82%",
+        "line-gap-override": "0%",
+        "size-adjust": "100.72%"
+      },
+      '"JetBrains Mono Fallback"': {
+        "font-family": '"JetBrains Mono Fallback"',
+        src: 'local("Arial")',
+        "ascent-override": "75.79%",
+        "descent-override": "22.29%",
+        "line-gap-override": "0%",
+        "size-adjust": "134.59%"
+      },
+      '"Source Serif 4 Fallback"': {
+        "font-family": '"Source Serif 4 Fallback"',
+        src: 'local("Times New Roman")',
+        "ascent-override": "87.87%",
+        "descent-override": "28.41%",
+        "line-gap-override": "0%",
+        "size-adjust": "117.91%"
+      }
+    });
 
     const root: Record<string, string> = {};
     postcss.parse(css).walkRules(":root", (rule: Rule) => {
@@ -235,9 +281,9 @@ describe("globals.css", () => {
       });
     });
     expect(root).toEqual({
-      "--font-figtree": '"Figtree"',
-      "--font-jetbrains-mono": '"JetBrains Mono"',
-      "--font-source-serif": '"Source Serif 4", serif'
+      "--font-figtree": '"Figtree", "Figtree Fallback"',
+      "--font-jetbrains-mono": '"JetBrains Mono", "JetBrains Mono Fallback"',
+      "--font-source-serif": '"Source Serif 4", "Source Serif 4 Fallback", serif'
     });
   });
 
