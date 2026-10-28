@@ -1,16 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
-import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -21,12 +19,12 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
-import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { useSearchParams } from "@/lib/navigation";
 import {
-  buildRateMap,
-  defaultUsageRange,
+  type CostRate,
   formatCost,
   usageIntensity,
+  usageListHref,
   userModelBreakdownQueryOptions,
   userTokenUsageSummaryQueryOptions,
   userUsageCost,
@@ -34,6 +32,13 @@ import {
   type UsageRange,
   type UserUsageRow
 } from "@/features/admin/usage/usage";
+import {
+  DateRangeBar,
+  percent,
+  share,
+  UsageBadge,
+  useCostRates
+} from "@/features/admin/usage/usage-parts";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
 
@@ -47,80 +52,12 @@ function Stat({ label, value, subvalue }: { label: string; value: string; subval
   );
 }
 
-function percent(value: number, locale: string): string {
-  return new Intl.NumberFormat(locale, {
-    style: "percent",
-    maximumFractionDigits: 1
-  }).format(Number.isFinite(value) ? value : 0);
-}
-
-function share(part: number, total: number): number {
-  return total > 0 ? part / total : 0;
-}
-
 function modelDisplayName(model: TokenUsage["models"][number]): string {
   return model.model_nickname || model.model_name;
 }
 
 function modelProvider(model: TokenUsage["models"][number], unknown: string): string {
   return model.model_provider || model.model_org || unknown;
-}
-
-function DateRangeBar({
-  range,
-  setRange
-}: {
-  range: UsageRange;
-  setRange: Dispatch<SetStateAction<UsageRange>>;
-}) {
-  const t = useTranslations();
-  return (
-    <Card className="flex flex-wrap items-end gap-3 p-4">
-      <label className="flex flex-col gap-1 text-xs">
-        {t("from")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={range.from}
-          onChange={(event) => {
-            if (event.target.value)
-              setRange((current) => ({ ...current, from: event.target.value }));
-          }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        {t("to")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={range.to}
-          onChange={(event) => {
-            if (event.target.value) setRange((current) => ({ ...current, to: event.target.value }));
-          }}
-        />
-      </label>
-      <Button variant="outline" size="sm" onClick={() => setRange(defaultUsageRange())}>
-        <RotateCcw className="size-4" />
-        {t("reset")}
-      </Button>
-    </Card>
-  );
-}
-
-function UsageBadge({ user, range }: { user: UserUsageRow; range: UsageRange }) {
-  const t = useTranslations();
-  const intensity = usageIntensity(user.total_tokens, range);
-  const className =
-    intensity === "high"
-      ? "border-destructive/40 text-destructive"
-      : intensity === "medium"
-        ? "border-warning/40 text-warning"
-        : "border-success/40 text-success";
-  return (
-    <Badge variant="outline" className={className}>
-      {t(`usage_level_${intensity}`)}
-    </Badge>
-  );
 }
 
 function UserSummary({
@@ -149,7 +86,7 @@ function UserSummary({
             <p className="text-muted-foreground truncate text-sm">{user.email}</p>
           </div>
         </div>
-        <UsageBadge user={user} range={range} />
+        <UsageBadge level={usageIntensity(user.total_tokens, range)} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-muted-foreground">{t("username")}</dt>
           <dd className="truncate">{user.username}</dd>
@@ -270,13 +207,7 @@ function TopModels({ data }: { data: TokenUsage }) {
   );
 }
 
-function ModelBreakdownTable({
-  data,
-  rates
-}: {
-  data: TokenUsage;
-  rates: ReturnType<typeof buildRateMap>;
-}) {
+function ModelBreakdownTable({ data, rates }: { data: TokenUsage; rates: Map<string, CostRate> }) {
   const t = useTranslations();
   const unknown = t("unknown");
   const headingId = useId();
@@ -353,22 +284,22 @@ export function UserUsagePage({
   const [range, setRange] = useState(initialRange);
   const user = useQuery(userTokenUsageSummaryQueryOptions(browserApi, userId, range));
   const breakdown = useQuery(userModelBreakdownQueryOptions(browserApi, userId, range));
-  const models = useQuery(adminModelsQueryOptions(browserApi));
-  const rates = useMemo(() => buildRateMap(models.data?.completion_models ?? []), [models.data]);
+  const rates = useCostRates();
+  const searchParams = useSearchParams();
   const userRow = user.data?.user;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <PageHeader title={userRow?.username ?? t("usage")}>
         <Button variant="outline" asChild>
-          <Link href="/admin/usage">
+          <Link href={usageListHref(searchParams)}>
             <ArrowLeft className="size-4" />
             {t("back")}
           </Link>
         </Button>
       </PageHeader>
 
-      <DateRangeBar range={range} setRange={setRange} />
+      <DateRangeBar range={range} onChange={setRange} />
 
       <QueryStateBoundary query={user} rows={1} height={256}>
         {() =>
