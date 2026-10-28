@@ -212,10 +212,10 @@ export function CreateCollectionButton() {
 export function CollectionActions({ collection }: { collection: Collection }) {
   const t = useTranslations();
   const shared = use(KnowledgeActionContext);
-  const [action, setAction] = useState<"edit" | "delete" | null>(null);
+  const [opening, setOpening] = useState<{ action: "edit" | "delete" } | null>(null);
   const open = (next: "edit" | "delete") => {
     if (shared) shared({ kind: "collection", collection, action: next });
-    else setAction(next);
+    else setOpening({ action: next });
   };
   const canDelete = collection.permissions?.includes("delete") ?? false;
   const items: DropdownMenuOption[] = [
@@ -239,11 +239,11 @@ export function CollectionActions({ collection }: { collection: Collection }) {
         items={items}
         alignment="end"
       />
-      {action && (
+      {opening && (
         <CollectionActionDialog
           collection={collection}
-          action={action}
-          onClose={() => setAction(null)}
+          action={opening.action}
+          onClose={() => setOpening((current) => (current === opening ? null : current))}
         />
       )}
     </>

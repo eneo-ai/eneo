@@ -162,10 +162,10 @@ function deleteOutcomeToast(
 export function WebsiteActions({ website }: { website: Website }) {
   const t = useTranslations();
   const shared = use(KnowledgeActionContext);
-  const [action, setAction] = useState<"edit" | "delete" | null>(null);
+  const [opening, setOpening] = useState<{ action: "edit" | "delete" } | null>(null);
   const open = (next: "edit" | "delete") => {
     if (shared) shared({ kind: "website", website, action: next });
-    else setAction(next);
+    else setOpening({ action: next });
   };
   const canDelete = website.permissions?.includes("delete") ?? false;
   const items: DropdownMenuOption[] = [
@@ -189,8 +189,12 @@ export function WebsiteActions({ website }: { website: Website }) {
         items={items}
         alignment="end"
       />
-      {action && (
-        <WebsiteActionDialog website={website} action={action} onClose={() => setAction(null)} />
+      {opening && (
+        <WebsiteActionDialog
+          website={website}
+          action={opening.action}
+          onClose={() => setOpening((current) => (current === opening ? null : current))}
+        />
       )}
     </>
   );

@@ -93,11 +93,11 @@ export function IntegrationActions({
 }) {
   const t = useTranslations();
   const shared = use(KnowledgeActionContext);
-  const [action, setAction] = useState<"rename" | "sync" | "delete" | null>(null);
+  const [opening, setOpening] = useState<{ action: "rename" | "sync" | "delete" } | null>(null);
   const anchor = useRef<HTMLSpanElement>(null);
   const open = (next: "rename" | "sync" | "delete") => {
     if (shared) shared({ kind: "integration", item, action: next, anchor, onDeleted });
-    else setAction(next);
+    else setOpening({ action: next });
   };
   const canEdit = item.permissions?.includes("edit") ?? false;
   const canDelete = item.permissions?.includes("delete") ?? false;
@@ -145,13 +145,13 @@ export function IntegrationActions({
           alignment="end"
         />
       </span>
-      {action && (
+      {opening && (
         <IntegrationActionDialog
           item={item}
-          action={action}
+          action={opening.action}
           anchor={anchor}
           onDeleted={onDeleted}
-          onClose={() => setAction(null)}
+          onClose={() => setOpening((current) => (current === opening ? null : current))}
         />
       )}
     </>
@@ -296,7 +296,7 @@ export function WrapperActions({
 }) {
   const t = useTranslations();
   const shared = use(KnowledgeActionContext);
-  const [action, setAction] = useState<"rename" | "resync" | "delete" | null>(null);
+  const [opening, setOpening] = useState<{ action: "rename" | "resync" | "delete" } | null>(null);
   const anchor = useRef<HTMLSpanElement>(null);
   const open = (next: "rename" | "resync" | "delete") => {
     if (shared)
@@ -309,7 +309,7 @@ export function WrapperActions({
         anchor,
         onDeleted
       });
-    else setAction(next);
+    else setOpening({ action: next });
   };
   const canResync =
     canEdit &&
@@ -361,15 +361,15 @@ export function WrapperActions({
           alignment="end"
         />
       </span>
-      {action && (
+      {opening && (
         <WrapperActionDialog
           wrapperId={wrapperId}
           wrapperName={wrapperName}
           items={wrapperItems}
-          action={action}
+          action={opening.action}
           anchor={anchor}
           onDeleted={onDeleted}
-          onClose={() => setAction(null)}
+          onClose={() => setOpening((current) => (current === opening ? null : current))}
         />
       )}
     </>

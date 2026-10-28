@@ -5,7 +5,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
-const api = vi.hoisted(() => ({ POST: vi.fn() }));
+const api = vi.hoisted(() => ({ POST: vi.fn(), DELETE: vi.fn() }));
 const space = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -99,4 +99,33 @@ it("keeps a newer draft open when a previous save finishes after its dialog clos
 
   expect(screen.getByRole("dialog")).toBe(dialog);
   expect((within(dialog).getByLabelText("Namn") as HTMLInputElement).value).toBe("Nytt utkast");
+});
+
+it("keeps a standalone pending deletion open when an earlier rename finishes", async () => {
+  space.current = makeSpace();
+  let finishRename!: () => void;
+  api.POST.mockReturnValue(
+    new Promise((resolve) => {
+      finishRename = () => resolve({ data: { id: "collection-1" }, response: new Response("{}") });
+    })
+  );
+  api.DELETE.mockReturnValue(new Promise(() => {}));
+  renderInApp(<CollectionActions collection={makeCollection() as Collection} />);
+  const trigger = screen.getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Redigera" }));
+  const edit = await screen.findByRole("dialog");
+  fireEvent.click(within(edit).getByRole("button", { name: "Spara ändringar" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  fireEvent.click(within(edit).getByRole("button", { name: "Avbryt" }));
+
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const confirmation = await screen.findByRole("alertdialog", { name: "Radera samling" });
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Ta bort" }));
+  await waitFor(() => expect(api.DELETE).toHaveBeenCalledTimes(1));
+  await act(async () => finishRename());
+
+  expect(screen.getByRole("alertdialog", { name: "Radera samling" })).toBe(confirmation);
+  expect(confirmation.querySelector('[aria-busy="true"]')).not.toBeNull();
 });
