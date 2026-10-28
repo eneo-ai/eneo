@@ -36,6 +36,33 @@ test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
 
+// Fonts (src/app/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
+
+test("preloads only Figtree and renders with it", async ({ page }) => {
+  const response = await page.goto("/spaces/personal/chat");
+  // Next's font loader sent its preloads only as a Link header; Next mirrors
+  // the app's own HTML preload into that header too. Both count, once each.
+  const headerPreloads = (response?.headers()["link"] ?? "")
+    .split(/,\s*(?=<)/)
+    .filter((entry) => /rel=preload/.test(entry) && /as="?font/.test(entry))
+    .map((entry) => entry.slice(1, entry.indexOf(">")));
+  const htmlPreloads = await page
+    .locator('link[rel="preload"][as="font"]')
+    .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  const preloads = [...new Set([...headerPreloads, ...htmlPreloads])];
+  expect(preloads).toEqual(["/fonts/figtree-latin-wght-normal.woff2"]);
+  expect(preloads.join()).not.toMatch(/jetbrains|source-serif/);
+
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        await document.fonts.ready;
+        return document.fonts.check("16px Figtree");
+      })
+    )
+    .toBe(true);
+});
+
 // App shell (SideNav, ⌘K palette, phone drawer).
 
 test("the side navigation reaches the assistant catalog", async ({ page }) => {

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import tailwind from "@tailwindcss/postcss";
@@ -204,6 +205,40 @@ describe("globals.css", () => {
     });
     expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
+  });
+
+  it("self-hosts the fonts from public/fonts and names them on :root", () => {
+    const faces: Record<string, string>[] = [];
+    postcss.parse(css).walkAtRules("font-face", (face: AtRule) => {
+      const declarations: Record<string, string> = {};
+      face.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      faces.push(declarations);
+    });
+    const hosted = faces.filter((face) => face.src?.includes('url("/fonts/'));
+    expect(hosted.map((face) => face["font-family"])).toEqual([
+      '"Figtree"',
+      '"JetBrains Mono"',
+      '"Source Serif 4"'
+    ]);
+    for (const face of hosted) {
+      expect(face["font-display"]).toBe("swap");
+      const file = face.src?.match(/url\("\/fonts\/([^"]+)"\)/)?.[1] ?? "";
+      expect(existsSync(path.join(appDir, "public/fonts", file)), file).toBe(true);
+    }
+
+    const root: Record<string, string> = {};
+    postcss.parse(css).walkRules(":root", (rule: Rule) => {
+      rule.walkDecls(/^--font-(figtree|jetbrains-mono|source-serif)$/, (decl) => {
+        root[decl.prop] = decl.value;
+      });
+    });
+    expect(Object.keys(root).sort()).toEqual([
+      "--font-figtree",
+      "--font-jetbrains-mono",
+      "--font-source-serif"
+    ]);
   });
 
   it("keeps what an Astryx table scrolls inside its scroll box", () => {
