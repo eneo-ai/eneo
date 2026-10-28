@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { auditLogsQueryOptions, type AuditFilters } from "./audit";
 import { AuditConfig } from "./audit-config";
@@ -21,8 +22,6 @@ import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters
 import { ExportDialog } from "./export-dialog";
 import { JustificationForm } from "./justification-form";
 
-const SEARCH_DEBOUNCE_MS = 300;
-
 function LogsTab() {
   const t = useTranslations();
   const searchParams = useSearchParams();
@@ -31,17 +30,19 @@ function LogsTab() {
   const [showExport, setShowExport] = useState(false);
   const [paging, setPaging] = useState<"previous" | "next" | null>(null);
 
-  // Debounce the free-text search into the committed filters.
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      setFilters((current) =>
-        current.search === searchInput ? current : { ...current, search: searchInput, page: 1 }
-      );
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput]);
+  // The free-text search commits into the filters once typing pauses; a new
+  // search starts over at page 1. Only a change of the debounced draft
+  // commits, so clearing (committed at once, below) is not undone meanwhile.
+  const debouncedSearch = useDebouncedValue(searchInput.trim());
+  const [committedSearch, setCommittedSearch] = useState(debouncedSearch);
+  if (debouncedSearch !== committedSearch) {
+    setCommittedSearch(debouncedSearch);
+    setFilters((current) =>
+      current.search === debouncedSearch
+        ? current
+        : { ...current, search: debouncedSearch, page: 1 }
+    );
+  }
 
   useEffect(() => {
     const query = auditFiltersSearchParams(filters).toString();

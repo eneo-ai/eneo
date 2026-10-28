@@ -25,6 +25,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { BlobPreviewDialog } from "../../blobs";
@@ -45,7 +46,6 @@ import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "./in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
-const SEARCH_DEBOUNCE_MS = 300;
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
 const NARROW_QUERY = "(width < 40rem)";
 
@@ -249,18 +249,12 @@ export function FolderDocuments({
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
 
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      const next = searchInput.trim();
-      // Only a new search starts over at page 1, not the first run after mount.
-      if (next === q) return;
-      setQ(next);
-      setPage(1);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [q, searchInput]);
+  // A new search starts over at page 1.
+  const debouncedQ = useDebouncedValue(searchInput.trim());
+  if (debouncedQ !== q) {
+    setQ(debouncedQ);
+    setPage(1);
+  }
 
   const [active] = sort;
   const documents = useQuery(

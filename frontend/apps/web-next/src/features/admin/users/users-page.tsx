@@ -16,12 +16,12 @@ import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { PasswordPolicyPanel } from "./password-policy-panel";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
 
-const SEARCH_DEBOUNCE_MS = 250;
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
 const NARROW_QUERY = "(width < 40rem)";
@@ -43,7 +43,7 @@ export function AdminUsersPage() {
   const searchParams = useSearchParams();
 
   const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
-  const initialSearch = searchParams.get("search") ?? "";
+  const initialSearch = (searchParams.get("search") ?? "").trim();
   const initialPage = Math.max(1, Number(searchParams.get("page")) || 1);
   const [roleId, setRoleId] = useState(searchParams.get("role_id"));
 
@@ -63,20 +63,14 @@ export function AdminUsersPage() {
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
-  // Debounce the search box; only commit at 0 or ≥3 chars (backend rule).
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      const trimmed = searchInput.trim();
-      if (trimmed.length > 0 && trimmed.length < MIN_SEARCH_LENGTH) return;
-      if (trimmed !== search) {
-        setSearch(trimmed);
-        setPage(1);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput, search]);
+  // The search box commits once typing pauses, at 0 or ≥3 chars (backend
+  // rule); a new search starts over at page 1.
+  const debouncedSearch = useDebouncedValue(searchInput.trim());
+  const searchable = debouncedSearch.length === 0 || debouncedSearch.length >= MIN_SEARCH_LENGTH;
+  if (searchable && debouncedSearch !== search) {
+    setSearch(debouncedSearch);
+    setPage(1);
+  }
 
   useEffect(() => {
     syncUrl(stateFilter, search, page, roleId);
