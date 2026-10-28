@@ -11,13 +11,15 @@ import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { MultiSelector, type MultiSelectorOptionType } from "@astryxdesign/core/MultiSelector";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Token } from "@astryxdesign/core/Token";
-import { Typeahead, type SearchableItem, type SearchSource } from "@astryxdesign/core/Typeahead";
+import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
+import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
   actionLabel,
@@ -125,6 +127,7 @@ function UserField({
         )
       }
       minQueryLength={MIN_SEARCH_LENGTH}
+      debounceMs={SEARCH_DEBOUNCE_MS}
       emptySearchResultsText={t("audit_user_search_empty")}
       width="100%"
     />
