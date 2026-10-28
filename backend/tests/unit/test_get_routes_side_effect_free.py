@@ -14,17 +14,22 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from redis.asyncio import Redis
+from redis.asyncio.client import Pipeline
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 from starlette.routing import BaseRoute
 
+from eneo.authentication.browser_session import SAFE_METHODS
 from eneo.authentication.endpoint_access import (
+    COOKIE_CAPABLE,
     Authentication,
     Authorization,
     EndpointAccess,
     access_for,
     endpoint_access,
 )
+from eneo.main.config import get_settings
 from eneo.server.endpoint_routes import endpoint_routes, validate_endpoint_access
 from tests.integration import safe_method_tripwire
 
@@ -47,10 +52,10 @@ def undeclared_cookie_gets(routes: list[BaseRoute]) -> set[str]:
     result: set[str] = set()
     for route in endpoint_routes(routes):
         policy = access_for(route.endpoint)
-        methods = safe_method_tripwire.SAFE_METHODS & (route.context.methods or set())
+        methods = SAFE_METHODS & (route.context.methods or set())
         if (
             policy is not None
-            and policy.authentication in safe_method_tripwire.COOKIE_CAPABLE
+            and policy.authentication in COOKIE_CAPABLE
             and policy.effect_on_get is None
         ):
             result.update(f"{method} {route.path}" for method in methods)
@@ -120,7 +125,19 @@ def test_redis_writes_are_recognised() -> None:
     assert not safe_method_tripwire.is_redis_write("GET")
 
 
-def test_the_tripwire_reports_only_undeclared_writing_cookie_gets() -> None:
+def test_the_tripwire_reports_only_undeclared_writing_cookie_gets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The tripwire wraps whatever Redis does; these stand in for the network.
+    async def sent(_self: object, *_args: object, **_options: object) -> bool:
+        return True
+
+    async def sent_all(_self: object, *_args: object, **_options: object) -> list[bool]:
+        return []
+
+    monkeypatch.setattr(Redis, "execute_command", sent)
+    monkeypatch.setattr(Pipeline, "execute", sent_all)
+    redis = Redis()
     # One shared in-memory database for the threadpool the handlers run in.
     engine = create_engine(
         "sqlite://",
@@ -139,6 +156,18 @@ def test_the_tripwire_reports_only_undeclared_writing_cookie_gets() -> None:
     @endpoint_access(**_USER)
     def undeclared() -> None:
         write()
+
+    @app.get("/redis")
+    @endpoint_access(**_USER)
+    async def redis_write() -> None:
+        await redis.setex("key", 10, "value")
+
+    @app.get("/redis-pipeline")
+    @endpoint_access(**_USER)
+    async def redis_pipeline_write() -> None:
+        pipeline = redis.pipeline()
+        pipeline.set("key", "value")
+        await pipeline.execute()
 
     @app.get("/raises")
     @endpoint_access(**_USER)
@@ -175,13 +204,19 @@ def test_the_tripwire_reports_only_undeclared_writing_cookie_gets() -> None:
         for path in ("/declared", "/public", "/read"):
             client.get(path)
         client.post("/undeclared")
+        # An API key rules the session cookie out, so the request is not checked.
+        client.get("/undeclared", headers={get_settings().api_key_header_name: "k"})
         assert violations == []
-        client.get("/undeclared")
+        client.get("/undeclared", headers={"Authorization": "Bearer x"})
+        client.get("/redis")
+        client.get("/redis-pipeline")
         client.get("/raises")
     finally:
         stop()
     assert [violation.split(" changed")[0] for violation in violations] == [
         "GET /undeclared",
+        "GET /redis",
+        "GET /redis-pipeline",
         "GET /raises",
     ]
 
