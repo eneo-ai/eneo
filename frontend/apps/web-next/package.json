@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3100",
+    "dev:vite": "vite",
     "dev:clean": "bun run clean:cache && bun run dev",
     "clean:cache": "rm -rf .next node_modules/.cache",
     "build": "next build",

@@ -57,6 +57,26 @@ _AUDIT_SESSION_RATE_LIMIT = RateLimitConfig(
     max_requests=5, window_seconds=3600, key_prefix="rate_limit:audit_session"
 )
 
+_AUDIT_LOG_VIEW_ON_GET = (
+    "Audited read: records AUDIT_LOG_VIEWED with the session's justification and "
+    "slides the audit session's idle expiry (Redis TTL and cookie). Recording the "
+    "access is the purpose of the audit trail; the logs go only to the caller."
+)
+_AUDIT_USER_LOGS_ON_GET = (
+    "Audited read: records AUDIT_LOG_VIEWED for the caller. Recording the access is "
+    "the purpose of the audit trail; the logs go only to the caller."
+)
+_AUDIT_EXPORT_ON_GET = (
+    "Audited read: records AUDIT_LOG_EXPORTED (or the failed attempt) for the "
+    "caller. Recording the access is the purpose of the audit trail; the logs go "
+    "only to the caller."
+)
+_DEFAULT_RETENTION_ON_GET = (
+    "Creates the tenant's default 365-day retention policy on first read (INSERT "
+    "... ON CONFLICT DO NOTHING); the result is the default the read reports either "
+    "way."
+)
+
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
@@ -372,6 +392,7 @@ async def create_access_session(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_LOG_VIEW_ON_GET,
 )
 async def list_audit_logs(
     request: Request,
@@ -601,6 +622,7 @@ async def list_audit_logs(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_USER_LOGS_ON_GET,
 )
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
@@ -709,6 +731,7 @@ async def get_user_logs(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_EXPORT_ON_GET,
 )
 async def export_audit_logs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1260,6 +1283,7 @@ async def cancel_export(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_DEFAULT_RETENTION_ON_GET,
 )
 async def get_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
