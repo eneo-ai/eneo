@@ -105,8 +105,9 @@ _DEFAULT_ASSISTANT_ON_GET = (
 _PERSONAL_SPACE_ON_GET = (
     "Creates the caller's own personal space, the tenant hub and their default "
     "assistants when missing, syncs the hub's admin members, and points the "
-    "personal assistant at a usable model when its model is unusable. Idempotent, "
-    "and the outcome follows from tenant state, not from the request."
+    "personal assistant at a usable model when its model is unusable. A repeat "
+    "read changes nothing further, and the outcome follows from tenant state, not "
+    "from the request."
 )
 _TENANT_HUB_ON_GET = (
     "Creates the tenant hub and its default assistant when missing and makes its "
