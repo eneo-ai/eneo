@@ -87,12 +87,10 @@ def build_runtime_config(settings: Settings) -> WebRuntimeConfig:
 def log_unlinked_runtime_values(settings: Settings) -> None:
     """Name, never quote, the runtime values the web app will not use."""
     config = build_runtime_config(settings)
+    # MCP_APP_CONTENT_BASE_URL is not here: settings refuse an invalid one.
     rejected = [
         name
-        for field, name in (
-            *_LINKS.items(),
-            ("mcp_app_content_base_url", "MCP_APP_CONTENT_BASE_URL"),
-        )
+        for field, name in _LINKS.items()
         if getattr(settings, field) is not None
         and _http_url(getattr(settings, field)) is None
     ]

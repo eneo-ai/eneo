@@ -102,3 +102,49 @@ def test_env_backend_template_lists_web_app_settings():
             re.findall(r"(?m)^#?\s*([A-Z][A-Z0-9_]+)=", template.read_text())
         )
         assert names <= declared, template
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_blank_mcp_content_base_url_is_unset(value: str):
+    assert _settings(mcp_app_content_base_url=value).mcp_app_content_base_url is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # A browser would read each of these differently from the backend.
+        "https://content.example.com *",
+        "https://Bücher.example/",
+        "https://content.example.com\\@evil.com/",
+        "https://user:secret@content.example.com/",
+        "https://content.example.com/views?x=1",
+        "https://content.example.com/#views",
+        "https://999.1.1.1/",
+        "https://-content.example.com/",
+        "https://content_views.example.com/",
+        "https://content.example.com:port/",
+        "https://[::1/",
+        "ftp://content.example.com/",
+        "content.example.com",
+    ],
+)
+def test_mcp_content_base_url_must_read_the_same_in_a_browser(value: str):
+    with pytest.raises(ValidationError, match="mcp_app_content_base_url") as error:
+        _settings(mcp_app_content_base_url=value)
+
+    assert value not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("value", "stored"),
+    [
+        ("https://views.example.com/base", "https://views.example.com/base"),
+        (" http://localhost:8123 ", "http://localhost:8123"),
+        ("http://127.0.0.1:8123/", "http://127.0.0.1:8123/"),
+        ("http://[::1]:8123/", "http://[::1]:8123/"),
+        ("https://xn--bcher-kva.example", "https://xn--bcher-kva.example"),
+        ("http://content.test", "http://content.test"),
+    ],
+)
+def test_mcp_content_base_url_accepts_browser_urls(value: str, stored: str):
+    assert _settings(mcp_app_content_base_url=value).mcp_app_content_base_url == stored

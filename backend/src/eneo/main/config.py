@@ -1,10 +1,12 @@
+import ipaddress
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
     Field,
@@ -50,6 +52,53 @@ def _same_origin(first: str, second: str) -> bool:
         return scheme, (parts.hostname or "").lower(), port
 
     return origin(first) == origin(second)
+
+
+# Printable ASCII without space or backslash: a browser reads such a URL as
+# written, while it would encode, trim or reinterpret anything else.
+_BROWSER_LITERAL_URL = re.compile(r"[!-\[\]-~]+")
+_HOST_LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")
+
+
+def validate_content_base_url(url: str) -> str:
+    """An absolute http(s) URL whose host a browser reads exactly as written.
+
+    The content origin is framed, compared with the Host header and put in a
+    CSP, so every reader must agree on it. Non-ASCII hosts are refused rather
+    than IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ
+    (ß), and the stored value is used verbatim. Messages never repeat the URL.
+    """
+    url = url.strip()
+    if not _BROWSER_LITERAL_URL.fullmatch(url):
+        raise ValueError(
+            "must be printable ASCII without spaces or backslashes; write an "
+            "international host name in punycode (xn--...)"
+        )
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # a malformed port raises too
+    except ValueError:
+        raise ValueError("is not a valid URL") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an absolute http or https URL")
+    if "@" in parts.netloc:
+        raise ValueError("must not contain credentials")
+    if parts.query or parts.fragment:
+        raise ValueError("must not include a query or fragment")
+    host = parts.hostname
+    try:
+        if parts.netloc.startswith("["):
+            ipaddress.IPv6Address(host)
+        elif host.rstrip(".").rsplit(".", 1)[-1].isdigit():
+            # A browser parses a host ending in a number as IPv4.
+            ipaddress.IPv4Address(host)
+        elif not all(_HOST_LABEL.fullmatch(label) for label in host.split(".")):
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            "must name a DNS host, an IPv4 address or a bracketed IPv6 address"
+        ) from None
+    return url
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -363,6 +412,11 @@ class Settings(BaseSettings):
     # public_origin.
     mcp_app_host_origins: list[str] = Field(default_factory=list)
 
+    @field_validator("mcp_app_content_base_url")
+    @classmethod
+    def validate_mcp_app_content_base_url(cls, v: str | None) -> str | None:
+        return None if v is None else validate_content_base_url(v)
+
     @field_validator("mcp_app_host_origins")
     @classmethod
     def validate_mcp_app_host_origins(cls, v: list[str]) -> list[str]:
@@ -500,6 +554,7 @@ class Settings(BaseSettings):
         "legacy_app_url",
         "accessibility_statement_url",
         "request_integration_form_url",
+        "mcp_app_content_base_url",
         mode="before",
     )
     @classmethod

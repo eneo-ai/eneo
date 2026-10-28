@@ -112,17 +112,14 @@ def test_help_center_requires_flag(test_settings: Settings):
 @pytest.mark.parametrize(
     ("base_url", "origin"),
     [
-        ("https://views.example.com/base/path?q=1", "https://views.example.com"),
+        ("https://views.example.com/base/path", "https://views.example.com"),
         ("http://localhost:8123/", "http://localhost:8123"),
-        (
-            "https://user:secret@views.example.com:8443/x",
-            "https://views.example.com:8443",
-        ),
+        ("https://views.example.com:8443/x", "https://views.example.com:8443"),
         ("HTTPS://Views.Example.com", "https://views.example.com"),
         ("https://views.example.com:443/x", "https://views.example.com"),
         ("http://[::1]:8123/x", "http://[::1]:8123"),
-        ("ftp://views.example.com", None),
-        ("views.example.com", None),
+        ("", None),
+        ("   ", None),
     ],
 )
 def test_mcp_origin_strips_path(
@@ -188,7 +185,6 @@ def test_startup_log_names_unlinked_values_without_values(
         help_center_url="https://help.example.com/secret-path",
         legacy_app_url="javascript:alert(1)",
         accessibility_statement_url="https://a11y.example.com/statement",
-        mcp_app_content_base_url="ftp://views.example.com/token",
     )
 
     log_unlinked_runtime_values(settings)
@@ -200,11 +196,22 @@ def test_startup_log_names_unlinked_values_without_values(
     assert "REQUEST_INTEGRATION_FORM_URL" in info
     assert "ACCESSIBILITY_STATEMENT_URL" not in info
     assert "LEGACY_APP_URL" in warning
-    assert "MCP_APP_CONTENT_BASE_URL" in warning
+    assert "MCP_APP_CONTENT_BASE_URL" not in warning
     for message in (info, warning):
         assert "example.com" not in message
         assert "javascript" not in message
         assert "://" not in message
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_startup_log_treats_blank_mcp_base_url_as_unset(
+    test_settings: Settings, runtime_log: list[logging.LogRecord], blank: str
+):
+    log_unlinked_runtime_values(
+        _settings(test_settings, mcp_app_content_base_url=blank)
+    )
+
+    assert [record.levelno for record in runtime_log] == [logging.INFO]
 
 
 @pytest.mark.parametrize(
