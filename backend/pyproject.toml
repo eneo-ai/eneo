@@ -101,6 +101,11 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# LiteLLM's <4 cap excludes the fixes for UnixFileLock and SoftFileLock used
+# by huggingface-hub. Remove this override when LiteLLM permits patched 4.x.
+override-dependencies = ["filelock==4.2.4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/eneo"]
 
