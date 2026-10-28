@@ -387,6 +387,9 @@ function UserTable({
   // The user's page leads back to this view.
   const back = usageViewSearch(view);
   const sortPlugin = useTableSortable<UserUsageRow, UserSortBy>({
+    // A server-sorted list always has one sort: a click on the active column
+    // flips it, as apps/web does, instead of clearing it.
+    allowUnsortedState: false,
     sort: [
       { sortKey: view.sortBy, direction: view.sortOrder === "asc" ? "ascending" : "descending" }
     ],

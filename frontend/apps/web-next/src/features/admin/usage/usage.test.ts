@@ -20,6 +20,19 @@ describe("usage ranges", () => {
       expect(usageRangeFromSearchParams({ from, to: "2026-06-30" }, fallback)).toEqual(fallback);
     }
   );
+  it("keeps the default period independent of the time zone across a DST change", () => {
+    const previous = process.env.TZ;
+    process.env.TZ = "Europe/Stockholm";
+    try {
+      expect(defaultUsageRange(new Date("2026-10-28T00:30:00Z"))).toEqual({
+        from: "2026-09-28",
+        to: "2026-10-28"
+      });
+    } finally {
+      process.env.TZ = previous;
+    }
+  });
+
   it("creates a date-input range for the last 30 days", () => {
     expect(defaultUsageRange(new Date("2026-07-06T12:00:00Z"))).toEqual({
       from: "2026-06-06",

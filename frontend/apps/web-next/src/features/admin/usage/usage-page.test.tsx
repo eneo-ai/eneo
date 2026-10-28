@@ -315,6 +315,28 @@ describe("UsagePage", () => {
     const header = screen.getByRole("columnheader", { name: /Användare/ });
     expect(header.getAttribute("aria-sort")).toBe("ascending");
 
+    // A second click on the active column flips it, and a figure column can
+    // reach ascending order.
+    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Användare/ }));
+    await waitFor(() =>
+      expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "username", sort_order: "desc" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Förfrågningar/ }));
+    await waitFor(() =>
+      expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "requests", sort_order: "desc" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Förfrågningar/ }));
+    await waitFor(() =>
+      expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "requests", sort_order: "asc" })
+    );
+    // Back to names: served from the cache, so check the view, not a request.
+    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Användare/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("columnheader", { name: /Användare/ }).getAttribute("aria-sort")
+      ).toBe("ascending")
+    );
+
     fireEvent.change(screen.getByRole("textbox", { name: /Sök användarnamn/ }), {
       target: { value: "  user1  " }
     });

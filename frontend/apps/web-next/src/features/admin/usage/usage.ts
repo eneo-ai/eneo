@@ -19,7 +19,9 @@ function dateInput(date: Date): string {
 
 export function defaultUsageRange(now = new Date()): UsageRange {
   const start = new Date(now);
-  start.setDate(start.getDate() - 30);
+  // UTC arithmetic, like the dates it formats, so the period never depends
+  // on the time zone (a DST change would otherwise shift it).
+  start.setUTCDate(start.getUTCDate() - 30);
   return { from: dateInput(start), to: dateInput(now) };
 }
 
