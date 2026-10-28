@@ -58,7 +58,11 @@ const UNLOCALIZED_BY_DESIGN = new Map<number, string>([
   [9047, "OBJECT_STORE_NOT_SELECTABLE — object content deployment"],
   [9021, "CRAWL_ALREADY_RUNNING — crawler"],
   [9032, "PROVIDER_NOT_FOUND — model providers"],
-  [9041, "PROVIDER_REJECTED_REQUEST — message quotes the provider"]
+  [9041, "PROVIDER_REJECTED_REQUEST — message quotes the provider"],
+
+  // Browser-session protocol of the Vite web app, which answers it with a
+  // reload; this app signs in with Bearer tokens and never receives it.
+  [9080, "SESSION_GENERATION_MISMATCH — answered by a reload, never shown"]
 ]);
 
 function backendErrorCodes(): number[] {
