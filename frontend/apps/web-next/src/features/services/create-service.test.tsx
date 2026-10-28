@@ -7,7 +7,7 @@ import type { Space } from "@/features/spaces/space";
 
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");

@@ -9,7 +9,7 @@ const refresh = vi.hoisted(() => vi.fn());
 const toastApiError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/api/toast", () => ({ toastApiError }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 

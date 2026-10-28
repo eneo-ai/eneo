@@ -3,7 +3,7 @@
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";

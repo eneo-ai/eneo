@@ -15,7 +15,7 @@ import {
   SlidersHorizontal,
   Sparkles
 } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { SaveStatusProvider } from "@/components/composites/save-status";
 import {

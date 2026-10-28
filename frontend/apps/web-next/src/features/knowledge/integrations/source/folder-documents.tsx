@@ -14,7 +14,7 @@ import {
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText, Search } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";

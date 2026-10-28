@@ -2,7 +2,7 @@
 
 import type { Locale, ReleaseEntry } from "@eneo/whats-new";
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/lib/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { runTour, type TourOutcome } from "./tour";
 

@@ -12,7 +12,7 @@ import {
   type TableSortState
 } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
