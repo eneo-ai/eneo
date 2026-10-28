@@ -9,7 +9,7 @@
     "date": "2026-10-28T05:51:39.803Z",
     "runs": 10,
     "appCommit": "e0ae2866cb321da289b9edc23241a022d742b12f",
-    "note": "Measured on origin/develop e0ae2866c with only the perf harness added (meta.commit is the harness commit; the harness fixes for page markers, interaction-only INP and mean were in the working tree). Local e2e stack (docker-compose.e2e.ci.yml, OrbStack 6 CPU / 16 GiB), next start on port 3210, Playwright Desktop Chrome. The shared-machine speech-to-text job held a guarded slot during part of the run (1-minute load 4-7.7 on 14 cores). Chat LCP is bimodal (the greeting h1 paints at about 350 or 450 ms), so its median moves up to 31% between runs while p75 and mean stay within 8%; compare p75 or mean for it. Build peak RSS is the largest single process (macOS /usr/bin/time -l), like GNU time -v in CI."
+    "note": "Measured on origin/develop e0ae2866c with only the perf harness added (meta.commit is the harness commit; the harness fixes for page markers, interaction-only INP and mean were in the working tree). Local e2e stack (docker-compose.e2e.ci.yml, OrbStack 6 CPU / 16 GiB), next start on port 3210, Playwright Desktop Chrome. The shared-machine speech-to-text job held a guarded slot during part of the run (1-minute load 4-7.7 on 14 cores). Chat LCP is bimodal (the greeting h1 paints at about 350 or 450 ms), so its median moves up to 31% between runs while p75 and mean stay within 8%. Which statistic a gate compares is decided in P0-baseline-thresholds. Build peak RSS is the largest single process (macOS /usr/bin/time -l), like GNU time -v in CI."
   },
   "metrics": {
     "/spaces/personal/chat": {

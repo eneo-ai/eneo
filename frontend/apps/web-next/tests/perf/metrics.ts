@@ -2,11 +2,7 @@
 // src/test/perf-metrics.test.ts.
 
 export type Samples = Record<string, Record<string, number[]>>;
-/**
- * `mean` is there because some metrics are bimodal (the chat greeting paints at
- * about 350 or 450 ms), which makes their median jump between runs; gates on
- * such a metric compare p75 or mean.
- */
+/** `mean` sits next to median and p75 because some metrics are bimodal (the chat greeting paints at about 350 or 450 ms). */
 export type Summary = { median: number; p75: number; mean: number };
 /** An Event Timing entry as the page records it. */
 export type EventEntry = { interactionId: number; startTime: number; duration: number };
