@@ -212,13 +212,9 @@ function AnalysisTab({
           {ask.isPending ? (
             <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
           ) : ask.isError ? (
-            <ListError
-              error={ask.error}
-              onRetry={() => {
-                if (ask.variables) ask.mutate(ask.variables);
-              }}
-              compact
-            />
+            // No retry here: it would unmount under focus while the question
+            // runs; asking again from the field is the retry.
+            <ListError error={ask.error} compact />
           ) : answer ? (
             <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
           ) : (

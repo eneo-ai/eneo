@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   PUT: vi.fn()
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toastApiError = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/toast", () => ({ toastApiError }));
 
 import { ModulesPage } from "./modules-page";
 
@@ -70,4 +72,6 @@ it("reports a failed read once, in the user's language, with a retry", async () 
   expect(alert.textContent).not.toContain("Internal server error");
   expect(alert.textContent).toContain("Innehållet kunde inte hämtas");
   expect(screen.getAllByText("Innehållet kunde inte hämtas")).toHaveLength(1);
+  // The read failure is reported inline only; the toast is for failed changes.
+  expect(toastApiError).not.toHaveBeenCalled();
 });
