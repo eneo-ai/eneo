@@ -37,7 +37,7 @@ const saved = () => Promise.resolve({ data: { enabled: true }, response: new Res
 it("renders labelled, described switches in a titled card", async () => {
   renderToggles();
   expect(screen.getByRole("region", { name: "Funktioner" })).toBeTruthy();
-  const templates = screen.getByRole("switch", { name: "Aktivera mallar" });
+  const templates = screen.getByRole("switch", { name: "Aktivera assistent- och appmallar" });
   expect((templates as HTMLInputElement).checked).toBe(true);
   expect(templates.getAttribute("aria-describedby")).toBeTruthy();
   const described = document.getElementById(templates.getAttribute("aria-describedby")!);
