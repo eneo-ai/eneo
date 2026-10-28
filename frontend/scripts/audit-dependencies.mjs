@@ -8,6 +8,14 @@ const cwd = fileURLToPath(new URL("..", import.meta.url));
 // and with an expiry: a reviewed reason, not a blanket waiver.
 const ACCEPTED = [
   {
+    name: "deepmerge",
+    url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+    vulnerable_versions: ">=4.2.0 <=4.3.1",
+    expires: "2026-11-28",
+    reason:
+      "mitigated by the tested downstream patch rejecting __proto__ in both merge inputs",
+  },
+  {
     name: "braces",
     url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
     vulnerable_versions: "<=3.0.3",

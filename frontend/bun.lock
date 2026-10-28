@@ -284,6 +284,7 @@
   "patchedDependencies": {
     "sonner@2.0.8": "patches/sonner@2.0.8.patch",
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
+    "deepmerge@4.3.1": "patches/deepmerge@4.3.1.patch",
     "braces@3.0.3": "patches/braces@3.0.3.patch",
     "mermaid@11.16.1": "patches/mermaid@11.16.1.patch",
     "@astryxdesign/core@0.6.4": "patches/@astryxdesign%2Fcore@0.6.4.patch",
@@ -3391,7 +3392,6 @@
     "mdast-util-find-and-replace/escape-string-regexp": ["escape-string-regexp@5.0.0", "", {}, "sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw=="],
 
     "mdast-util-frontmatter/escape-string-regexp": ["escape-string-regexp@5.0.0", "", {}, "sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw=="],
-
 
     "mermaid/marked": ["marked@16.4.2", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA=="],
 
