@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { matchesSearch } from "@/lib/search";
 
 export type Role = Schema<"RolePublic">;
 export type Permission = Schema<"Permission">;
@@ -123,12 +124,9 @@ export function roleMatches(
   query: string,
   labelFor: (entry: PermissionEntry) => string
 ): boolean {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle || role.name.toLocaleLowerCase().includes(needle)) return true;
   const held = new Set(role.permissions);
-  return groups.some((group) =>
-    group.permissions.some(
-      (entry) => held.has(entry.name) && labelFor(entry).toLocaleLowerCase().includes(needle)
-    )
+  const heldLabels = groups.flatMap((group) =>
+    group.permissions.filter((entry) => held.has(entry.name)).map(labelFor)
   );
+  return matchesSearch([role.name, ...heldLabels], query);
 }

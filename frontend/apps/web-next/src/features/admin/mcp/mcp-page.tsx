@@ -39,6 +39,7 @@ import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
@@ -316,16 +317,11 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
   }, [servers]);
 
   const visible = useMemo(() => {
-    const query = search.trim().toLowerCase();
     return servers.filter((server) => {
       if (filter === "enabled" && !server.is_org_enabled) return false;
       if (filter === "disabled" && server.is_org_enabled) return false;
       if (filter === "attention" && !needsAttention(server)) return false;
-      if (!query) return true;
-      const haystack = [server.name, server.http_url, ...(server.tags ?? [])]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
+      return matchesSearch([server.name, server.http_url, ...(server.tags ?? [])], search);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [servers, search, filter, securityEnabled]);

@@ -40,6 +40,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
@@ -311,15 +312,8 @@ export function ResourceAttachmentsSection({
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 
   const filteredFiles = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     return files
-      .filter((file) => {
-        if (!needle) return true;
-        return (
-          file.name.toLowerCase().includes(needle) ||
-          attachmentTypeLabel(file).toLowerCase().includes(needle)
-        );
-      })
+      .filter((file) => matchesSearch([file.name, attachmentTypeLabel(file)], query))
       .sort((first, second) =>
         sortAscending
           ? first.name.localeCompare(second.name)

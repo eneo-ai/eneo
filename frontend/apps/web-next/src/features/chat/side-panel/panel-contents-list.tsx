@@ -12,6 +12,7 @@ import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { fileExtension, formatBytes } from "@/lib/format";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
 import type { SidePanelStore } from "./side-panel-store";
@@ -192,12 +193,11 @@ export function PanelContentsList({
   const types = [...typeCounts]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const needle = query.trim().toLowerCase();
   const shownUploads = filterable
     ? contents.uploads.filter(
         (file) =>
           (selectedType === null || typeOf(file) === selectedType) &&
-          (!needle || displayFileName(file).toLowerCase().includes(needle))
+          matchesSearch([displayFileName(file)], query)
       )
     : contents.uploads;
 

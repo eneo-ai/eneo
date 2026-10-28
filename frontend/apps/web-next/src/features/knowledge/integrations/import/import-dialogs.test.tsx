@@ -395,3 +395,57 @@ it("Confluence: keeps a pending import pending when closed and reopened", async 
   expect(busy.getAttribute("aria-busy")).toBe("true");
   expect(api.POST).toHaveBeenCalledTimes(1);
 });
+
+it("Confluence and SharePoint: the source search ignores a trailing space", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" },
+        { key: "IT", type: "space", name: "IT-stöd", url: "https://wiki/IT" }
+      ]
+    })
+  );
+  renderInApp(
+    <ConfluenceImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const spaces = await screen.findByRole("group", { name: "Confluence-ytor" });
+  await within(spaces).findByRole("button", { name: "IT-stöd" });
+  fireEvent.change(document.getElementById("confluence-space-search")!, {
+    target: { value: "personal " }
+  });
+  expect(within(spaces).getByRole("button", { name: "Personal" })).toBeTruthy();
+  expect(within(spaces).queryByRole("button", { name: "IT-stöd" })).toBeNull();
+  cleanup();
+
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "site-1", type: "site", name: "Intranätet", url: "https://sp/intra" },
+        { key: "site-2", type: "site", name: "Ekonomi", url: "https://sp/eko" }
+      ]
+    })
+  );
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const sites = await screen.findByRole("group", {
+    name: "Tillgängliga SharePoint- och OneDrive-källor"
+  });
+  await within(sites).findByRole("button", { name: "Intranätet" });
+  fireEvent.change(document.getElementById("sharepoint-site-search")!, {
+    target: { value: "ekonomi " }
+  });
+  expect(within(sites).getByRole("button", { name: "Ekonomi" })).toBeTruthy();
+  expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
+});
