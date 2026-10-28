@@ -22,7 +22,11 @@ export function safeNextPath(next: string | null | undefined): string {
         return DEFAULT_LANDING;
     }
     const origin = "https://login-destination.invalid";
-    if (new URL(next, origin).origin !== origin) return DEFAULT_LANDING;
+    const url = new URL(next, origin);
+    if (url.origin !== origin) return DEFAULT_LANDING;
+    // Sign-ins continue through /login: never back to it (a nested next), and
+    // never to /login/switch-organisation, which ends the session.
+    if (url.pathname === "/login" || url.pathname.startsWith("/login/")) return DEFAULT_LANDING;
   } catch {
     return DEFAULT_LANDING;
   }

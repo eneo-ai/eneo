@@ -29,6 +29,13 @@ describe("safeNextPath", () => {
     expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
   );
 
+  // A sign-in continues through /login (signedInContinuation): next=/login
+  // would nest it, and /login/switch-organisation would end the new session.
+  it.each(["/login", "/login?next=%2Fdashboard", "/login/switch-organisation", "/login/../login"])(
+    "never continues to the login pages: %s",
+    (value) => expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
+  );
+
   it("preserves opaque query encoding after validation", () => {
     const next = "/module-login?state=a%2Bb%252Fc";
     expect(safeNextPath(next)).toBe(next);
