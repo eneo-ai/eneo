@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SaveStatusIndicator, SaveStatusProvider } from "./save-status";
 import { useAutosave, useAutosaveField, useDirtySaveStatus } from "./use-autosave";
@@ -234,4 +234,100 @@ it("commits an explicit value before the draft state settles and reports the res
   expect(save).toHaveBeenCalledTimes(1);
   expect(save).toHaveBeenCalledWith("applied");
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ saved: "applied" }));
+});
+
+function ServerBackedProbe({ save }: { save: (value: string) => Promise<void> }) {
+  const [server, setServer] = useState("A");
+  const field = useAutosaveField({
+    key: "server-backed-field",
+    value: server,
+    save: async (value: string) => {
+      await save(value);
+      setServer(value);
+    }
+  });
+
+  return (
+    <>
+      <output aria-label="Draft">{field.value}</output>
+      {["A", "B"].map((value) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => {
+            field.setValue(value);
+            void field.commit(value);
+          }}
+        >
+          Pick {value}
+        </button>
+      ))}
+    </>
+  );
+}
+
+it("keeps a reverted choice made while the previous save is still pending", async () => {
+  const saves: Array<{ value: string; done: ReturnType<typeof deferred> }> = [];
+  const save = vi.fn((value: string) => {
+    const done = deferred();
+    saves.push({ value, done });
+    return done.promise;
+  });
+  renderWithStatus(<ServerBackedProbe save={save} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Pick B" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pick A" }));
+  expect(saves.map((entry) => entry.value)).toEqual(["B", "A"]);
+
+  await act(async () => saves[0]?.done.resolve());
+  expect(screen.getByRole("status", { name: "Draft" }).textContent).toBe("A");
+  await act(async () => saves[1]?.done.resolve());
+  expect(screen.getByRole("status", { name: "Draft" }).textContent).toBe("A");
+});
+
+function RemovableField({ save }: { save: (value: string) => Promise<unknown> }) {
+  const [shown, setShown] = useState(true);
+  return (
+    <>
+      {shown && <DebouncedFieldProbe save={save} />}
+      <button type="button" onClick={() => setShown(false)}>
+        Remove field
+      </button>
+    </>
+  );
+}
+
+it("keeps reporting a pending save after its field unmounts", async () => {
+  const pending = deferred();
+  const save = vi.fn(() => pending.promise);
+  renderWithStatus(<RemovableField save={save} />);
+  const input = screen.getByRole("textbox", { name: "Text field" });
+
+  fireEvent.change(input, { target: { value: "draft" } });
+  fireEvent.blur(input);
+  fireEvent.click(screen.getByRole("button", { name: "Remove field" }));
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Saving...")).toBeDefined();
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
+});
+
+function NormalizedFieldProbe({ save }: { save: (value: string) => Promise<unknown> }) {
+  const field = useAutosaveField({
+    key: "normalized-field",
+    value: " Existing name ",
+    normalize: (value: string) => value.trim(),
+    save
+  });
+  return <output>{field.value}</output>;
+}
+
+it("does not write an untouched field on unmount, even when normalizing would change it", () => {
+  const save = vi.fn(() => Promise.resolve());
+  const { unmount } = renderWithStatus(<NormalizedFieldProbe save={save} />);
+
+  unmount();
+
+  expect(save).not.toHaveBeenCalled();
 });

@@ -21,8 +21,14 @@ export function useAutosave(key: string) {
   const setStatus = useSetSaveStatus();
   const state = useRef({ failed: false, pending: 0 });
 
-  // Don't strand a stale status if the field unmounts mid-save.
-  useEffect(() => () => setStatus?.(key, null), [setStatus, key]);
+  // Don't strand a stale status when the field unmounts; a save still in
+  // flight keeps reporting until it settles.
+  useEffect(() => {
+    const current = state.current;
+    return () => {
+      if (current.pending === 0) setStatus?.(key, null);
+    };
+  }, [setStatus, key]);
 
   return useCallback(
     async function run<T>(operation: () => Promise<T>): Promise<T | undefined> {
@@ -105,12 +111,21 @@ export function useAutosaveField<T, R = unknown>({
   const autosave = useAutosave(key);
   const [draft, setDraft] = useState(serverValue);
   const serverRef = useRef(serverValue);
+  // The latest value sent and not yet settled: what the server will hold next.
+  const inFlight = useRef<{ value: T } | null>(null);
 
   useEffect(() => {
     if (equals(serverRef.current, serverValue)) return;
     const previousServer = serverRef.current;
     serverRef.current = serverValue;
-    setDraft((current) => (equals(current, previousServer) ? serverValue : current));
+    // A draft the user has not diverged from adopts the new value, unless it is
+    // the newer value still on its way (a choice reverted during a slow save).
+    const pending = inFlight.current;
+    setDraft((current) =>
+      equals(current, previousServer) && !(pending && equals(current, pending.value))
+        ? serverValue
+        : current
+    );
   }, [serverValue, equals]);
 
   const dirty = !equals(draft, serverValue);
@@ -132,7 +147,6 @@ export function useAutosaveField<T, R = unknown>({
     latest.current = { autosave, draft, serverValue, save, equals, validate, normalize, onSaved };
   });
   const timer = useRef<number | undefined>(undefined);
-  const inFlight = useRef<{ value: T } | null>(null);
 
   const commit = useCallback(async (override?: T) => {
     window.clearTimeout(timer.current);
@@ -141,9 +155,10 @@ export function useAutosaveField<T, R = unknown>({
     const value = override === undefined ? draft : override;
     const next = normalize ? normalize(value) : value;
     if (normalize && !equals(next, value)) setDraft(next);
-    if (equals(next, serverValue)) return;
+    // Compare with what the server will hold: a value already in flight is not
+    // sent again, and returning to the old value during a save is sent.
+    if (equals(next, inFlight.current ? inFlight.current.value : serverValue)) return;
     if (validate && !validate(next)) return;
-    if (inFlight.current && equals(inFlight.current.value, next)) return;
     const flight = { value: next };
     inFlight.current = flight;
     await autosave(async () => {
@@ -172,8 +187,15 @@ export function useAutosaveField<T, R = unknown>({
     return () => document.removeEventListener("visibilitychange", handler);
   }, [commit, commitOnVisibilityChange, dirty]);
 
-  // Fire-and-forget: the save still reports through the page's save status.
-  useEffect(() => () => void commit(), [commit]);
+  // Flush unsaved intent only (fire-and-forget; the save still reports through
+  // the page's save status): an untouched field is never written on unmount.
+  useEffect(
+    () => () => {
+      const { draft, serverValue, equals } = latest.current;
+      if (inFlight.current || !equals(draft, serverValue)) void commit();
+    },
+    [commit]
+  );
 
   return { value: draft, setValue: setDraft, dirty, commit, reset };
 }
