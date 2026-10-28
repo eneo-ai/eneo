@@ -87,8 +87,16 @@ export function AdminUsersPage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
   const [page, setPage] = useState(initialPage);
   const [showCreate, setShowCreate] = useState(false);
-  // Held here, not in the row whose editor set it: a refetch may drop that row.
-  const [issued, setIssued] = useState<IssuedPassword | null>(null);
+  // Passwords the editor set, shown one at a time in the order the saves
+  // landed. Held here, not in the row whose editor set them: a refetch may
+  // drop that row. A queue, as a save keeps running after its editor closes,
+  // so another save can land before a password has been handed over.
+  const [issued, setIssued] = useState<{ key: number; password: IssuedPassword }[]>([]);
+  const issuedCount = useRef(0);
+  function showIssued(password: IssuedPassword) {
+    const key = ++issuedCount.current;
+    setIssued((queue) => [...queue, { key, password }]);
+  }
   // E-mail and username searches combine (AND); a new search starts over at page 1.
   const emailBox = useSearchBox((searchParams.get("search") ?? "").trim(), () => setPage(1));
   const nameBox = useSearchBox((searchParams.get("search_name") ?? "").trim(), () => setPage(1));
@@ -206,7 +214,7 @@ export function AdminUsersPage() {
           users={users}
           label={tabLabel(stateFilter)}
           onRemoved={() => rescue(panelRef.current)}
-          onIssued={setIssued}
+          onIssued={showIssued}
         />
       </div>
     );
@@ -332,11 +340,13 @@ export function AdminUsersPage() {
 
       <PasswordPolicyPanel />
 
-      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} onIssued={setIssued} />
+      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} onIssued={showIssued} />
       <IssuedPasswordDialog
-        issued={issued}
+        // A fresh view for each password.
+        key={issued[0]?.key}
+        issued={issued[0]?.password ?? null}
         onClose={() => {
-          setIssued(null);
+          setIssued((queue) => queue.slice(1));
           // The row whose menu opened the editor may have gone meanwhile.
           rescue(panelRef.current);
         }}
