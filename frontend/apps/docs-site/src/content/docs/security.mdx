@@ -72,7 +72,8 @@ The rules are public at
   review is advisory: it cannot change the repository, approve or merge, and
   it is not a full security audit
   ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work), [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)). A separate advisory
-  report lists dead code and unused dependencies on each pull request.
+  report lists dead code and unused dependencies on pull requests into `develop` and
+  the release branches.
 - **How a release is published.** A `v*` tag starts the publication workflow.
   It builds the images, checks the runtimes, blocks fixable high and critical
   vulnerabilities in the frontend and tool runtime images, runs a combined
