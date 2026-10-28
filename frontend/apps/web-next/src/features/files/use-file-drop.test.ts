@@ -106,16 +106,33 @@ describe("useFileDrop", () => {
     expect(result.current.dragging).toBe(false);
   });
 
+  it("clears the highlight of a drag that follows a drop", () => {
+    const { result } = renderHookInApp(() => useFileDrop(vi.fn()));
+
+    // A drop fires no dragleave, so the drop itself must reset the depth.
+    act(() => result.current.handlers.onDragEnter(dragEvent()));
+    act(() => result.current.handlers.onDrop(dragEvent()));
+    act(() => result.current.handlers.onDragEnter(dragEvent()));
+    expect(result.current.dragging).toBe(true);
+    act(() => result.current.handlers.onDragLeave(dragEvent()));
+
+    expect(result.current.dragging).toBe(false);
+  });
+
   it("ignores a text drag", async () => {
     const onFiles = vi.fn();
     const { result } = renderHookInApp(() => useFileDrop(onFiles));
     const { onDragEnter, onDragOver, onDrop } = result.current.handlers;
-    const events = [dragEvent({ types: ["text/plain"] }), dragEvent({ types: ["text/plain"] })];
+    const events = [
+      dragEvent({ types: ["text/plain"] }),
+      dragEvent({ types: ["text/plain"] }),
+      dragEvent({ types: ["text/plain"] })
+    ];
 
     act(() => onDragEnter(events[0]!));
     act(() => onDragOver(events[1]!));
     expect(result.current.dragging).toBe(false);
-    act(() => onDrop(dragEvent({ types: ["text/plain"] })));
+    act(() => onDrop(events[2]!));
     await settle();
 
     for (const event of events) expect(event.preventDefault).not.toHaveBeenCalled();
