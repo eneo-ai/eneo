@@ -302,6 +302,12 @@ layout.
   `QueryStateBoundary`.
 - **Search** is flat `URLSearchParams` (`src/lib/router/search.ts`): every
   value is a string, a repeated key a list.
+- **Navigation**: `vite.config.mts` aliases `@/lib/navigation` and
+  `@/lib/link` to their TanStack implementations (`*.tanstack.ts(x)`), typed
+  against the Next ones. The hooks report the page on screen until the next
+  one has loaded; `replaceUrl` is a router navigation in place (no history
+  entry, no scroll reset, the page stays mounted). Test them in a real router
+  with `renderWithRouter` (`src/test/router.tsx`).
 
 ## Styling
 

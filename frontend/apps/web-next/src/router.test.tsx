@@ -6,6 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import { renderWithRouter } from "@/test/router";
 
+// As in the Vite build: the not-found page links home through TanStack.
+vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
+
 let loaders: { slow: () => Promise<void>; failing: () => Promise<void> };
 let readData: () => Promise<string>;
 
@@ -67,6 +70,7 @@ it("shows the not-found page for an address the app does not have", async () => 
   await renderRouter("/nowhere");
 
   expect(await screen.findByRole("heading", { name: "Sidan hittades inte" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Tillbaka till start" }).getAttribute("href")).toBe("/");
 });
 
 it("shows a failed load with its trace id, and its retry loads the route again", async () => {

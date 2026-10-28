@@ -10,6 +10,7 @@ import type { createTranslator } from "use-intl";
 import { NotFoundPage } from "@/components/shell/not-found-page";
 import { PagePending } from "@/components/shell/page-pending";
 import { RouteError } from "@/components/shell/route-error";
+import { bindNavigationRouter } from "@/lib/navigation.tanstack";
 import { parseSearch, stringifySearch } from "@/lib/router/search";
 import { routeTree } from "./routeTree.gen";
 
@@ -28,7 +29,7 @@ export function createAppRouter(
   context: RouterContext,
   overrides: { routeTree?: AnyRoute; history?: RouterHistory } = {}
 ) {
-  return createRouter({
+  const router = createRouter({
     // A test's tree is typed as the app's: only the app's routes are registered.
     routeTree: (overrides.routeTree ?? routeTree) as typeof routeTree,
     history: overrides.history,
@@ -52,6 +53,9 @@ export function createAppRouter(
     defaultErrorComponent: RouterRouteError,
     defaultNotFoundComponent: NotFoundPage
   });
+  // replaceUrl() navigates outside React, with this router.
+  bindNavigationRouter(router);
+  return router;
 }
 
 declare module "@tanstack/react-router" {
