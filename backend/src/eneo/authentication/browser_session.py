@@ -43,6 +43,9 @@ class SessionGenerationMismatchError(Exception):
 
     code = "session_generation_mismatch"
 
+    def __init__(self) -> None:
+        super().__init__("The browser session changed after this page was loaded.")
+
 
 def browser_request_allowed(method: str, headers: Mapping[str, str]) -> bool:
     """Whether a request may authenticate with the browser session cookie.
@@ -165,18 +168,11 @@ def refuse_superseded_session(request: Request, token: str) -> None:
     The page names the generation it was loaded with; when the cookie now
     holds another credential (another tab signed in or out), acting on it
     would act as someone the page does not show. Without the header nothing
-    is compared.
+    is compared. The domain-exception handler logs the refusal.
     """
     expected = request.headers.get(SESSION_GENERATION_HEADER)
-    if expected is None or expected == session_generation(token):
-        return
-    logger.info(
-        "browser_session_superseded",
-        extra={"method": request.method, "path": request.url.path},
-    )
-    raise SessionGenerationMismatchError(
-        "The browser session changed after this page was loaded."
-    )
+    if expected is not None and expected != session_generation(token):
+        raise SessionGenerationMismatchError()
 
 
 def _set_cookie(

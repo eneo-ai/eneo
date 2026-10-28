@@ -425,11 +425,12 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
         body["eneo_error_code"] == ErrorCodes.SESSION_GENERATION_MISMATCH.value == 9080
     )
     assert body["code"] == "session_generation_mismatch"
+    assert body["message"] == "The browser session changed after this page was loaded."
     assert set_cookies(response) == []
-    [record] = [
-        r for r in caplog.records if r.getMessage() == "browser_session_superseded"
-    ]
-    assert getattr(record, "path") == LOGOUT
+    # Logged once, by the shared domain-exception handler.
+    assert [
+        (r.name, r.levelno) for r in caplog.records if r.name.startswith("eneo.")
+    ] == [("eneo.server.exception_handlers", logging.WARNING)]
     assert current not in all_logs(caplog)
 
 

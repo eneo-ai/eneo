@@ -265,7 +265,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     # --- Browser session ---
     SessionGenerationMismatchError: (
         401,
-        "The browser session changed after this page was loaded.",
+        None,
         ErrorCodes.SESSION_GENERATION_MISMATCH,
     ),
     # --- Integrations: the string ``code`` tells the cases apart ---
