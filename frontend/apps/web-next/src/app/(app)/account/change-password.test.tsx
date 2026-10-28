@@ -13,6 +13,10 @@ const toast = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
+const events = vi.hoisted(() => [] as string[]);
+vi.mock("@/lib/session/identity-broadcast", () => ({
+  announceIdentityChange: () => events.push("announce")
+}));
 
 import { ChangePasswordCard } from "./change-password.client";
 
@@ -55,7 +59,11 @@ const refused = (code: number) =>
     response: new Response(null, { status: 400 })
   });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  events.length = 0;
+});
 
 describe("ChangePasswordCard", () => {
   it("states the backend's policy before the field and gives password managers what they need", async () => {
@@ -178,6 +186,22 @@ describe("ChangePasswordCard", () => {
       expect(api.POST).toHaveBeenCalledWith("/api/v1/users/me/password/", {
         body: { current_password: "Gammalt-lösen1", new_password: "Nytt-lösenord-2026" }
       })
+    );
+  });
+
+  it("signs out after the change, telling the other tabs first", async () => {
+    const assign = vi.fn((href: string) => events.push(`assign ${href}`));
+    vi.stubGlobal("location", { ...window.location, assign });
+    api.POST.mockResolvedValue({ data: {}, response: new Response(null, { status: 200 }) });
+    renderCard();
+    type(/^Nuvarande lösenord/, "Gammalt-lösen1");
+    type(/^Nytt lösenord/, "Nytt-lösenord-2026");
+    type(/^Bekräfta lösenord/, "Nytt-lösenord-2026");
+
+    save();
+
+    await waitFor(() =>
+      expect(events).toEqual(["announce", "assign /logout?reason=password_changed"])
     );
   });
 

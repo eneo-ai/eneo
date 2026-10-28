@@ -28,6 +28,7 @@ import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { setLocale } from "@/lib/i18n/actions";
 import { locales } from "@/lib/i18n/locales";
+import { announceIdentityChange } from "@/lib/session/identity-broadcast";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 import { ThemeSubMenu } from "./theme-switcher";
 
@@ -54,6 +55,12 @@ export function profileInitials(name: string): string {
 /** Full-page navigation for routes that are not React pages (logout, SSO, external). */
 function navigateTo(href: string) {
   window.location.assign(href);
+}
+
+/** Leaves the session (logout, another organisation): every other tab reloads with it. */
+function leaveSession(href: string) {
+  announceIdentityChange();
+  navigateTo(href);
 }
 
 /**
@@ -193,14 +200,14 @@ export function ProfileMenu() {
         <DropdownMenuItem
           icon={Building2}
           label={t("oidc_choose_another_org")}
-          onClick={() => navigateTo("/login/switch-organisation")}
+          onClick={() => leaveSession("/login/switch-organisation")}
         />
       )}
       <DropdownMenuItem
         icon={LogOut}
         label={t("logout")}
         variant="destructive"
-        onClick={() => navigateTo("/logout")}
+        onClick={() => leaveSession("/logout")}
       />
       <div className="text-ax-text-secondary px-2 pt-1.5 pb-1 text-xs">
         {t("shell_versions", { frontend: versions.frontend, backend: versions.backend || "–" })}

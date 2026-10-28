@@ -15,6 +15,7 @@ import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { passwordChangedLogoutUrl } from "@/lib/auth/password-change-path";
+import { announceIdentityChange } from "@/lib/session/identity-broadcast";
 import {
   newPasswordErrors,
   passwordCapability,
@@ -77,9 +78,10 @@ export function ChangePasswordForm({
         })
       ),
     onSuccess: () => {
-      // The change bumps the credential version, so the session is gone: the
-      // logout route tells the login page the password was changed (a toast
-      // would not survive the navigation).
+      // The change bumps the credential version, so the session is gone, in
+      // every tab: the logout route tells the login page the password was
+      // changed (a toast would not survive the navigation).
+      announceIdentityChange();
       window.location.assign(afterChangeHref);
     },
     onError: (error) => {
