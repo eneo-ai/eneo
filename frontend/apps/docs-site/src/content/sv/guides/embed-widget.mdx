@@ -235,9 +235,30 @@ valfria attributen är till för webbansvariga:
 | `data-position="bottom-left"`              | Bara en reserv när de sparade inställningarna inte går att läsa. Annars gäller widgetens sparade placering.                                                |
 | `data-color-scheme="light"` eller `"dark"` | Värdsidans färgschema, som används när widgetens färgschema är automatiskt (standard: besökarens systeminställning)                                        |
 | `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                                                                              |
+| `data-launcher="static"`                   | Låt knappen ligga kvar på telefoner; som standard glider den in i kanten när sidan rullas nedåt (se nedan)                                                 |
 | `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                                                                             |
 | `data-label="…"`                           | Knappens tillgängliga namn (standard "Öppna chatt" eller "Open chat", med persona "Öppna chatt med `<namn>`, AI-assistent" eller "Open chat with `<name>`, AI assistant") |
 | `data-frame-title="…"`                     | Chattramens tillgängliga namn (standard "Chatt" eller "Chat")                                                                                              |
+
+**På telefoner** (upp till 40em bred skärm) är knappen 48 px i stället för 56 px,
+håller 16 px till kanterna plus enhetens säkra område, och glider halvvägs in i
+kanten när besökaren rullar nedåt, så att den inte täcker texten som läses. Den
+kommer tillbaka när besökaren rullar uppåt, stannar en sekund, flyttar
+tangentbordsfokus till den, öppnar chatten eller när ett svar väntar. Det är
+samma knapp hela tiden, så tangentbords- och skärmläsaranvändare påverkas inte.
+`data-launcher="static"` stänger av beteendet; med nedsatt rörelse i systemet
+sker flytten utan animation.
+
+**Storlek och placering från webbplatsens CSS.** Skriptet läser de här
+egenskaperna från elementet `<eneo-widget>` eller `:root`: `--eneo-widget-size`
+(knappens diameter), `--eneo-widget-offset-x` och `--eneo-widget-offset-y`
+(avstånd från hörnet), `--eneo-widget-z`, `--eneo-widget-radius` (panelens
+hörn) samt `--eneo-widget-color` och `--eneo-widget-on-color` (ersätter
+widgetens egen färg och stänger då av dess kontrastkontroll). Knappen och
+panelen går att nå som `::part(launcher)` och `::part(panel)`, till exempel
+`eneo-widget { --eneo-widget-size: 44px; --eneo-widget-offset-y: 80px; }` för
+att gå fri från en fast sidfot. En webbplats som inte vill ha någon flytande
+knapp alls använder `data-launcher="none"` med en egen länk.
 
 Skriptet exponerar `window.Eneo` med kommandona `open`, `close`, `toggle`,
 `on(event, listener)` och `off(event, listener)`. Anrop kan köas innan skriptet

@@ -10,7 +10,7 @@ import {
   type PanelLayout,
   type WidgetSettings
 } from "./protocol";
-import { FULL_SCREEN_MEDIA } from "./styles";
+import { FULL_SCREEN_MEDIA, SMALL_SCREEN_MEDIA } from "./styles";
 
 export type WidgetEventName = "ready" | "open" | "close" | "conversation_started" | "unread";
 
@@ -148,6 +148,24 @@ export class EneoWidgetElement extends HTMLElement {
     this.paintLauncher();
     this.sendTheme();
   };
+  private lastScrollY = 0;
+  private tuckTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * On a small screen the launcher tucks into the edge while the page scrolls
+   * down, so it stops covering the text being read, and comes back on the way
+   * up, after a second at rest, on focus, on open or when a reply is waiting.
+   */
+  private readonly onHostScroll = () => {
+    const y = window.scrollY;
+    // A scroll event without movement (a resize, a repeated event) says nothing.
+    if (y === this.lastScrollY) return;
+    const down = y > this.lastScrollY;
+    this.lastScrollY = y;
+    if (!this.tuckable) return;
+    // The top of a page is not reading yet.
+    this.setTucked(down ? y > 48 : false);
+    this.tuckTimer = setTimeout(() => this.setTucked(false), 1000);
+  };
   private schemeQuery: MediaQueryList | null = null;
 
   get widgetId(): string {
@@ -233,6 +251,8 @@ export class EneoWidgetElement extends HTMLElement {
       this.schemeQuery = matchMedia("(prefers-color-scheme: dark)");
       this.schemeQuery.addEventListener("change", this.onSchemeChange);
     }
+    this.lastScrollY = window.scrollY;
+    window.addEventListener("scroll", this.onHostScroll);
     document.dispatchEvent(new CustomEvent(CONNECTED_EVENT, { detail: this }));
     this.loadSettings();
     if (this.isOpen) {
@@ -313,6 +333,8 @@ export class EneoWidgetElement extends HTMLElement {
     }
     window.removeEventListener("message", this.onMessage);
     this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
+    window.removeEventListener("scroll", this.onHostScroll);
+    this.setTucked(false);
     this.unwatch();
     // Never leave the host page inert behind a panel that is gone.
     this.releasePage();
@@ -330,6 +352,25 @@ export class EneoWidgetElement extends HTMLElement {
     } else {
       this.syncLauncher();
     }
+  }
+
+  /**
+   * Whether the launcher may tuck into the edge right now: a small screen,
+   * nothing open, and a host that has not pinned it with `launcher="static"`.
+   */
+  private get tuckable(): boolean {
+    // Evaluated afresh: a kept MediaQueryList without listeners can lag a resize.
+    return (
+      !this.isOpen &&
+      this.getAttribute("launcher") !== "static" &&
+      typeof matchMedia === "function" &&
+      matchMedia(SMALL_SCREEN_MEDIA).matches
+    );
+  }
+
+  private setTucked(tucked: boolean): void {
+    clearTimeout(this.tuckTimer);
+    this.launcher.classList.toggle("tucked", tucked);
   }
 
   private render(): void {
@@ -351,6 +392,9 @@ export class EneoWidgetElement extends HTMLElement {
     this.backdrop = root.querySelector(".backdrop") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
     this.launcher.addEventListener("click", () => this.toggle());
+    // Keyboard and screen reader users reach the tucked button as usual; it
+    // comes fully into view for them.
+    this.launcher.addEventListener("focus", () => this.setTucked(false));
     root.querySelector(".loading-close button")!.addEventListener("click", () => this.closePanel());
     this.syncLauncher();
   }
@@ -464,6 +508,7 @@ export class EneoWidgetElement extends HTMLElement {
     this.lastFocus = document.activeElement;
     this.isOpen = true;
     this.unread = 0;
+    this.setTucked(false);
     const frame = this.ensureFrame();
     // Transitions start with the first open; see the stylesheet.
     this.launcher.classList.add("motion");
@@ -585,6 +630,8 @@ export class EneoWidgetElement extends HTMLElement {
       case "unread":
         if (!this.isOpen) {
           this.unread = message.payload.count;
+          // A waiting reply is worth the space: the whole badge shows.
+          if (this.unread > 0) this.setTucked(false);
           this.syncLauncher();
         }
         this.emit("unread", message.payload);

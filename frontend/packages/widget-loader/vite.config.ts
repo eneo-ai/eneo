@@ -57,6 +57,8 @@ export default defineConfig(({ command }) => ({
       enabled: true,
       provider: playwright(),
       headless: true,
+      // A desktop page by default; the small-screen tests set a phone viewport.
+      viewport: { width: 1280, height: 800 },
       instances: [{ browser: "chromium" }]
     }
   }

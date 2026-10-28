@@ -88,9 +88,14 @@ The copied snippet carries only `data-widget-id`. These optional attributes are 
 | `data-position="bottom-left"`          | Fallback only, used when the saved settings cannot be read. Otherwise the widget's saved position applies.                                             |
 | `data-color-scheme="light"` / `"dark"` | The host page's colour scheme, used while the widget's colour scheme is automatic (default: the visitor's system setting)                              |
 | `data-launcher="none"`                 | No button; the site opens the chat itself                                                                                                              |
+| `data-launcher="static"`               | Keep the button in place on phones; by default it tucks into the edge while the page scrolls down (see below)                                          |
 | `data-auto-open="true"`                | Open the panel on page load                                                                                                                            |
 | `data-label="…"`                       | Accessible name of the button (default "Öppna chatt" / "Open chat", or "Öppna chatt med `<name>`, AI-assistent" / "Open chat with `<name>`, AI assistant" with a persona) |
 | `data-frame-title="…"`                 | Accessible name of the chat frame (default "Chatt" / "Chat")                                                                                           |
+
+**On phones** (viewports up to 40em wide) the button is 48 px instead of 56 px, keeps 16 px from the edges plus the device's safe area, and tucks halfway into the edge while the visitor scrolls down, so it does not cover the text being read. It comes back when they scroll up, stop for a second, move keyboard focus to it, open the chat, or when a reply is waiting. It is the same button throughout, so keyboard and screen reader users are not affected. `data-launcher="static"` turns the tucking off; a site with reduced motion gets the moves without animation.
+
+**Size and placement from the site's CSS.** The loader reads these custom properties from the `<eneo-widget>` element or `:root`: `--eneo-widget-size` (the button's diameter), `--eneo-widget-offset-x` and `--eneo-widget-offset-y` (distance from the corner), `--eneo-widget-z`, `--eneo-widget-radius` (the panel's corners) and `--eneo-widget-color` / `--eneo-widget-on-color` (override the widget's own colour, which also switches off its contrast check). The button and the panel are exposed as `::part(launcher)` and `::part(panel)`, for example `eneo-widget { --eneo-widget-size: 44px; --eneo-widget-offset-y: 80px; }` to clear a sticky footer. A site that wants no floating button at all uses `data-launcher="none"` with its own link.
 
 The loader also exposes `window.Eneo`, which queues calls made before the script has loaded:
 

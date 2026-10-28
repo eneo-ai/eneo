@@ -7,6 +7,12 @@
 export const FULL_SCREEN_MEDIA = "(max-width: 40em), (max-height: 31.25em)";
 
 /**
+ * A phone-width page: the launcher is smaller, sits inside the safe area and
+ * tucks into the edge while the visitor scrolls down (see `tuck` in element.ts).
+ */
+export const SMALL_SCREEN_MEDIA = "(max-width: 40em)";
+
+/**
  * Styles for the launcher and panel inside the shadow root. The build emits
  * this as eneo.css beside the loader, so hosts can allow it through style-src.
  * Host pages tune it through the `--eneo-widget-*` custom properties documented
@@ -14,6 +20,7 @@ export const FULL_SCREEN_MEDIA = "(max-width: 40em), (max-height: 31.25em)";
  */
 export const styles = `
 :host {
+  --_eneo-size: var(--eneo-widget-size, 56px);
   position: fixed;
   inset-block-end: var(--eneo-widget-offset-y, 20px);
   inset-inline-end: var(--eneo-widget-offset-x, 20px);
@@ -32,8 +39,8 @@ export const styles = `
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: var(--_eneo-size);
+  height: var(--_eneo-size);
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -225,6 +232,23 @@ export const styles = `
   .panel iframe { flex: 1; min-height: 0; height: 0; }
 }
 @media (max-width: 40em) {
+  /* A phone: a lighter button inside the safe area. The host's own
+     --eneo-widget-size and offsets still win. */
+  :host {
+    --_eneo-size: var(--eneo-widget-size, 48px);
+    inset-block-end: var(--eneo-widget-offset-y, max(16px, env(safe-area-inset-bottom)));
+    inset-inline-end: var(--eneo-widget-offset-x, max(16px, env(safe-area-inset-right)));
+  }
+  :host([position="bottom-left"]) {
+    inset-inline-start: var(--eneo-widget-offset-x, max(16px, env(safe-area-inset-left)));
+  }
+  /* Tucked while the page scrolls down (element.ts): half of it stays in
+     view and it is still the same focusable button; focus brings it back. */
+  .launcher.tucked { transform: translateX(calc(50% + var(--eneo-widget-offset-x, 16px))); }
+  :host([position="bottom-left"]) .launcher.tucked {
+    transform: translateX(calc(-50% - var(--eneo-widget-offset-x, 16px)));
+  }
+  .launcher svg { width: 24px; height: 24px; }
   .panel {
     --_eneo-sheet-gap: min(24px, 4svh);
     inset-block-start: var(--_eneo-sheet-gap);

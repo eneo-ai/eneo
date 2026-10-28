@@ -184,7 +184,8 @@ describe("launcher", () => {
   });
 
   it("shows the persona's avatar as the launcher, the same image the chat shows, and falls back to the bubble when it cannot load", async () => {
-    const avatar = `${location.origin}/avatar.png`;
+    // A real image: a 404 would fire the error handler and drop the avatar mid-test.
+    const avatar = `${location.origin}/src/fixtures/avatar.png`;
     stubSettings({ language: "en", persona: { name: "Sigge", avatar_url: avatar } });
     const element = await mount();
     const launcher = launcherOf(element);
@@ -201,8 +202,10 @@ describe("launcher", () => {
     expect(getComputedStyle(chat).width).toBe("22px");
     expect(getComputedStyle(launcher).borderColor).not.toBe("rgba(0, 0, 0, 0)");
 
-    // Open, the close icon sits on the plain disc, never over the face.
+    // Open, the close icon sits on the plain disc, never over the face
+    // (the face cross-fades out; on a wide screen the launcher stays visible).
     element.openPanel();
+    await new Promise((resolve) => setTimeout(resolve, 250));
     expect(getComputedStyle(image).opacity).toBe("0");
     element.closePanel();
 
@@ -1037,5 +1040,102 @@ describe("host controls", () => {
     element.remove();
     deliver(element, frameMessage("close"));
     expect(element.open).toBe(true);
+  });
+});
+
+describe("small screens", () => {
+  it("shrinks the launcher and keeps it inside the safe area on a phone, unchanged elsewhere", async () => {
+    const element = await mount();
+    expect(launcherOf(element).getBoundingClientRect().width).toBe(56);
+    await atViewport(390, 844, () => {
+      expect(launcherOf(element).getBoundingClientRect().width).toBe(48);
+      expect(getComputedStyle(element).insetInlineEnd).toBe("16px");
+      expect(getComputedStyle(element).insetBlockEnd).toBe("16px");
+    });
+    expect(launcherOf(element).getBoundingClientRect().width).toBe(56);
+  });
+
+  /**
+   * A page tall enough to scroll, starting at the top (earlier tests may have
+   * left it scrolled), and a scroll that the loader sees at once.
+   */
+  function scrollable(): (y: number) => void {
+    const filler = document.createElement("div");
+    filler.style.height = "5000px";
+    document.body.append(filler);
+    window.scrollTo(0, 0);
+    return (y: number) => {
+      window.scrollTo(0, y);
+      window.dispatchEvent(new Event("scroll"));
+    };
+  }
+
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 250));
+
+  it("tucks into the edge while the page scrolls down and comes back on the way up, at rest, on focus, when a reply waits and on open", async () => {
+    const scroll = scrollable();
+    const element = await mount();
+    const launcher = launcherOf(element);
+    const tucked = () => launcher.classList.contains("tucked");
+    try {
+      await atViewport(390, 844, async () => {
+        scroll(20);
+        expect(tucked(), "the top of the page is not reading").toBe(false);
+        scroll(200);
+        expect(tucked()).toBe(true);
+        // Half of it stays in view once the move has played, and it is still
+        // the same button.
+        await settled();
+        const box = launcher.getBoundingClientRect();
+        expect(box.right).toBeGreaterThan(window.innerWidth);
+        expect(box.left).toBeLessThan(window.innerWidth);
+        expect(launcher.getAttribute("aria-label")).toBe("Öppna chatt");
+        scroll(120);
+        expect(tucked(), "scrolling up brings it back").toBe(false);
+        scroll(400);
+        expect(tucked()).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        expect(tucked(), "at rest it comes back").toBe(false);
+        scroll(600);
+        expect(tucked()).toBe(true);
+        launcher.focus();
+        expect(tucked(), "focus brings it back").toBe(false);
+        scroll(800);
+        expect(tucked()).toBe(true);
+        element.prefetch();
+        deliver(element, frameMessage("unread", { count: 1 }));
+        expect(tucked(), "a waiting reply shows the whole badge").toBe(false);
+        scroll(1000);
+        expect(tucked()).toBe(true);
+        element.openPanel();
+        expect(tucked(), "open, the launcher is back in place for the close").toBe(false);
+        element.closePanel();
+      });
+    } finally {
+      window.scrollTo(0, 0);
+    }
+  });
+
+  it("stays put on a wide screen, with launcher=static, and while the panel is open", async () => {
+    const scroll = scrollable();
+    const element = await mount();
+    const pinned = await mount({ launcher: "static" });
+    try {
+      scroll(300);
+      expect(launcherOf(element).classList.contains("tucked"), "wide screen").toBe(false);
+      await atViewport(390, 844, () => {
+        scroll(600);
+        expect(launcherOf(element).classList.contains("tucked")).toBe(true);
+        expect(launcherOf(pinned).classList.contains("tucked"), "launcher=static").toBe(false);
+        element.openPanel();
+        scroll(900);
+        expect(launcherOf(element).classList.contains("tucked"), "while open").toBe(false);
+        element.closePanel();
+      });
+      scroll(1200);
+      expect(launcherOf(element).classList.contains("tucked"), "wide again").toBe(false);
+    } finally {
+      window.scrollTo(0, 0);
+    }
   });
 });
