@@ -20,7 +20,7 @@ import { Fragment, useId, useMemo, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { useModelTypeLabel } from "./model-type-label";
@@ -74,9 +74,8 @@ const STATUS_TONE: Record<string, StatusTone> = {
 export function MigrationHistoryPanel() {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
-  const { data, isPending, isError, error, isFetching, refetch } = useQuery(
-    migrationHistoryQueryOptions(browserApi)
-  );
+  const historyQuery = useQuery(migrationHistoryQueryOptions(browserApi));
+  const data = historyQuery.data;
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -110,24 +109,32 @@ export function MigrationHistoryPanel() {
       return next;
     });
 
-  if (isPending) return <LoadingState rows={4} />;
-  if (isError) {
+  if (blockingError(historyQuery)) {
     return (
       <ListError
-        error={error}
+        error={historyQuery.error}
         title={t("migration_history_load_failed")}
-        isRetrying={isFetching}
-        onRetry={() => void refetch()}
+        isRetrying={historyQuery.isFetching}
+        onRetry={() => void historyQuery.refetch()}
       />
     );
   }
-  if (!data || data.length === 0) return <EmptyState title={t("migration_history_empty")} />;
+  if (!data) return <LoadingState rows={4} />;
+  if (data.length === 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        <RefreshError queries={[historyQuery]} />
+        <EmptyState title={t("migration_history_empty")} />
+      </div>
+    );
+  }
 
   const filterValue = (label: string) => (option: { label?: string }) =>
     t("admin_models_filter_value", { label, value: option.label ?? "" });
 
   return (
     <div className="flex flex-col gap-4">
+      <RefreshError queries={[historyQuery]} />
       <div className="flex flex-wrap items-center gap-2.5">
         <TextInput
           label={t("admin_models_history_search")}

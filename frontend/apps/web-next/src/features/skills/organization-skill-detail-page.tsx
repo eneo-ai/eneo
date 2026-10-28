@@ -4,11 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY, type SkillRemovalResult } from "./organization-skills";
@@ -48,13 +49,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
   }
 
-  if (skill.isPending)
-    return (
-      <p role="status" className="text-muted-foreground p-6 text-sm">
-        {t("loading")}
-      </p>
-    );
-  if (skill.isError)
+  if (blockingError(skill))
     return (
       <ListError
         error={skill.error}
@@ -62,6 +57,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
         onRetry={() => void skill.refetch()}
       />
     );
+  if (!skill.data) return <LoadingState rows={4} />;
   const value = skill.data;
 
   return (
@@ -78,6 +74,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
           </Button>
         )}
       </PageHeader>
+      <RefreshError queries={[skill]} />
       <Button asChild variant="link" className="w-fit px-0">
         <Link href={LIST_PATH}>{t("skills")}</Link>
       </Button>

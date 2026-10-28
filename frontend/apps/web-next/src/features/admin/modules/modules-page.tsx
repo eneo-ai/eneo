@@ -6,11 +6,10 @@ import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { LoadingState } from "@/components/composites/loading-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +59,6 @@ export function ModulesPage({ title }: { title: string }) {
     queryFn: listCompatibleServiceKeys
   });
   const loading = installations.isPending || serviceKeys.isPending;
-  const loadError = installations.error ?? serviceKeys.error;
   const keys = serviceKeys.data ?? [];
   const redirectUris = parseRedirectUris(redirectUrisInput);
   const trimmedKey = moduleKey.trim();
@@ -162,86 +160,82 @@ export function ModulesPage({ title }: { title: string }) {
           </h2>
           <p className="text-muted-foreground mt-1 text-sm">{t("module_admin_description")}</p>
         </div>
-        {loadError && (
-          <ListError
-            error={loadError}
-            isRetrying={installations.isFetching || serviceKeys.isFetching}
-            onRetry={() => {
-              if (installations.isError) void installations.refetch();
-              if (serviceKeys.isError) void serviceKeys.refetch();
-            }}
-          />
-        )}
-        {loading ? (
-          <LoadingState rows={2} height={48} />
-        ) : (installations.data ?? []).length === 0 ? (
-          <div className="rounded-lg border border-dashed px-6 py-10 text-center">
-            <p className="font-medium">{t("module_admin_empty_title")}</p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {t("module_admin_empty_description")}
-            </p>
-          </div>
-        ) : (
-          <ul className="grid gap-3">
-            {(installations.data ?? []).map((installation) => {
-              const boundKey = keys.find((key) => key.id === installation.service_key_id);
-              return (
-                <li key={installation.module_id} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <h3 className="font-mono text-sm font-semibold">{installation.module_key}</h3>
-                      <Badge variant={installation.configured ? "default" : "destructive"}>
-                        {installation.configured
-                          ? t("module_admin_configured")
-                          : t("module_admin_incomplete")}
-                      </Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => editInstallation(installation)}
-                      >
-                        <Pencil className="size-4" /> {t("edit")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setPendingRemoval(installation)}
-                      >
-                        <Trash2 className="size-4" /> {t("remove")}
-                      </Button>
-                    </div>
-                  </div>
-                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <dt className="text-muted-foreground">{t("module_admin_callback_urls")}</dt>
-                      <dd className="mt-1 space-y-1">
-                        {(installation.redirect_uris ?? []).length > 0
-                          ? installation.redirect_uris?.map((uri) => (
-                              <div key={uri} className="truncate" title={uri}>
-                                {uri}
-                              </div>
-                            ))
-                          : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground">{t("module_admin_service_key")}</dt>
-                      <dd className="mt-1">
-                        {boundKey
-                          ? serviceKeyLabel(boundKey)
-                          : installation.service_key_id
-                            ? `${installation.service_key_id.slice(0, 8)}…`
-                            : "—"}
-                      </dd>
-                    </div>
-                  </dl>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <QueryStateBoundary queries={[installations, serviceKeys]} rows={2} height={48}>
+          {() =>
+            (installations.data ?? []).length === 0 ? (
+              <div className="rounded-lg border border-dashed px-6 py-10 text-center">
+                <p className="font-medium">{t("module_admin_empty_title")}</p>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {t("module_admin_empty_description")}
+                </p>
+              </div>
+            ) : (
+              <ul className="grid gap-3">
+                {(installations.data ?? []).map((installation) => {
+                  const boundKey = keys.find((key) => key.id === installation.service_key_id);
+                  return (
+                    <li key={installation.module_id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-mono text-sm font-semibold">
+                            {installation.module_key}
+                          </h3>
+                          <Badge variant={installation.configured ? "default" : "destructive"}>
+                            {installation.configured
+                              ? t("module_admin_configured")
+                              : t("module_admin_incomplete")}
+                          </Badge>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => editInstallation(installation)}
+                          >
+                            <Pencil className="size-4" /> {t("edit")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => setPendingRemoval(installation)}
+                          >
+                            <Trash2 className="size-4" /> {t("remove")}
+                          </Button>
+                        </div>
+                      </div>
+                      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">
+                            {t("module_admin_callback_urls")}
+                          </dt>
+                          <dd className="mt-1 space-y-1">
+                            {(installation.redirect_uris ?? []).length > 0
+                              ? installation.redirect_uris?.map((uri) => (
+                                  <div key={uri} className="truncate" title={uri}>
+                                    {uri}
+                                  </div>
+                                ))
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">{t("module_admin_service_key")}</dt>
+                          <dd className="mt-1">
+                            {boundKey
+                              ? serviceKeyLabel(boundKey)
+                              : installation.service_key_id
+                                ? `${installation.service_key_id.slice(0, 8)}…`
+                                : "—"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          }
+        </QueryStateBoundary>
       </section>
 
       <section className="space-y-4 border-t pt-6" aria-labelledby="module-form-title">
@@ -325,7 +319,7 @@ export function ModulesPage({ title }: { title: string }) {
               </Alert>
             )}
           </div>
-          {!loading && keys.length === 0 && (
+          {serviceKeys.data?.length === 0 && (
             <Alert>
               <CircleAlert className="size-4" />
               <AlertTitle>{t("module_admin_no_service_keys_title")}</AlertTitle>

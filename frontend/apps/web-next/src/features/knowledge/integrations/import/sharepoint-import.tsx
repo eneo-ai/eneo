@@ -34,6 +34,7 @@ import {
   type UserIntegration
 } from "../queries";
 import { SharePointFolderTree } from "./folder-tree";
+import { blockingError, RefreshError } from "@/components/composites/query-state";
 import { ImportPreviewError } from "./preview-state";
 import {
   buildBatchItems,
@@ -320,6 +321,7 @@ export function SharePointImportDialog({
                 {t("sharepoint_toggle_public_non_member_teams")}
               </label>
             )}
+            <RefreshError queries={[preview]} />
             <div
               id="sharepoint-sites"
               role="group"
@@ -333,7 +335,7 @@ export function SharePointImportDialog({
                   onBack={onBack}
                   settingsHref={settingsHref}
                 />
-              ) : preview.isError ? (
+              ) : blockingError(preview) ? (
                 <ImportPreviewError
                   error={preview.error}
                   message={t("integration_preview_failed")}

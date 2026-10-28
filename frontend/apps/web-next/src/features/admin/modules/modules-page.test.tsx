@@ -85,3 +85,33 @@ it("tells screen readers the installed modules are loading", () => {
   expect(region).not.toBeNull();
   expect(region!.getAttribute("aria-busy")).toBe("true");
 });
+
+it("shows a failed read as an error only, and keeps its focused retry busy while it retries", async () => {
+  let reads = 0;
+  api.GET.mockImplementation((path: string) => {
+    if (path !== "/api/v1/admin/modules/")
+      return Promise.resolve({
+        data: { items: [], next_cursor: null },
+        response: new Response("{}")
+      });
+    reads += 1;
+    return reads === 1
+      ? (Promise.resolve({
+          error: { message: "Internal server error", eneo_error_code: 9024 },
+          response: new Response(null, { status: 500 })
+        }) as never)
+      : new Promise(() => {});
+  });
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const retry = await screen.findByRole("button", { name: "Försök igen" });
+  // A failed read is not an empty list.
+  expect(screen.queryByText("Inga moduler är installerade")).toBeNull();
+
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+  expect(retry.isConnected).toBe(true);
+  expect(document.activeElement).toBe(retry);
+  expect(screen.queryByText("Laddar...")).toBeNull();
+});

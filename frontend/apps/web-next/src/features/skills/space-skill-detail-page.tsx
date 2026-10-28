@@ -4,11 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
@@ -62,8 +63,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
     saveActive(value);
   }
 
-  if (skill.isPending) return <p role="status">{t("loading")}</p>;
-  if (skill.isError)
+  if (blockingError(skill))
     return (
       <ListError
         error={skill.error}
@@ -71,12 +71,14 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
         onRetry={() => void skill.refetch()}
       />
     );
+  if (!skill.data) return <LoadingState rows={4} />;
   const value = skill.data;
   const editable = can("edit", "skill");
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
       <PageHeader title={value.display_name} />
+      <RefreshError queries={[skill]} />
       <Button asChild variant="link" className="w-fit px-0">
         <Link href={base}>{t("skills")}</Link>
       </Button>

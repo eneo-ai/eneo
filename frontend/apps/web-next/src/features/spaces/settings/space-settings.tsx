@@ -243,17 +243,11 @@ function SecuritySection() {
     impact: SpaceSecurityImpact;
   } | null>(null);
 
-  const {
-    data: security,
-    isPending: securityPending,
-    isError: securityError,
-    error: securityLoadError,
-    isFetching: securityFetching,
-    refetch: refetchSecurity
-  } = useQuery({
+  const securityQuery = useQuery({
     queryKey: ["security-classifications"],
     queryFn: () => unwrap(browserApi.GET("/api/v1/security-classifications/"))
   });
+  const security = securityQuery.data;
 
   const NONE = "__none__";
   const currentClassificationId = space.security_classification?.id ?? NONE;
@@ -308,14 +302,16 @@ function SecuritySection() {
 
   return (
     <SettingsGroup title={t("security_and_privacy")}>
-      {securityPending ? <LoadingState rows={1} /> : null}
-      {securityError ? (
+      <RefreshError queries={[securityQuery]} />
+      {blockingError(securityQuery) ? (
         <ListError
-          error={securityLoadError}
+          error={securityQuery.error}
           title={t("space_security_load_failed")}
-          isRetrying={securityFetching}
-          onRetry={() => void refetchSecurity()}
+          isRetrying={securityQuery.isFetching}
+          onRetry={() => void securityQuery.refetch()}
         />
+      ) : securityQuery.isPending ? (
+        <LoadingState rows={1} />
       ) : null}
       {security?.security_enabled && (
         <SettingsRow
@@ -543,18 +539,12 @@ function ModelsSection() {
     }
   }, [space, overrides]);
 
-  const {
-    data: models,
-    isPending: modelsPending,
-    isError: modelsError,
-    error: modelsLoadError,
-    isFetching: modelsFetching,
-    refetch: refetchModels
-  } = useQuery({
+  const modelsQuery = useQuery({
     queryKey: ["ai-models", space.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/ai-models/", { params: { query: { space_id: space.id } } }))
   });
+  const models = modelsQuery.data;
 
   const completionModels = (models?.completion_models ?? []).filter(
     (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
@@ -571,14 +561,16 @@ function ModelsSection() {
       title={t("space_settings_models_title")}
       description={t("space_settings_models_description")}
     >
-      {modelsPending ? <LoadingState rows={3} /> : null}
-      {modelsError ? (
+      <RefreshError queries={[modelsQuery]} />
+      {blockingError(modelsQuery) ? (
         <ListError
-          error={modelsLoadError}
+          error={modelsQuery.error}
           title={t("space_models_load_failed")}
-          isRetrying={modelsFetching}
-          onRetry={() => void refetchModels()}
+          isRetrying={modelsQuery.isFetching}
+          onRetry={() => void modelsQuery.refetch()}
         />
+      ) : modelsQuery.isPending ? (
+        <LoadingState rows={3} />
       ) : null}
       {models ? (
         <>

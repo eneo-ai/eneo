@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
@@ -121,53 +121,47 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
           {t("organization_skills_execution_description")}
         </p>
       </div>
-      {state.isPending ? (
-        <p role="status">{t("loading")}</p>
-      ) : state.isError ? (
-        <ListError
-          error={state.error}
-          isRetrying={state.isFetching}
-          onRetry={() => void state.refetch()}
-        />
-      ) : (
-        <>
-          <Badge variant={block ? "destructive" : "outline"}>
-            {t(
-              block
-                ? "organization_skills_execution_blocked_status"
-                : "organization_skills_execution_available_status"
+      <QueryStateBoundary query={state} rows={2}>
+        {() => (
+          <>
+            <Badge variant={block ? "destructive" : "outline"}>
+              {t(
+                block
+                  ? "organization_skills_execution_blocked_status"
+                  : "organization_skills_execution_available_status"
+              )}
+            </Badge>
+            {block && (
+              <Alert variant="destructive">
+                <AlertTitle>{t("organization_skills_execution_blocked_status")}</AlertTitle>
+                <AlertDescription>
+                  <p>{t("organization_skills_execution_blocked_description")}</p>
+                  <p className="mt-2 font-medium">{block.reason}</p>
+                  <p className="mt-1 text-xs">
+                    {t("organization_skills_execution_blocked_at", {
+                      time: new Date(block.blocked_at).toLocaleString(locale)
+                    })}
+                  </p>
+                </AlertDescription>
+              </Alert>
             )}
-          </Badge>
-          {block && (
-            <Alert variant="destructive">
-              <AlertTitle>{t("organization_skills_execution_blocked_status")}</AlertTitle>
-              <AlertDescription>
-                <p>{t("organization_skills_execution_blocked_description")}</p>
-                <p className="mt-2 font-medium">{block.reason}</p>
-                <p className="mt-1 text-xs">
-                  {t("organization_skills_execution_blocked_at", {
-                    time: new Date(block.blocked_at).toLocaleString(locale)
-                  })}
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-          <Button
-            variant={block ? "outline" : "destructive"}
-            onClick={() => {
-              setError(null);
-              setAction(block ? "unblock" : "block");
-            }}
-          >
-            {block ? <ShieldCheck className="size-4" /> : <ShieldAlert className="size-4" />}
-            {t(
-              block
-                ? "organization_skills_execution_unblock_action"
-                : "organization_skills_execution_block_action"
-            )}
-          </Button>
-        </>
-      )}
+            <Button
+              variant={block ? "outline" : "destructive"}
+              onClick={() => {
+                setError(null);
+                setAction(block ? "unblock" : "block");
+              }}
+            >
+              {block ? <ShieldCheck className="size-4" /> : <ShieldAlert className="size-4" />}
+              {t(
+                block
+                  ? "organization_skills_execution_unblock_action"
+                  : "organization_skills_execution_block_action"
+              )}
+            </Button>
+          </>
+        )}
+      </QueryStateBoundary>
       <AlertDialog
         open={action !== null}
         onOpenChange={(open) => {

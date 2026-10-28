@@ -17,7 +17,7 @@ import { ClientTime, useClientTimeText } from "@/components/composites/client-ti
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import { crawlRunState, crawlRunStateLabelKey } from "@/features/knowledge/crawl-run-state";
@@ -620,7 +620,9 @@ export function CrawlerPage() {
             ) : null}
           </form>
 
-          {rows.isError ? (
+          {/* The page's own copy for a failed poll (data kept) and a failed first read;
+              blockingError keeps the retry under focus while a first read retries. */}
+          {rows.isError || blockingError(rows) ? (
             <ListError
               error={rows.error}
               title={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
@@ -629,7 +631,7 @@ export function CrawlerPage() {
             />
           ) : null}
 
-          {rows.isPending && !rows.isError ? (
+          {rows.isPending && !blockingError(rows) ? (
             <LoadingState rows={3} />
           ) : isSchedule && schedule.data ? (
             <ScheduleTable

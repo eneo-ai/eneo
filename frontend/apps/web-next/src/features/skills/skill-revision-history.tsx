@@ -4,6 +4,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Eye, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,7 +17,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  LoadMore,
+  QueryStateBoundary,
+  RefreshError
+} from "@/components/composites/query-state";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
@@ -200,17 +207,20 @@ export function SkillRevisionHistory({
               })}
             </DialogTitle>
           </DialogHeader>
-          {preview.isPending && viewId !== skill.current_revision_id ? (
-            <p role="status">{t("loading")}</p>
-          ) : preview.isError ? (
+          {blockingError(preview) ? (
             <ListError
               error={preview.error}
               title={t("skills_library_preview_error")}
               isRetrying={preview.isFetching}
               onRetry={() => void preview.refetch()}
             />
-          ) : revision ? (
+          ) : !revision ? (
+            viewId !== null ? (
+              <LoadingState rows={3} />
+            ) : null
+          ) : (
             <>
+              <RefreshError queries={[preview]} />
               <RevisionContent revision={revision} current={skill.current_revision} />
               {canRestore && revision.id !== skill.current_revision_id && (
                 <Button
@@ -226,7 +236,7 @@ export function SkillRevisionHistory({
                 </Button>
               )}
             </>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
       <AlertDialog

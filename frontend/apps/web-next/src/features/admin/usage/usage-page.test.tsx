@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -125,7 +125,9 @@ describe("UsagePage", () => {
     expect(await screen.findByRole("table", { name: "Lagring" })).toBeTruthy();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Tokens" }));
-    expect(await screen.findByRole("button", { name: "Försök igen" })).toBeTruthy();
+    // Back on the tab the failed read retries on mount; its retry button stays, busy.
+    const retry = await screen.findByRole("button", { name: "Försök igen" });
+    await waitFor(() => expect(retry.getAttribute("aria-busy")).not.toBe("true"));
     apiState.failingPaths.delete("/api/v1/token-usage/");
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     expect(await screen.findByRole("table", { name: "Tokens" })).toBeTruthy();

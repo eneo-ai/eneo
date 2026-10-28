@@ -5,9 +5,8 @@ import { ArrowLeft, RotateCcw } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
-import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -371,43 +370,36 @@ export function UserUsagePage({
 
       <DateRangeBar range={range} setRange={setRange} />
 
-      {user.isPending ? (
-        <LoadingState rows={1} height={256} />
-      ) : user.isError ? (
-        <ListError
-          error={user.error}
-          isRetrying={user.isFetching}
-          onRetry={() => void user.refetch()}
-        />
-      ) : !userRow ? (
-        <Card className="p-6 text-center">
-          <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {t("usage_user_not_found_description")}
-          </p>
-        </Card>
-      ) : (
-        <>
-          <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
-
-          {breakdown.isPending ? (
-            <LoadingState rows={1} height={288} />
-          ) : breakdown.isError ? (
-            <ListError
-              error={breakdown.error}
-              title={t("usage_error_loading_model_breakdown")}
-              isRetrying={breakdown.isFetching}
-              onRetry={() => void breakdown.refetch()}
-            />
+      <QueryStateBoundary query={user} rows={1} height={256}>
+        {() =>
+          !userRow ? (
+            <Card className="p-6 text-center">
+              <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("usage_user_not_found_description")}
+              </p>
+            </Card>
           ) : (
             <>
-              <ProviderBreakdown data={breakdown.data} />
-              <TopModels data={breakdown.data} />
-              <ModelBreakdownTable data={breakdown.data} rates={rates} />
+              <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
+              <QueryStateBoundary
+                query={breakdown}
+                rows={1}
+                height={288}
+                errorTitle={t("usage_error_loading_model_breakdown")}
+              >
+                {(data) => (
+                  <>
+                    <ProviderBreakdown data={data} />
+                    <TopModels data={data} />
+                    <ModelBreakdownTable data={data} rates={rates} />
+                  </>
+                )}
+              </QueryStateBoundary>
             </>
-          )}
-        </>
-      )}
+          )
+        }
+      </QueryStateBoundary>
     </div>
   );
 }

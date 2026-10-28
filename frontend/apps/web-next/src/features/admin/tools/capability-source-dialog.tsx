@@ -10,7 +10,7 @@ import {
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -248,28 +248,18 @@ export function CapabilitySourceDialog({
                 ))}
               </select>
               <FieldProblem id="source-model" problem={problemAt("imageModel")} />
-              {(models.isPending || providers.isPending) && (
-                <p className="text-muted-foreground text-sm">{t("loading")}</p>
-              )}
-              {(models.isError || providers.isError) && (
-                <ListError
-                  error={models.error ?? providers.error}
-                  isRetrying={models.isFetching || providers.isFetching}
-                  onRetry={() => {
-                    if (models.isError) void models.refetch();
-                    if (providers.isError) void providers.refetch();
-                  }}
-                  compact
-                />
-              )}
-              {!models.isPending && !providers.isPending && imageModels.length === 0 && (
-                <p className="text-muted-foreground text-sm">
-                  {t("mcp_builtin_no_image_models")}{" "}
-                  <Link className="underline" href="/admin/models">
-                    {t("models")}
-                  </Link>
-                </p>
-              )}
+              <QueryStateBoundary queries={[models, providers]} rows={1}>
+                {() =>
+                  imageModels.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      {t("mcp_builtin_no_image_models")}{" "}
+                      <Link className="underline" href="/admin/models">
+                        {t("models")}
+                      </Link>
+                    </p>
+                  ) : null
+                }
+              </QueryStateBoundary>
             </div>
           ) : (
             <div className="space-y-4">
@@ -408,36 +398,31 @@ export function CapabilitySourceDialog({
               {...fieldProblemProps("source-groups", problemAt("groups"))}
             >
               <legend className="px-1 text-sm font-medium">{t("mcp_audience_groups")}</legend>
-              {groups.isPending ? (
-                <p>{t("loading")}</p>
-              ) : groups.isError ? (
-                <ListError
-                  error={groups.error}
-                  isRetrying={groups.isFetching}
-                  onRetry={() => void groups.refetch()}
-                  compact
-                />
-              ) : groups.data?.length ? (
-                groups.data.map((group) => (
-                  <label key={group.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={draft.groupIds.includes(group.id)}
-                      onChange={(event) =>
-                        set(
-                          "groupIds",
-                          event.target.checked
-                            ? [...draft.groupIds, group.id]
-                            : draft.groupIds.filter((id) => id !== group.id)
-                        )
-                      }
-                    />
-                    {group.name}
-                  </label>
-                ))
-              ) : (
-                <p className="text-muted-foreground text-sm">{t("mcp_audience_no_groups")}</p>
-              )}
+              <QueryStateBoundary query={groups} rows={2}>
+                {(items) =>
+                  items.length ? (
+                    items.map((group) => (
+                      <label key={group.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={draft.groupIds.includes(group.id)}
+                          onChange={(event) =>
+                            set(
+                              "groupIds",
+                              event.target.checked
+                                ? [...draft.groupIds, group.id]
+                                : draft.groupIds.filter((id) => id !== group.id)
+                            )
+                          }
+                        />
+                        {group.name}
+                      </label>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">{t("mcp_audience_no_groups")}</p>
+                  )
+                }
+              </QueryStateBoundary>
               <FieldProblem id="source-groups" problem={problemAt("groups")} />
             </fieldset>
           )}

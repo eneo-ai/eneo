@@ -5,9 +5,8 @@ import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
-import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -47,48 +46,48 @@ function TokensTab() {
   const t = useTranslations();
   const usage = useQuery(tokenUsageQueryOptions(browserApi));
 
-  if (usage.isPending) return <LoadingState rows={1} height={256} />;
-  if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
-  const data = usage.data;
-
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_token_usage)} />
-        <Stat label={t("input")} value={NUMBER.format(data.total_input_token_usage)} />
-        <Stat label={t("output")} value={NUMBER.format(data.total_output_token_usage)} />
-      </div>
-      {data.models.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
-      ) : (
-        <Table aria-label={t("tokens")}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("model")}</TableHead>
-              <TableHead className="text-right">{t("input")}</TableHead>
-              <TableHead className="text-right">{t("output")}</TableHead>
-              <TableHead className="text-right">{t("usage_total_tokens")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.models.map((model) => (
-              <TableRow key={model.model_id}>
-                <TableCell className="font-medium">{model.model_nickname}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.input_token_usage)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.output_token_usage)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.total_token_usage)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <QueryStateBoundary query={usage} rows={1} height={256}>
+      {(data) => (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_token_usage)} />
+            <Stat label={t("input")} value={NUMBER.format(data.total_input_token_usage)} />
+            <Stat label={t("output")} value={NUMBER.format(data.total_output_token_usage)} />
+          </div>
+          {data.models.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
+          ) : (
+            <Table aria-label={t("tokens")}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("model")}</TableHead>
+                  <TableHead className="text-right">{t("input")}</TableHead>
+                  <TableHead className="text-right">{t("output")}</TableHead>
+                  <TableHead className="text-right">{t("usage_total_tokens")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.models.map((model) => (
+                  <TableRow key={model.model_id}>
+                    <TableCell className="font-medium">{model.model_nickname}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(model.input_token_usage)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(model.output_token_usage)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(model.total_token_usage)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
-    </div>
+    </QueryStateBoundary>
   );
 }
 
@@ -98,51 +97,40 @@ function StorageTab() {
   const storage = useQuery(storageQueryOptions(browserApi));
   const spaces = useQuery(storageSpacesQueryOptions(browserApi));
 
-  if (storage.isPending || spaces.isPending) return <LoadingState rows={1} height={256} />;
-  if (storage.isError || spaces.isError) {
-    return (
-      <ListError
-        error={storage.error ?? spaces.error}
-        onRetry={() => {
-          if (storage.isError) void storage.refetch();
-          if (spaces.isError) void spaces.refetch();
-        }}
-      />
-    );
-  }
-  const storageData = storage.data;
-  const spacesData = spaces.data;
-
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("storage_used")} value={formatBytes(storageData.total_used, locale)} />
-        <Stat label={t("personal")} value={formatBytes(storageData.personal_used, locale)} />
-        <Stat label={t("shared")} value={formatBytes(storageData.shared_used, locale)} />
-      </div>
-      {spacesData.items.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
-      ) : (
-        <Table aria-label={t("storage")}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead className="text-right">{t("storage_used")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {spacesData.items.map((space) => (
-              <TableRow key={space.id}>
-                <TableCell className="font-medium">{space.name}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatBytes(space.size, locale)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <QueryStateBoundary queries={[storage, spaces]} rows={1} height={256}>
+      {() => (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Stat label={t("storage_used")} value={formatBytes(storage.data!.total_used, locale)} />
+            <Stat label={t("personal")} value={formatBytes(storage.data!.personal_used, locale)} />
+            <Stat label={t("shared")} value={formatBytes(storage.data!.shared_used, locale)} />
+          </div>
+          {spaces.data!.items.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
+          ) : (
+            <Table aria-label={t("storage")}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("name")}</TableHead>
+                  <TableHead className="text-right">{t("storage_used")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {spaces.data!.items.map((space) => (
+                  <TableRow key={space.id}>
+                    <TableCell className="font-medium">{space.name}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatBytes(space.size, locale)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
-    </div>
+    </QueryStateBoundary>
   );
 }
 
@@ -152,63 +140,63 @@ function UsersTab() {
   const { data: models } = useQuery(adminModelsQueryOptions(browserApi));
   const rates = useMemo(() => buildRateMap(models?.completion_models ?? []), [models]);
 
-  if (usage.isPending) return <LoadingState rows={1} height={256} />;
-  if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
-  const data = usage.data;
-
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("users")} value={NUMBER.format(data.total_users)} />
-        <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_tokens)} />
-        <Stat label={t("requests")} value={NUMBER.format(data.total_requests)} />
-      </div>
-      {data.users.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("no_user_token_usage_data")}</p>
-      ) : (
-        <Table aria-label={t("users")}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("user")}</TableHead>
-              <TableHead className="text-right">{t("input_tokens")}</TableHead>
-              <TableHead className="text-right">{t("output_tokens")}</TableHead>
-              <TableHead className="text-right">{t("total_tokens")}</TableHead>
-              <TableHead className="text-right">{t("requests")}</TableHead>
-              <TableHead className="text-right">{t("estimated_cost")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.users.map((user) => (
-              <TableRow key={user.user_id}>
-                <TableCell>
-                  <Button variant="link" className="h-auto p-0 font-medium" asChild>
-                    <Link href={`/admin/usage/users/${user.user_id}`}>
-                      {user.username || user.email}
-                      <ExternalLink className="size-3" />
-                    </Link>
-                  </Button>
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(user.total_input_tokens)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(user.total_output_tokens)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(user.total_tokens)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(user.total_requests)}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-right tabular-nums">
-                  {formatCost(userUsageCost(user, rates))}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <QueryStateBoundary query={usage} rows={1} height={256}>
+      {(data) => (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Stat label={t("users")} value={NUMBER.format(data.total_users)} />
+            <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_tokens)} />
+            <Stat label={t("requests")} value={NUMBER.format(data.total_requests)} />
+          </div>
+          {data.users.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("no_user_token_usage_data")}</p>
+          ) : (
+            <Table aria-label={t("users")}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("user")}</TableHead>
+                  <TableHead className="text-right">{t("input_tokens")}</TableHead>
+                  <TableHead className="text-right">{t("output_tokens")}</TableHead>
+                  <TableHead className="text-right">{t("total_tokens")}</TableHead>
+                  <TableHead className="text-right">{t("requests")}</TableHead>
+                  <TableHead className="text-right">{t("estimated_cost")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.users.map((user) => (
+                  <TableRow key={user.user_id}>
+                    <TableCell>
+                      <Button variant="link" className="h-auto p-0 font-medium" asChild>
+                        <Link href={`/admin/usage/users/${user.user_id}`}>
+                          {user.username || user.email}
+                          <ExternalLink className="size-3" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(user.total_input_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(user.total_output_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(user.total_tokens)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {NUMBER.format(user.total_requests)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-right tabular-nums">
+                      {formatCost(userUsageCost(user, rates))}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
-    </div>
+    </QueryStateBoundary>
   );
 }
 
