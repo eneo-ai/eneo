@@ -182,7 +182,8 @@ const eslintConfig = defineConfig([
   {
     // Toasts (2.2.1): errors and warnings stay until the user closes them.
     // src/lib/toast.ts owns that policy, so it and the Toaster are the only
-    // shipped code that talks to sonner.
+    // shipped code that talks to sonner. Loading placeholders (4.1.3):
+    // LoadingState is the only one, a status region with a translated label.
     files: ["src/**/*.{ts,tsx}"],
     ignores: [
       "src/lib/toast.ts",
@@ -199,6 +200,11 @@ const eslintConfig = defineConfig([
               name: "sonner",
               message:
                 "Use `toast` from @/lib/toast: it keeps errors and warnings up until they are closed."
+            },
+            {
+              name: "@/components/ui/skeleton",
+              message:
+                "Use `LoadingState` from @/components/composites/loading-state: it tells screen readers the content is loading."
             }
           ]
         }

@@ -5,6 +5,7 @@ import { ArrowLeft, RotateCcw } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { ListError } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -372,7 +372,7 @@ export function UserUsagePage({
       <DateRangeBar range={range} setRange={setRange} />
 
       {user.isPending ? (
-        <Skeleton className="h-64 w-full" />
+        <LoadingState rows={1} height={256} />
       ) : user.isError ? (
         <ListError
           error={user.error}
@@ -391,7 +391,7 @@ export function UserUsagePage({
           <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
 
           {breakdown.isPending ? (
-            <Skeleton className="h-72 w-full" />
+            <LoadingState rows={1} height={288} />
           ) : breakdown.isError ? (
             <ListError
               error={breakdown.error}

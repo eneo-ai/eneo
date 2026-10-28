@@ -5,11 +5,11 @@ import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -47,7 +47,7 @@ function TokensTab() {
   const t = useTranslations();
   const usage = useQuery(tokenUsageQueryOptions(browserApi));
 
-  if (usage.isPending) return <Skeleton className="h-64 w-full" />;
+  if (usage.isPending) return <LoadingState rows={1} height={256} />;
   if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
   const data = usage.data;
 
@@ -98,7 +98,7 @@ function StorageTab() {
   const storage = useQuery(storageQueryOptions(browserApi));
   const spaces = useQuery(storageSpacesQueryOptions(browserApi));
 
-  if (storage.isPending || spaces.isPending) return <Skeleton className="h-64 w-full" />;
+  if (storage.isPending || spaces.isPending) return <LoadingState rows={1} height={256} />;
   if (storage.isError || spaces.isError) {
     return (
       <ListError
@@ -152,7 +152,7 @@ function UsersTab() {
   const { data: models } = useQuery(adminModelsQueryOptions(browserApi));
   const rates = useMemo(() => buildRateMap(models?.completion_models ?? []), [models]);
 
-  if (usage.isPending) return <Skeleton className="h-64 w-full" />;
+  if (usage.isPending) return <LoadingState rows={1} height={256} />;
   if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
   const data = usage.data;
 

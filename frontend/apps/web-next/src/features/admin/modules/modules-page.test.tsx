@@ -75,3 +75,13 @@ it("reports a failed read once, in the user's language, with a retry", async () 
   // The read failure is reported inline only; the toast is for failed changes.
   expect(toastApiError).not.toHaveBeenCalled();
 });
+
+it("tells screen readers the installed modules are loading", () => {
+  api.GET.mockImplementationOnce(() => new Promise(() => {}));
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const label = screen.getByText("Laddar...");
+  const region = label.closest<HTMLElement>('[role="status"]');
+  expect(region).not.toBeNull();
+  expect(region!.getAttribute("aria-busy")).toBe("true");
+});

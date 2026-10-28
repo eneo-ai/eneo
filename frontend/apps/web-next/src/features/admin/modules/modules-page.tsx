@@ -6,6 +6,7 @@ import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -15,7 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -173,10 +173,7 @@ export function ModulesPage({ title }: { title: string }) {
           />
         )}
         {loading ? (
-          <div className="space-y-3" aria-label={t("loading")}>
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
+          <LoadingState rows={2} height={48} />
         ) : (installations.data ?? []).length === 0 ? (
           <div className="rounded-lg border border-dashed px-6 py-10 text-center">
             <p className="font-medium">{t("module_admin_empty_title")}</p>

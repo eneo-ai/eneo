@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -60,7 +60,7 @@ export function ApiKeyPolicyDialog({
         </DialogHeader>
 
         {isPending || !policy ? (
-          <Skeleton className="h-72 w-full" />
+          <LoadingState rows={1} height={288} />
         ) : (
           <PolicyForm
             policy={policy}
@@ -331,7 +331,7 @@ function SuperKeySection({
         </span>
       </div>
       {!status ? (
-        <Skeleton className="h-12 w-full" />
+        <LoadingState rows={1} height={48} />
       ) : (
         <div className="flex flex-col gap-2">
           {rows.map((row) => (
