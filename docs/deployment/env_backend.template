@@ -582,8 +582,11 @@ OAUTH_CALLBACK_URLS=[]
 # With ENVIRONMENT=development, BROWSER_SESSION_ENABLED needs PUBLIC_ORIGIN set
 # to a localhost URL, e.g. http://localhost:3101.
 # BROWSER_SESSION_ENABLED=false
-# WEB_APP_ENABLED: serve the web app from the backend.
+# WEB_APP_ENABLED: serve the web app from the backend; /healthz then answers
+# like /api/healthz.
 # WEB_APP_ENABLED=false
+# Outside development, either flag turns off the /docs and /redoc pages (and
+# SCIM's): they load third-party scripts on the session's host. /openapi.json stays.
 # Runtime links for the web app: same values as env_web_next.env; used by the
 # backend from phase 4, the only copy after the routing switch (6A).
 # Links must be absolute http(s) URLs; any other is dropped (and named in a

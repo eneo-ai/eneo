@@ -32,11 +32,6 @@
       "count": 1
     }
   },
-  "src/features/apps/editor/ai-section.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
   "src/features/apps/results/result-detail.tsx": {
     "jsx-a11y/media-has-caption": {
       "count": 1

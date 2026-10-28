@@ -138,6 +138,7 @@ from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.database_reset import reset_populated_tables
 from tests.fixtures import mint_v2_api_key
+from tests.integration import safe_method_tripwire
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -656,6 +657,12 @@ async def app(setup_database):
     # We DON'T use lifespan_context because it would close the sessionmanager
     # on exit, which we need for cleanup_database fixture.
     application = get_application()
+    # Every GET the tests send must be side-effect free or declare its effect.
+    get_violations: list[str] = []
+    application.add_middleware(
+        safe_method_tripwire.SafeMethodTripwire, violations=get_violations
+    )
+    stop_recording = safe_method_tripwire.install()
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
@@ -678,7 +685,10 @@ async def app(setup_database):
         # Full shutdown closes the session manager needed by cleanup_database.
         # Release the new process-owned byte-plane clients independently so
         # every function-scoped application gets a fresh runtime without leaks.
+        stop_recording()
         await object_content_runtime.stop()
+    if get_violations:
+        pytest.fail("\n".join(get_violations), pytrace=False)
 
 
 @pytest.fixture

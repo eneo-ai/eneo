@@ -30,6 +30,7 @@ The app is moving from Next.js to a Vite SPA with TanStack Router. Until the
 move is done, this package builds both, and Next stays the default:
 
 ```bash
+bun run dev:vite        # Vite dev server on port 3101, beside Next on 3100
 bun run build:vite      # static SPA in dist/ (vite.config.mts)
 bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
 ```
@@ -37,6 +38,29 @@ bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
 `src/routeTree.gen.ts` is generated and committed: commit it together with the
 route change that produced it. `vite build` does not type-check; `bun run check`
 does.
+
+### Vite dev server
+
+The browser talks only to `http://localhost:3101`. The dev server forwards
+`/api` (WebSockets too), `/version`, `/login/callback` and `/auth/callback` to
+the backend at `ENEO_BACKEND_URL` without changing the Host header, so the
+session cookie and the backend's same-origin checks work as in production. It
+refuses to start without `ENEO_BACKEND_URL` (set it in `.env.local`). It sends no
+CSP; the CSP is checked against the build FastAPI serves.
+
+Run the backend in development mode with these in its `.env`:
+
+```bash
+ENVIRONMENT=development          # session cookie eneo_web, without Secure, works on http
+BROWSER_SESSION_ENABLED=true
+PUBLIC_ORIGIN=http://localhost:3101
+```
+
+The backend refuses to start with the browser session in development mode
+unless `PUBLIC_ORIGIN` is a localhost origin. The SSO `redirect_uri` follows the
+request's host, so register `http://localhost:3101/login/callback` with the
+identity provider or the tenant's federation redirect URIs; with global OIDC,
+`PUBLIC_ORIGIN` already makes it the redirect URI.
 
 ## Environment
 

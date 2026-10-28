@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultUsageRange,
+  readUsageView,
   usageIntensity,
+  usageListHref,
   usageRangeDayCount,
   usageRangeFromSearchParams,
   usageRangeQuery,
+  usageThresholds,
+  usageViewSearch,
   userUsageCost
 } from "./usage";
 
@@ -16,6 +20,19 @@ describe("usage ranges", () => {
       expect(usageRangeFromSearchParams({ from, to: "2026-06-30" }, fallback)).toEqual(fallback);
     }
   );
+  it("keeps the default period independent of the time zone across a DST change", () => {
+    const previous = process.env.TZ;
+    process.env.TZ = "Europe/Stockholm";
+    try {
+      expect(defaultUsageRange(new Date("2026-10-28T00:30:00Z"))).toEqual({
+        from: "2026-09-28",
+        to: "2026-10-28"
+      });
+    } finally {
+      process.env.TZ = previous;
+    }
+  });
+
   it("creates a date-input range for the last 30 days", () => {
     expect(defaultUsageRange(new Date("2026-07-06T12:00:00Z"))).toEqual({
       from: "2026-06-06",
@@ -35,15 +52,19 @@ describe("usage ranges", () => {
     );
   });
 
-  it("converts date inputs to inclusive backend datetime parameters", () => {
+  it("sends the range's calendar dates with the day after the end, whatever the time zone", () => {
     expect(usageRangeQuery({ from: "2026-06-01", to: "2026-06-30" })).toEqual({
-      start_date: new Date("2026-06-01T00:00:00").toISOString(),
-      end_date: new Date("2026-06-30T23:59:59").toISOString()
+      start_date: "2026-06-01",
+      end_date: "2026-07-01"
     });
+    expect(usageRangeQuery({ from: "2026-12-01", to: "2026-12-31" }).end_date).toBe("2027-01-01");
+    // The last Sunday of March has 23 hours in Stockholm.
+    expect(usageRangeQuery({ from: "2026-03-01", to: "2026-03-29" }).end_date).toBe("2026-03-30");
   });
 
-  it("counts inclusive range days for usage thresholds", () => {
-    expect(usageRangeDayCount({ from: "2026-06-01", to: "2026-06-30" })).toBe(30);
+  it("counts the days between the range ends, as apps/web does", () => {
+    expect(usageRangeDayCount({ from: "2026-06-01", to: "2026-07-01" })).toBe(30);
+    expect(usageRangeDayCount({ from: "2026-06-01", to: "2026-06-01" })).toBe(1);
   });
 });
 
@@ -83,9 +104,71 @@ describe("usage cost and intensity", () => {
   });
 
   it("scales usage intensity thresholds with the selected range", () => {
-    const range = { from: "2026-06-01", to: "2026-06-30" };
+    const range = { from: "2026-06-01", to: "2026-07-01" };
+    expect(usageThresholds(range)).toEqual({ high: 500_000, medium: 50_000 });
+    expect(usageThresholds({ from: "2026-06-01", to: "2026-06-16" })).toEqual({
+      high: 250_000,
+      medium: 25_000
+    });
     expect(usageIntensity(600_000, range)).toBe("high");
+    expect(usageIntensity(500_000, range)).toBe("medium");
     expect(usageIntensity(75_000, range)).toBe("medium");
-    expect(usageIntensity(10_000, range)).toBe("low");
+    expect(usageIntensity(50_000, range)).toBe("low");
+  });
+});
+
+describe("usage view in the URL", () => {
+  const fallback = { from: "2026-06-01", to: "2026-07-01" };
+  const read = (query: string) => readUsageView(new URLSearchParams(query), fallback);
+
+  it("reads the tab, range, page, sort and search", () => {
+    expect(
+      read(
+        "tab=users&from=2026-05-01&to=2026-05-31&page=7&sortBy=requests&sortOrder=asc&userSearch=%20anna%20"
+      )
+    ).toEqual({
+      tab: "users",
+      range: { from: "2026-05-01", to: "2026-05-31" },
+      page: 7,
+      sortBy: "requests",
+      sortOrder: "asc",
+      search: "anna"
+    });
+  });
+
+  it("falls back to safe defaults for malformed deep links", () => {
+    expect(
+      read("tab=admin&from=2026-02-30&to=x&page=-1&sortBy=invalid&sortOrder=bad&userSearch=")
+    ).toEqual({
+      tab: "tokens",
+      range: fallback,
+      page: 1,
+      sortBy: "total_tokens",
+      sortOrder: "desc",
+      search: ""
+    });
+    expect(read("page=1.5").page).toBe(1);
+    expect(read(`userSearch=${"a".repeat(250)}`).search).toHaveLength(200);
+  });
+
+  it("writes only what differs from the defaults and keeps other parameters", () => {
+    expect(usageViewSearch(read(""), "", fallback)).toBe("");
+    expect(usageViewSearch(read(""), "?keep=1&page=4", fallback)).toBe("?keep=1");
+    const view = read("tab=users&page=3&sortBy=username&sortOrder=asc&userSearch=anna lind");
+    const search = usageViewSearch(
+      { ...view, range: { from: "2026-05-01", to: "2026-05-31" } },
+      "",
+      fallback
+    );
+    expect(search).toBe(
+      "?tab=users&from=2026-05-01&to=2026-05-31&page=3&sortBy=username&sortOrder=asc&userSearch=anna+lind"
+    );
+    expect(read(search.slice(1))).toMatchObject({ page: 3, search: "anna lind" });
+  });
+
+  it("leads back to the list a user's page was opened from", () => {
+    const fromList = new URLSearchParams("tab=users&page=2&userSearch=anna&evil=https://x.test");
+    expect(usageListHref(fromList)).toMatch(/^\/admin\/usage\?tab=users&page=2&userSearch=anna$/);
+    expect(usageListHref(new URLSearchParams())).toBe("/admin/usage");
   });
 });

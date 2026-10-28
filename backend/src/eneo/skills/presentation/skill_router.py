@@ -41,6 +41,11 @@ _SKILL_SERVICE_ACCESS_REASON = (
     "Skill service enforces actor permissions and space or assistant membership."
 )
 
+_SKILL_POLICY_SEED_ON_GET = (
+    "Seeds the tenant's default skill runtime policy on first read (INSERT ... ON "
+    "CONFLICT DO NOTHING); the result is the default the read reports either way."
+)
+
 router = APIRouter(
     prefix="/spaces",
     tags=["skills"],
@@ -464,6 +469,7 @@ async def list_assistant_skill_bindings(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason=_SKILL_SERVICE_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_assistant_skill_configuration(
     space_id: UUID,

@@ -8,10 +8,16 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
 from eneo.server.main import get_application
-from eneo.server.middleware.api_response_headers import ApiResponseHeadersMiddleware
+from eneo.server.middleware.response_headers import ResponseHeadersMiddleware
 
 SANDBOX_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox"
 HSTS = "max-age=31536000"
+WEB_APP_DEFAULTS = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-dns-prefetch-control": "off",
+    "permissions-policy": "camera=(), geolocation=(), microphone=(self)",
+}
 
 
 async def _json(request):
@@ -45,13 +51,17 @@ async def _plain(request):
     return PlainTextResponse("plain")
 
 
+async def _own_referrer_policy(request):
+    return PlainTextResponse("page", headers={"Referrer-Policy": "no-referrer"})
+
+
 async def _socket(websocket: WebSocket):
     await websocket.accept()
     await websocket.send_text("hello")
     await websocket.close()
 
 
-def _client(*, hsts: bool = False) -> TestClient:
+def _client(*, hsts: bool = False, web_app: bool = False) -> TestClient:
     app = Starlette(
         routes=[
             Route("/api/v1/thing/", _json),
@@ -61,10 +71,11 @@ def _client(*, hsts: bool = False) -> TestClient:
             Route("/openapi.json", _plain),
             Route("/docs", _plain),
             Route("/scim/v2/Users", _plain),
+            Route("/module-login", _own_referrer_policy),
             WebSocketRoute("/api/v1/ws", _socket),
         ]
     )
-    return TestClient(ApiResponseHeadersMiddleware(app, hsts=hsts))
+    return TestClient(ResponseHeadersMiddleware(app, hsts=hsts, web_app=web_app))
 
 
 def test_api_json_response_gets_default_headers():
@@ -112,6 +123,37 @@ def test_non_api_paths_are_untouched(path: str):
         assert header not in response.headers
 
 
+@pytest.mark.parametrize(
+    "path", ["/version", "/openapi.json", "/docs", "/scim/v2/Users"]
+)
+def test_web_app_gives_other_paths_the_browser_headers(path: str):
+    response = _client(hsts=True, web_app=True).get(path)
+
+    assert response.status_code == 200
+    for name, value in WEB_APP_DEFAULTS.items():
+        assert response.headers[name] == value
+    assert response.headers["strict-transport-security"] == HSTS
+    # Pages carry their own CSP and cache policy; framing is the CSP's.
+    for header in ("cache-control", "content-security-policy", "x-frame-options"):
+        assert header not in response.headers
+
+
+def test_web_app_keeps_a_path_policy():
+    response = _client(web_app=True).get("/module-login")
+
+    assert response.headers.get_list("referrer-policy") == ["no-referrer"]
+    assert response.headers["permissions-policy"] == (
+        "camera=(), geolocation=(), microphone=(self)"
+    )
+
+
+def test_web_app_leaves_api_defaults_alone():
+    response = _client(web_app=True).get("/api/v1/thing/")
+
+    assert response.headers["content-security-policy"] == SANDBOX_CSP
+    assert "referrer-policy" not in response.headers
+
+
 def test_range_response_is_byte_identical():
     response = _client().get("/api/v1/file/")
 
@@ -143,7 +185,8 @@ async def test_streaming_response_is_not_buffered():
 
     scope = {"type": "http", "path": "/api/v1/stream/", "method": "GET", "headers": []}
     await asyncio.wait_for(
-        ApiResponseHeadersMiddleware(app, hsts=False)(scope, receive, send), timeout=2
+        ResponseHeadersMiddleware(app, hsts=False, web_app=True)(scope, receive, send),
+        timeout=2,
     )
 
     assert [message.get("body") for message in sent[1:]] == [b"one", b"two"]
@@ -151,8 +194,11 @@ async def test_streaming_response_is_not_buffered():
     assert headers[b"cache-control"] == b"no-store"
 
 
-def test_websocket_scope_passes_through():
-    with _client(hsts=True).websocket_connect("/api/v1/ws") as websocket:
+@pytest.mark.parametrize("web_app", [False, True])
+def test_websocket_scope_passes_through(web_app: bool):
+    with _client(hsts=True, web_app=web_app).websocket_connect(
+        "/api/v1/ws"
+    ) as websocket:
         assert websocket.receive_text() == "hello"
 
 

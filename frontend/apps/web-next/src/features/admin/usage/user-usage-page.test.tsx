@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
 const model = {
   model_id: "model-1",
   model_name: "gpt-5",
@@ -64,6 +66,21 @@ afterEach(() => {
 });
 
 describe("UserUsagePage", () => {
+  it("leads back to the users list it was opened from", async () => {
+    renderInApp(
+      <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />,
+      {
+        route:
+          "/admin/usage/users/user-1?tab=users&from=2026-09-01&to=2026-09-25&page=3&sortBy=requests&sortOrder=asc&userSearch=anna"
+      }
+    );
+
+    await screen.findByRole("table", { name: "Fullständig modelluppdelning" });
+    expect(screen.getByRole("link", { name: "Tillbaka" }).getAttribute("href")).toBe(
+      "/admin/usage?tab=users&from=2026-09-01&to=2026-09-25&page=3&sortBy=requests&sortOrder=asc&userSearch=anna"
+    );
+  });
+
   it("names the model table by its heading", async () => {
     renderInApp(
       <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />
