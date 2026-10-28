@@ -18,6 +18,7 @@ import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
 import {
   pendingImports,
@@ -65,6 +66,10 @@ type UploadStore = {
 };
 
 const NO_UPLOADS: Upload[] = [];
+
+/** Not on the server yet: a reload would lose it. */
+const isUploadPending = (upload: Upload) =>
+  upload.status === "queued" || upload.status === "uploading";
 
 function createUploadStore(): UploadStore {
   let uploads = NO_UPLOADS;
@@ -285,6 +290,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const waitingRef = useRef<string[]>([]);
   const runningRef = useRef<Set<string>>(new Set());
   const [uploadStore] = useState(createUploadStore);
+  // Re-renders only when the answer flips, not on every progress tick.
+  useBeforeUnloadWarning(
+    useSyncExternalStore(
+      uploadStore.subscribe,
+      () => uploadStore.getSnapshot().some(isUploadPending),
+      () => false
+    )
+  );
 
   const sync = useCallback(() => {
     uploadStore.set([...uploadsRef.current.values()]);
@@ -395,8 +408,6 @@ export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount
     uploadStore.getSnapshot,
     uploadStore.getSnapshot
   );
-  const runningCount =
-    jobs.filter(isJobActive).length +
-    uploads.filter((upload) => upload.status === "queued" || upload.status === "uploading").length;
+  const runningCount = jobs.filter(isJobActive).length + uploads.filter(isUploadPending).length;
   return { jobs, uploads, runningCount };
 }
