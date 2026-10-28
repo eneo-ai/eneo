@@ -91,6 +91,47 @@ it("loads the target ahead on hover, unless prefetch is false", async () => {
   expect(preload).toHaveBeenCalledWith(expect.objectContaining({ to: "/a" }));
 });
 
+it("does not scroll to a hash target when scroll is false", async () => {
+  await renderWithRouter(
+    <>
+      <Link href="/a#target" scroll={false}>
+        Utan scroll
+      </Link>
+      <p id="target">Mål</p>
+    </>,
+    { routes: (root) => [page("/a")(root)] }
+  );
+  const target = screen.getByText("Mål");
+  target.scrollIntoView = vi.fn();
+
+  await act(async () => fireEvent.click(screen.getByRole("link", { name: "Utan scroll" })));
+
+  expect(target.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("leaves a download to the browser", async () => {
+  const { router } = await renderWithRouter(
+    <Link href="/a?download=1" download="report.csv">
+      Ladda ner
+    </Link>,
+    { routes: (root) => [page("/a")(root)] }
+  );
+  const navigate = vi.spyOn(router, "navigate");
+  let prevented: boolean | undefined;
+  // jsdom cannot download; record and stop the browser's action after the app's handlers ran.
+  const stop = (event: Event) => {
+    prevented = event.defaultPrevented;
+    event.preventDefault();
+  };
+  document.addEventListener("click", stop);
+
+  fireEvent.click(screen.getByRole("link", { name: "Ladda ner" }));
+
+  document.removeEventListener("click", stop);
+  expect(prevented).toBe(false);
+  expect(navigate).not.toHaveBeenCalled();
+});
+
 it("leaves another site to the browser", async () => {
   const { router } = await renderWithRouter(
     <>

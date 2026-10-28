@@ -5,11 +5,12 @@
  * An app path navigates in the app; it is the current page (`aria-current`)
  * only when path and query both match, so one link per page is current. An
  * `aria-current` the caller passes, even `undefined`, wins over that.
- * Another site and a `#hash` are plain anchors.
+ * Another site, a `#hash` and a download are plain anchors.
  */
 import { useLinkProps, type AnyRouter } from "@tanstack/react-router";
 import type { ForwardedRef, ReactNode } from "react";
 import type { LinkProps } from "./link";
+import { scrollOptions } from "./navigation.tanstack";
 import { parseSearch } from "./router/search";
 
 // A scheme (`https:`, `mailto:`), or a host without one (`//host`, which
@@ -25,7 +26,7 @@ function AppLink({ href, prefetch, scroll, replace, ref, children, ...anchor }: 
       search: parseSearch(url.search),
       hash: url.hash.slice(1),
       preload: prefetch === false ? false : undefined,
-      resetScroll: scroll !== false,
+      ...scrollOptions(scroll),
       replace,
       activeOptions: { exact: true, includeSearch: true }
     },
@@ -49,7 +50,8 @@ const Link: (props: LinkProps) => ReactNode = ({
   children,
   ...anchor
 }) =>
-  OTHER_SITE.test(href) || href.startsWith("#") ? (
+  // The browser handles another site, a #hash and a download (as next/link).
+  OTHER_SITE.test(href) || href.startsWith("#") || (anchor.download ?? false) !== false ? (
     <a {...anchor} href={href} ref={ref}>
       {children}
     </a>

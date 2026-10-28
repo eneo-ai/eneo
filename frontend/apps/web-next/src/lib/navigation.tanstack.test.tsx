@@ -69,6 +69,30 @@ describe("while the next page loads", () => {
     expect(location()).toBe("/slow -");
   });
 
+  it("gives the next page its own address from its first render", async () => {
+    const firstRender: string[] = [];
+    function Destination() {
+      const pathname = navigation.usePathname();
+      const tab = navigation.useSearchParams().get("tab");
+      // A page that starts its tab from the URL keeps what it read first.
+      const [initial] = useState(() => `${pathname} ${tab}`);
+      firstRender.push(initial);
+      return null;
+    }
+    await renderWithRouter(<Location />, {
+      route: "/a?tab=old",
+      routes: (root) => [
+        ...routes(root),
+        createRoute({ getParentRoute: () => root, path: "/b", component: Destination })
+      ]
+    });
+
+    await act(async () => seam.push("/b?tab=new"));
+
+    expect(firstRender[0]).toBe("/b new");
+    expect(location()).toBe("/b new");
+  });
+
   it("keeps the space's chrome", async () => {
     const { router } = await renderWithRouter(<SpaceFrame>{null}</SpaceFrame>, {
       route: "/spaces/s1/chat",
@@ -170,6 +194,23 @@ describe("scroll and history", () => {
     expect(router.state.location.href).toBe("/a?tab=y");
     expect(panel.scrollTo).not.toHaveBeenCalled();
     expect(router.history.length).toBe(entries);
+  });
+
+  it("scrolls to a hash target only when the navigation may scroll", async () => {
+    await renderPanel("/a");
+    const target = document.createElement("p");
+    target.id = "target";
+    document.body.append(target);
+    target.scrollIntoView = vi.fn();
+
+    await act(async () => navigation.replaceUrl("/a?tab=y#target"));
+    await act(async () => seam.replace("/a?tab=z#target", { scroll: false }));
+    await act(async () => seam.push("/a?tab=w#target", { scroll: false }));
+    expect(target.scrollIntoView).not.toHaveBeenCalled();
+
+    await act(async () => seam.push("/a#target"));
+    await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalledTimes(1));
+    target.remove();
   });
 
   it("refuses an address on another origin", async () => {
