@@ -6,7 +6,7 @@ import { useClipboard } from "@astryxdesign/core/hooks";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, Download } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { Streamdown } from "streamdown";

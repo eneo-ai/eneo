@@ -1,10 +1,13 @@
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from eneo.main.config import Settings, get_settings
+from eneo.mcp_apps.presentation import mcp_apps_router
 
 REPO_ROOT = Path(__file__).parents[4]
 LINKS = (
@@ -102,3 +105,82 @@ def test_env_backend_template_lists_web_app_settings():
             re.findall(r"(?m)^#?\s*([A-Z][A-Z0-9_]+)=", template.read_text())
         )
         assert names <= declared, template
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_blank_mcp_content_base_url_is_unset(value: str):
+    assert _settings(mcp_app_content_base_url=value).mcp_app_content_base_url is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # A browser would read each of these differently from the backend.
+        "https://content.example.com *",
+        "https://Bücher.example/",
+        "https://content.example.com\\@evil.com/",
+        "https://user:secret@content.example.com/",
+        "https://content.example.com/views?x=1",
+        "https://content.example.com/#views",
+        "https://content.example.com?",
+        "https://content.example.com#",
+        "http://0x7f000001/",
+        "http://127.1/",
+        "http://0177.0.0.1/",
+        "http://[fe80::1%25eth0]/",
+        "http://[::ffff:127.0.0.1]/",
+        "https://999.1.1.1/",
+        "https://-content.example.com/",
+        "https://content_views.example.com/",
+        "https://content.example.com:port/",
+        "https://[::1/",
+        "ftp://content.example.com/",
+        "content.example.com",
+    ],
+)
+def test_mcp_content_base_url_must_read_the_same_in_a_browser(value: str):
+    with pytest.raises(ValidationError, match="mcp_app_content_base_url") as error:
+        _settings(mcp_app_content_base_url=value)
+
+    assert value not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("value", "stored", "host"),
+    [
+        # stored as a browser serializes it; host is the Host header it sends
+        (
+            "https://views.example.com/base",
+            "https://views.example.com/base",
+            "views.example.com",
+        ),
+        (" http://localhost:8123 ", "http://localhost:8123", "localhost:8123"),
+        (
+            "https://Content.Example.com:443/",
+            "https://content.example.com/",
+            "content.example.com",
+        ),
+        ("http://127.0.0.1:80/", "http://127.0.0.1/", "127.0.0.1"),
+        (
+            "http://[0:0:0:0:0:0:0:1]:8123/",
+            "http://[::1]:8123/",
+            "[::1]:8123",
+        ),
+        (
+            "https://xn--bcher-kva.example",
+            "https://xn--bcher-kva.example",
+            "xn--bcher-kva.example",
+        ),
+        ("http://content.test", "http://content.test", "content.test"),
+    ],
+)
+def test_mcp_content_base_url_is_stored_as_a_browser_reads_it(
+    value: str, stored: str, host: str
+):
+    settings = _settings(mcp_app_content_base_url=value)
+
+    assert settings.mcp_app_content_base_url == stored
+    # The content endpoint recognises the Host header a browser sends for it.
+    request = SimpleNamespace(headers={"host": host})
+    with patch.object(mcp_apps_router, "get_settings", return_value=settings):
+        assert mcp_apps_router._on_content_origin(request)  # pyright: ignore[reportPrivateUsage, reportArgumentType]

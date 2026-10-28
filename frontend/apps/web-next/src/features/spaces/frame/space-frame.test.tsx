@@ -17,8 +17,8 @@ const state = vi.hoisted(() => ({
   routeId: "space-1"
 }));
 
-vi.mock("next/navigation", () => ({
-  useSelectedLayoutSegments: () => state.segments,
+vi.mock("@/lib/navigation", () => ({
+  useSpaceSegments: () => state.segments,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/spaces/space-1"
 }));

@@ -7,7 +7,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Search, UserPlus } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "@/lib/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";

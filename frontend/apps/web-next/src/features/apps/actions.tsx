@@ -4,7 +4,7 @@ import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

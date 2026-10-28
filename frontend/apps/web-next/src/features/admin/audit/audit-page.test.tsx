@@ -5,7 +5,7 @@ import { EneoApiError } from "@/lib/api/errors";
 import { renderInApp } from "@/test/render";
 
 const state = vi.hoisted(() => ({ failLogs: false, requested: [] as string[] }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) => {

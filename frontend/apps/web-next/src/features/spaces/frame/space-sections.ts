@@ -92,8 +92,8 @@ function isEditorRoute(first: string | undefined, rest: readonly string[]): bool
 }
 
 /**
- * Classifies the route below `/spaces/[spaceId]` from its layout segments
- * (`useSelectedLayoutSegments()`). The chat and the editors render full-bleed
+ * Classifies the route below `/spaces/[spaceId]` from its path segments
+ * (`useSpaceSegments()`). The chat and the editors render full-bleed
  * with headers of their own; every other route gets the space header and tabs.
  */
 export function spaceRoute(segments: readonly string[]): SpaceRoute {

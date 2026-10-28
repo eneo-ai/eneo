@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";

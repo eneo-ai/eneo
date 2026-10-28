@@ -5,7 +5,7 @@ import {
   type AppShellMobileContextValue
 } from "@astryxdesign/core/AppShell";
 import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useHydrated } from "@/lib/hooks/use-hydrated";

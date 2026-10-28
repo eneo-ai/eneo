@@ -125,7 +125,7 @@ const api = vi.hoisted(() => ({
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce

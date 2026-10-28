@@ -6,7 +6,7 @@ import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { ProfileMenu, profileDisplayName, profileInitials } from "./profile-menu";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: true, hasUnseen: true })

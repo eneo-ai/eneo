@@ -17,6 +17,45 @@ const generatedAndVendored = [
 // Vendored primitives DO ship, so the accessibility rules cover them too.
 const notShippedUi = ["src/**/*.test.tsx"];
 
+// Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse before
+// you build).
+const astryxWrappedImports = [
+  {
+    name: "@astryxdesign/core/Switch",
+    message:
+      'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
+  },
+  {
+    name: "@astryxdesign/core/Table",
+    importNames: ["Table"],
+    message:
+      'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
+  },
+  {
+    name: "@astryxdesign/core/TextInput",
+    message:
+      'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
+  }
+];
+
+// Next APIs app code reaches through the app's own modules, so the Vite build
+// can swap the implementation (src/lib/navigation.ts, src/lib/link.ts).
+const frameworkSeamImports = [
+  {
+    name: "next/navigation",
+    importNames: [
+      "useRouter",
+      "usePathname",
+      "useSearchParams",
+      "useSelectedLayoutSegments",
+      "useSelectedLayoutSegment",
+      "useParams"
+    ],
+    message: 'Use "@/lib/navigation" (Next now, TanStack Router in the Vite build).'
+  },
+  { name: "next/link", message: 'Use "@/lib/link".' }
+];
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -198,34 +237,32 @@ const eslintConfig = defineConfig([
     }
   },
   {
-    // Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse
-    // before you build). A separate rule from no-restricted-imports above, so
-    // neither block replaces the other's options.
+    // Astryx parts we wrap (astryxWrappedImports). A separate rule from
+    // no-restricted-imports above, so neither block replaces the other's
+    // options.
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/components/astryx/**"],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "@astryxdesign/core/Switch",
-              message:
-                'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
-            },
-            {
-              name: "@astryxdesign/core/Table",
-              importNames: ["Table"],
-              message:
-                'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
-            },
-            {
-              name: "@astryxdesign/core/TextInput",
-              message:
-                'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
-            }
-          ]
+          paths: astryxWrappedImports
         }
+      ]
+    }
+  },
+  {
+    // The framework seam, outside src/app (which keeps Next until it is
+    // ported). Flat config replaces a rule's options per file instead of
+    // merging them, so this block repeats the Astryx paths, and both blocks
+    // ignore src/components/astryx/**. Later restrictions extend this block's
+    // `paths`/`patterns`; never add a competing block with the same rule.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/app/**", "src/components/astryx/**", "src/lib/navigation.ts", "src/lib/link.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        { paths: [...astryxWrappedImports, ...frameworkSeamImports] }
       ]
     }
   },

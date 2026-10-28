@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { DocumentEditor, type DocumentEditorHandle } from "./document-editor";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();

@@ -5,7 +5,7 @@ import { useCollator } from "@astryxdesign/core/i18n";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { ExternalLink } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { Table } from "@/components/astryx/table";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";

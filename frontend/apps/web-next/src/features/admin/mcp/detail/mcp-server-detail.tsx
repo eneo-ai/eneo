@@ -10,8 +10,8 @@ import {
   Shield,
   Trash2
 } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "@/lib/link";
+import { usePathname, useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

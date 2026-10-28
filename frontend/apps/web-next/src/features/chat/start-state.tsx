@@ -3,7 +3,7 @@
 import { IconTile, type IconTileHue } from "@/components/composites/icon-tile";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useId, type ReactNode } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";

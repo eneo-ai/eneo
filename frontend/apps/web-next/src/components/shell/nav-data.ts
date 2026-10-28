@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "@/lib/navigation";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import { useHydrated } from "@/lib/hooks/use-hydrated";

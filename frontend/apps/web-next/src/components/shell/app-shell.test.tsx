@@ -9,7 +9,7 @@ import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
 import { useOwnMobileHeader } from "./shell-context";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins that show where the bells are placed (they have their own tests).
 vi.mock("@/features/jobs/job-indicator", () => ({
   JobIndicator: () => <button type="button">Jobbklockan</button>
