@@ -2,7 +2,6 @@
 
 import { redirect } from "next/navigation";
 import { passwordLogin } from "@/lib/auth/password";
-import { safeNextPath } from "@/lib/auth/safe-next";
 import { setSessionCookie } from "@/lib/auth/session";
 
 export interface LoginFormState {
@@ -14,8 +13,6 @@ export interface LoginFormState {
   attemptsRemaining?: number | null;
   /** How long the account stays blocked, in seconds, when the backend said. */
   retryAfterSeconds?: number | null;
-  /** Signed in: the page to continue to, loaded as a new document by LoginForm. */
-  redirectTo?: string;
 }
 
 export async function loginAction(
@@ -24,7 +21,6 @@ export async function loginAction(
 ): Promise<LoginFormState> {
   const email = formData.get("email");
   const password = formData.get("password");
-  const next = formData.get("next");
 
   if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
     return { error: "missing_fields", email: typeof email === "string" ? email : undefined };
@@ -42,7 +38,8 @@ export async function loginAction(
   }
 
   await setSessionCookie(result.session);
-  // Not redirect(): from a server action that is a client-side navigation, and
-  // the new session must not start in the previous one's memory.
-  return { redirectTo: safeNextPath(typeof next === "string" ? next : null) };
+  // Not redirect(): from a server action that is a client-side navigation. A
+  // cookie set here re-renders the login page, which now finds the session
+  // and continues to `next` in a new document (LoginPage).
+  return {};
 }

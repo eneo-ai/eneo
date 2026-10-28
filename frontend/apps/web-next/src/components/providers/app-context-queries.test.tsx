@@ -204,7 +204,7 @@ it("starts a new user's document with their context, never the previous user's",
   const previousDocument = getQueryClient();
   previousDocument.setQueryData(appContextKeys.me, signedIn.user);
 
-  // Logging in loads a new document (LoginForm): its modules, the browser's
+  // Logging in loads a new document (ContinueSignedIn): its modules, the browser's
   // query client among them, start over.
   vi.resetModules();
   const { getQueryClient: inNewDocument } = await import("@/lib/api/query");

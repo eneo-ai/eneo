@@ -26,7 +26,6 @@ afterEach(() => {
   cleanup();
   loginAction.mockClear();
   action.hold = null;
-  vi.unstubAllGlobals();
 });
 
 function submit(email: string, password: string) {
@@ -133,23 +132,6 @@ describe("LoginForm", () => {
     const error = await screen.findByRole("alert");
     await waitFor(() => expect(document.activeElement).toBe(error));
     expect(screen.getByLabelText("E-post").hasAttribute("aria-invalid")).toBe(false);
-    action.result = { error: "invalid_credentials" };
-  });
-
-  it("continues with a full page load after signing in, busy until it leaves", async () => {
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    action.result = { redirectTo: "/spaces/abc" };
-    renderInApp(<LoginForm />);
-    submit("anna@kommun.se", "rätt-lösenord");
-
-    // A new document: nothing the previous session left in memory renders for this one.
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/spaces/abc"));
-    const login = screen.getByRole("button", { name: "Logga in" });
-    expect(login.getAttribute("aria-busy")).toBe("true");
-    fireEvent.click(login);
-    await act(async () => {});
-    expect(loginAction).toHaveBeenCalledTimes(1);
     action.result = { error: "invalid_credentials" };
   });
 
