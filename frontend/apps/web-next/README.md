@@ -34,6 +34,19 @@ it invalidates existing Next sessions. Do not reuse the backend JWT secret.
 Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
 `NEXT_PUBLIC_*` backend URL by design: all backend calls go through the server.
 
+## Embeddable widget
+
+The chat a visitor of another site sees (`/embed/<public id>`, `/en/embed/…`)
+and what the loader needs (`/widget/v1/eneo.js`, `eneo.css`,
+`/widget/settings/<public id>`) live in `src/features/widget` and the matching
+routes; the visitor API is proxied under this origin
+(`src/app/api/v1/widgets`, `src/app/api/v1/icons`), since the browser never
+reaches the backend. `src/proxy.ts` decides an embed page's frame policy,
+language and colour scheme from the widget's configuration, and the root
+layout renders it without the app's chrome. The loader bundle is read from
+`packages/widget-loader` (build it with `bun run --filter '@eneo/widget-loader'
+build`; the image does). The admin side of widgets is not ported yet.
+
 ## Auth
 
 - **Password and tenant federation** use the existing backend authentication

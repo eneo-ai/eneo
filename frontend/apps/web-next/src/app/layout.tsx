@@ -6,6 +6,13 @@ import { getLocale, getMessages } from "next-intl/server";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
+import { EmbedShell } from "@/features/widget/embed-shell";
+import {
+  EMBED_LOCALE_HEADER,
+  EMBED_SCHEME_HEADER,
+  parseEmbedScheme
+} from "@/features/widget/server/embed-policy";
+import { isLocale } from "@/lib/i18n/locales";
 import { eneoTheme } from "@/theme/eneo";
 import "./globals.css";
 
@@ -37,18 +44,40 @@ export const metadata: Metadata = {
   description: "Eneo"
 };
 
+const FONT_CLASSES = `${figtree.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`;
+
 export default async function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const locale = await getLocale();
-  const messages = await getMessages();
   // Per-request CSP nonce from src/proxy.ts. next-themes needs it for its
   // blocking colour-mode script (and its transition-suppressing <style>), and
   // client components that inject a <style> read it from Providers; the
   // nonce-only CSP would otherwise block them.
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const requestHeaders = await headers();
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
+
+  // The widget's embed page is a visitor's page on someone else's site: it
+  // speaks the widget's language and shows the host page's colour scheme
+  // (both decided in src/proxy.ts), never the signed-in user's cookie and
+  // stored preference, and carries none of the app's chrome.
+  const embedLocale = requestHeaders.get(EMBED_LOCALE_HEADER);
+  if (isLocale(embedLocale)) {
+    return (
+      <EmbedShell
+        locale={embedLocale}
+        scheme={parseEmbedScheme(requestHeaders.get(EMBED_SCHEME_HEADER))}
+        nonce={nonce}
+        className={FONT_CLASSES}
+      >
+        {children}
+      </EmbedShell>
+    );
+  }
+
+  const locale = await getLocale();
+  const messages = await getMessages();
 
   return (
     <html
@@ -56,7 +85,7 @@ export default async function RootLayout({
       // The Astryx theme scope, server-rendered so tokens exist on <html> (and
       // in portals) from first paint; the root <Theme> keeps it in sync.
       data-astryx-theme={eneoTheme.name}
-      className={`${figtree.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`}
+      className={FONT_CLASSES}
       suppressHydrationWarning
     >
       <head>

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/lib/env";
 import { SESSION_COOKIE } from "@/lib/auth/session";
 import { openSession, sealSession } from "@/lib/auth/session-codec";
@@ -180,4 +180,53 @@ it("lets /module-login and /invite through signed out: they gate or explain them
     expect(response.status, path).toBe(200);
     expect(response.headers.get("location"), path).toBeNull();
   }
+});
+
+const embedConfig = vi.hoisted(() => vi.fn());
+vi.mock("@/features/widget/server/public-config", () => ({ fetchPublicConfig: embedConfig }));
+
+describe("the widget's pages", () => {
+  const ID = "wgt_aaaaaaaaaaaaaaaaaaaaaa";
+  const widget = {
+    public_id: ID,
+    name: "Kaffe",
+    texts: { title: "Kaffe", subtitle: "", welcome: "", suggested_questions: [] },
+    theme: { color_scheme: "auto", logo_url: "https://cdn.example.org/logo.png" },
+    language: "en",
+    frame_ancestors: ["https://www.sundsvall.se"]
+  };
+
+  it("frames the embed page where the widget allows, in its language and the host's scheme", async () => {
+    embedConfig.mockResolvedValue(widget);
+    const response = await proxy(
+      new NextRequest(
+        `http://localhost:3100/embed/${ID}?origin=https://www.sundsvall.se&scheme=dark`
+      )
+    );
+    expect(response.status).toBe(200);
+    const csp = response.headers.get("content-security-policy")!;
+    expect(directive(csp, "frame-ancestors")).toBe(
+      "frame-ancestors 'self' https://www.sundsvall.se"
+    );
+    expect(directive(csp, "img-src")).toBe("img-src 'self' blob: data: https://cdn.example.org");
+    expect(directive(csp, "connect-src")).toBe("connect-src 'self'");
+    expect(directive(csp, "worker-src")).toBe("worker-src 'self' blob:");
+    expect(directive(csp, "frame-src")).toBe("frame-src 'none'");
+    expect(response.headers.get("x-middleware-request-x-eneo-embed-locale")).toBe("en");
+    expect(response.headers.get("x-middleware-request-x-eneo-embed-scheme")).toBe("dark");
+  });
+
+  it("lets the loader's assets, settings and the visitor API through signed out", async () => {
+    embedConfig.mockResolvedValue(widget);
+    for (const path of [
+      `/widget/settings/${ID}`,
+      `/api/v1/widgets/${ID}/config/`,
+      `/api/v1/icons/11111111-2222-4333-8444-555555555555/`,
+      `/en/embed/${ID}`
+    ]) {
+      const response = await proxy(new NextRequest(`http://localhost:3100${path}`));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("location"), path).toBeNull();
+    }
+  });
 });
