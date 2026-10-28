@@ -12,9 +12,11 @@ import typing
 from collections.abc import Sequence
 
 from starlette.datastructures import URL, Headers, MutableHeaders
+from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from eneo.allowed_origins.get_origin_callback import get_origin
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
@@ -23,6 +25,32 @@ logger = get_logger(__name__)
 
 ALL_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 SAFELISTED_HEADERS = {"Accept", "Accept-Language", "Content-Language", "Content-Type"}
+
+OriginCallback = typing.Callable[
+    [str, Headers, bool, URL | None], typing.Awaitable[bool]
+]
+
+
+class CORSOptions(typing.TypedDict):
+    allow_origins: Sequence[str]
+    allow_methods: Sequence[str]
+    allow_headers: Sequence[str]
+    allow_credentials: bool
+    expose_headers: Sequence[str]
+    callback: OriginCallback
+
+
+# The one CORS policy of the API: the middleware and the unhandled-error path
+# (`add_cors_headers`) both read it, so a 500 answers with the same headers.
+CORS_OPTIONS: CORSOptions = {
+    "allow_origins": (),
+    "allow_methods": ("*",),
+    "allow_headers": ("*",),
+    "allow_credentials": True,
+    # Trace headers a cross-origin caller may read, on every response.
+    "expose_headers": ("X-Trace-Id", "X-Correlation-ID"),
+    "callback": get_origin,
+}
 
 
 class CORSMiddleware:
@@ -37,9 +65,7 @@ class CORSMiddleware:
         allow_private_network: bool = False,
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
-        callback: typing.Optional[
-            typing.Callable[[str, Headers, bool, URL | None], typing.Awaitable[bool]]
-        ] = None,
+        callback: OriginCallback | None = None,
     ) -> None:
         super().__init__()
         if "*" in allow_methods:
@@ -258,9 +284,15 @@ class CORSMiddleware:
             return
 
         message.setdefault("headers", [])
-        headers = MutableHeaders(scope=message)
+        self.add_simple_headers(
+            MutableHeaders(scope=message), request_headers["Origin"], origin_allowed
+        )
+        await send(message)
+
+    def add_simple_headers(
+        self, headers: MutableHeaders, origin: str, origin_allowed: bool
+    ) -> None:
         headers.update(self.simple_headers)
-        origin = request_headers["Origin"]
 
         # If credentials are allowed, then we must respond
         # with the specific origin instead of '*'.
@@ -272,9 +304,24 @@ class CORSMiddleware:
         elif not self.allow_all_origins and origin_allowed:
             self.allow_explicit_origin(headers, origin)
 
-        await send(message)
-
     @staticmethod
     def allow_explicit_origin(headers: MutableHeaders, origin: str) -> None:
         headers["Access-Control-Allow-Origin"] = origin
         headers.add_vary_header("Origin")
+
+
+async def add_cors_headers(request: Request, response: Response) -> None:
+    """Give a response built outside the middleware its CORS headers.
+
+    Starlette's ServerErrorMiddleware answers an unhandled exception outside
+    every user middleware, so without this a browser cannot read the 500, its
+    `error_id` or its trace headers.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    cors = CORSMiddleware(request.app, **CORS_OPTIONS)
+    origin_allowed = await cors.is_allowed_origin(
+        origin=origin, request_headers=request.headers, request_url=request.url
+    )
+    cors.add_simple_headers(response.headers, origin, origin_allowed)
