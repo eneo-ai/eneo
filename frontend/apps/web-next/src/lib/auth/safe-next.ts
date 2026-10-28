@@ -22,9 +22,24 @@ export function safeNextPath(next: string | null | undefined): string {
         return DEFAULT_LANDING;
     }
     const origin = "https://login-destination.invalid";
-    if (new URL(next, origin).origin !== origin) return DEFAULT_LANDING;
+    const url = new URL(next, origin);
+    if (url.origin !== origin) return DEFAULT_LANDING;
+    // Sign-ins continue through /login: never back to it (a nested next), and
+    // never to /login/switch-organisation or /logout, which end the session
+    // (an auth redirect loop).
+    for (const page of ["/login", "/logout"]) {
+      if (url.pathname === page || url.pathname.startsWith(`${page}/`)) return DEFAULT_LANDING;
+    }
   } catch {
     return DEFAULT_LANDING;
   }
   return next;
+}
+
+/**
+ * Where a sign-in finished by a route handler (the SSO callbacks) continues:
+ * the login page, which loads `next` in a new document (ContinueSignedIn).
+ */
+export function signedInContinuation(next: string | null | undefined): string {
+  return `/login?next=${encodeURIComponent(safeNextPath(next))}`;
 }

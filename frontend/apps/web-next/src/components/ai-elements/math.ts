@@ -8,12 +8,9 @@
  * money is decided by @eneo/markdown-math; both apps are tested against its
  * cases.json.
  */
-import {
-  canCloseDollar,
-  canFollowWithDollar,
-  canOpenDollar,
-  katexOptions
-} from "@eneo/markdown-math";
+import { canCloseDollar, canFollowWithDollar, canOpenDollar } from "@eneo/markdown-math";
+import type { Element, Root as HastRoot } from "hast";
+import { toText } from "hast-util-to-text";
 import type { Nodes, Paragraph, Parent, Root } from "mdast";
 import { mathFromMarkdown, type InlineMath, type Math } from "mdast-util-math";
 import { math } from "micromark-extension-math";
@@ -26,9 +23,8 @@ import type {
   State,
   TokenizeContext
 } from "micromark-util-types";
-import rehypeKatex from "rehype-katex";
 import type { MathPlugin } from "streamdown";
-import type { Processor } from "unified";
+import type { Pluggable, Processor } from "unified";
 
 // The token names remark-math's tokenizer declares; ours emit the same ones.
 declare module "micromark-util-types" {
@@ -387,7 +383,7 @@ function rewrite(parent: Parent, source: string) {
  * remark-math, put together from the same two packages, with its `$$` fence
  * guarded and our constructs added after its own, so they are tried first.
  */
-function remarkLlmMath(this: Processor) {
+export function remarkLlmMath(this: Processor) {
   const syntax = math({ singleDollarTextMath: false });
   const fence = syntax.flow?.[DOLLAR];
   if (fence && !Array.isArray(fence)) syntax.flow = { [DOLLAR]: guardFence(fence) };
@@ -400,11 +396,122 @@ function remarkLlmMath(this: Processor) {
 /**
  * Streamdown's math plugin, in its slot after the sanitizer. Replaces
  * `@streamdown/math` (remark-math with `$$` only) so both apps read the same
- * delimiters and typeset with the same KaTeX options.
+ * delimiters and typeset with the same KaTeX options. The remark side is here,
+ * so math is recognised from the first render; `typeset` is rehype-katex once
+ * it has loaded (`math-katex.ts`), until then the formula keeps its source.
  */
-export const mathPlugin: MathPlugin = {
-  name: "katex",
-  type: "math",
-  remarkPlugin: remarkLlmMath,
-  rehypePlugin: [rehypeKatex, katexOptions(false)]
+export function mathPlugin(typeset: Pluggable | null): MathPlugin {
+  return {
+    name: "katex",
+    type: "math",
+    remarkPlugin: remarkLlmMath,
+    rehypePlugin: typeset ?? rehypeMathSource
+  };
+}
+
+// What rehype-katex typesets: an element with one of these classes, or the
+// code block around a `language-math` code element.
+const MATH_CLASSES = ["language-math", "math-display", "math-inline"];
+
+function hasMathClass(node: Element, classes = MATH_CLASSES): boolean {
+  const own = node.properties.className;
+  return Array.isArray(own) && own.some((name) => classes.includes(String(name)));
+}
+
+/** Whether a rendered answer holds a formula rehype-katex would typeset. */
+export function holdsMath(parent: HastRoot | Element): boolean {
+  return parent.children.some(
+    (node) => node.type === "element" && (hasMathClass(node) || holdsMath(node))
+  );
+}
+
+/**
+ * Until KaTeX arrives a formula shows its TeX as inline code. It takes the
+ * place and the text of what rehype-katex would typeset, a display formula's
+ * code block included, so nothing in it (code controls, a link, a focus stop)
+ * vanishes when the formula is typeset.
+ */
+function rehypeMathSource() {
+  return (tree: HastRoot) => {
+    const visit = (parent: HastRoot | Element) => {
+      parent.children.forEach((node, index) => {
+        if (node.type !== "element") return;
+        const block =
+          node.tagName === "pre" &&
+          node.children.some(
+            (child) =>
+              child.type === "element" &&
+              child.tagName === "code" &&
+              hasMathClass(child, ["language-math"])
+          );
+        if (!block && !hasMathClass(node)) return visit(node);
+        const source: Element = {
+          type: "element",
+          tagName: "code",
+          properties: { className: ["language-math"] },
+          children: [{ type: "text", value: toText(node, { whitespace: "pre" }) }]
+        };
+        parent.children[index] = block
+          ? { type: "element", tagName: "p", properties: {}, children: [source] }
+          : source;
+      });
+    };
+    visit(tree);
+  };
+}
+
+/**
+ * Whether markdown can hold a formula. rehype-katex typesets elements classed
+ * `language-math`, `math-inline` or `math-display`, and only these get there:
+ * the `$`, `\(` and `\[` constructs of `remarkLlmMath` (literal characters; a
+ * character reference never opens one), and a code fence or raw HTML class
+ * that spells `math`, literally or with numeric character references (no
+ * named reference spells one of its letters). A superset, so it can load KaTeX for money or a
+ * mention of math but never misses a formula.
+ */
+export function mayContainMath(markdown: string): boolean {
+  return /\$|\\[([]|math|&#/.test(markdown);
+}
+
+// KaTeX is loaded once: when the first answer that can hold math renders, or
+// earlier, while the browser is idle after any answer has rendered, so that a
+// formula opened later typesets on first paint. A failed load is tried again
+// by the next answer that can hold math.
+let katex: typeof import("./math-katex") | null = null;
+let loadingMath: Promise<void> | null = null;
+let preloading = false;
+const mathListeners = new Set<() => void>();
+
+export const katexStore = {
+  subscribe(listener: () => void) {
+    mathListeners.add(listener);
+    return () => {
+      mathListeners.delete(listener);
+    };
+  },
+  /** rehype-katex for answers, once loaded. */
+  typeset: (): Pluggable | null => katex?.rehypeTypesetMath ?? null,
+  /** rehype-katex writing MathML for the clipboard, once loaded. */
+  mathml: (): Pluggable | null => katex?.rehypeTypesetMathAsMathml ?? null,
+  /** Loads KaTeX when the browser is next idle; off the page's critical path. */
+  preload() {
+    if (katex || preloading) return;
+    preloading = true;
+    const load = () => void katexStore.load();
+    if ("requestIdleCallback" in window) window.requestIdleCallback(load);
+    else setTimeout(load, 2000);
+  },
+  load(): Promise<void> {
+    if (katex) return Promise.resolve();
+    loadingMath ??= import("./math-katex").then(
+      (module) => {
+        katex = module;
+        for (const listener of mathListeners) listener();
+      },
+      () => {
+        loadingMath = null;
+      }
+    );
+    return loadingMath;
+  }
 };

@@ -4,6 +4,7 @@
  */
 import { Chat } from "@ai-sdk/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHAT_API } from "@/lib/api/base";
 import { EneoApiError } from "@/lib/api/errors";
 import { sseResponse, toSseBody } from "./contract-fixtures";
 import { createChatTransport, enforceStreamContract } from "./transport";
@@ -12,8 +13,21 @@ import type { EneoUIMessage } from "./types";
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
+// Reads the body it is handed, as a refusal owner may: the caller must still
+// be able to read its own copy.
+const rawRefusal = vi.hoisted(() =>
+  vi.fn<(response: Response, url: string) => Promise<void>>(async (response) => {
+    await response.text();
+  })
+);
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  onRawRefusal: rawRefusal
+}));
+
 afterEach(() => {
   fetchMock.mockReset();
+  rawRefusal.mockClear();
 });
 
 const start = { type: "start", messageId: "q-1" };
@@ -90,6 +104,25 @@ describe("a refused response", () => {
     expect(error.message).toBe("Not authenticated");
     expect(error.traceId).toBe("trace-1");
   });
+
+  it.each([
+    [401, 9001],
+    [403, 9070]
+  ])(
+    "reports a %i to the refusal owner once, then fails with its own error",
+    async (status, code) => {
+      const result = await run(
+        Response.json({ message: "Refused", eneo_error_code: code }, { status })
+      );
+      expect(rawRefusal).toHaveBeenCalledTimes(1);
+      expect(rawRefusal).toHaveBeenCalledWith(expect.any(Response), CHAT_API);
+      expectFailed(result);
+      const error = result.chat.error as EneoApiError;
+      expect(error.status).toBe(status);
+      expect(error.code).toBe(code);
+      expect(error.message).toBe("Refused");
+    }
+  );
 
   it("keeps the status when the refused body is not JSON", async () => {
     const result = await run(new Response("<html>Bad gateway</html>", { status: 502 }));

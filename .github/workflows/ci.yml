@@ -536,7 +536,18 @@ jobs:
       # (playwright.config.ts), keeping the build out of its startup timeout.
       - name: Build web-next for E2E
         working-directory: frontend/apps/web-next
-        run: bun run build
+        # Peak memory is reported, not budgeted: it is the Next baseline for the
+        # phase 4 Vite build memory gate (P0-baseline).
+        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-build-resources.txt" bun run build
+
+      - name: Upload web-next build resource measurements
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-next-build-resources
+          path: ${{ runner.temp }}/web-next-build-resources.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Wait for the E2E stack
         run: |

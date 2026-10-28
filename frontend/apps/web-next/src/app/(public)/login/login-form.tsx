@@ -29,7 +29,7 @@ function retryAfterMinutes(seconds: number | null | undefined): number | null {
  * After a wrong password the message counts the attempts left; once the
  * account is blocked it says how long to wait instead.
  */
-export function LoginForm({ next }: { next?: string }) {
+export function LoginForm() {
   const t = useTranslations();
   const [state, formAction, pending] = useActionState(loginAction, {});
   const errorRef = useRef<HTMLDivElement>(null);
@@ -78,7 +78,6 @@ export function LoginForm({ next }: { next?: string }) {
           </AlertDescription>
         </Alert>
       )}
-      {next && <input type="hidden" name="next" value={next} />}
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">{t("email")}</Label>
         <Input

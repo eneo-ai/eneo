@@ -1,30 +1,52 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { API_BASE } from "@/lib/api/base";
 import { renderInApp } from "@/test/render";
-import { IconField } from "./icon-field";
+import { IconField, iconUrl } from "./icon-field";
 
 const api = vi.hoisted(() => ({ DELETE: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/toast", () => ({ toast: { error: toastError } }));
+// Reads the body it is handed, as a refusal owner may.
+const rawRefusal = vi.hoisted(() =>
+  vi.fn<(response: Response, url: string) => Promise<void>>(async (response) => {
+    await response.text();
+  })
+);
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  onRawRefusal: rawRefusal
+}));
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   api.DELETE.mockReset();
+  toastError.mockReset();
+  rawRefusal.mockClear();
 });
 
-function upload(onSave: (iconId: string | null) => Promise<unknown>) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => new Response(JSON.stringify({ id: "icon-new" }), { status: 200 }))
-  );
+function upload(
+  onSave: (iconId: string | null) => Promise<unknown>,
+  response = () => new Response(JSON.stringify({ id: "icon-new" }), { status: 200 })
+) {
+  const fetchMock = vi.fn(async () => response());
+  vi.stubGlobal("fetch", fetchMock);
   api.DELETE.mockResolvedValue({});
   const { container } = renderInApp(<IconField iconId="icon-old" onSave={onSave} />);
   const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
   fireEvent.change(input, {
     target: { files: [new File(["x"], "icon.png", { type: "image/png" })] }
   });
+  return fetchMock;
 }
+
+it("serves icons under the API base", () => {
+  expect(iconUrl("icon-1")).toBe(`${API_BASE}/api/v1/icons/icon-1/`);
+  expect(iconUrl(null)).toBeNull();
+});
 
 describe("IconField", () => {
   // The server releases the icon a saved change replaced.
@@ -58,4 +80,25 @@ describe("IconField", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(null));
     expect(api.DELETE).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [401, 9001],
+    [403, 9070]
+  ])(
+    "reports a refused %i upload to the refusal owner once, then shows its own error",
+    async (status, code) => {
+      const onSave = vi.fn(async () => {});
+      const refused = Response.json({ message: "Refused", eneo_error_code: code }, { status });
+
+      const fetchMock = upload(onSave, () => refused);
+
+      await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/icons/`, expect.anything());
+      expect(rawRefusal).toHaveBeenCalledTimes(1);
+      expect(rawRefusal).toHaveBeenCalledWith(expect.any(Response), `${API_BASE}/api/v1/icons/`);
+      expect(onSave).not.toHaveBeenCalled();
+      // The owner read its copy; the upload's own response is still unread.
+      await expect(refused.json()).resolves.toMatchObject({ message: "Refused" });
+    }
+  );
 });

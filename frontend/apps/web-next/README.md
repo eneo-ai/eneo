@@ -24,6 +24,20 @@ bun run test     # vitest run
 bun run theme:build # compile src/theme/eneo-theme.ts after editing it
 ```
 
+## Vite build (migration)
+
+The app is moving from Next.js to a Vite SPA with TanStack Router. Until the
+move is done, this package builds both, and Next stays the default:
+
+```bash
+bun run build:vite      # static SPA in dist/ (vite.config.mts)
+bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
+```
+
+`src/routeTree.gen.ts` is generated and committed: commit it together with the
+route change that produced it. `vite build` does not type-check; `bun run check`
+does.
+
 ## Environment
 
 Copy [`.env.example`](.env.example) to `.env.local`. Set the backend URL,
