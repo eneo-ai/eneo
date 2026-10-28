@@ -158,22 +158,25 @@ on the documentation site.
   access and contribute from forks. A small number of organisation owners hold
   Admin rights for rulesets, team access and repository settings. The
   organisation base permission is read.
-- **`develop`.** Changes arrive only through pull requests. At least one
-  approval from `@eneo-ai/core-maintainers` is required, enforced by the
-  ruleset and requested automatically through `.github/CODEOWNERS`. New
-  commits dismiss earlier approvals, review conversations must be resolved,
-  and merges go through the merge queue.
+- **`develop`.** Changes arrive only through pull requests, and only Core
+  Maintainers can add a pull request to the merge queue. Required checks must
+  pass and review conversations must be resolved. A Core Maintainer reviews
+  and approves contributions from outside the team before queueing them;
+  `.github/CODEOWNERS` requests that review automatically. If someone without
+  write access pushes new commits afterwards, GitHub cancels the pending
+  merge. Core Maintainers may queue their own pull requests without a second
+  approval.
 - **Releases.** Only Core Maintainers can create, update or delete
   `release/**` branches and `v*` tags. A `v*` tag starts image publication,
   so this restriction controls who can publish a release.
 - **`main`.** Protected against deletion and force pushes.
-- **Bypass.** Core Maintainers can bypass the `develop` ruleset for a single
-  pull request when a fix is urgent or no second Core Maintainer can review.
-  A bypass also skips the merge queue and required checks, so use it only when
-  every check has passed on the pull request, record the reason in the pull
-  request, and have another Core Maintainer review the change afterwards.
-  Repository administrators are not exempt from rulesets unless they are on
-  the bypass list.
+- **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
+  no one can skip the required checks or the merge queue. Repository
+  administrators are not exempt from rulesets unless they are on a bypass
+  list. If GitHub itself blocks a critical fix, an organisation owner may
+  change the ruleset temporarily; restore it straight away and record the
+  change in a GitHub issue. The release branch and tag rulesets keep Core
+  Maintainers as bypass actors because cutting releases requires it.
 - **Workflow trust.** Pull requests from forks run with a read-only
   `GITHUB_TOKEN` and without repository secrets. Workflows started from
   branches in this repository can request package write permissions, which is
