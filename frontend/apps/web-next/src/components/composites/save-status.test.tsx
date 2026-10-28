@@ -18,8 +18,8 @@ afterEach(() => {
   setVisibilityState("visible");
 });
 
-function renderWithStatus(children: ReactNode) {
-  return render(
+function withStatus(children: ReactNode) {
+  return (
     <NextIntlClientProvider locale="en" messages={messages}>
       <SaveStatusProvider>
         {children}
@@ -29,6 +29,10 @@ function renderWithStatus(children: ReactNode) {
   );
 }
 
+function renderWithStatus(children: ReactNode) {
+  return render(withStatus(children));
+}
+
 function DirtyProbe({ dirty }: { dirty: boolean }) {
   useDirtySaveStatus("dirty-field", dirty);
   return null;
@@ -36,10 +40,12 @@ function DirtyProbe({ dirty }: { dirty: boolean }) {
 
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function AutosaveProbe({ saves }: { saves: Array<() => Promise<void>> }) {
@@ -236,16 +242,15 @@ it("commits an explicit value before the draft state settles and reports the res
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ saved: "applied" }));
 });
 
-function ServerBackedProbe({ save }: { save: (value: string) => Promise<void> }) {
-  const [server, setServer] = useState("A");
-  const field = useAutosaveField({
-    key: "server-backed-field",
-    value: server,
-    save: async (value: string) => {
-      await save(value);
-      setServer(value);
-    }
-  });
+/** The server value is a prop, so a test decides when a landed save renders. */
+function ServerBackedProbe({
+  server,
+  save
+}: {
+  server: string;
+  save: (value: string) => Promise<void>;
+}) {
+  const field = useAutosaveField({ key: "server-backed-field", value: server, save });
 
   return (
     <>
@@ -262,27 +267,39 @@ function ServerBackedProbe({ save }: { save: (value: string) => Promise<void> })
           Pick {value}
         </button>
       ))}
+      <button type="button" onClick={() => void field.commit()}>
+        Retry
+      </button>
     </>
   );
 }
 
-it("keeps a reverted choice made while the previous save is still pending", async () => {
+function deferredSaves() {
   const saves: Array<{ value: string; done: ReturnType<typeof deferred> }> = [];
   const save = vi.fn((value: string) => {
     const done = deferred();
     saves.push({ value, done });
     return done.promise;
   });
-  renderWithStatus(<ServerBackedProbe save={save} />);
+  return { saves, save };
+}
+
+const draftText = () => screen.getByRole("status", { name: "Draft" }).textContent;
+
+it("keeps a reverted choice made while the previous save is still pending", async () => {
+  const { saves, save } = deferredSaves();
+  const { rerender } = renderWithStatus(<ServerBackedProbe server="A" save={save} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Pick B" }));
   fireEvent.click(screen.getByRole("button", { name: "Pick A" }));
   expect(saves.map((entry) => entry.value)).toEqual(["B", "A"]);
 
   await act(async () => saves[0]?.done.resolve());
-  expect(screen.getByRole("status", { name: "Draft" }).textContent).toBe("A");
+  rerender(withStatus(<ServerBackedProbe server="B" save={save} />));
+  expect(draftText()).toBe("A");
   await act(async () => saves[1]?.done.resolve());
-  expect(screen.getByRole("status", { name: "Draft" }).textContent).toBe("A");
+  rerender(withStatus(<ServerBackedProbe server="A" save={save} />));
+  expect(draftText()).toBe("A");
 });
 
 function RemovableField({ save }: { save: (value: string) => Promise<unknown> }) {
@@ -330,4 +347,22 @@ it("does not write an untouched field on unmount, even when normalizing would ch
   unmount();
 
   expect(save).not.toHaveBeenCalled();
+});
+
+it("keeps a reverted choice whose save failed, and retries it", async () => {
+  const { saves, save } = deferredSaves();
+  const { rerender } = renderWithStatus(<ServerBackedProbe server="A" save={save} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Pick B" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pick A" }));
+  // B lands and A fails before the landed B renders.
+  await act(async () => {
+    saves[0]?.done.resolve();
+    saves[1]?.done.reject(new Error("refused"));
+  });
+  rerender(withStatus(<ServerBackedProbe server="B" save={save} />));
+
+  expect(draftText()).toBe("A");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(saves.map((entry) => entry.value)).toEqual(["B", "A", "A"]);
 });

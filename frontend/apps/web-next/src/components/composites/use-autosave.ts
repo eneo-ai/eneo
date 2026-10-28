@@ -113,16 +113,20 @@ export function useAutosaveField<T, R = unknown>({
   const serverRef = useRef(serverValue);
   // The latest value sent and not yet settled: what the server will hold next.
   const inFlight = useRef<{ value: T } | null>(null);
+  // The latest value sent that the server value has not shown yet, whether its
+  // save is pending or failed: the user's choice, which a landing save keeps.
+  const unacknowledged = useRef<{ value: T } | null>(null);
 
   useEffect(() => {
     if (equals(serverRef.current, serverValue)) return;
     const previousServer = serverRef.current;
     serverRef.current = serverValue;
+    const sent = unacknowledged.current;
+    if (sent && equals(sent.value, serverValue)) unacknowledged.current = null;
     // A draft the user has not diverged from adopts the new value, unless it is
-    // the newer value still on its way (a choice reverted during a slow save).
-    const pending = inFlight.current;
+    // a newer choice (one reverted while an earlier save was still landing).
     setDraft((current) =>
-      equals(current, previousServer) && !(pending && equals(current, pending.value))
+      equals(current, previousServer) && !(sent && equals(current, sent.value))
         ? serverValue
         : current
     );
@@ -161,6 +165,7 @@ export function useAutosaveField<T, R = unknown>({
     if (validate && !validate(next)) return;
     const flight = { value: next };
     inFlight.current = flight;
+    unacknowledged.current = flight;
     await autosave(async () => {
       const result = await save(next);
       onSaved?.(result);
