@@ -1452,19 +1452,28 @@ async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_guardrail_allows_ipv6_localhost_origin(
-    client, db_container, default_user, default_user_token
+@pytest.mark.parametrize(
+    ("key_origin", "expected_status"),
+    [("http://[::1]:5173", 200), ("http://localhost:5173", 403)],
+)
+async def test_pk_guardrail_matches_ipv6_loopback_origin_exactly(
+    client, db_container, default_user, default_user_token, key_origin, expected_status
 ):
+    """An IPv6 loopback origin passes the pk_ guardrail only when the key lists it.
+
+    One loopback name does not stand in for another: a key that lists
+    localhost refuses [::1].
+    """
     # Let CORS pass so this test exercises the key's origin allowlist.
     await _add_allowed_origin(db_container, default_user.tenant_id, "http://[::1]:5173")
     create_response = await client.post(
         "/api/v1/api-keys",
         json={
-            "name": "IPv6 Localhost PK",
+            "name": "IPv6 Loopback PK",
             "key_type": "pk_",
             "permission": "read",
             "scope_type": "tenant",
-            "allowed_origins": ["http://localhost:5173"],
+            "allowed_origins": [key_origin],
         },
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
@@ -1472,10 +1481,12 @@ async def test_pk_guardrail_allows_ipv6_localhost_origin(
     secret = create_response.json()["secret"]
 
     response = await client.get(
-        "/version",
+        _AUTH_ENDPOINT,
         headers={"X-API-Key": secret, "Origin": "http://[::1]:5173"},
     )
-    assert response.status_code == 200
+    assert response.status_code == expected_status, response.text
+    if expected_status == 403:
+        assert response.json()["code"] == "origin_not_allowed"
 
 
 @pytest.mark.integration
