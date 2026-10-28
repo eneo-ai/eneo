@@ -38,7 +38,6 @@ export function QueryAppContextProvider({
   const { data: settings } = useSuspenseQuery(session.settings);
   const { data: federationStatus } = useSuspenseQuery(session.federationStatus);
   const { data: limits } = useSuspenseQuery(session.limits);
-  const { data: whatsNewState } = useSuspenseQuery(session.whatsNew);
 
   // Structural sharing keeps a source's data object when a refetch answers the
   // same, so the value (and every consumer) holds still.
@@ -55,18 +54,10 @@ export function QueryAppContextProvider({
     }),
     [user, tenant, settings, federationStatus, limits, env]
   );
-  const whatsNewEnabled = settings.whats_new_enabled !== false;
 
   return (
     <AppContextProvider value={value}>
-      <WhatsNewProvider
-        key={`${whatsNewEnabled}:${whatsNewState?.seen_version ?? "unknown"}:${whatsNewState?.announced_version ?? "unknown"}`}
-        enabled={whatsNewEnabled}
-        initialSeen={whatsNewState?.seen_version}
-        initialAnnounced={whatsNewState?.announced_version}
-      >
-        {children}
-      </WhatsNewProvider>
+      <WhatsNewProvider>{children}</WhatsNewProvider>
     </AppContextProvider>
   );
 }

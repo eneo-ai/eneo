@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { latestRelease } from "@eneo/whats-new";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -37,7 +38,8 @@ function request(path: string) {
 }
 
 const browserGet = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet } }));
+const browserPut = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet, PUT: browserPut } }));
 // The (app) layout loads with the server's client.
 const serverApi = { GET: vi.fn(request) } as unknown as EneoClient;
 
@@ -51,6 +53,7 @@ const signedIn = testAppContext();
 
 beforeEach(() => {
   browserGet.mockReset().mockImplementation(request);
+  browserPut.mockReset();
   backend = new Map([
     [ME, ok(signedIn.user)],
     [TENANT, ok(signedIn.tenant)],
@@ -66,7 +69,7 @@ let contextValues: AppContextValue[] = [];
 /** Reads the context and holds state of its own, as the app under WhatsNewProvider does. */
 function Probe() {
   const context = useAppContext();
-  const { seenVersion } = useWhatsNew();
+  const { seenVersion, markLatestSeen } = useWhatsNew();
   const [clicks, setClicks] = useState(0);
   contextValues.push(context);
   return (
@@ -75,6 +78,7 @@ function Probe() {
       <span data-testid="tenant">{context.tenant.display_name}</span>
       <span data-testid="seen">{seenVersion === undefined ? "unknown" : String(seenVersion)}</span>
       <button onClick={() => setClicks(clicks + 1)}>{`Klick ${clicks}`}</button>
+      <button onClick={() => void markLatestSeen()}>Markera sedd</button>
     </div>
   );
 }
@@ -173,8 +177,44 @@ it("keeps the previous data and the app mounted when a refetch fails", async () 
   expect(queryClient.getQueryState(sessionKeys.tenant)?.status).toBe("error");
   expect(queryClient.getQueryState(sessionKeys.whatsNew)?.status).toBe("error");
   expect(screen.getByTestId("tenant").textContent).toBe("Sundsvalls kommun");
-  // The What's new markers held, so WhatsNewProvider's key did and nothing remounted.
+  // The What's new markers held, and nothing remounted.
   expect(screen.getByTestId("seen").textContent).toBe("1.0.0");
+  expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
+});
+
+// What's new markers change while editors and chats are open: they must not
+// remount the app (nothing keys it on them).
+it("takes changed What's new markers without remounting the app", async () => {
+  const { queryClient } = await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
+  backend.set(WHATS_NEW, ok({ seen_version: "2.0.0", announced_version: "2.0.0" }));
+
+  await queryClient.invalidateQueries({ queryKey: sessionKeys.whatsNew });
+
+  await waitFor(() => expect(screen.getByTestId("seen").textContent).toBe("2.0.0"));
+  expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
+});
+
+it("records What's new as seen in the session's markers, with the app still mounted", async () => {
+  const latest = latestRelease()!.version;
+  backend.set(WHATS_NEW, ok({ seen_version: null, announced_version: null }));
+  browserPut.mockResolvedValue({
+    data: { seen_version: latest, announced_version: null },
+    response: new Response(null, { status: 200 })
+  });
+  const { queryClient } = await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Markera sedd" }));
+
+  await waitFor(() => expect(browserPut).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(queryClient.getQueryData(sessionKeys.whatsNew)).toEqual({
+      seen_version: latest,
+      announced_version: null
+    })
+  );
+  expect(screen.getByTestId("seen").textContent).toBe(latest);
   expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
 });
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderInApp } from "@/test/render";
+import { sessionKeys } from "@/lib/api/session";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const put = vi.hoisted(() => vi.fn());
@@ -25,16 +26,32 @@ function Probe() {
   );
 }
 
+/** The backend's answer to a PUT: the whole state, one marker moved to the latest release. */
+let answered = { seen_version: null as string | null, announced_version: null as string | null };
+
 beforeEach(() => {
-  put.mockImplementation((path: string) =>
-    Promise.resolve({
-      data: path.endsWith("/seen/")
-        ? { seen_version: latestVersion }
-        : { announced_version: latestVersion },
-      response: new Response("{}", { status: 200 })
-    })
-  );
+  answered = { seen_version: null, announced_version: null };
+  put.mockImplementation((path: string) => {
+    answered = path.endsWith("/seen/")
+      ? { ...answered, seen_version: latestVersion }
+      : { ...answered, announced_version: latestVersion };
+    return Promise.resolve({ data: answered, response: new Response("{}", { status: 200 }) });
+  });
 });
+
+/** The provider over the session's What's new markers (null: unavailable). */
+function renderWithMarkers(
+  state: { seen_version: string | null; announced_version: string | null } | null
+) {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(sessionKeys.whatsNew, state);
+  return renderInApp(
+    <WhatsNewProvider>
+      <Probe />
+    </WhatsNewProvider>,
+    { queryClient }
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -43,11 +60,7 @@ afterEach(() => {
 
 describe("What's new markers", () => {
   it("keeps the unseen dot after recording the one-time announcement", async () => {
-    renderInApp(
-      <WhatsNewProvider enabled initialSeen={null} initialAnnounced={null}>
-        <Probe />
-      </WhatsNewProvider>
-    );
+    renderWithMarkers({ seen_version: null, announced_version: null });
     expect(screen.getByTestId("unseen").textContent).toBe("true");
     expect(screen.getByTestId("announcement").textContent).toBe(latestVersion);
     fireEvent.click(screen.getByText("Announced"));
@@ -58,11 +71,7 @@ describe("What's new markers", () => {
   });
 
   it("does not treat an unavailable state endpoint as a first visit", () => {
-    renderInApp(
-      <WhatsNewProvider enabled initialSeen={undefined} initialAnnounced={undefined}>
-        <Probe />
-      </WhatsNewProvider>
-    );
+    renderWithMarkers(null);
     expect(screen.getByTestId("unseen").textContent).toBe("false");
     expect(screen.getByTestId("announcement").textContent).toBe("none");
     fireEvent.click(screen.getByText("Seen"));
