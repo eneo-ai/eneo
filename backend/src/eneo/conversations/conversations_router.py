@@ -19,12 +19,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    enforce_rate_limit,
-)
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
@@ -77,6 +71,13 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     get_approval_manager,
 )
 from eneo.questions.question import MessageFeedback
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import extract_request_id
@@ -539,15 +540,8 @@ async def preflight_tokens(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many preflight requests. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many preflight requests. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open: preflight is best-effort UX, not a security-critical path.
@@ -822,15 +816,8 @@ async def call_tool_from_app_view(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool calls from views. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool calls from views. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-closed: a view runs a server's code, and nothing else bounds
@@ -1463,15 +1450,8 @@ async def approve_tools(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool approval submissions. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool approval submissions. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open on limiter outages to avoid breaking approval flows.

@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, cast
 
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitResult,
-    RateLimitServiceUnavailableError,
-)
-from eneo.audit.infrastructure.rate_limiting import (
-    check_rate_limit as _raw_check_rate_limit,  # pyright: ignore[reportUnknownVariableType]
-)
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyV2InDB
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitResult,
+    RateLimitServiceUnavailableError,
+)
+from eneo.redis.rate_limit import (
+    check_rate_limit as _raw_check_rate_limit,  # pyright: ignore[reportUnknownVariableType]
+)
 
 logger = get_logger(__name__)
 CheckRateLimit = Callable[
@@ -77,7 +77,7 @@ class ApiKeyRateLimiter:
                 code="rate_limit_exceeded",
                 message="API key rate limit exceeded.",
                 headers={
-                    "Retry-After": str(result.window_seconds),
+                    "Retry-After": str(result.retry_after_seconds),
                     "X-RateLimit-Limit": str(result.max_requests),
                     "X-RateLimit-Remaining": "0",
                 },

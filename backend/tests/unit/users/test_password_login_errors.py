@@ -9,7 +9,6 @@ import pytest
 from dependency_injector import providers
 from fastapi.testclient import TestClient
 
-from eneo.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
 from eneo.authentication.auth_models import AccessToken
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.login_attempts import LoginAttempt
@@ -21,6 +20,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import OTELJSONFormatter, SimpleLogger
 from eneo.main.models import GeneralError
+from eneo.redis.rate_limit import RateLimitServiceUnavailableError
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
 from eneo.tenants.tenant import TenantState
