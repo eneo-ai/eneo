@@ -9,7 +9,9 @@ export type FlatSearch = Record<string, string | string[]>;
 
 /** `?a=1&b=x&b=y` → `{ a: "1", b: ["x", "y"] }`; values are never parsed further. */
 export function parseSearch(searchStr: string): FlatSearch {
-  const search: FlatSearch = {};
+  // No prototype (as TanStack's own parser): `?toString=a` or `?__proto__=a`
+  // is a key like any other, not an inherited member.
+  const search: FlatSearch = Object.create(null);
   for (const [key, value] of new URLSearchParams(searchStr)) {
     const current = search[key];
     if (current === undefined) search[key] = value;

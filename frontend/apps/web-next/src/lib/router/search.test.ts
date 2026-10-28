@@ -23,6 +23,14 @@ describe("search serialization", () => {
     });
   });
 
+  it("reads keys named like object members as plain keys", () => {
+    const search = parseSearch("?toString=a&toString=b&__proto__=x&constructor=y");
+
+    expect(search.toString).toEqual(["a", "b"]);
+    expect(Object.keys(search)).toEqual(["toString", "__proto__", "constructor"]);
+    expect(stringifySearch(search)).toBe("?toString=a&toString=b&__proto__=x&constructor=y");
+  });
+
   it("keeps the order of the keys", () => {
     expect(Object.keys(parseSearch("?z=1&a=2&m=3"))).toEqual(["z", "a", "m"]);
   });
