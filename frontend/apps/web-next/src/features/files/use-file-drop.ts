@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useRef, useState, type DragEvent } from "react";
+import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { toast } from "@/lib/toast";
 import { collectDroppedFiles } from "./collect-dropped-files";
 
@@ -24,6 +24,12 @@ export function useFileDrop(
   // dragenter/dragleave fire for every child element crossed, so count the
   // nesting depth instead of trusting a single leave event.
   const depth = useRef(0);
+  // Reading a dropped folder is async: its files go to the newest callback, so
+  // they are validated against the zone's state (and limits) when they arrive.
+  const latestOnFiles = useRef(onFiles);
+  useLayoutEffect(() => {
+    latestOnFiles.current = onFiles;
+  });
 
   return {
     dragging: enabled && dragging,
@@ -52,7 +58,7 @@ export function useFileDrop(
         if (!enabled) return;
         void collectDroppedFiles(event.dataTransfer)
           .then((files) => {
-            if (files.length > 0) onFiles(files);
+            if (files.length > 0) latestOnFiles.current(files);
           })
           .catch(onError ?? (() => toast.error(t("file_upload_error"))));
       }

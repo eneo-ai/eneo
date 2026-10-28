@@ -68,6 +68,31 @@ describe("useFileDrop", () => {
     await waitFor(() => expect(onFiles).toHaveBeenCalledWith(files));
   });
 
+  it("hands a slow folder read to the newest callback, which sees the zone's current state", async () => {
+    const file = new File(["a"], "a.txt");
+    let finishRead = () => {};
+    const slow = {
+      isFile: true,
+      isDirectory: false,
+      file: (resolve: (value: File) => void) => {
+        finishRead = () => resolve(file);
+      }
+    } as FileSystemFileEntry;
+    const atDrop = vi.fn();
+    const current = vi.fn();
+    let onFiles = atDrop;
+    const { result, rerender } = renderHookInApp(() => useFileDrop(onFiles));
+
+    act(() => result.current.handlers.onDrop(dragEvent({ entries: [slow] })));
+    // A file picked meanwhile rerenders the zone with new state (and limits).
+    onFiles = current;
+    rerender();
+    act(() => finishRead());
+
+    await waitFor(() => expect(current).toHaveBeenCalledWith([file]));
+    expect(atDrop).not.toHaveBeenCalled();
+  });
+
   it("stays highlighted while the drag crosses a child element", () => {
     const { result } = renderHookInApp(() => useFileDrop(vi.fn()));
     const { onDragEnter, onDragLeave } = result.current.handlers;
