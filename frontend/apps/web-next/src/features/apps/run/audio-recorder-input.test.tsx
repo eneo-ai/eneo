@@ -134,8 +134,17 @@ it("warns before a reload loses a recording, until it is queued and uploaded", a
   const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
   expect(unloadIsGuarded()).toBe(true);
 
-  act(() => Recorder.instances[0]!.data());
+  const recorder = Recorder.instances[0]!;
+  act(() => recorder.data());
+  // The recorder finalizes the audio after Stop; the page stays guarded meanwhile.
+  recorder.stop = () => {
+    recorder.state = "inactive";
+  };
   fireEvent.click(stop);
+  expect(unloadIsGuarded()).toBe(true);
+  act(() => {
+    recorder.dispatchEvent(new Event("stop"));
+  });
   await screen.findByRole("button", { name: "Använd denna inspelning" });
   // Recorded but not queued yet.
   expect(unloadIsGuarded()).toBe(true);

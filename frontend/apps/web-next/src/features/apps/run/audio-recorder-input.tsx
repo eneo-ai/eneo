@@ -76,9 +76,13 @@ export function AudioRecorderInput({
   const captureRef = useRef<Capture | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  // A reload loses a recording until it is queued for the run and uploaded.
+  // A reload loses a recording until it is queued for the run and uploaded,
+  // also while Stop is finalizing it.
   useBeforeUnloadWarning(
-    recording || (recorded !== null && files.length === 0) || files.some((file) => file.uploading)
+    recording ||
+      phase === "stopping" ||
+      (recorded !== null && files.length === 0) ||
+      files.some((file) => file.uploading)
   );
 
   useEffect(
