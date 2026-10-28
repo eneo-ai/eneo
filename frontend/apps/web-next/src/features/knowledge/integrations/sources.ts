@@ -115,6 +115,20 @@ export function findWrapperSource(
   );
 }
 
+/**
+ * What this space may do to a wrapper as a whole: the first item's permissions,
+ * but only when every item belongs to the space. A wrapper shared in, even in
+ * part, offers no edit or delete that the backend would refuse.
+ */
+export function wrapperPermissions(
+  items: readonly IntegrationKnowledge[],
+  spaceId: string
+): { canEdit: boolean; canDelete: boolean } {
+  const owned = items.filter((item) => item.space_id === spaceId);
+  const permissions = owned.length === items.length ? (owned[0]?.permissions ?? []) : [];
+  return { canEdit: permissions.includes("edit"), canDelete: permissions.includes("delete") };
+}
+
 /** The tab a link asks for; older links name "skipped", which is now part of Problems. */
 export function sourceTabParam(value: string | string[] | undefined): SourceTab | undefined {
   if (value === "problems" || value === "skipped") return "problems";

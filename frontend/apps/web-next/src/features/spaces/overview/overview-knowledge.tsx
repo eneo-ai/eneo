@@ -15,6 +15,7 @@ import { IntegrationActions, WrapperActions } from "@/features/knowledge/integra
 import {
   isSyncActive,
   summarizeSource,
+  wrapperPermissions,
   type QueuedIds
 } from "@/features/knowledge/integrations/sources";
 import type { ProgressById } from "@/features/knowledge/integrations/sync-progress";
@@ -100,6 +101,7 @@ function UploadMenu() {
 type SyncState = { progress: ProgressById; queued: QueuedIds };
 
 function RowActions({ row, sync }: { row: KnowledgeRow; sync: SyncState }) {
+  const { space } = useSpace();
   const { source } = row;
   const syncActive = (items: readonly IntegrationKnowledge[]) =>
     isSyncActive(summarizeSource(items, sync.progress, sync.queued));
@@ -110,19 +112,16 @@ function RowActions({ row, sync }: { row: KnowledgeRow; sync: SyncState }) {
       return <WebsiteActions website={source.website} />;
     case "integration":
       return <IntegrationActions item={source.item} syncActive={syncActive([source.item])} />;
-    case "wrapper": {
-      const permissions = source.items[0]?.permissions ?? [];
+    case "wrapper":
       return (
         <WrapperActions
           wrapperId={source.wrapperId}
           wrapperName={source.wrapperName}
           items={source.items}
-          canEdit={permissions.includes("edit")}
-          canDelete={permissions.includes("delete")}
+          {...wrapperPermissions(source.items, space.id)}
           syncActive={syncActive(source.items)}
         />
       );
-    }
   }
 }
 
