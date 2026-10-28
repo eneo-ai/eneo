@@ -158,15 +158,15 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 ### 6. Checks, Review and Merge
 
-- `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels` must pass. A first-time contributor's first workflow run may need a maintainer's approval before it starts.
+- `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels` must pass. For contributors outside the `eneo-ai` organisation, a maintainer approves the workflow runs before they start.
 - If you cannot add labels yourself, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
 - A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
 - If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
-Only Core Maintainers can push to `develop`, `main` or `release/*` and add pull requests to the merge queue, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+Only Core Maintainers have write access and can add pull requests to the merge queue, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
-**For Core Maintainers:** choose **Merge when ready** on your own pull request as soon as you open it (or run `gh pr merge <number> --auto`). It enters the merge queue when the checks are green; no approval from a colleague is required, but ask for one when a second opinion helps. There is no bypass, so nothing reaches `develop` without passing the checks.
+**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. From the command line, `gh pr merge <number> --auto` works only while the repository setting **Allow auto-merge** is on; otherwise run `gh pr merge <number>` once the checks are green. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer.
 
 ---
 

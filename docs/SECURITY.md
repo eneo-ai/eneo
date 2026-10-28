@@ -43,26 +43,55 @@ handling, LLM provider credentials, SSRF, RCE, or deserialization take priority.
 
 ## Supported Versions
 
-Security fixes land on `develop` first. Supported release branches are any
-release branches that are currently deployed or explicitly maintained by the
-Eneo maintainers. Older tags and inactive branches are not guaranteed to receive
-security fixes.
+Supported release branches are any release branches that are currently deployed
+or explicitly maintained by the Eneo maintainers. Older tags and inactive
+branches are not guaranteed to receive security fixes. This section is the
+canonical support policy; other guides link here.
 
-If a fix affects users outside the hosted/deployed environments, maintainers
-should publish upgrade or mitigation guidance through a GitHub Security Advisory.
+## Fixing a Vulnerability
+
+Every affected supported line receives the fix: `develop` and each supported
+`release/vX.Y` branch. How the fix is prepared depends on whether the
+vulnerability is already public.
+
+- **Reported privately.** Keep the work private until it is ready. Confirm and
+  rate the report in a private GitHub Security Advisory, and prepare the fix in
+  the advisory's temporary private fork or on unpublished local branches. A
+  temporary private fork can merge only into `develop`, and GitHub runs no
+  status checks and applies no rulesets to that merge, so run the backend and
+  frontend checks on the fix before merging it. Fixes for release branches go
+  through ordinary pull requests, which need the second Core Maintainer
+  approval. Open them when the patch releases are ready, merge them, tag the
+  releases and publish the advisory the same day, naming the affected and
+  patched versions.
+- **Already public**, such as a published advisory for a dependency. Fix it in
+  ordinary pull requests on `develop` and backport it to the supported release
+  lines.
+
+Publish upgrade or mitigation guidance through a GitHub Security Advisory
+whenever operators need to act.
 
 ## Security Tooling
 
 The repository uses GitHub security features and CI to prevent regressions:
 
-- Dependabot creates weekly dependency update pull requests for backend,
-  frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
+- Dependabot alerts are enabled. Dependabot version updates are configured for
+  backend, frontend, GitHub Actions, Dockerfiles, and devcontainer
+  configuration, but paused (`open-pull-requests-limit: 0`) until they are
+  re-enabled one ecosystem at a time. Dependabot security updates are off, so
+  maintainers patch vulnerable dependencies in focused `fix(deps)` pull
+  requests. The tool runtime (`tool-runtime/`) has no Dependabot entry yet.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
 - The reusable `Security` workflow audits the complete runtime Python lock and
-  frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
-  added Git history with Gitleaks. It is included in the required CI aggregate
-  and runs before image publication. Reports are retained as CI artifacts.
+  frontend lock, runs Semgrep security-audit/GitHub Actions rules over
+  `backend/src`, both frontends' sources and `.github`, and scans the added Git
+  history with Gitleaks. It runs on every pull request and merge-queue
+  candidate as part of the required CI aggregate, and weekly on a schedule.
+  On `develop` and tag builds, component images are pushed while the checks
+  run; only the completed release bundle waits for them, so deployments must
+  consume the bundle. The tool runtime's `bun.lock` is not part of the audit
+  yet. Reports are retained as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -77,9 +106,9 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
-  SeaweedFS container
-  image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
+- Release SBOMs are generated from the published backend, Svelte frontend, Next
+  frontend, tool runtime, and bundled SeaweedFS container image digests and
+  attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
   CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
   released backend image. The frontend release also includes a source dependency
@@ -87,8 +116,11 @@ The repository uses GitHub security features and CI to prevent regressions:
   checked-out release tag with the frozen Bun lockfile, so JavaScript
   dependencies remain visible even when the runtime image only contains the
   bundled build output. Release SBOM assets are attested through GitHub artifact
-  attestations, and the pushed backend, frontend, and SeaweedFS images include
-  provenance attestations in GHCR.
+  attestations, and the pushed backend, frontend, web-next, tool runtime, and
+  SeaweedFS images include provenance attestations in GHCR. Fixable HIGH and
+  CRITICAL image vulnerabilities block the frontend, web-next, and tool runtime
+  images; the backend image has no image scan yet and relies on the audit of
+  its Python lock.
   `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
   exact image digests scanned by platform and records the bundled store's
   multi-platform manifest reference for deployment.
@@ -122,25 +154,26 @@ The repository uses GitHub security features and CI to prevent regressions:
   module/version/license-file hashes in `docker/seaweedfs/verify-supply-chain.sh`.
   Any dependency, version, license content, or unknown-package drift fails the
   job for review. This is not a general allowlist or vulnerability waiver.
-- Configure the `object-content-supply-chain` GitHub Environment as a protected
-  trusted-publication boundary with a deployment branch policy that allows
+- The `object-content-supply-chain` GitHub Environment is the protected
+  trusted-publication boundary, with a deployment branch policy that allows
   only `develop`; the workflow enforces the same rule in code, and the
-  environment policy is the backstop. Do not grant package write, OIDC, or
-  attestation permissions to pull-request workflows, and do not make the
+  environment policy is the backstop. No pull-request workflow publishes
+  images. Fork pull requests get a read-only token; the tool runtime image job
+  still requests package write, OIDC, and attestation permissions on
+  same-repository pull requests although it publishes only when the
+  coordinator calls it, so narrowing that is open work. Do not make the
   path-filtered SeaweedFS workflow a required status check. The canonical
   image/SBOM owners remain `.github/workflows/build_and_push_images.yml`,
   `.github/workflows/seaweedfs_image.yml`, and
   `.github/workflows/release_sbom.yml`; do not create a parallel signing system.
-- Secret scanning and push protection should remain enabled for provider keys,
-  tokens, credentials, and other repository secrets.
+- Secret scanning and push protection are enabled for provider keys, tokens,
+  credentials, and other repository secrets. Keep them enabled.
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
 The `develop` ruleset requires `CI` and `Dependency Review`, and the PR label
 classification ruleset requires `PR labels` on `develop`, `main` and
-`release/**`. While code scanning is paused, remove `CodeQL gate` from the
-GitHub ruleset; otherwise pull requests can wait for a check that no longer
-runs.
+`release/**`. No ruleset requires a CodeQL check while code scanning is paused.
 
 ## Repository Access and Change Control
 
@@ -168,8 +201,13 @@ on the documentation site.
   approval.
 - **Releases.** Only Core Maintainers can create, update or delete
   `release/**` branches and `v*` tags. A `v*` tag starts image publication,
-  so this restriction controls who can publish a release.
-- **`main`.** Protected against deletion and force pushes.
+  so this restriction controls who can publish a release. Every pull request
+  into a release branch needs an approval from a Core Maintainer other than its
+  author: the `Release and main review` ruleset requires one approval and
+  code-owner review, has no bypass actors, and dismisses an approval when new
+  commits are pushed. Each release branch therefore needs `.github/CODEOWNERS`.
+- **`main`.** The same review rule applies, and `main` is protected against
+  deletion and force pushes.
 - **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
   no one can skip the required checks or the merge queue. Repository
   administrators are not exempt from rulesets unless they are on a bypass
@@ -234,8 +272,8 @@ For each new alert:
    Docker image, GitHub Action, or code scanning.
 2. Check whether it is reachable in Eneo and whether it touches user input,
    files, prompts, credentials, authentication, network calls, or deployment.
-3. Prefer the Dependabot security PR. If Dependabot cannot create one, manually
-   bump, pin, replace, or remove the dependency.
+3. Bump, pin, replace, or remove the dependency in a focused `fix(deps)` pull
+   request, and backport it to the supported release lines that ship it.
 4. Review the diff. For AI and LLM packages, check changelogs for telemetry,
    callback behavior, environment variable handling, proxy behavior, logging
    changes, and changed defaults.
@@ -256,8 +294,8 @@ library updates.
 Immediate response:
 
 - check whether Eneo uses the affected package and version
-- use the Dependabot security PR if GitHub has an advisory
-- manually bump, pin, or temporarily remove the package if no advisory exists yet
+- bump, pin, or temporarily remove the package, whether or not an advisory
+  exists yet
 - rotate any potentially exposed provider keys
 - review application logs, CI artifacts, Sentry events, build logs, and package
   install logs

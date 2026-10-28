@@ -1,7 +1,7 @@
 # Release SBOMs
 
 Each Eneo release includes Software Bill of Materials (SBOM) files for the
-published backend, frontend, tools runtime, and bundled object-store container images. The files are attached to the
+published backend, frontend, web-next, tools runtime, and bundled object-store container images. The files are attached to the
 GitHub Release so you can download the dependency inventory for the exact
 version you run.
 
@@ -13,6 +13,7 @@ The release workflow covers:
 
 - `ghcr.io/eneo-ai/eneo-backend:<version>`
 - `ghcr.io/eneo-ai/eneo-frontend:<version>`
+- `ghcr.io/eneo-ai/eneo-web-next:<version>`
 - `ghcr.io/eneo-ai/eneo-tool-runtime:<version>`
 - `ghcr.io/eneo-ai/eneo-seaweedfs:<bundled store version>`
 
@@ -31,7 +32,7 @@ the release SBOM workflow automatically:
 1. The workflow reads the release tag and downloads and verifies its completed bundle.
 2. It checks out the release tag for source-based dependency inventory and
    reads the bundled store version from `docker/seaweedfs/VERSION`.
-3. It reads backend, frontend and tools-runtime digests from the bundle and
+3. It reads backend, frontend, web-next and tools-runtime digests from the bundle and
    resolves the already-published Eneo SeaweedFS version tag.
 4. It resolves immutable `linux/amd64` digests and the tools-runtime and SeaweedFS `linux/arm64`
    digest.
@@ -46,9 +47,9 @@ the release SBOM workflow automatically:
 9. It attests the release SBOM assets with GitHub artifact attestations.
 
 Each release keeps its own SBOM files. Older release pages keep their original
-assets, so you can compare one version with the next. The backend, frontend
-and tool runtime container images also get provenance attestations when they
-are built and pushed to GitHub Container Registry.
+assets, so you can compare one version with the next. The backend, frontend,
+web-next and tool runtime container images also get provenance attestations
+when they are built and pushed to GitHub Container Registry.
 
 The application publication workflow checks the actual Node runtime in both
 frontend images and blocks fixable HIGH or CRITICAL image vulnerabilities

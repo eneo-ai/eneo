@@ -4,6 +4,7 @@ const meta: MetaRecord = {
   index: "Overview",
   "getting-started": "Getting Started",
   architecture: "Architecture",
+  security: "Security at Eneo",
   "authentication-architecture": "Authentication Architecture",
   "module-authentication": "Module Authentication",
   "tool-architecture": "Tools and MCP Architecture",

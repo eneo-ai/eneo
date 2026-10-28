@@ -4,7 +4,7 @@ const meta: MetaRecord = {
   index: "Overview",
   governance: "Governance and Roles",
   "project-roadmap": "Project Roadmap",
-  security: "Security",
+  security: "Security for Contributors",
 };
 
 export default meta;

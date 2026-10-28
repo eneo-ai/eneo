@@ -43,9 +43,17 @@ The separation it maintains:
 - **The user who receives the output.** A file the runtime produced is safe
   to open: no macros, scripts or externally loaded content.
 
+The separation between jobs is strongest on a host whose kernel supports
+Landlock (Linux 5.13 or later). On a host without it, the other layers remain
+but jobs are not confined to their own files; see
+[Layer 3](#layer-3-one-confined-process-per-job) and set
+`TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run there.
+
 The runtime's own code and the engines it bundles are part of the Eneo release
-and are kept current through its normal dependency process. The layers below
-are about what those engines are fed, not about the release itself.
+and are updated by the maintainers in dependency pull requests. The runtime's
+lockfile is not yet covered by Dependabot or by the lockfile audit in CI; its
+image is scanned before it is published. The layers below are about what those
+engines are fed, not about the release itself.
 
 ## The layers, from the outside in
 

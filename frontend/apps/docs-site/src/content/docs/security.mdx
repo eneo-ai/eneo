@@ -1,0 +1,152 @@
+---
+title: Security at Eneo
+---
+
+import { Callout } from "nextra/components";
+
+# Security at Eneo
+
+Municipalities and agencies run Eneo with their own users, documents and model
+providers. This page explains how we protect them, from the people who decide
+what goes into the platform to the evidence that comes with every release. It is
+an overview: each section links to the page that owns the details.
+
+<Callout type="warning">
+  Found a vulnerability? Report it privately through [**Security → Report a
+  vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new) or
+  by e-mail to `security@sundsvall.se`. Never report it in a public issue, pull
+  request or discussion.
+</Callout>
+
+## Who is responsible for what
+
+| Who                                                                 | Responsible for                                                                                                                                                       |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Core Maintainers** (`@eneo-ai/core-maintainers`)                  | The Eneo team at Sundsvalls kommun stewards the platform. It is the only team with write access, decides what is merged and released, and handles security reports.   |
+| **Collaborators** (`@eneo-ai/collaborators`) and other contributors | Partner organisations and anyone else build features and fixes in the open and propose them from a fork. They review each other's work and organise issues.           |
+| **Operators**                                                       | The organisation that runs Eneo hosts it, configures identity providers and secrets, provides the host capabilities the runtime relies on, and installs new releases. |
+
+`.github/CODEOWNERS` names the Core Maintainers as owners of the whole
+repository, so GitHub asks them to review every pull request. The roles, the
+permission table and the reasons behind them are in
+[Governance and Roles](/contributing/governance).
+
+## From change to release
+
+![Three lanes. People: a change starts as an issue and a pull request, a Core Maintainer adds it to the merge queue into develop, a second Core Maintainer approves pull requests into release branches, and a Core Maintainer creates the v tag. GitHub runs the checks on each pull request and builds, scans, describes and attests the release bundle. Operators verify the completed bundle and deploy it.](/diagrams/security-change-to-deployment.svg)
+
+Every change is a pull request, and GitHub rulesets decide what may be merged.
+The rules are public at
+[github.com/eneo-ai/eneo/rules](https://github.com/eneo-ai/eneo/rules).
+
+- **Into `develop`.** Only Core Maintainers can add a pull request to the merge
+  queue, and nothing enters it without the required checks: **CI**,
+  **Dependency Review** and **PR labels**. The queue tests each change again
+  against the latest `develop`. There is no bypass. A Core Maintainer reviews
+  and approves every contribution from outside the team before queueing it.
+  The Core Maintainers agree on their own changes together as a team; GitHub
+  does not require a formal approval for those.
+- **Into a release.** A pull request into a `release/vX.Y` branch, or into
+  `main`, needs an approval from a Core Maintainer other than its author. Only
+  Core Maintainers can create release branches and `v*` tags.
+- **What the checks cover.** CI runs the tests, linters and type checks and
+  builds the container images without publishing them. Its security job
+  audits the backend and frontend lockfiles for known vulnerabilities, runs
+  Semgrep's security rules over the application code and workflows, and scans
+  newly added Git history for secrets with Gitleaks. Dependency Review fails a
+  pull request into `develop` that adds a dependency with a known
+  high-severity vulnerability. Every endpoint must declare who may call it, or
+  the application refuses to start. GitHub secret scanning with push
+  protection blocks known credential formats.
+- **How a release is published.** A `v*` tag starts the publication workflow.
+  It builds the images, checks the runtimes, blocks fixable high and critical
+  vulnerabilities in the frontend and tool runtime images, runs a combined
+  smoke test, and then completes the **release bundle**: the shared version
+  and the exact image digests. SBOMs and attestations are attached to the
+  GitHub release. Builds of `develop` are published as `develop-<commit>`
+  images for testing; only a `v*` tag produces a versioned release.
+
+<Callout type="info">
+  Third-party GitHub Actions are pinned to full commit SHAs. Pull requests from
+  forks run with a read-only token and no secrets, and no pull request workflow
+  publishes images. How to work with each check is described in [Security for
+  Contributors](/contributing/security).
+</Callout>
+
+The checks have known limits. CodeQL code scanning is paused while we look for
+a setup with actionable results, so Semgrep is the code scanner. The backend
+image is covered by the audit of its Python lockfile, not by an image scan, and
+the tool runtime's own lockfile is not yet part of the automated audit.
+Automated checks find known patterns and known vulnerabilities, not design
+flaws; that is what review is for.
+
+## Protection in a deployment
+
+| Concern                       | How Eneo handles it                                                                                                                                                                    | Read more                                                        |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Signing in                    | Username and password, per-tenant OIDC federation, SCIM provisioning and scoped API keys.                                                                                              | [Authentication Architecture](/docs/authentication-architecture) |
+| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check the tenant, space and resource.                                                         | [Security for Contributors](/contributing/security)              |
+| API keys                      | Stored only as HMAC hashes and limited to their scope, with origin, IP and expiry guardrails.                                                                                          | [API Key Management](/docs/api-key-management)                   |
+| Code and files from the model | Run in a separate tool runtime with no access to the database, keys or the internet. Each job is confined with Landlock where the host kernel supports it; operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             |
+| Stored files                  | PostgreSQL owns identity, integrity and authorization; file bytes are verified against their checksum before they are served.                                                          | [Object Content Architecture](/docs/object-content-architecture) |
+| Traceability                  | A per-tenant audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                          | [Audit Logging](/docs/audit-logging)                             |
+
+Several protections depend on the deployment. The
+[deployment guide](/guides/deployment) describes the internal networks, TLS and
+secrets the operator sets up.
+
+## Evidence you can inspect
+
+You do not have to take this page on trust:
+
+- **Release bundle.** Each release publishes `release.json` and `release.env`
+  with the version, source revision and immutable image digests. Deploy by
+  digest from the bundle rather than from a moving tag.
+- **SBOMs.** Every release carries CycloneDX and SPDX SBOMs for each published
+  image, plus SBOMs of the backend's Python runtime and the frontend's source
+  dependencies. They show what is inside an image, not that it is free of
+  vulnerabilities.
+- **Attestations.** Images, release bundles and SBOM files carry GitHub
+  artifact attestations, so you can verify with `gh attestation verify` that
+  they were built by Eneo's workflows from the stated source.
+- **Rules and advisories.** The active
+  [rulesets](https://github.com/eneo-ai/eneo/rules) and the published
+  [security advisories](https://github.com/eneo-ai/eneo/security/advisories)
+  are public.
+
+[Release SBOMs](/docs/release-sboms) explains the files and how to verify
+them. The bundled object store is built by Eneo from a pinned SeaweedFS source
+with its own supply-chain checks; see
+[Object Content Architecture](/docs/object-content-architecture).
+
+## Vulnerabilities and updates
+
+![Five steps. In private: report through GitHub or by e-mail, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure: publish the patch releases and the advisory together. Then operators deploy the patched release.](/diagrams/security-vulnerability-response.svg)
+
+A reported vulnerability stays private until it is fixed. The Core Maintainers
+confirm it, prepare the fix for every affected supported release line, and then
+publish the patch releases and a GitHub Security Advisory together. The advisory
+names the affected and patched versions. A vulnerability that is already public
+is fixed in ordinary pull requests. The
+[security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
+owns the response targets, the supported versions and how exceptions are
+recorded.
+
+Vulnerable dependencies are reported by Dependabot alerts and by the lockfile
+audit in CI, which also runs every week. The Core Maintainers patch them in
+focused pull requests and carry the fixes to the supported release lines.
+Automatic Dependabot update pull requests are paused for now.
+
+For operators, staying secure means installing patch releases. A new base image
+does not change an image that is already published: fixes reach a deployment
+only through a new Eneo release.
+
+## Take part
+
+- Report a suspected vulnerability privately, as described at the top of this
+  page.
+- Review open pull requests. Anyone can comment, and other reviews often find
+  problems early.
+- Contribute a fix from a fork; see [Contributing to Eneo](/contributing).
+- If your organisation runs Eneo and wants to build it with us, contact
+  `digitalisering@sundsvall.se` about becoming a Collaborator.

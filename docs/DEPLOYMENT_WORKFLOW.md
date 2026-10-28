@@ -20,7 +20,7 @@ This document describes our Git workflow and deployment process. Please read it 
 
 ## Overview
 
-We use a Git Flow-inspired workflow with **persistent release branches**. Every minor version gets a `release/v1.X` branch. Tags always live on release branches. Deployment systems watch for new image tags and deploy them automatically.
+We use a Git Flow-inspired workflow with **persistent release branches**. Every minor version gets a `release/v1.X` branch. Tags always live on release branches. Deployment systems consume the completed release bundle of a tag, or the `:develop` image for the development environment.
 
 ```mermaid
 graph LR
@@ -28,9 +28,9 @@ graph LR
     B -->|Push| C[Build :develop image]
     C -->|Image Update| D[Deploy to Dev]
     B -->|Create branch| E[release/v1.8]
-    E -->|Tag v1.8.0-rc.1| F[Build :v1.8.0-rc.1 image]
+    E -->|Tag v1.8.0-rc.1| F[Build :1.8.0-rc.1 image]
     F -->|Deploy| G[Test Environment]
-    E -->|Tag v1.8.0| H[Build :v1.8.0 image]
+    E -->|Tag v1.8.0| H[Build :1.8.0 image]
     H -->|Deploy| I[Production]
 ```
 
@@ -47,8 +47,8 @@ Backflow (patches):
 | Environment | Purpose | Branch/Tag | Image Tag | Deployment Method |
 |------------|---------|------------|-----------|-------------------|
 | **Development** | Latest features, may be unstable | `develop` | `:develop` | Auto (on image update) |
-| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:v1.8.0-rc.1` | Manual deploy |
-| **Production** | Live system | `v*` tags on `release/v1.X` | `:v1.8.0` | Manual deploy |
+| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:1.8.0-rc.1` | Manual deploy |
+| **Production** | Live system | `v*` tags on `release/v1.X` | `:1.8.0` | Manual deploy |
 
 ## Branch Strategy
 
@@ -63,9 +63,9 @@ Backflow (patches):
 - Created from `develop` when ready to release or stabilize a minor version
 - Persistent home for all patches to that minor version
 - All version tags (`v1.X.Y`) live here
-- Test via RC tags (`:v1.8.0-rc.1`) before creating the final release
+- Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
-- Protected: only members of `@eneo-ai/core-maintainers` can create, push to or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs an approval from a Core Maintainer other than its author. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
 
 ### Supporting Branches
 
@@ -140,11 +140,13 @@ Once the RC is stable, create the final release via GitHub UI:
 6. Leave **Set as pre-release** unchecked
 7. Click **Publish release**
 
-GitHub Actions will automatically build production images:
-- `ghcr.io/eneo-ai/eneo-backend:v1.8.0`
-- `ghcr.io/eneo-ai/eneo-frontend:v1.8.0`
+GitHub Actions will automatically build the production images and complete the release bundle:
+- `ghcr.io/eneo-ai/eneo-backend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-frontend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-web-next:1.8.0`
+- `ghcr.io/eneo-ai/eneo-tool-runtime:1.8.0`
 
-Deploy to production by updating your deployment config to point at the new version tag.
+Deploy to production from the release bundle (`release.json` and `release.env` on the GitHub release), which records the exact image digests. An image tag can exist before its release has passed every check; the bundle is attached only after they pass.
 
 ### Semantic Versioning
 
@@ -162,7 +164,7 @@ RC tags also live on the release branch. Create the release branch from `develop
 develop ──► create release/v1.8
                  │
                  ├──► v1.8.0-rc.1 (tag, pre-release) → deploy to test env
-                 ├──► fix directly on branch or via PR
+                 ├──► fix via PR (a second Core Maintainer approves)
                  ├──► v1.8.0-rc.2 (tag, pre-release)
                  └──► v1.8.0 (final release)
 ```
@@ -184,7 +186,7 @@ git push origin release/v1.8
 5. Check **Set as pre-release**
 6. Click **Publish release**
 
-**3. Fix issues** directly on the release branch (or via `hotfix/*` PRs to `release/v1.8`)
+**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs an approval from a Core Maintainer other than its author; direct pushes are rejected.
 
 **4. Create subsequent RCs** the same way via GitHub Releases (tag `v1.8.0-rc.2`, target `release/v1.8`, mark as pre-release)
 
@@ -204,7 +206,8 @@ flowchart TB
     A[Production Bug Found] --> B[Create hotfix from release/v1.X]
     B --> C[Fix Bug]
     C --> D[PR to release/v1.X]
-    D --> E[Merge to release/v1.X]
+    D --> D2[Second Core Maintainer approves]
+    D2 --> E[Merge to release/v1.X]
     E --> F[Tag new patch version]
     F --> G[Build versioned image]
     G --> H[Deploy to Production]
@@ -226,8 +229,10 @@ git commit -m "fix: resolve critical payment processing error"
 
 # Push and create PR to the release branch
 git push origin hotfix/fix-critical-bug
-# Create PR on GitHub: hotfix/fix-critical-bug → release/v1.7
+gh pr create --base release/v1.7 --head hotfix/fix-critical-bug
 ```
+
+Another Core Maintainer approves the pull request. Squash-merge it, so the fix is one commit on the release branch.
 
 **2. After PR merge, create the patch release via GitHub UI:**
 
@@ -238,44 +243,38 @@ git push origin hotfix/fix-critical-bug
 5. Describe the fix in the release notes
 6. Click **Publish release**
 
-GitHub Actions builds `v1.7.4` images. The `:latest` tag is NOT overwritten if `v1.8.0` already exists.
+GitHub Actions builds the `1.7.4` images and the release bundle. The `:latest` tag is NOT overwritten if `v1.8.0` already exists.
 
-**3. Deploy** `v1.7.4` to the affected production instance.
+**3. Deploy** `v1.7.4` to the affected production instance, using the image digests in its release bundle.
 
-**4. Cherry-pick the fix to develop:**
+**4. Carry the fix to develop** with the procedure below.
 
-Use the **squashed commit on the release branch** as the cherry-pick source, not the original commit from your `hotfix/*` branch. Because PRs are squash-merged, the commit on `release/v1.7` is the authoritative one; the hotfix branch's pre-squash SHA won't exist after the branch is deleted.
+## Carrying a Fix to Another Branch
+
+Neither `develop` nor a release branch accepts direct pushes, so every cherry-pick goes through a pull request:
 
 ```bash
-# Grab the SHA from the release branch (the squashed merge commit)
+# 1. Take the fix as it landed on the source branch
 git checkout release/v1.7 && git pull
-git log -1 --format=%H  # copy this SHA
+git log -1 --format=%H  # the squashed commit; copy this SHA
 
-git checkout develop && git pull origin develop
-git cherry-pick <sha-from-release-branch>
-git push origin develop
+# 2. Apply it on a topic branch from the target branch
+git checkout develop && git pull
+git checkout -b fix/carry-xyz
+git cherry-pick <sha>   # for a merge commit: git cherry-pick -m 1 <sha>
+git push origin fix/carry-xyz
+
+# 3. Open the pull request
+gh pr create --base develop --head fix/carry-xyz
 ```
+
+- **Source commit.** Use the commit on the source branch, not the one on your `hotfix/*` branch. A squashed commit is the whole fix; the hotfix branch's commits do not survive its deletion.
+- **Into `develop`.** The pull request needs the required checks and the merge queue; Core Maintainers agree on it together, with no formal approval.
+- **Into a release branch.** Another Core Maintainer approves the pull request. Several fixes for the same release can go in one pull request.
 
 ## Backporting
 
-When a bug is fixed on `develop` but also affects an older release:
-
-**1. Cherry-pick the fix to the release branch:**
-
-```bash
-git log --oneline develop  # identify the fix commit
-git checkout release/v1.7
-git pull origin release/v1.7
-git cherry-pick <commit-hash>
-git push origin release/v1.7
-
-# If conflicts, resolve them and create a PR instead:
-git checkout -b fix/backport-xyz
-git push origin fix/backport-xyz
-# Create PR: fix/backport-xyz → release/v1.7
-```
-
-**2. After the fix lands on the release branch, tag via GitHub UI:**
+When a bug is fixed on `develop` but also affects an older release, carry the fix to `release/v1.7` with the procedure above (base `release/v1.7`). After it lands on the release branch, tag via GitHub UI:
 
 1. Go to **Releases** → **Draft a new release**
 2. Tag: `v1.7.5`, Target: `release/v1.7`
@@ -284,49 +283,15 @@ git push origin fix/backport-xyz
 
 ## Security Patches Across Multiple Releases
 
-When a security fix must go to multiple supported releases:
+When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): a vulnerability that was reported privately stays private until the patch releases and the advisory are published together.
 
 1. **Fix on the oldest affected release branch first**
-2. **Cherry-pick forward** to each newer release branch
-3. **Cherry-pick to `develop`**
-4. **Tag new patch versions** on each affected release branch
+2. **Carry it forward** to each newer release branch, then to `develop`, with [the procedure above](#carrying-a-fix-to-another-branch)
+3. **Tag new patch versions** on each affected release branch
 
-Order matters: **oldest → newest → develop**. This minimizes merge conflicts since newer branches are closer to develop.
+Order matters: **oldest → newest → develop**. This minimizes merge conflicts since newer branches are closer to develop. Before each step, re-read the SHA of the commit the previous pull request landed on its branch.
 
-**Example: security fix needed on v1.6, v1.7, and v1.8:**
-
-At each step, the `<commit-hash>` is the SHA of the **squashed merge commit on the branch you just merged into** — re-read it from that branch before cherry-picking forward.
-
-```bash
-# 1. Fix on oldest affected branch
-git checkout release/v1.6
-git checkout -b hotfix/security-fix
-# ... fix ...
-git push origin hotfix/security-fix
-# PR → release/v1.6, merge (squash)
-
-# Grab the squashed SHA from release/v1.6
-git checkout release/v1.6 && git pull
-SHA=$(git log -1 --format=%H)
-
-# 2. Cherry-pick forward (re-read SHA from each branch after it lands)
-git checkout release/v1.7 && git pull
-git cherry-pick "$SHA"
-git push origin release/v1.7
-SHA=$(git log -1 --format=%H)  # new SHA on release/v1.7
-
-git checkout release/v1.8 && git pull
-git cherry-pick "$SHA"
-git push origin release/v1.8
-SHA=$(git log -1 --format=%H)  # new SHA on release/v1.8
-
-# 3. Cherry-pick to develop
-git checkout develop && git pull
-git cherry-pick "$SHA"
-git push origin develop
-```
-
-**Then create releases for each branch via GitHub UI:**
+**Example: security fix needed on v1.6, v1.7, and v1.8. Create releases for each branch via GitHub UI:**
 
 | Tag | Target | Pre-release? |
 |-----|--------|-------------|
@@ -340,29 +305,13 @@ For each: **Releases** → **Draft a new release** → set tag, target, and rele
 
 **Every fix that lands on a release branch must also be cherry-picked to `develop`.** If you skip this, the fix will be missing in the next release.
 
-After merging a hotfix PR to a release branch:
-
-1. **Immediately cherry-pick** the fix commit to `develop`
-2. **Use the squashed commit on the release branch as the source** — not the original commit from your `hotfix/*` branch (which won't survive the branch deletion)
-3. If cherry-pick conflicts, create a PR to `develop` with the manual resolution
-
-```bash
-# Get the SHA from the release branch
-git checkout release/v1.7 && git pull
-git log -1 --format=%H  # this is the SHA to cherry-pick
-
-git checkout develop && git pull
-git cherry-pick <sha-from-release-branch>
-git push origin develop
-```
+After merging a hotfix PR to a release branch, **immediately** carry the fix to `develop` with [the procedure above](#carrying-a-fix-to-another-branch), using the commit on the release branch as the source.
 
 This applies to all fixes on release branches — hotfixes, RC stabilization fixes, backported patches, and security fixes.
 
 ## Support / Maintenance Policy
 
-- **Supported:** current release + 1 previous minor version (receives bug fixes and security patches)
-- **EOL:** older release branches can be deleted after confirming no customers depend on them
-- Review and update this policy as the team/customer base grows
+Which release lines receive bug fixes and security patches is defined in [Supported Versions](SECURITY.md#supported-versions). Older release branches can be deleted after confirming that no deployment depends on them.
 
 ## Docker Images
 
@@ -371,8 +320,8 @@ This applies to all fixes on release branches — hotfixes, RC stabilization fix
 | Source | Docker Tags | Purpose |
 |--------|------------|---------|
 | `develop` branch | `:develop`, `:develop-{sha}` | Development testing |
-| `v*-rc/beta` tags | `:v1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
-| `v*` tags (stable) | `:v1.8.0`, `:latest` (if highest version) | Production releases |
+| `v*-rc/beta` tags | `:1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
+| `v*` tags (stable) | `:1.8.0`, `:latest` (if highest version) | Production releases |
 
 **How `:latest` is decided:** Evaluated at tag-push time by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
 
@@ -387,14 +336,14 @@ Consequences to be aware of:
 ```bash
 # Backend Images
 ghcr.io/eneo-ai/eneo-backend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-backend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-backend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-backend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-backend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-backend:latest       # Highest stable release
 
 # Frontend Images
 ghcr.io/eneo-ai/eneo-frontend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-frontend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-frontend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest       # Highest stable release
 ```
 
@@ -417,7 +366,7 @@ move at release time.
 **A:** For any change that adds functionality, fixes a bug, or modifies behavior. Even small changes should go through a PR for code review.
 
 ### Q: Can I push directly to develop or release branches?
-**A:** No. `develop` only accepts pull requests through the merge queue, and only Core Maintainers can push to release branches. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+**A:** No. `develop` only accepts pull requests through the merge queue, and release branches only accept pull requests that another Core Maintainer has approved. See [Carrying a Fix to Another Branch](#carrying-a-fix-to-another-branch). See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 ### Q: Where and how do I create version tags?
 **A:** Always on a `release/v1.X` branch. Use **GitHub Releases** (not the CLI) to create tags — this gives you release notes, pre-release marking, and a clean audit trail. See [Quick Command Reference](#creating-tags-github-ui).
@@ -429,7 +378,7 @@ move at release time.
 - Bug fixes → increment PATCH
 
 ### Q: What if I need to patch an old version?
-**A:** Use the same hotfix flow — create a `hotfix/*` branch from the relevant `release/v1.X`, PR to the release branch, merge, tag. No special handling needed.
+**A:** Use the same hotfix flow — create a `hotfix/*` branch from the relevant `release/v1.X`, PR to the release branch, get another Core Maintainer's approval, merge, tag. No special handling needed.
 
 ### Q: What if I need to test something quickly?
 **A:** Create a feature branch and PR to develop. Once merged, it auto-deploys to dev environment.
@@ -475,9 +424,9 @@ git push origin release/v1.8
 # Hotfix any version
 git checkout release/v1.7 && git pull
 git checkout -b hotfix/critical-fix
-# ... fix, push, PR to release/v1.7, merge ...
+# ... fix, push, PR to release/v1.7, second approval, merge ...
 # Then tag via GitHub UI (see below)
-# Cherry-pick to develop
+# Carry the fix to develop through a PR (see "Carrying a Fix to Another Branch")
 ```
 
 ### Creating tags (GitHub UI)

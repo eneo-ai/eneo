@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="title">From change to deployment</title>
+  <desc id="desc">Three lanes. People: a change starts as an issue and a pull request. GitHub runs CI, dependency audits and secret scanning. A Core Maintainer adds the pull request to the merge queue into develop. A pull request into a release branch is approved by a second Core Maintainer, and a Core Maintainer creates the v tag. GitHub then builds and scans the images, generates SBOMs and attestations and completes the release bundle. Operators verify the bundle and deploy it. Rulesets ensure that only Core Maintainers can queue, release and tag. Deployments consume the completed release bundle, not a single image tag.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="899" height="469" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+
+  <rect x="24" y="20" width="852" height="36" fill="#1a1a1a"/>
+  <text x="40" y="44" fill="#ffffff" font-size="16" font-weight="700">From change to deployment</text>
+
+  <!-- Lanes -->
+  <rect x="24" y="72" width="852" height="112" rx="8" fill="#eef7f8" stroke="#0e7c86"/>
+  <rect x="24" y="192" width="852" height="96" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="24" y="296" width="852" height="96" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+
+  <text x="40" y="110" fill="#1a1a1a" font-size="13" font-weight="700">People</text>
+  <text x="40" y="129" fill="#455a64" font-size="11">Contributors and</text>
+  <text x="40" y="144" fill="#455a64" font-size="11">Core Maintainers</text>
+
+  <text x="40" y="228" fill="#1a1a1a" font-size="13" font-weight="700">GitHub</text>
+  <text x="40" y="247" fill="#455a64" font-size="11">Checks and</text>
+  <text x="40" y="262" fill="#455a64" font-size="11">publication</text>
+
+  <text x="40" y="332" fill="#1a1a1a" font-size="13" font-weight="700">Operators</text>
+  <text x="40" y="351" fill="#455a64" font-size="11">Organisations</text>
+  <text x="40" y="366" fill="#455a64" font-size="11">running Eneo</text>
+
+  <!-- 1 Change -->
+  <rect x="170" y="86" width="106" height="84" rx="8" fill="#ffffff" stroke="#455a64"/>
+  <text x="180" y="108" fill="#1a1a1a" font-size="12" font-weight="700">1 Change</text>
+  <text x="180" y="128" fill="#455a64" font-size="11">Issue, then a</text>
+  <text x="180" y="144" fill="#455a64" font-size="11">pull request</text>
+
+  <path d="M276 128 H341 V204" fill="none" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 2 Checks -->
+  <rect x="288" y="206" width="106" height="68" rx="8" fill="#ffffff" stroke="#455a64" stroke-dasharray="4 3"/>
+  <text x="298" y="226" fill="#1a1a1a" font-size="12" font-weight="700">2 Checks</text>
+  <text x="298" y="246" fill="#455a64" font-size="11">CI, audits and</text>
+  <text x="298" y="262" fill="#455a64" font-size="11">secret scans</text>
+
+  <path d="M394 240 H459 V172" fill="none" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 3 Merge -->
+  <rect x="406" y="86" width="106" height="84" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="416" y="108" fill="#1a1a1a" font-size="12" font-weight="700">3 Merge</text>
+  <text x="416" y="128" fill="#455a64" font-size="11">Merge queue</text>
+  <text x="416" y="144" fill="#455a64" font-size="11">into develop</text>
+
+  <line x1="513" y1="128" x2="522" y2="128" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 4 Release review -->
+  <rect x="524" y="86" width="106" height="84" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="534" y="108" fill="#1a1a1a" font-size="12" font-weight="700">4 Approve</text>
+  <text x="534" y="128" fill="#455a64" font-size="11">A second Core</text>
+  <text x="534" y="144" fill="#455a64" font-size="11">Maintainer, on</text>
+  <text x="534" y="160" fill="#455a64" font-size="11">release/vX.Y</text>
+
+  <line x1="631" y1="128" x2="640" y2="128" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 5 Tag -->
+  <rect x="642" y="86" width="106" height="84" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="652" y="108" fill="#1a1a1a" font-size="12" font-weight="700">5 Tag</text>
+  <text x="652" y="128" fill="#455a64" font-size="11">v* tag on the</text>
+  <text x="652" y="144" fill="#455a64" font-size="11">release branch</text>
+
+  <path d="M748 128 H813 V204" fill="none" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 6 Release bundle -->
+  <rect x="760" y="206" width="106" height="68" rx="8" fill="#ffffff" stroke="#455a64" stroke-dasharray="4 3"/>
+  <text x="770" y="226" fill="#1a1a1a" font-size="12" font-weight="700">6 Bundle</text>
+  <text x="770" y="246" fill="#455a64" font-size="11">Build, scan,</text>
+  <text x="770" y="262" fill="#455a64" font-size="11">SBOM, attest</text>
+
+  <line x1="813" y1="275" x2="813" y2="308" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 7 Deploy -->
+  <rect x="760" y="310" width="106" height="68" rx="8" fill="#ffffff" stroke="#455a64"/>
+  <text x="770" y="330" fill="#1a1a1a" font-size="12" font-weight="700">7 Deploy</text>
+  <text x="770" y="350" fill="#455a64" font-size="11">Verify the</text>
+  <text x="770" y="366" fill="#455a64" font-size="11">bundle, deploy</text>
+
+  <!-- Enforcement -->
+  <rect x="24" y="404" width="852" height="50" rx="8" fill="#ffffff" stroke="#0e7c86"/>
+  <text x="40" y="425" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only Core Maintainers can queue into develop, approve and update releases, and tag.</text>
+  <text x="40" y="443" fill="#455a64" font-size="12">Deployments consume the completed release bundle, not a single image tag.</text>
+</svg>
