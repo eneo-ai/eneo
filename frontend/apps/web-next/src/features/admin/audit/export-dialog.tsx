@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -35,8 +36,8 @@ const RUNNING = new Set(["pending", "processing"]);
 /**
  * Async CSV export: start a job, poll its progress, then download through the
  * proxy (which streams the file with its content-disposition). The four
- * SvelteKit BFF endpoints are unnecessary here — the generic /api/eneo proxy
- * already attaches the bearer.
+ * SvelteKit BFF endpoints are unnecessary here — a plain link under API_BASE
+ * is already authenticated.
  */
 export function ExportDialog({
   open,
@@ -193,7 +194,7 @@ export function ExportDialog({
                 {t("close")}
               </Button>
               <Button asChild>
-                <a href={`/api/eneo/api/v1/audit/logs/export/${jobId}/download`}>
+                <a href={`${API_BASE}/api/v1/audit/logs/export/${jobId}/download`}>
                   <Download className="size-4" /> {t("download")}
                 </a>
               </Button>

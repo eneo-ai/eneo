@@ -1,17 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { JOB_EVENTS_PATH } from "@/lib/api/base";
 import type { Job } from "./jobs";
 
 /**
  * The live feed of the signed-in user's job updates: one EventSource per tab
- * on the app's `/api/jobs/events` proxy, shared by every subscriber. The
- * browser reconnects on its own after a dropped connection; after an HTTP
- * refusal (a session that expired) it stops, and this module tries again
- * later. While the feed is down, JobsProvider's polling carries on, so a
- * missed event only costs a few seconds, never a reload.
+ * on JOB_EVENTS_PATH, shared by every subscriber. The browser reconnects on
+ * its own after a dropped connection; after an HTTP refusal (a session that
+ * expired) it stops, and this module tries again later. While the feed is
+ * down, JobsProvider's polling carries on, so a missed event only costs a
+ * few seconds, never a reload.
  */
-export const JOB_EVENTS_PATH = "/api/jobs/events";
 export const JOB_EVENT_NAME = "job";
 /** How long to wait before reopening a feed the server refused. */
 const RETRY_AFTER_REFUSAL_MS = 30_000;

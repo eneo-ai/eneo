@@ -9,9 +9,23 @@ export function uniqueName(prefix: string) {
   return `${prefix} ${Date.now()} ${counter}`;
 }
 
-/** The chat composer's text field ("Meddelande till <assistent>"), in either layout. */
+/**
+ * The chat stream request in either build: Next's /api/chat proxy, or the
+ * backend's v3 conversations endpoint the Vite build calls directly.
+ */
+export function isChatStream(url: URL): boolean {
+  return (
+    url.pathname === "/api/chat" ||
+    (url.pathname === "/api/v1/conversations/" && url.searchParams.get("version") === "3")
+  );
+}
+
+/** The chat composer's accessible name ("Meddelande till <assistent>"). */
+export const CHAT_COMPOSER_NAME = /^(Meddelande till|Message to) /;
+
+/** The chat composer's text field, in either layout. */
 export function chatComposer(page: Page) {
-  return page.getByRole("textbox", { name: /^(Meddelande till|Message to) / });
+  return page.getByRole("textbox", { name: CHAT_COMPOSER_NAME });
 }
 
 export async function askChatQuestion(page: Page, question: string) {
@@ -19,9 +33,12 @@ export async function askChatQuestion(page: Page, question: string) {
   await page.getByRole("button", { name: /skicka meddelande|send message/i }).click();
 }
 
+/** The chat message list's accessible name. */
+export const CONVERSATION_LOG_NAME = /konversation|conversation/i;
+
 /** The chat's message list (a named log); appears once the first question is sent. */
 export function conversationLog(page: Page) {
-  return page.getByRole("log", { name: /konversation|conversation/i });
+  return page.getByRole("log", { name: CONVERSATION_LOG_NAME });
 }
 
 /** An answer's activity pill ("Aktivitet: 2 steg · 1 källa"), which opens the activity panel. */
@@ -52,11 +69,11 @@ const ANSWER_ACTIVITY = [
  * activity (steps, sources) to open. This gives the page's next answers a
  * reasoning step and a cited source, as a model with reasoning and knowledge
  * would: they are added to the answer's stream (the AI SDK UI message stream
- * that /api/chat passes on from the backend) before the answer text. The
- * backend still saves the plain answer.
+ * the backend sends) before the answer text. The backend still saves the
+ * plain answer.
  */
 export async function addActivityToAnswers(page: Page) {
-  await page.route("**/api/chat", async (route) => {
+  await page.route(isChatStream, async (route) => {
     const response = await route.fetch();
     const events = (await response.text()).split(/\r?\n\r?\n/).filter((event) => event.trim());
     const answerStart = events.findIndex((event) => /"type":\s*"(text-start|finish)"/.test(event));
