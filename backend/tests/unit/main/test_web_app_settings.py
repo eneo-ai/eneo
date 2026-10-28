@@ -182,7 +182,7 @@ def test_mcp_content_base_url_is_stored_as_a_browser_reads_it(
     # The content endpoint recognises the Host header a browser sends for it.
     request = SimpleNamespace(headers={"host": host})
     with patch.object(mcp_apps_router, "get_settings", return_value=settings):
-        assert mcp_apps_router._on_content_origin(request)  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+        assert mcp_apps_router.on_content_origin(request)  # pyright: ignore[reportArgumentType]
 
 
 @pytest.mark.parametrize(

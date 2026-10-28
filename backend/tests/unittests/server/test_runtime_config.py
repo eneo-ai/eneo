@@ -10,7 +10,7 @@ from eneo.authentication.endpoint_access import (
     access_for,
 )
 from eneo.main.config import Settings, set_settings
-from eneo.server import runtime_config_router
+from eneo.server import browser_platform, runtime_config_router
 from eneo.server.main import get_application
 from eneo.server.runtime_config_router import (
     build_runtime_config,
@@ -214,6 +214,7 @@ def test_startup_log_treats_blank_mcp_base_url_as_unset(
     ("flags", "logged"),
     [
         ({}, False),
+        ({"browser_session_enabled": True}, True),
         ({"web_app_enabled": True}, True),
     ],
 )
@@ -222,7 +223,10 @@ def test_startup_log_runs_only_for_the_browser_platform(
     runtime_log: list[logging.LogRecord],
     flags: dict[str, bool],
     logged: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    # The web app flag also serves a build; this test is about the log only.
+    monkeypatch.setattr(browser_platform, "install_web_app", lambda app: None)
     set_settings(_settings(test_settings, **flags))
 
     get_application()

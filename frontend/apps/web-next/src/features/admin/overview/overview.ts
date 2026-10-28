@@ -19,7 +19,7 @@ export function overviewUsersQueryOptions(api: EneoClient) {
   return adminUsersQueryOptions(api, { page: 1, stateFilter: "active", search: "" });
 }
 
-/** Token usage over the backend's default range, the last 30 days (the Användning page's query). */
+/** Token usage over the last 30 days (the Användning page's overview query). */
 export function overviewUsageQueryOptions(api: EneoClient) {
   return tokenUsageQueryOptions(api);
 }
