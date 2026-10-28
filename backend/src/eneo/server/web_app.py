@@ -10,6 +10,8 @@ its 307 and 405 answers (``Mount("/")`` would take both over):
 - any other GET or HEAD gets ``index.html`` with a fresh nonce, its CSP and
   ``<html lang>``, never stored.
 
+``/healthz`` answers like ``/api/healthz``, for monitoring on the web host.
+
 The other browser headers come from the one default-header owner
 (``middleware/response_headers.py``); headers set here win over them.
 """
@@ -22,6 +24,7 @@ from collections.abc import Sequence
 from pathlib import Path, PurePath, PurePosixPath
 
 from fastapi import FastAPI, HTTPException
+from fastapi.routing import APIRoute
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
@@ -109,6 +112,30 @@ def _read_index(dist: Path) -> str:
     return template
 
 
+def _alias_healthz(app: FastAPI) -> None:
+    """``/healthz`` for monitoring on the web host: the same endpoint, and so
+    the same access policy, as ``/api/healthz``."""
+    route = next(
+        (
+            route
+            for route in app.router.routes
+            if isinstance(route, APIRoute) and route.path == "/api/healthz"
+        ),
+        None,
+    )
+    if route is None:
+        raise RuntimeError("The /healthz alias needs the /api/healthz route")
+    app.add_api_route(
+        "/healthz",
+        route.endpoint,
+        methods=["GET"],
+        include_in_schema=False,
+        response_model=None,
+        description=route.description,
+        responses=route.responses,
+    )
+
+
 def install_web_app(app: FastAPI) -> None:
     settings = get_settings()
     if not settings.web_app_enabled:
@@ -174,3 +201,4 @@ def install_web_app(app: FastAPI) -> None:
         await response(scope, receive, send)
 
     app.router.default = web_app_fallback
+    _alias_healthz(app)

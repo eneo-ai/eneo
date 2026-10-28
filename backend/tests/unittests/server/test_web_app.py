@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -13,6 +14,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.main.config import get_settings, set_settings
+from eneo.scim.app import scim_app
 from eneo.server import web_app
 from eneo.server.browser_platform import install_browser_platform
 from eneo.server.exception_handlers import add_exception_handlers
@@ -42,6 +44,15 @@ async def _things() -> dict[str, bool]:
     return {"ok": True}
 
 
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Test health stub.",
+)
+async def _healthz() -> dict[str, str]:
+    return {"status": "HEALTHY"}
+
+
 @pytest.fixture
 def dist(tmp_path: Path) -> Path:
     root = tmp_path / "dist"
@@ -62,11 +73,21 @@ def _settings(**updates: object) -> None:
     )
 
 
-def _app(monkeypatch: pytest.MonkeyPatch, dist: Path, **updates: object) -> FastAPI:
+def _app(
+    monkeypatch: pytest.MonkeyPatch,
+    dist: Path,
+    *,
+    documented: bool = False,
+    **updates: object,
+) -> FastAPI:
     monkeypatch.setattr(web_app, "WEB_APP_DIST", dist)
     _settings(**updates)
-    # No documentation pages: /redoc must reach the fallback.
-    app = FastAPI(docs_url=None, redoc_url=None)
+    if documented:
+        app = FastAPI()
+        app.mount("/scim/v2", scim_app)
+    else:
+        app = FastAPI(docs_url=None, redoc_url=None)
+    app.add_api_route("/api/healthz", _healthz, methods=["GET"])
     app.add_api_route("/api/v1/things/", _things, methods=["GET"])
     add_exception_handlers(app)
     install_browser_platform(app)
@@ -234,7 +255,7 @@ def test_reserved_prefixes_never_return_html(
 
     assert response.status_code == 404
     assert response.headers["content-type"] == "application/json"
-    assert response.json()["message"] == "Not Found"
+    assert response.json()["detail"] == "Not Found"
 
 
 def test_api_slash_redirect_and_method_not_allowed_unchanged(
@@ -349,12 +370,22 @@ def test_get_application_with_web_app_enabled_validates(
     monkeypatch.setattr(web_app, "WEB_APP_DIST", dist)
     _settings()
 
-    client = TestClient(get_application())
+    app = get_application()
+    client = TestClient(app)
 
     assert client.get("/spaces/list").headers["content-type"].startswith("text/html")
     missing = client.get("/api/v1/does-not-exist")
     assert missing.status_code == 404
     assert missing.json()["message"] == "Not Found"
+    assert client.get("/docs").status_code == 404
+    assert client.get("/scim/v2/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 200
+    endpoints = {
+        route.path: route.endpoint
+        for route in app.router.routes
+        if isinstance(route, APIRoute)
+    }
+    assert endpoints["/healthz"] is endpoints["/api/healthz"]
 
 
 @pytest.mark.parametrize(
@@ -380,3 +411,95 @@ def test_other_paths_keep_strict_origin_referrer(
         "strict-origin-when-cross-origin"
     ]
     assert "x-robots-tag" not in response.headers
+
+
+def test_healthz_alias_serves_the_api_healthz_endpoint(
+    monkeypatch: pytest.MonkeyPatch, dist: Path
+):
+    app = _app(monkeypatch, dist)
+
+    endpoints = {
+        route.path: route.endpoint
+        for route in app.router.routes
+        if isinstance(route, APIRoute)
+    }
+    assert endpoints["/healthz"] is endpoints["/api/healthz"]
+    response = TestClient(app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "HEALTHY"}
+    assert "/healthz" not in app.openapi()["paths"]
+
+
+def test_healthz_alias_requires_api_healthz(
+    monkeypatch: pytest.MonkeyPatch, dist: Path
+):
+    monkeypatch.setattr(web_app, "WEB_APP_DIST", dist)
+    _settings()
+
+    with pytest.raises(RuntimeError, match="/api/healthz"):
+        install_browser_platform(FastAPI())
+
+
+def test_healthz_absent_when_disabled(monkeypatch: pytest.MonkeyPatch, dist: Path):
+    response = _client(monkeypatch, dist, web_app_enabled=False).get("/healthz")
+
+    assert response.status_code == 404
+
+
+DOCUMENTATION_PAGES = (
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/scim/v2/docs",
+    "/scim/v2/docs/oauth2-redirect",
+    "/scim/v2/redoc",
+)
+BROWSER_FLAGS = (
+    {"web_app_enabled": True},
+    {"web_app_enabled": False, "browser_session_enabled": True},
+)
+
+
+@pytest.mark.parametrize("flags", BROWSER_FLAGS)
+@pytest.mark.parametrize("path", DOCUMENTATION_PAGES)
+def test_documentation_pages_are_404_when_the_web_app_is_on(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, flags: dict[str, bool]
+):
+    response = TestClient(_app(monkeypatch, dist, documented=True, **flags)).get(path)
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/json"
+
+
+@pytest.mark.parametrize("flags", BROWSER_FLAGS)
+@pytest.mark.parametrize("path", ["/openapi.json", "/scim/v2/openapi.json"])
+def test_openapi_json_stays_available(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, flags: dict[str, bool]
+):
+    response = TestClient(_app(monkeypatch, dist, documented=True, **flags)).get(path)
+
+    assert response.status_code == 200
+    assert "openapi" in response.json()
+
+
+@pytest.mark.parametrize("flags", BROWSER_FLAGS)
+def test_documentation_stays_in_development(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, flags: dict[str, bool]
+):
+    client = TestClient(
+        _app(monkeypatch, dist, documented=True, environment="development", **flags)
+    )
+
+    for path in DOCUMENTATION_PAGES:
+        assert client.get(path).status_code == 200, path
+
+
+def test_documentation_unchanged_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, dist: Path
+):
+    client = TestClient(_app(monkeypatch, dist, documented=True, web_app_enabled=False))
+
+    for path in DOCUMENTATION_PAGES:
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].startswith("text/html")
