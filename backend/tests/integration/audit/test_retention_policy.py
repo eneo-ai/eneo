@@ -1,5 +1,6 @@
 """Integration tests for audit log retention policy."""
 
+import asyncio
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ from eneo.audit.application.retention_service import RetentionService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.database import sessionmanager
 
 pytestmark = pytest.mark.integration
 
@@ -26,6 +28,30 @@ async def test_get_default_retention_policy(db_session, test_tenant):
         assert policy.retention_days == 365  # Default
         assert policy.purge_count == 0
         assert policy.last_purge_at is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_reads_both_get_the_default_policy(
+    setup_database, test_tenant
+):
+    """The default is created by a GET, so two first reads racing both succeed."""
+    async with sessionmanager.session() as first, sessionmanager.session() as second:
+        await first.begin()
+        await second.begin()
+        # The first read inserts the default and holds it uncommitted, so the
+        # second read also finds no policy and its insert waits for the first.
+        first_policy = await RetentionService(first).get_policy(test_tenant.id)
+        racing = asyncio.create_task(
+            RetentionService(second).get_policy(test_tenant.id)
+        )
+        await asyncio.sleep(0.2)
+        assert not racing.done()
+        await first.commit()
+        second_policy = await racing
+        await second.commit()
+
+    assert first_policy.retention_days == second_policy.retention_days == 365
+    assert first_policy.created_at == second_policy.created_at
 
 
 @pytest.mark.asyncio
