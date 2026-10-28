@@ -47,7 +47,7 @@ class ConversationTarget(BaseModel):
 
 class ConversationTurnTarget(ConversationTarget):
     settings: ConversationSettings | None = None
-    settings_revision: int | None = Field(default=None, ge=1)
+    settings_revision: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_settings_target(self) -> "ConversationTurnTarget":

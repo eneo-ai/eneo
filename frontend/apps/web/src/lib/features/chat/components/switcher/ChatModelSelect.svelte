@@ -53,10 +53,12 @@
 
   $effect(() => chat.setModelCatalog(chat.settingsResolution?.available_models ?? []));
 
-  async function applyModel(id: string) {
+  async function applyModel(id: string, newConversation = false) {
     const model = visibleModels.find((candidate) => candidate.id === id);
     if (!model) return;
     pendingModelId = null;
+    // Capture the model before resetting clears the current resolution/catalog.
+    if (newConversation) onNewConversation();
     await chat.loadSettings();
     await chat.selectPersonalModel(model);
   }
@@ -175,8 +177,7 @@
         onclick={() => {
           const id = pendingModelId;
           if (!id) return;
-          onNewConversation();
-          applyModel(id);
+          applyModel(id, true);
         }}>{m.personal_chat_model_new_conversation()}</Button
       >
       <AlertDialog.Action

@@ -1,6 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  readConversationDraft,
+  rememberConversationDraft,
+  resolveConversationDraft
+} from "@eneo/eneo-js/conversations/draft-preferences";
+import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -24,7 +30,7 @@ type ConversationSettingsContext = {
 };
 const Context = createContext<ConversationSettingsContext | null>(null);
 
-/** One lifecycle per mounted conversation; no browser or assistant preferences. */
+/** Saved conversations own their choices; browser preferences seed only new drafts. */
 export function ConversationSettingsProvider({
   partner,
   initialSessionId,
@@ -36,6 +42,13 @@ export function ConversationSettingsProvider({
   hasHistory?: boolean;
   children: ReactNode;
 }) {
+  const { user, tenant } = useAppContext();
+  const scope = {
+    tenantId: tenant.id,
+    userId: user.id,
+    partnerId: partner.id,
+    partnerType: partner.type
+  };
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -57,6 +70,9 @@ export function ConversationSettingsProvider({
     if (!mounted.current) return;
     current.current = next;
     setResolution(next);
+    if (next.settings_compatible !== false && !next.model_unavailable) {
+      rememberConversationDraft(scope, next.settings);
+    }
   }
 
   async function resolve(settings?: Settings) {
@@ -68,7 +84,12 @@ export function ConversationSettingsProvider({
   }
 
   async function readSettings() {
-    let next = await resolve(current.current?.settings);
+    let next = sessionId.current
+      ? await resolve()
+      : await resolveConversationDraft(
+          resolve,
+          current.current?.settings ?? readConversationDraft(scope)
+        );
     if (sessionId.current && next.revision === 0 && !next.model_unavailable) {
       try {
         await unwrap(

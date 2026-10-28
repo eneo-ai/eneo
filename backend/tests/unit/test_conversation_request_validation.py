@@ -52,3 +52,13 @@ def test_existing_choices_must_use_the_versioned_settings_endpoint(request_type)
         request_type(question="hello", session_id=uuid4(), settings={})
     with pytest.raises(ValueError, match="existing conversation"):
         request_type(question="hello", assistant_id=uuid4(), settings_revision=1)
+
+
+@pytest.mark.parametrize("request_type", [ConversationRequest, PreflightRequest])
+def test_legacy_session_revision_zero_is_valid_but_negative_revisions_are_not(
+    request_type,
+):
+    request = request_type(question="hello", session_id=uuid4(), settings_revision=0)
+    assert request.settings_revision == 0
+    with pytest.raises(ValueError):
+        request_type(question="hello", session_id=uuid4(), settings_revision=-1)

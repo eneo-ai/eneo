@@ -175,6 +175,10 @@ settings do not replace them.
   `{ "expected_revision": 0, "settings": { ... } }`. Revision zero initializes a
   conversation without saved settings; subsequent writes use the current revision.
   A concurrent change returns `409` instead of overwriting it.
+- Preflight and sending accept `settings_revision: 0` for an existing conversation
+  that has no saved settings yet. Sending checks that observed revision before
+  initializing revision one. A concurrent initialization still returns `409`;
+  an existing nonzero revision must match exactly.
 - Each returned MCP server and capability has `selected` and `available`.
   `selected` represents user intent resolved against current defaults;
   `available` represents current eligibility. A selected but unavailable tool
@@ -194,6 +198,13 @@ the clients or continued through the API. Historical choices cannot be
 reconstructed from old browser preferences. Explicit selections are saved; a tool
 introduced later follows its current policy default until explicitly selected.
 A turn already running uses the configuration with which it started.
+
+The clients keep browser-local starting choices per tenant, user and conversation
+partner. These are used only to seed new drafts, never to replace an existing
+conversation's saved state or initialize an older conversation. The draft's
+choices travel in `settings` on its first question. Clearing or blocking browser
+storage restores current defaults; remembered model and reasoning choices are
+resolved against current policy before a new draft can send.
 
 `settings_compatible: false` means the stored state contains an option this server
 version cannot interpret. History remains readable, but settings writes, new

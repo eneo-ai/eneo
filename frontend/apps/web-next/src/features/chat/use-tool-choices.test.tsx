@@ -194,18 +194,40 @@ describe("conversation choices", () => {
     expect(view.current.settings.resolution?.settings.completion_model_id).toBe("model-2");
   });
 
-  it("uses current defaults for a new conversation, ignoring old browser preferences", async () => {
+  it("remembers browser choices for new drafts without saving them on the server", async () => {
     window.localStorage.setItem("autoAcceptToolsEnabled", "false");
     const first = renderChoices();
     await ready(first);
     await act(async () => first.current.tools.setAutoAcceptTools(false));
+    await act(async () => first.current.settings.update({ completion_model_id: "model-2" }));
     await ready(first);
     expect(first.current.automatic).toBe(false);
     expect(api.PATCH).not.toHaveBeenCalled();
     first.unmount();
     const next = renderChoices();
     await ready(next);
-    expect(next.current.automatic).toBe(true);
+    expect(next.current.automatic).toBe(false);
+    expect(next.current.settings.resolution?.settings.completion_model_id).toBe("model-2");
+    expect(api.PATCH).not.toHaveBeenCalled();
+    next.unmount();
+    window.localStorage.clear();
+    const reset = renderChoices();
+    await ready(reset);
+    expect(reset.current.automatic).toBe(true);
+    expect(reset.current.settings.resolution?.settings.completion_model_id).toBe("model-1");
+  });
+
+  it("keeps stored conversation choices authoritative over browser start choices", async () => {
+    const draft = renderChoices();
+    await ready(draft);
+    await act(async () =>
+      draft.current.settings.update({ completion_model_id: "model-2", require_tool_approval: true })
+    );
+    draft.unmount();
+    const existing = renderChoices(personal, "saved");
+    await ready(existing);
+    expect(existing.current.settings.resolution?.settings.completion_model_id).toBe("model-1");
+    expect(existing.current.automatic).toBe(true);
   });
 
   it("keeps dormant choices while the model cannot call tools", async () => {

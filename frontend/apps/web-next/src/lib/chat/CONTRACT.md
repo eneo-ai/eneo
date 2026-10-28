@@ -80,6 +80,12 @@ restriction such as hidden web search; it only narrows the saved and allowed set
 New options belong in the typed backend contract and generated types before a
 client control is added. Both frontends use the same resolution response.
 
+Both clients use `@eneo/eneo-js/conversations/draft-preferences` for browser-local
+start choices, scoped by tenant, user and partner. These seed only new drafts;
+saved and legacy conversations still read their state/defaults from the server.
+Storage clearing or failure returns new drafts to current defaults. A remembered
+model no longer available falls back to current defaults only for new drafts.
+
 ## Stream parts
 
 All parts are JSON objects with a `type` discriminator. Fields marked

@@ -226,6 +226,64 @@ async def test_send_uses_persisted_choices_and_rejects_another_tabs_revision():
 
 
 @pytest.mark.asyncio
+async def test_revision_zero_initializes_a_legacy_conversation_before_sending():
+    service, assistant, *_ = service_with_policy()
+    session = SimpleNamespace(
+        id=uuid4(), assistant_id=assistant.id, group_chat_id=None, settings=None
+    )
+    service.session_service.get_context.return_value = session
+    choices = await service.settings_defaults(assistant_id=assistant.id)
+    state = ConversationSettingsState(revision=1, settings=choices)
+    service.session_service.update_settings.return_value = state
+    resolved = await service.resolve_settings(session_id=session.id)
+    assert resolved.revision == 0
+
+    await service.ask_conversation(
+        "hello", session_id=session.id, settings_revision=resolved.revision
+    )
+    assert (
+        service.assistant_service.ask.await_args.kwargs["conversation_settings"]
+        == state
+    )
+
+
+@pytest.mark.asyncio
+async def test_initialization_conflict_does_not_send_with_another_writers_choices():
+    service, assistant, *_ = service_with_policy()
+    session = SimpleNamespace(
+        id=uuid4(), assistant_id=assistant.id, group_chat_id=None, settings=None
+    )
+    service.session_service.get_context.return_value = session
+    service.session_service.update_settings.side_effect = (
+        ConversationSettingsConflictException()
+    )
+    with pytest.raises(ConversationSettingsConflictException):
+        await service.ask_conversation(
+            "hello", session_id=session.id, settings_revision=0
+        )
+    service.assistant_service.ask.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_revision_is_rejected_before_initializing_a_legacy_conversation():
+    service, assistant, *_ = service_with_policy()
+    session = SimpleNamespace(
+        id=uuid4(), assistant_id=assistant.id, group_chat_id=None, settings=None
+    )
+    service.session_service.get_context.return_value = session
+    with pytest.raises(ConversationSettingsConflictException):
+        await service.ask_conversation(
+            "hello", session_id=session.id, settings_revision=1
+        )
+    service.session_service.update_settings.assert_not_awaited()
+    service.assistant_service.ask.assert_not_awaited()
+    with pytest.raises(ConversationSettingsConflictException):
+        await service.preflight_tokens(
+            "hello", [], session_id=session.id, settings_revision=1
+        )
+
+
+@pytest.mark.asyncio
 async def test_group_send_keeps_shared_choices_without_a_global_model():
     service, *_ = service_with_policy()
     state = ConversationSettingsState(
@@ -345,7 +403,11 @@ async def test_preflight_and_first_send_use_the_same_current_policy_default(lega
         return ConversationSettingsState(revision=1, settings=settings)
 
     service.session_service.update_settings.side_effect = save
-    target = {"session_id": session_id} if legacy else {"assistant_id": assistant.id}
+    target = (
+        {"session_id": session_id, "settings_revision": 0}
+        if legacy
+        else {"assistant_id": assistant.id}
+    )
     estimate = await service.preflight_tokens(question="Hello", file_ids=[], **target)
     await service.ask_conversation("Hello", **target)
     saved = service.assistant_service.ask.await_args.kwargs["conversation_settings"]

@@ -1,4 +1,9 @@
 import { browser } from "$app/environment";
+import {
+  readConversationDraft,
+  rememberConversationDraft,
+  resolveConversationDraft
+} from "@eneo/eneo-js/conversations/draft-preferences";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
 import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
@@ -108,6 +113,17 @@ export class ChatService {
   settingsBusy = $state(false);
   settingsError = $state<unknown>(null);
   #settingsEnabled = false;
+  #draftOwner?: { tenantId: string; userId: string };
+
+  #draftScope() {
+    return this.#draftOwner
+      ? {
+          ...this.#draftOwner,
+          partnerId: this.#chatPartner.id,
+          partnerType: this.#chatPartner.type
+        }
+      : undefined;
+  }
   selectedPersonalModel = $derived.by(() => {
     const id = this.settings?.completion_model_id;
     if (!id || this.#chatPartner?.type !== "default-assistant") return null;
@@ -354,6 +370,15 @@ export class ChatService {
     } else {
       this.#draftSettings = resolution.settings;
     }
+    const scope = this.#draftScope();
+    if (
+      browser &&
+      scope &&
+      resolution.settings_compatible !== false &&
+      !resolution.model_unavailable
+    ) {
+      rememberConversationDraft(scope, resolution.settings);
+    }
     this.#clearPreflight();
   }
 
@@ -364,11 +389,15 @@ export class ChatService {
     const partner = this.#chatPartner;
     this.settingsBusy = true;
     try {
-      let resolution = await this.#eneo.conversations.resolveSettings({
-        chatPartner: partner,
-        conversation,
-        settings: conversation.id ? undefined : (this.settings ?? undefined)
-      });
+      const resolve = (settings?: ConversationSettings) =>
+        this.#eneo.conversations.resolveSettings({ chatPartner: partner, conversation, settings });
+      const scope = this.#draftScope();
+      let resolution = conversation.id
+        ? await resolve()
+        : await resolveConversationDraft(
+            resolve,
+            this.settings ?? (browser && scope ? readConversationDraft(scope) : undefined)
+          );
       if (conversation.id && resolution.revision === 0 && !resolution.model_unavailable) {
         try {
           await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
@@ -482,12 +511,14 @@ export class ChatService {
 
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#eneo = data.eneo;
+    this.#draftOwner = data.draftOwner;
     this.init(data);
   }
 
   init(data: {
     eneo: Eneo;
     chatPartner: ChatPartner;
+    draftOwner?: { tenantId: string; userId: string };
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
   }) {

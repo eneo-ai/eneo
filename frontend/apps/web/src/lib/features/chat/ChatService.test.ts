@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
 import {
@@ -35,15 +35,17 @@ function chatService(
   preflight = vi.fn(),
   overrides: {
     ask?: ReturnType<typeof vi.fn>;
-    get?: ReturnType<typeof vi.fn>;
+    get?: Mock<(conversation: Conversation) => Promise<Conversation>>;
     resolveSettings?: ReturnType<typeof vi.fn>;
     updateSettings?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
     initialConversation?: Conversation | null;
     partner?: ChatPartner;
+    draftOwner?: { tenantId: string; userId: string };
   } = {}
 ) {
   return new ChatService({
+    draftOwner: overrides.draftOwner,
     eneo: {
       conversations: {
         preflight,
@@ -707,7 +709,12 @@ describe("ChatService saved conversation choices", () => {
         settings: { require_tool_approval: false },
         settings_compatible: false
       }),
-      initialConversation: { id: "saved", messages: [], settings: { revision: 2, settings: {} } }
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 2, settings: {} }
+      }
     });
     await chat.loadSettings();
     expect(chat.settingsError).toBeNull();
@@ -1276,5 +1283,64 @@ describe("pending question", () => {
       expect(question(chat)).toEqual([]);
       expect(chat.askQuestion.isLoading).toBe(false);
     });
+  });
+});
+
+describe("ChatService browser start choices", () => {
+  const owner = { tenantId: "tenant", userId: "user" };
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      clear: () => values.clear()
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("carries the setup into new chats and a fresh page without persisting a session", async () => {
+    const updateSettings = vi.fn();
+    const chat = chatService(vi.fn(), { draftOwner: owner, updateSettings });
+    await chat.loadSettings();
+    await chat.updateSettings({
+      completion_model_id: "model-2",
+      require_tool_approval: true,
+      mcp_server_states: { tool: false },
+      capability_states: { web_search: false }
+    });
+    chat.newConversation();
+    await chat.loadSettings();
+    expect(chat.settings).toMatchObject({
+      completion_model_id: "model-2",
+      require_tool_approval: true,
+      mcp_server_states: { tool: false },
+      capability_states: { web_search: false }
+    });
+    const fresh = chatService(vi.fn(), { draftOwner: owner });
+    await fresh.loadSettings();
+    expect(fresh.settings).toEqual(chat.settings);
+    expect(updateSettings).not.toHaveBeenCalled();
+    localStorage.clear();
+    chat.newConversation();
+    await chat.loadSettings();
+    expect(chat.settings?.completion_model_id).toBe("model-1");
+  });
+
+  it("never overwrites saved conversation choices with browser defaults", async () => {
+    const draft = chatService(vi.fn(), { draftOwner: owner });
+    await draft.loadSettings();
+    await draft.updateSettings({ completion_model_id: "model-2" });
+    const existing = chatService(vi.fn(), {
+      draftOwner: owner,
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 3, settings: { completion_model_id: "model-1" } }
+      }
+    });
+    await existing.loadSettings();
+    expect(existing.settings?.completion_model_id).toBe("model-1");
+    expect(existing.currentConversation.settings?.revision).toBe(3);
   });
 });

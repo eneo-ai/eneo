@@ -27,6 +27,7 @@
 
   const {
     user,
+    tenant,
     state: { userInfo }
   } = getAppContext();
 
@@ -34,7 +35,9 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const chat = untrack(() => initChatService(data));
+  const chat = untrack(() =>
+    initChatService({ ...data, draftOwner: { userId: user.id, tenantId: tenant.id } })
+  );
   // Keep the conversation's preview state when moving between chat and history.
   initFilePreview(getAttachmentUrlService());
 

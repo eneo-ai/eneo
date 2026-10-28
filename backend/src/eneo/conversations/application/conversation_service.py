@@ -448,6 +448,13 @@ class ConversationService:
             assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
             state = session.settings
+        # Compare with the state the caller observed, before initialization
+        # advances an uninitialized conversation from revision zero to one.
+        revision = state.revision if state is not None else 0
+        if settings_revision is not None and settings_revision != revision:
+            raise ConversationSettingsConflictException(
+                "Conversation settings changed elsewhere. Reload the conversation and try again."
+            )
         if state is None:
             choices = settings or await self.settings_defaults(
                 assistant_id=assistant_id, group_chat_id=group_chat_id
@@ -462,10 +469,6 @@ class ConversationService:
             else:
                 state = ConversationSettingsState(revision=1, settings=choices)
         state.require_supported()
-        if settings_revision is not None and settings_revision != state.revision:
-            raise ConversationSettingsConflictException(
-                "Conversation settings changed elsewhere. Reload the conversation and try again."
-            )
         if (
             require_tool_approval or state.settings.require_tool_approval
         ) and not stream:
@@ -531,15 +534,13 @@ class ConversationService:
             session = await self.session_service.get_context(session_id)
             assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
+            revision = session.settings.revision if session.settings else 0
+            if settings_revision is not None and settings_revision != revision:
+                raise ConversationSettingsConflictException(
+                    "Conversation settings changed elsewhere. Reload the conversation and try again."
+                )
             if session.settings:
                 session.settings.require_supported()
-                if (
-                    settings_revision is not None
-                    and settings_revision != session.settings.revision
-                ):
-                    raise ConversationSettingsConflictException(
-                        "Conversation settings changed elsewhere. Reload the conversation and try again."
-                    )
                 settings = session.settings.settings
         if settings is None:
             settings = await self.settings_defaults(

@@ -303,8 +303,11 @@ ask a file is not granted to service keys.
 ## What users see in the chat
 
 - The tools popover in the chat input lists each enabled function with an
-  on/off toggle. Each new conversation starts with its assistant's current
-  defaults, including the organisation's governance defaults in Personal Chat.
+  on/off toggle. New conversations reuse the latest setup remembered in this
+  browser for the same account and assistant or group chat. Clearing browser
+  storage, using another browser, or blocked storage restores current assistant
+  defaults, including governance defaults in Personal Chat. These start choices
+  are stored only in the browser; they do not change other saved conversations.
   Tool choices and the approval preference belong to that conversation. They
   are stored on the server and restored when it is reopened or refreshed,
   including on another browser or device signed in to the same account.
@@ -312,7 +315,8 @@ ask a file is not granted to service keys.
   change the saved choice. A newly available tool uses its current default.
 - In Personal Chat, the completion model and, where policy allows it,
   reasoning effort also belong to the conversation. Changing them does not
-  change the default assistant or later conversations. A model change resets
+  change the default assistant. The browser remembers the choices as a starting
+  point for later conversations. A model change resets
   reasoning effort to the organisation's default for the selected model.
   Ordinary assistant chats use their configured model and reasoning settings;
   group chats use the responding assistant's settings. Group chats do not
@@ -328,8 +332,11 @@ ask a file is not granted to service keys.
   miss does not delete saved messages or require a new conversation. The model
   that produced each answer remains recorded with that message.
 - Changes in an existing conversation are saved immediately, before the next
-  message. A draft is saved together with its first question; refreshing an
-  unsent draft restores current defaults. Older conversations without saved
+  message. A draft is saved on the server together with its first question;
+  refreshing an unsent draft restores this browser's remembered setup. Its
+  message text and attachments are not part of these preferences. A remembered
+  model that is no longer allowed falls back to current defaults for new drafts,
+  and unsupported reasoning choices are cleared. Older conversations without saved
   settings initialize once from current defaults when opened. If the default
   model is unavailable, select an available replacement before saving those
   initial settings. Old browser
