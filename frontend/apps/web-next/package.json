@@ -7,7 +7,7 @@
     "dev:clean": "bun run clean:cache && bun run dev",
     "clean:cache": "rm -rf .next node_modules/.cache",
     "build": "next build",
-    "build:vite": "vite build",
+    "build:vite": "tsr generate && vite build",
     "routes:generate": "tsr generate",
     "start": "next start",
     "lint": "node scripts/check-i18n.mjs && astryx theme build --check src/theme/eneo-theme.ts && prettier --check . && eslint",
