@@ -20,9 +20,12 @@ export function isChatStream(url: URL): boolean {
   );
 }
 
-/** The chat composer's text field ("Meddelande till <assistent>"), in either layout. */
+/** The chat composer's accessible name ("Meddelande till <assistent>"). */
+export const CHAT_COMPOSER_NAME = /^(Meddelande till|Message to) /;
+
+/** The chat composer's text field, in either layout. */
 export function chatComposer(page: Page) {
-  return page.getByRole("textbox", { name: /^(Meddelande till|Message to) / });
+  return page.getByRole("textbox", { name: CHAT_COMPOSER_NAME });
 }
 
 export async function askChatQuestion(page: Page, question: string) {
@@ -30,9 +33,12 @@ export async function askChatQuestion(page: Page, question: string) {
   await page.getByRole("button", { name: /skicka meddelande|send message/i }).click();
 }
 
+/** The chat message list's accessible name. */
+export const CONVERSATION_LOG_NAME = /konversation|conversation/i;
+
 /** The chat's message list (a named log); appears once the first question is sent. */
 export function conversationLog(page: Page) {
-  return page.getByRole("log", { name: /konversation|conversation/i });
+  return page.getByRole("log", { name: CONVERSATION_LOG_NAME });
 }
 
 /** An answer's activity pill ("Aktivitet: 2 steg · 1 källa"), which opens the activity panel. */
