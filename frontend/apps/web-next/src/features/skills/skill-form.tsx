@@ -2,12 +2,11 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { getErrorMessage } from "@/lib/api/errors";
+import { ListError } from "@/components/composites/query-state";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import {
   deriveSkillSlug,
@@ -49,7 +48,7 @@ export function SkillForm(props: Props) {
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
@@ -99,7 +98,7 @@ export function SkillForm(props: Props) {
         setAttempted(false);
         setSaved(true);
       } catch (cause) {
-        setError(getErrorMessage(cause, t));
+        setError(cause);
       } finally {
         setBusy(false);
       }
@@ -211,17 +210,15 @@ export function SkillForm(props: Props) {
             </div>
           </details>
         )}
-        {error && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>
-              {t(
-                props.mode === "create"
-                  ? "skills_form_error_title"
-                  : "skills_revision_form_error_title"
-              )}
-            </AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+        {error != null && (
+          <ListError
+            error={error}
+            title={t(
+              props.mode === "create"
+                ? "skills_form_error_title"
+                : "skills_revision_form_error_title"
+            )}
+          />
         )}
       </div>
       <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3">

@@ -4,7 +4,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Eye, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,8 +17,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import {
+  blockingError,
+  ListError,
+  LoadMore,
+  QueryStateBoundary,
+  RefreshError
+} from "@/components/composites/query-state";
+import { EneoApiError } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import {
   getSkillRevision,
   listSkillRevisions,
@@ -80,15 +88,14 @@ export function SkillRevisionHistory({
   const [viewId, setViewId] = useState<string | null>(null);
   const [restoreId, setRestoreId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const key = skillQueryKey(scope);
   const canRestore = allowRestore && !("removed_at" in skill && skill.removed_at);
   const revisions = useInfiniteQuery({
     queryKey: [...key, skill.id, "revisions"],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => listSkillRevisions(scope, skill.id, pageParam),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    ...cursorPagination,
+    queryFn: ({ pageParam }) => listSkillRevisions(scope, skill.id, pageParam ?? null),
     retry: false
   });
   const preview = useQuery({
@@ -98,7 +105,7 @@ export function SkillRevisionHistory({
     retry: false
   });
   const revision = viewId === skill.current_revision_id ? skill.current_revision : preview.data;
-  const items = revisions.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = flattenPages(revisions.data?.pages);
 
   async function restore() {
     if (!restoreId || restoring || !canRestore) return;
@@ -123,7 +130,7 @@ export function SkillRevisionHistory({
       );
       if (outcome.created) await queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
       if (cause instanceof EneoApiError && cause.status === 409) {
         await queryClient.invalidateQueries({ queryKey: [...key, skill.id] });
         setRestoreId(null);
@@ -144,80 +151,48 @@ export function SkillRevisionHistory({
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
       </p>
-      {revisions.isPending ? (
-        <p role="status">{t("loading")}</p>
-      ) : revisions.isError && !revisions.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void revisions.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <>
-          <div className="divide-y rounded-lg border">
-            {items.map((item) => (
-              <div key={item.id} className="flex flex-wrap items-center gap-3 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {t("skills_revision_label", { revision: String(item.revision_number) })}
-                    {item.id === skill.current_revision_id && (
-                      <Badge variant="secondary">{t("skills_library_current_revision")}</Badge>
-                    )}
-                  </p>
-                  <p className="text-muted-foreground truncate text-xs">
-                    {item.display_name} ·{" "}
-                    {new Date(item.created_at).toLocaleString(locale, {
-                      dateStyle: "short",
-                      timeStyle: "short"
+      <QueryStateBoundary query={revisions} rows={3}>
+        {() => (
+          <>
+            <div className="divide-y rounded-lg border">
+              {items.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center gap-3 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      {t("skills_revision_label", { revision: String(item.revision_number) })}
+                      {item.id === skill.current_revision_id && (
+                        <Badge variant="secondary">{t("skills_library_current_revision")}</Badge>
+                      )}
+                    </p>
+                    <p className="text-muted-foreground truncate text-xs">
+                      {item.display_name} ·{" "}
+                      {new Date(item.created_at).toLocaleString(locale, {
+                        dateStyle: "short",
+                        timeStyle: "short"
+                      })}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("skills_library_view_revision_aria", {
+                      revision: String(item.revision_number)
                     })}
-                  </p>
+                    onClick={() => {
+                      setError(null);
+                      setViewId(item.id);
+                    }}
+                  >
+                    <Eye className="size-4" />
+                    {t("preview")}
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={t("skills_library_view_revision_aria", {
-                    revision: String(item.revision_number)
-                  })}
-                  onClick={() => {
-                    setError(null);
-                    setViewId(item.id);
-                  }}
-                >
-                  <Eye className="size-4" />
-                  {t("preview")}
-                </Button>
-              </div>
-            ))}
-          </div>
-          {revisions.hasNextPage && (
-            <Button
-              variant="outline"
-              aria-busy={revisions.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!revisions.isFetchingNextPage) void revisions.fetchNextPage();
-              }}
-            >
-              {revisions.isFetchingNextPage
-                ? t("skills_library_loading_older")
-                : t("skills_library_load_older")}
-            </Button>
-          )}
-          {revisions.isFetchNextPageError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_load_older_error")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" onClick={() => void revisions.fetchNextPage()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
+              ))}
+            </div>
+            <LoadMore query={revisions} label={t("skills_library_load_older")} />
+          </>
+        )}
+      </QueryStateBoundary>
       <Dialog
         open={viewId !== null}
         onOpenChange={(open) => {
@@ -232,19 +207,20 @@ export function SkillRevisionHistory({
               })}
             </DialogTitle>
           </DialogHeader>
-          {preview.isPending && viewId !== skill.current_revision_id ? (
-            <p role="status">{t("loading")}</p>
-          ) : preview.isError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_preview_error")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" onClick={() => void preview.refetch()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : revision ? (
+          {blockingError(preview) ? (
+            <ListError
+              error={preview.error}
+              title={t("skills_library_preview_error")}
+              isRetrying={preview.isFetching}
+              onRetry={() => void preview.refetch()}
+            />
+          ) : !revision ? (
+            viewId !== null ? (
+              <LoadingState rows={3} />
+            ) : null
+          ) : (
             <>
+              <RefreshError queries={[preview]} />
               <RevisionContent revision={revision} current={skill.current_revision} />
               {canRestore && revision.id !== skill.current_revision_id && (
                 <Button
@@ -260,7 +236,7 @@ export function SkillRevisionHistory({
                 </Button>
               )}
             </>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
       <AlertDialog
@@ -282,12 +258,7 @@ export function SkillRevisionHistory({
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_restore_error")}</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {error != null && <ListError error={error} title={t("skills_library_restore_error")} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={restoring}>{t("cancel")}</AlertDialogCancel>
             {/* Busy, it stays enabled so it keeps focus; restore() ignores a second press. */}

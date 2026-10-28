@@ -146,7 +146,11 @@ describe("CrawlRunDetailsDialog", () => {
       await within(dialog).findByText("Kunde inte hämta misslyckade adresser. Försök igen.")
     ).toBeTruthy();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Försök igen: Kunde inte hämta misslyckade adresser. Försök igen."
+      })
+    );
     expect(await within(dialog).findByRole("list", { name: "Misslyckade adresser" })).toBeTruthy();
   });
 

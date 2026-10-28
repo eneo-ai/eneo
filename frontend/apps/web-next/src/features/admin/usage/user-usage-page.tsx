@@ -6,12 +6,12 @@ import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -370,35 +370,36 @@ export function UserUsagePage({
 
       <DateRangeBar range={range} setRange={setRange} />
 
-      {user.isPending ? (
-        <Skeleton className="h-64 w-full" />
-      ) : user.isError || !userRow ? (
-        <Card className="p-6 text-center">
-          <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {user.isError ? t("request_failed") : t("usage_user_not_found_description")}
-          </p>
-        </Card>
-      ) : (
-        <>
-          <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
-
-          {breakdown.isPending ? (
-            <Skeleton className="h-72 w-full" />
-          ) : breakdown.isError || !breakdown.data ? (
+      <QueryStateBoundary query={user} rows={1} height={256}>
+        {() =>
+          !userRow ? (
             <Card className="p-6 text-center">
-              <h2 className="font-semibold">{t("usage_error_loading_model_breakdown")}</h2>
-              <p className="text-muted-foreground mt-1 text-sm">{t("request_failed")}</p>
+              <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("usage_user_not_found_description")}
+              </p>
             </Card>
           ) : (
             <>
-              <ProviderBreakdown data={breakdown.data} />
-              <TopModels data={breakdown.data} />
-              <ModelBreakdownTable data={breakdown.data} rates={rates} />
+              <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
+              <QueryStateBoundary
+                query={breakdown}
+                rows={1}
+                height={288}
+                errorTitle={t("usage_error_loading_model_breakdown")}
+              >
+                {(data) => (
+                  <>
+                    <ProviderBreakdown data={data} />
+                    <TopModels data={data} />
+                    <ModelBreakdownTable data={data} rates={rates} />
+                  </>
+                )}
+              </QueryStateBoundary>
             </>
-          )}
-        </>
-      )}
+          )
+        }
+      </QueryStateBoundary>
     </div>
   );
 }

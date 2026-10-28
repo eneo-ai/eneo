@@ -11,7 +11,7 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -123,7 +123,7 @@ function PolicyEditor({
   const [modelProjections, setModelProjections] = useState(initialProjections);
   const [busy, setBusy] = useState<"save" | "reset" | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
-  const [error, setError] = useState<"save" | "reset" | null>(null);
+  const [error, setError] = useState<{ kind: "save" | "reset"; cause: unknown } | null>(null);
   const [status, setStatus] = useState<"saved" | "reset" | "unchanged" | null>(null);
   const statusText =
     status === "saved"
@@ -190,8 +190,8 @@ function PolicyEditor({
       ).catch(() => null);
       setModelProjections(projection);
       setStatus(kind === "save" ? "saved" : "reset");
-    } catch {
-      setError(kind);
+    } catch (cause) {
+      setError({ kind, cause });
     } finally {
       setBusy(null);
       setResetOpen(false);
@@ -246,16 +246,14 @@ function PolicyEditor({
         ))}
       </div>
       {error && (
-        <Alert variant="destructive" role="alert">
-          <CircleAlert className="size-4" />
-          <AlertTitle>
-            {t(
-              error === "reset"
-                ? "skills_runtime_policy_reset_error"
-                : "skills_runtime_policy_save_error"
-            )}
-          </AlertTitle>
-        </Alert>
+        <ListError
+          error={error.cause}
+          title={t(
+            error.kind === "reset"
+              ? "skills_runtime_policy_reset_error"
+              : "skills_runtime_policy_save_error"
+          )}
+        />
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="text-muted-foreground text-sm">{statusText}</p>

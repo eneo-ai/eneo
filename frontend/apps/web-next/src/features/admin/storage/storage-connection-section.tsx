@@ -12,6 +12,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -504,11 +504,7 @@ export function StorageConnectionSection({
             </p>
           </div>
         ) : loadStatus === "loading" ? (
-          <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-5 w-52" />
-            <Skeleton className="h-16 w-full" />
-            <span className="sr-only">{t("storage_connection_loading")}</span>
-          </div>
+          <LoadingState rows={2} label={t("storage_connection_loading")} />
         ) : loadStatus === "error" ? (
           <Alert variant="destructive">
             <CircleAlert className="size-4" />

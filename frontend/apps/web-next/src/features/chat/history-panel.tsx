@@ -1,7 +1,6 @@
 "use client";
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
-import { Button as AxButton } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -9,7 +8,7 @@ import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
-import { LoadingState } from "@/components/composites/loading-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
@@ -171,7 +170,6 @@ function HistoryPanel({
   }, [pageCount, pages]);
 
   function loadMore() {
-    if (history.isFetchingNextPage) return;
     focusPage.current = pageCount;
     void history.fetchNextPage();
   }
@@ -211,95 +209,83 @@ function HistoryPanel({
         </div>
       )}
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
-        {history.isPending ? (
-          <LoadingState rows={6} className="p-2" />
-        ) : history.isError ? (
-          <p className="text-ax-error p-2 text-[13px]">{t("request_failed")}</p>
-        ) : sessions.length === 0 ? (
-          <p className="text-ax-text-secondary p-2 text-[13px]">
-            {t("chat_history_empty_with", { name: partnerName })}
-          </p>
-        ) : shown.length === 0 ? (
-          <p className="text-ax-text-secondary p-2 text-[13px]">
-            {t("chat_history_no_matches", { query: query.trim() })}
-          </p>
-        ) : (
-          groups.map((group, index) => (
-            <section
-              key={`${group.bucket}-${index}`}
-              aria-label={
-                group.bucket
-                  ? t(BUCKET_KEY[group.bucket])
-                  : t("chat_history_with", { name: partnerName })
-              }
-              className="flex flex-col"
-            >
-              {group.bucket && (
-                <h3 className="text-ax-text-secondary px-2 pt-3 pb-1 text-xs font-semibold first:pt-1">
-                  {t(BUCKET_KEY[group.bucket])}
-                </h3>
-              )}
-              <ul className="flex flex-col gap-0.5">
-                {group.sessions.map((session) => {
-                  const active = session.id === activeSessionId;
-                  const name = session.name || t("chat_history_untitled");
-                  return (
-                    <li
-                      key={session.id}
-                      className={cn(
-                        "rounded-ax-element flex items-center transition-colors",
-                        active ? "bg-ax-selected" : "hover:bg-ax-hover"
-                      )}
-                    >
-                      <button
-                        type="button"
-                        data-session-row={session.id}
-                        aria-current={active ? "true" : undefined}
-                        onClick={() => onSelect(session.id)}
-                        className={cn(
-                          "focus-visible:outline-ring rounded-ax-element min-h-9 min-w-0 flex-1 truncate px-2.5 text-start text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 pointer-coarse:min-h-11",
-                          active ? "font-semibold" : "text-ax-text-secondary hover:text-ax-text"
-                        )}
-                      >
-                        {name}
-                      </button>
-                      <MoreMenu
-                        label={t("chat_history_actions", { name })}
-                        size="sm"
-                        alignment="end"
-                        items={[
-                          {
-                            label: t("rename"),
-                            onClick: () => setRenaming({ id: session.id, name: session.name })
-                          },
-                          { type: "divider" },
-                          {
-                            label: t("delete"),
-                            variant: "destructive",
-                            onClick: () => setDeleting({ id: session.id, name })
-                          }
-                        ]}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))
-        )}
-        {history.hasNextPage && (
-          <div className="flex justify-center p-2">
-            <AxButton
-              label={t("chat_history_load_more")}
-              variant="ghost"
-              size="sm"
-              // Stays enabled while loading so keyboard focus stays on it.
-              isLoading={history.isFetchingNextPage}
-              isInterruptible
-              onClick={loadMore}
-            />
-          </div>
-        )}
+        <QueryStateBoundary query={history} rows={6}>
+          {() =>
+            sessions.length === 0 ? (
+              <p className="text-ax-text-secondary p-2 text-[13px]">
+                {t("chat_history_empty_with", { name: partnerName })}
+              </p>
+            ) : shown.length === 0 ? (
+              <p className="text-ax-text-secondary p-2 text-[13px]">
+                {t("chat_history_no_matches", { query: query.trim() })}
+              </p>
+            ) : (
+              groups.map((group, index) => (
+                <section
+                  key={`${group.bucket}-${index}`}
+                  aria-label={
+                    group.bucket
+                      ? t(BUCKET_KEY[group.bucket])
+                      : t("chat_history_with", { name: partnerName })
+                  }
+                  className="flex flex-col"
+                >
+                  {group.bucket && (
+                    <h3 className="text-ax-text-secondary px-2 pt-3 pb-1 text-xs font-semibold first:pt-1">
+                      {t(BUCKET_KEY[group.bucket])}
+                    </h3>
+                  )}
+                  <ul className="flex flex-col gap-0.5">
+                    {group.sessions.map((session) => {
+                      const active = session.id === activeSessionId;
+                      const name = session.name || t("chat_history_untitled");
+                      return (
+                        <li
+                          key={session.id}
+                          className={cn(
+                            "rounded-ax-element flex items-center transition-colors",
+                            active ? "bg-ax-selected" : "hover:bg-ax-hover"
+                          )}
+                        >
+                          <button
+                            type="button"
+                            data-session-row={session.id}
+                            aria-current={active ? "true" : undefined}
+                            onClick={() => onSelect(session.id)}
+                            className={cn(
+                              "focus-visible:outline-ring rounded-ax-element min-h-9 min-w-0 flex-1 truncate px-2.5 text-start text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 pointer-coarse:min-h-11",
+                              active ? "font-semibold" : "text-ax-text-secondary hover:text-ax-text"
+                            )}
+                          >
+                            {name}
+                          </button>
+                          <MoreMenu
+                            label={t("chat_history_actions", { name })}
+                            size="sm"
+                            alignment="end"
+                            items={[
+                              {
+                                label: t("rename"),
+                                onClick: () => setRenaming({ id: session.id, name: session.name })
+                              },
+                              { type: "divider" },
+                              {
+                                label: t("delete"),
+                                variant: "destructive",
+                                onClick: () => setDeleting({ id: session.id, name })
+                              }
+                            ]}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))
+            )
+          }
+        </QueryStateBoundary>
+        <LoadMore query={history} label={t("chat_history_load_more")} onLoad={loadMore} />
       </div>
 
       {/* Outside the row menus: the menu closes before a dialog opens. */}

@@ -88,3 +88,71 @@ it("searches and announces how many migrations match", async () => {
     )
   );
 });
+
+it("announces a failed read as an error with its retry, not as an empty status", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  vi.mocked(browserApi.GET).mockResolvedValue({
+    error: { message: "Boom", error_id: "8bc91e0a" },
+    response: new Response(null, { status: 500 })
+  } as never);
+  const { renderInApp } = await import("@/test/render");
+  renderInApp(<MigrationHistoryPanel />);
+
+  const title = await screen.findByText("Det gick inte att ladda migrationshistoriken");
+  const alert = title.closest<HTMLElement>('[role="alert"]');
+  expect(alert).not.toBeNull();
+  expect(title.closest('[role="status"]')).toBeNull();
+  expect(
+    within(alert!).getByRole("button", {
+      name: "Försök igen: Det gick inte att ladda migrationshistoriken"
+    })
+  ).toBeTruthy();
+});
+
+it("keeps the focused retry button, busy, while a failed read is retried", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  // The first read fails; the retry's requests stay in flight.
+  let calls = 0;
+  vi.mocked(browserApi.GET).mockImplementation((() => {
+    calls += 1;
+    return calls <= 2
+      ? Promise.resolve({
+          error: { message: "Boom" },
+          response: new Response(null, { status: 500 })
+        })
+      : new Promise(() => {});
+  }) as never);
+  const { renderInApp } = await import("@/test/render");
+  renderInApp(<MigrationHistoryPanel />);
+
+  const retry = await screen.findByRole("button", {
+    name: "Försök igen: Det gick inte att ladda migrationshistoriken"
+  });
+  retry.focus();
+  fireEvent.click(retry);
+
+  await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+  expect(retry.isConnected).toBe(true);
+  expect(document.activeElement).toBe(retry);
+  expect(screen.queryByText("Laddar...")).toBeNull();
+});
+
+it("keeps the migrations on screen when a refresh fails", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  vi.mocked(browserApi.GET).mockResolvedValue({
+    error: { message: "Boom" },
+    response: new Response(null, { status: 500 })
+  } as never);
+  const { renderInApp, testQueryClient } = await import("@/test/render");
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(MODEL_MIGRATION_HISTORY_KEY, history);
+  renderInApp(<MigrationHistoryPanel />, { queryClient });
+  expect(screen.getByRole("table", { name: "Migreringshistorik" })).toBeTruthy();
+
+  await queryClient.refetchQueries({ queryKey: MODEL_MIGRATION_HISTORY_KEY });
+
+  expect(
+    await screen.findByText("Innehållet kunde inte uppdateras. Senast hämtade uppgifter visas.")
+  ).toBeTruthy();
+  expect(screen.getByRole("table", { name: "Migreringshistorik" })).toBeTruthy();
+});

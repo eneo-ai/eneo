@@ -116,7 +116,13 @@ describe("organisation Skill bindings", () => {
       expect(get).toHaveBeenCalledWith("/api/v1/skills/organization/{skill_id}/adoption/", {
         params: {
           path: { skill_id: "skill-1" },
-          query: { limit: 100, cursor: null, query: "Review", kind: undefined, drift: undefined }
+          query: {
+            limit: 100,
+            cursor: undefined,
+            query: "Review",
+            kind: undefined,
+            drift: undefined
+          }
         }
       })
     );

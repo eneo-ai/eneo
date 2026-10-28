@@ -74,6 +74,7 @@ afterEach(() => {
 function show(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  return client;
 }
 
 describe("space Skills", () => {
@@ -83,13 +84,19 @@ describe("space Skills", () => {
     // Named like the page heading (translation keys stand in for the text here).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
     expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
-      params: { path: { space_id: "space-1" }, query: { limit: 25, cursor: null, q: undefined } }
+      params: {
+        path: { space_id: "space-1" },
+        query: { limit: 25, cursor: undefined, q: undefined }
+      }
     });
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "reports" } });
     fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
-        params: { path: { space_id: "space-1" }, query: { limit: 25, cursor: null, q: "reports" } }
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: undefined, q: "reports" }
+        }
       })
     );
     await screen.findByText("Reports");
@@ -210,6 +217,24 @@ describe("space Skills", () => {
         }
       })
     );
+  });
+
+  it("keeps the form and its unsaved draft when a refresh of the skill fails", async () => {
+    const client = show(<SpaceSkillDetailPage skillId="skill-1" />);
+    const instructions = await screen.findByLabelText("skills_instructions_label");
+    fireEvent.change(instructions, { target: { value: "Search the archive" } });
+
+    get.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Bad gateway" },
+        response: new Response(null, { status: 502 })
+      })
+    );
+    await client.refetchQueries();
+
+    expect(await screen.findByText("query_error_refresh_title")).toBeTruthy();
+    expect(screen.getByLabelText("skills_instructions_label")).toBe(instructions);
+    expect((instructions as HTMLTextAreaElement).value).toBe("Search the archive");
   });
 
   it("keeps focus on the availability switch while it saves, and saves the press once", async () => {

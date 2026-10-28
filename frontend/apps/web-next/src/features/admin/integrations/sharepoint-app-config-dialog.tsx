@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
@@ -28,7 +29,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -189,7 +189,7 @@ export function SharePointAppConfigDialog({
         </DialogHeader>
 
         {isPending ? (
-          <Skeleton className="h-40 w-full" />
+          <LoadingState rows={1} height={160} />
         ) : config ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">

@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -10,7 +9,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
@@ -102,7 +101,6 @@ function SessionList({
   }, [pageCount, pages, announce, t, rows.length, total, sessions.hasNextPage]);
 
   function loadMore() {
-    if (sessions.isFetchingNextPage) return;
     focusPage.current = pageCount;
     void sessions.fetchNextPage();
   }
@@ -159,18 +157,13 @@ function SessionList({
                   })}
                 </ul>
                 <div className="text-ax-text-secondary flex flex-col items-center gap-2 py-3 text-xs">
+                  <LoadMore
+                    query={sessions}
+                    label={t("load_more_conversations")}
+                    onLoad={loadMore}
+                  />
                   {sessions.hasNextPage ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        label={t("load_more_conversations")}
-                        isLoading={sessions.isFetchingNextPage}
-                        isInterruptible
-                        onClick={loadMore}
-                      />
-                      <span>{t("loaded_conversations_count", { loaded: rows.length, total })}</span>
-                    </>
+                    <span>{t("loaded_conversations_count", { loaded: rows.length, total })}</span>
                   ) : (
                     <span>{t("loaded_all_conversations", { total })}</span>
                   )}

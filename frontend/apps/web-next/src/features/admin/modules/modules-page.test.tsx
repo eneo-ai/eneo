@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   PUT: vi.fn()
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toastApiError = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/toast", () => ({ toastApiError }));
 
 import { ModulesPage } from "./modules-page";
 
@@ -54,4 +56,62 @@ it("shows each problem at its field on install, and moves focus to the first", a
   expect(key.getAttribute("aria-invalid")).toBeNull();
   expect(document.activeElement).toBe(urls);
   expect(api.PUT).not.toHaveBeenCalled();
+});
+
+it("reports a failed read once, in the user's language, with a retry", async () => {
+  api.GET.mockImplementationOnce(() =>
+    Promise.resolve({
+      error: { message: "Internal server error", eneo_error_code: 9024 },
+      response: new Response(null, { status: 500 })
+    } as never)
+  );
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const retry = await screen.findByRole("button", { name: "Försök igen" });
+  const alert = retry.closest<HTMLElement>('[role="alert"]')!;
+  expect(alert.textContent).not.toContain("Internal server error");
+  expect(alert.textContent).toContain("Innehållet kunde inte hämtas");
+  expect(screen.getAllByText("Innehållet kunde inte hämtas")).toHaveLength(1);
+  // The read failure is reported inline only; the toast is for failed changes.
+  expect(toastApiError).not.toHaveBeenCalled();
+});
+
+it("tells screen readers the installed modules are loading", () => {
+  api.GET.mockImplementationOnce(() => new Promise(() => {}));
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const label = screen.getByText("Laddar...");
+  const region = label.closest<HTMLElement>('[role="status"]');
+  expect(region).not.toBeNull();
+  expect(region!.getAttribute("aria-busy")).toBe("true");
+});
+
+it("shows a failed read as an error only, and keeps its focused retry busy while it retries", async () => {
+  let reads = 0;
+  api.GET.mockImplementation((path: string) => {
+    if (path !== "/api/v1/admin/modules/")
+      return Promise.resolve({
+        data: { items: [], next_cursor: null },
+        response: new Response("{}")
+      });
+    reads += 1;
+    return reads === 1
+      ? (Promise.resolve({
+          error: { message: "Internal server error", eneo_error_code: 9024 },
+          response: new Response(null, { status: 500 })
+        }) as never)
+      : new Promise(() => {});
+  });
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const retry = await screen.findByRole("button", { name: "Försök igen" });
+  // A failed read is not an empty list.
+  expect(screen.queryByText("Inga moduler är installerade")).toBeNull();
+
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+  expect(retry.isConnected).toBe(true);
+  expect(document.activeElement).toBe(retry);
+  expect(screen.queryByText("Laddar...")).toBeNull();
 });
