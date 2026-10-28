@@ -49,6 +49,22 @@ it("renders routes below the UI", async () => {
   expect(screen.getByRole("heading", { name: "Page A" })).toBeTruthy();
 });
 
+it("rerenders the UI in the same router", async () => {
+  function Greeting({ name }: { name: string }) {
+    return <p>{`${name} ${useRouterState({ select: (state) => state.location.href })}`}</p>;
+  }
+  const { router, queryClient, rerender } = await renderWithRouter(<Greeting name="Anna" />, {
+    route: "/a?tab=x"
+  });
+  queryClient.setQueryData(["seed"], "planted");
+
+  rerender(<Greeting name="Bo" />);
+
+  expect(screen.getByText("Bo /a?tab=x")).toBeTruthy();
+  expect(router.state.location.href).toBe("/a?tab=x");
+  expect(queryClient.getQueryData(["seed"])).toBe("planted");
+});
+
 describe("isolation", () => {
   let first: { router: unknown; queryClient: unknown } | undefined;
 

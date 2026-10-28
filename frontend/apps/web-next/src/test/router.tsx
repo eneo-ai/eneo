@@ -23,6 +23,7 @@ import {
   type AnyRoute
 } from "@tanstack/react-router";
 import { act } from "@testing-library/react";
+import { createContext, use } from "react";
 import { createTranslator } from "use-intl";
 import messages from "@/lib/i18n/messages/sv.json";
 import { createAppRouter } from "@/router";
@@ -35,10 +36,15 @@ export type RenderWithRouterOptions = Omit<RenderInAppOptions, "route"> & {
   routes?: (root: AnyRootRoute) => AnyRoute[];
 };
 
+// `ui` reaches the root route through context, so `rerender(ui)` changes it
+// and keeps the router, its location and the query client.
+const UiContext = createContext<React.ReactNode>(null);
+const Ui = () => use(UiContext);
+
 /**
  * Renders `ui` as the root route of a fresh router at `route`, once the
  * router has loaded. Returns the router, the query client and Testing
- * Library's result.
+ * Library's result; `rerender(ui)` keeps the router.
  *
  * @example
  * const { router } = await renderWithRouter(<Probe />, { route: "/admin/users?page=2" });
@@ -55,11 +61,11 @@ export async function renderWithRouter(
     component: routes
       ? () => (
           <>
-            {ui}
+            <Ui />
             <Outlet />
           </>
         )
-      : () => ui
+      : Ui
   });
   const router = createAppRouter(
     { queryClient, t: createTranslator({ locale: "sv", messages }) },
@@ -68,7 +74,12 @@ export async function renderWithRouter(
       history: createMemoryHistory({ initialEntries: [route] })
     }
   );
-  const result = renderInApp(<RouterProvider router={router} />, { ...options, queryClient });
+  const app = (node: React.ReactNode) => (
+    <UiContext value={node}>
+      <RouterProvider router={router} />
+    </UiContext>
+  );
+  const result = renderInApp(app(ui), { ...options, queryClient });
   await act(() => router.load());
-  return { router, ...result };
+  return { router, ...result, rerender: (next: React.ReactNode) => result.rerender(app(next)) };
 }
