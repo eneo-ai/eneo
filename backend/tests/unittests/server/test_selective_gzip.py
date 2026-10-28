@@ -176,11 +176,29 @@ def test_unlisted_type_not_compressed(path: str):
     assert response.headers["content-length"] == "2000"
 
 
-def test_no_accept_encoding_passthrough():
-    response, body = _raw_get(_client(), "/json", {"Accept-Encoding": "identity"})
+@pytest.mark.parametrize(
+    "accept_encoding", ["identity", "gzip;q=0, identity;q=1", "br", "*;q=0"]
+)
+def test_no_accept_encoding_passthrough(accept_encoding: str):
+    response, body = _raw_get(_client(), "/json", {"Accept-Encoding": accept_encoding})
 
     assert "content-encoding" not in response.headers
+    # The identity copy still varies by encoding, so caches keep them apart.
+    assert "Accept-Encoding" in response.headers["vary"]
     assert json.loads(body) == BIG
+
+
+@pytest.mark.parametrize("accept_encoding", ["gzip;q=0.5", "deflate, *"])
+def test_gzip_accepted_with_quality_or_wildcard(accept_encoding: str):
+    response, _ = _raw_get(_client(), "/json", {"Accept-Encoding": accept_encoding})
+
+    assert response.headers["content-encoding"] == "gzip"
+
+
+def test_excluded_identity_response_has_no_vary():
+    response, _ = _raw_get(_client(), "/pdf", {"Accept-Encoding": "identity"})
+
+    assert "vary" not in response.headers
 
 
 def test_production_app_compresses_openapi_json():

@@ -686,6 +686,10 @@ These are the exact prefixes the shipped Traefik labels route to the backend.
 
 - WebSocket support (for real-time features)
 - TLS termination with valid certificate
+- No response compression on backend routes (for Traefik: no `compress`
+  middleware). The backend gzips JSON, HTML, JavaScript, CSS and SVG itself and
+  leaves downloads, streams and Range responses untouched; compressing again at
+  the proxy would undo that.
 
 ### Using nginx Instead of Traefik
 
