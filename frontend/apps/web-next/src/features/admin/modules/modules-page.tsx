@@ -4,11 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError } from "@/components/composites/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,10 +72,6 @@ export function ModulesPage({ title }: { title: string }) {
   const redirectUrisProblem = redirectUris.length > 0 ? null : t("required_field");
   const serviceKeyProblem = serviceKeyId ? null : t("required_field");
   const shown = (problem: string | null) => (submitted ? problem : null);
-
-  useEffect(() => {
-    if (loadError) toastApiError(loadError, t);
-  }, [loadError, t]);
 
   function resetForm() {
     setSubmitted(false);
@@ -166,10 +163,14 @@ export function ModulesPage({ title }: { title: string }) {
           <p className="text-muted-foreground mt-1 text-sm">{t("module_admin_description")}</p>
         </div>
         {loadError && (
-          <Alert variant="destructive" role="alert">
-            <CircleAlert className="size-4" />
-            <AlertDescription>{loadError.message}</AlertDescription>
-          </Alert>
+          <ListError
+            error={loadError}
+            isRetrying={installations.isFetching || serviceKeys.isFetching}
+            onRetry={() => {
+              if (installations.isError) void installations.refetch();
+              if (serviceKeys.isError) void serviceKeys.refetch();
+            }}
+          />
         )}
         {loading ? (
           <div className="space-y-3" aria-label={t("loading")}>
@@ -321,7 +322,7 @@ export function ModulesPage({ title }: { title: string }) {
               {t("module_admin_service_key_help")}
             </p>
             {boundKeyMissing && !serviceKeyId && (
-              <Alert variant="destructive" role="alert">
+              <Alert variant="destructive">
                 <CircleAlert className="size-4" />
                 <AlertDescription>{t("module_admin_bound_key_missing")}</AlertDescription>
               </Alert>

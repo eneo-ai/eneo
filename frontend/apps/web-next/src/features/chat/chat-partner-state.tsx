@@ -1,10 +1,8 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
-import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { EneoApiError } from "@/lib/api/errors";
 
 /**
@@ -30,25 +28,18 @@ export function ChatPartnerLoading() {
 
 /**
  * A chat route whose assistant or group chat could not be loaded: what
- * happened (the page's h1) and, when it can help, a retry. Without a chat
- * header on the page the shell shows its own top bar, so phones keep the
- * navigation menu.
+ * happened (the page's h1), why it may have happened and the failure itself
+ * (`ListError`: message, support references and, when it can help, a retry).
+ * Without a chat header on the page the shell shows its own top bar, so
+ * phones keep the navigation menu.
  */
-export function ChatPartnerError({ onRetry }: { onRetry?: () => void }) {
+export function ChatPartnerError({ error, onRetry }: { error?: unknown; onRetry?: () => void }) {
   const t = useTranslations();
   return (
-    <div className="mx-auto w-full max-w-[712px] p-6">
-      <EmptyState
-        headingLevel={1}
-        icon={<CircleAlert />}
-        title={t("chat_partner_load_failed")}
-        description={t("chat_partner_load_failed_description")}
-        actions={
-          onRetry ? (
-            <Button label={t("chat_retry")} variant="secondary" onClick={onRetry} />
-          ) : undefined
-        }
-      />
+    <div className="mx-auto flex w-full max-w-[712px] flex-col gap-3 p-6">
+      <h1 className="text-lg font-semibold">{t("chat_partner_load_failed")}</h1>
+      <p className="text-ax-text-secondary text-sm">{t("chat_partner_load_failed_description")}</p>
+      <ListError error={error} onRetry={onRetry} compact />
     </div>
   );
 }

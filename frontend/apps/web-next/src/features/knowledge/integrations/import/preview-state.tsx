@@ -2,14 +2,18 @@
 
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
+import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 
 export function ImportPreviewError({
+  error,
   message,
   onBack,
   onRetry,
   settingsHref
 }: {
+  /** The failed preview request; without one (no connection) only `message` shows. */
+  error?: unknown;
   message: string;
   onBack: () => void;
   onRetry?: () => void;
@@ -17,14 +21,9 @@ export function ImportPreviewError({
 }) {
   const t = useTranslations();
   return (
-    <div className="border-destructive/30 bg-destructive/10 text-destructive flex flex-col gap-3 rounded-md border px-3 py-3 text-sm">
-      <p>{message}</p>
+    <div className="flex flex-col gap-3">
+      <ListError error={error} title={message} onRetry={onRetry} />
       <div className="flex flex-wrap gap-2">
-        {onRetry ? (
-          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-            {t("retry")}
-          </Button>
-        ) : null}
         {settingsHref ? (
           <Button type="button" size="sm" variant="outline" asChild>
             <Link href={settingsHref}>{t("account_settings")}</Link>

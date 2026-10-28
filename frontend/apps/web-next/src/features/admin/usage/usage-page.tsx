@@ -1,13 +1,12 @@
 "use client";
 
-import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";
-import { EmptyState } from "@/components/composites/empty-state";
+import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,7 +20,6 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import {
@@ -45,42 +43,12 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function UsageLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  const t = useTranslations();
-  const apiError = error instanceof EneoApiError ? error : null;
-  const reference = apiError?.errorId
-    ? { label: t("error_id"), value: apiError.errorId }
-    : apiError?.traceId
-      ? { label: t("trace_id"), value: apiError.traceId }
-      : null;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <EmptyState
-        title={t("something_went_wrong")}
-        description={
-          apiError?.status === 500 && apiError.code === undefined
-            ? t("error_occurred")
-            : getErrorMessage(error, t)
-        }
-        actions={<AstryxButton label={t("retry")} onClick={onRetry} />}
-      />
-      {reference && (
-        <p className="text-ax-text-secondary text-center font-mono text-xs">
-          {reference.label}: {reference.value}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function TokensTab() {
   const t = useTranslations();
   const usage = useQuery(tokenUsageQueryOptions(browserApi));
 
   if (usage.isPending) return <Skeleton className="h-64 w-full" />;
-  if (usage.isError)
-    return <UsageLoadError error={usage.error} onRetry={() => void usage.refetch()} />;
+  if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
   const data = usage.data;
 
   return (
@@ -133,7 +101,7 @@ function StorageTab() {
   if (storage.isPending || spaces.isPending) return <Skeleton className="h-64 w-full" />;
   if (storage.isError || spaces.isError) {
     return (
-      <UsageLoadError
+      <ListError
         error={storage.error ?? spaces.error}
         onRetry={() => {
           if (storage.isError) void storage.refetch();
@@ -185,8 +153,7 @@ function UsersTab() {
   const rates = useMemo(() => buildRateMap(models?.completion_models ?? []), [models]);
 
   if (usage.isPending) return <Skeleton className="h-64 w-full" />;
-  if (usage.isError)
-    return <UsageLoadError error={usage.error} onRetry={() => void usage.refetch()} />;
+  if (usage.isError) return <ListError error={usage.error} onRetry={() => void usage.refetch()} />;
   const data = usage.data;
 
   return (

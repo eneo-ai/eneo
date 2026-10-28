@@ -17,7 +17,7 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { toastApiError } from "@/lib/api/toast";
 import { CrawlRunDetailsContent } from "@/features/knowledge/crawl-run-details";
@@ -380,7 +380,7 @@ export function CrawlDetailsDialog({
   const baseId = useId();
   const [view, setView] = useState<DetailsView>("details");
   const [confirmation, setConfirmation] = useState<"start" | "cancel" | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
   const details = useQuery({ ...crawlerDetailsQueryOptions(browserApi, runId), enabled: isOpen });
   const data = details.data;
   const requestedAt = useClientTimeText(data?.run.created_at, "date_time");
@@ -410,7 +410,7 @@ export function CrawlDetailsDialog({
       // The confirmation stays open so the user can retry or cancel; the
       // reason is toasted (it stays until closed) and shown in the footer.
       toastApiError(error, t);
-      setActionError(getErrorMessage(error, t));
+      setActionError(error);
     }
   });
 
@@ -536,8 +536,8 @@ export function CrawlDetailsDialog({
             data ? (
               <LayoutFooter>
                 <div className="flex flex-col gap-3">
-                  {actionError && !confirmation ? (
-                    <p className="text-ax-error text-sm">{actionError}</p>
+                  {actionError != null && !confirmation ? (
+                    <ListError error={actionError} compact />
                   ) : null}
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-col items-start gap-1">

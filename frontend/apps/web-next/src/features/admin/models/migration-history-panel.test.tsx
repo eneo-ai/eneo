@@ -88,3 +88,23 @@ it("searches and announces how many migrations match", async () => {
     )
   );
 });
+
+it("announces a failed read as an error with its retry, not as an empty status", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  vi.mocked(browserApi.GET).mockResolvedValue({
+    error: { message: "Boom", error_id: "8bc91e0a" },
+    response: new Response(null, { status: 500 })
+  } as never);
+  const { renderInApp } = await import("@/test/render");
+  renderInApp(<MigrationHistoryPanel />);
+
+  const title = await screen.findByText("Det gick inte att ladda migrationshistoriken");
+  const alert = title.closest<HTMLElement>('[role="alert"]');
+  expect(alert).not.toBeNull();
+  expect(title.closest('[role="status"]')).toBeNull();
+  expect(
+    within(alert!).getByRole("button", {
+      name: "Försök igen: Det gick inte att ladda migrationshistoriken"
+    })
+  ).toBeTruthy();
+});

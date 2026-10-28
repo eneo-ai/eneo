@@ -55,3 +55,19 @@ it("shows each problem at its field on install, and moves focus to the first", a
   expect(document.activeElement).toBe(urls);
   expect(api.PUT).not.toHaveBeenCalled();
 });
+
+it("reports a failed read once, in the user's language, with a retry", async () => {
+  api.GET.mockImplementationOnce(() =>
+    Promise.resolve({
+      error: { message: "Internal server error", eneo_error_code: 9024 },
+      response: new Response(null, { status: 500 })
+    } as never)
+  );
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const retry = await screen.findByRole("button", { name: "Försök igen" });
+  const alert = retry.closest<HTMLElement>('[role="alert"]')!;
+  expect(alert.textContent).not.toContain("Internal server error");
+  expect(alert.textContent).toContain("Innehållet kunde inte hämtas");
+  expect(screen.getAllByText("Innehållet kunde inte hämtas")).toHaveLength(1);
+});

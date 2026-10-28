@@ -6,6 +6,7 @@ import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -372,11 +373,17 @@ export function UserUsagePage({
 
       {user.isPending ? (
         <Skeleton className="h-64 w-full" />
-      ) : user.isError || !userRow ? (
+      ) : user.isError ? (
+        <ListError
+          error={user.error}
+          isRetrying={user.isFetching}
+          onRetry={() => void user.refetch()}
+        />
+      ) : !userRow ? (
         <Card className="p-6 text-center">
           <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
           <p className="text-muted-foreground mt-1 text-sm">
-            {user.isError ? t("request_failed") : t("usage_user_not_found_description")}
+            {t("usage_user_not_found_description")}
           </p>
         </Card>
       ) : (
@@ -385,11 +392,13 @@ export function UserUsagePage({
 
           {breakdown.isPending ? (
             <Skeleton className="h-72 w-full" />
-          ) : breakdown.isError || !breakdown.data ? (
-            <Card className="p-6 text-center">
-              <h2 className="font-semibold">{t("usage_error_loading_model_breakdown")}</h2>
-              <p className="text-muted-foreground mt-1 text-sm">{t("request_failed")}</p>
-            </Card>
+          ) : breakdown.isError ? (
+            <ListError
+              error={breakdown.error}
+              title={t("usage_error_loading_model_breakdown")}
+              isRetrying={breakdown.isFetching}
+              onRetry={() => void breakdown.refetch()}
+            />
           ) : (
             <>
               <ProviderBreakdown data={breakdown.data} />

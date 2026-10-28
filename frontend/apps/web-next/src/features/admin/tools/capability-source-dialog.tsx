@@ -10,6 +10,7 @@ import {
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +27,7 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { modelProvidersQueryOptions } from "@/features/admin/governance/governance";
 import type { Capability } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { createMcpServer, MCP_KEY, updateMcpServer, type McpServer } from "../mcp/mcp";
 import {
@@ -89,7 +90,7 @@ export function CapabilitySourceDialog({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => sourceDraft(server));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
   const [tokenConfirmation, setTokenConfirmation] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -183,7 +184,7 @@ export function CapabilitySourceDialog({
         queryClient.invalidateQueries({ queryKey: ["spaces"] })
       ]).catch((cause) => toastApiError(cause, t));
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
     } finally {
       setBusy(false);
     }
@@ -205,11 +206,7 @@ export function CapabilitySourceDialog({
         </DialogHeader>
         {/* Problems show at their fields on submit, and focus moves to the first. */}
         <form className="space-y-5" noValidate onSubmit={(event) => void submit(event)}>
-          {error && (
-            <p className="text-destructive text-sm" role="alert">
-              {error}
-            </p>
-          )}
+          {error != null && <ListError error={error} title={t("save_failed")} />}
           {purpose === "image_generation" && (
             <div className="space-y-2">
               <Label htmlFor="source-type">{t("mcp_source_label")}</Label>
@@ -255,9 +252,15 @@ export function CapabilitySourceDialog({
                 <p className="text-muted-foreground text-sm">{t("loading")}</p>
               )}
               {(models.isError || providers.isError) && (
-                <p className="text-destructive text-sm" role="alert">
-                  {t("request_failed")}
-                </p>
+                <ListError
+                  error={models.error ?? providers.error}
+                  isRetrying={models.isFetching || providers.isFetching}
+                  onRetry={() => {
+                    if (models.isError) void models.refetch();
+                    if (providers.isError) void providers.refetch();
+                  }}
+                  compact
+                />
               )}
               {!models.isPending && !providers.isPending && imageModels.length === 0 && (
                 <p className="text-muted-foreground text-sm">
@@ -408,7 +411,12 @@ export function CapabilitySourceDialog({
               {groups.isPending ? (
                 <p>{t("loading")}</p>
               ) : groups.isError ? (
-                <p role="alert">{t("request_failed")}</p>
+                <ListError
+                  error={groups.error}
+                  isRetrying={groups.isFetching}
+                  onRetry={() => void groups.refetch()}
+                  compact
+                />
               ) : groups.data?.length ? (
                 groups.data.map((group) => (
                   <label key={group.id} className="flex items-center gap-2 text-sm">

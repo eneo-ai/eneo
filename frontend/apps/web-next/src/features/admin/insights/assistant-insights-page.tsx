@@ -36,6 +36,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { toast } from "@/lib/toast";
@@ -139,8 +140,7 @@ function AnalysisTab({
     onSuccess: (text) => {
       setAnswer(text);
       announce(t("chat_announce_answer_ready"));
-    },
-    onError: () => announce(t("request_failed"))
+    }
   });
 
   return (
@@ -212,7 +212,13 @@ function AnalysisTab({
           {ask.isPending ? (
             <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
           ) : ask.isError ? (
-            <p className="text-ax-error text-sm">{t("request_failed")}</p>
+            <ListError
+              error={ask.error}
+              onRetry={() => {
+                if (ask.variables) ask.mutate(ask.variables);
+              }}
+              compact
+            />
           ) : answer ? (
             <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
           ) : (

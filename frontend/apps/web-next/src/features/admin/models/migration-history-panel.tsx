@@ -20,6 +20,7 @@ import { Fragment, useId, useMemo, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { useModelTypeLabel } from "./model-type-label";
@@ -73,7 +74,9 @@ const STATUS_TONE: Record<string, StatusTone> = {
 export function MigrationHistoryPanel() {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
-  const { data, isPending, isError, refetch } = useQuery(migrationHistoryQueryOptions(browserApi));
+  const { data, isPending, isError, error, isFetching, refetch } = useQuery(
+    migrationHistoryQueryOptions(browserApi)
+  );
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -110,9 +113,11 @@ export function MigrationHistoryPanel() {
   if (isPending) return <LoadingState rows={4} />;
   if (isError) {
     return (
-      <EmptyState
+      <ListError
+        error={error}
         title={t("migration_history_load_failed")}
-        actions={<Button label={t("retry")} onClick={() => void refetch()} />}
+        isRetrying={isFetching}
+        onRetry={() => void refetch()}
       />
     );
   }

@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import {
   highestFirst,
@@ -227,18 +228,14 @@ export function ProviderOverview({
   let content: React.ReactNode;
   if (providers.isError || capabilities.isError) {
     content = (
-      <EmptyState
+      <ListError
+        error={providers.error ?? capabilities.error}
         title={t("admin_models_providers_load_failed")}
-        actions={
-          <Button
-            label={t("retry")}
-            onClick={() => {
-              if (providers.isError) void providers.refetch();
-              if (capabilities.isError) void capabilities.refetch();
-            }}
-            variant="secondary"
-          />
-        }
+        isRetrying={providers.isFetching || capabilities.isFetching}
+        onRetry={() => {
+          if (providers.isError) void providers.refetch();
+          if (capabilities.isError) void capabilities.refetch();
+        }}
       />
     );
   } else if (providers.isPending || capabilities.isPending) {

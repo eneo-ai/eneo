@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { AssistantInsightFilters } from "./insights";
@@ -47,7 +48,12 @@ export function AnswerFeedbackSummary({
       {counts.isPending ? (
         <LoadingState rows={1} />
       ) : counts.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
+        <ListError
+          error={counts.error}
+          isRetrying={counts.isFetching}
+          onRetry={() => void counts.refetch()}
+          compact
+        />
       ) : (
         <dl className="flex flex-wrap gap-x-8 gap-y-3">
           <div className="flex flex-col gap-1">

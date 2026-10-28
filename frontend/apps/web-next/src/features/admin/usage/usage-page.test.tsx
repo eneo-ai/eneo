@@ -112,8 +112,13 @@ describe("UsagePage", () => {
     apiState.failingPaths.add("/api/v1/token-usage/");
     const { container } = renderInApp(<UsagePage />);
 
-    expect(await screen.findByText("Fel-ID: 8bc91e0a")).toBeTruthy();
-    expect(screen.getByText("Vi upplever vissa svårigheter, försök igen senare.")).toBeTruthy();
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText("Vi upplever vissa svårigheter, försök igen senare.")
+    ).toBeTruthy();
+    fireEvent.click(within(alert).getByRole("button", { name: "Expandera" }));
+    expect(screen.getByText("Fel-ID: 8bc91e0a")).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
     await expectNoAxeViolations(container);
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
@@ -132,7 +137,7 @@ describe("UsagePage", () => {
 
     expect(await screen.findByRole("table", { name: "Tokens" })).toBeTruthy();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
-    expect(await screen.findByText("Fel-ID: 8bc91e0a")).toBeTruthy();
+    expect(await screen.findByRole("alert")).toBeTruthy();
 
     apiState.failingPaths.delete("/api/v1/storage/spaces/");
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
@@ -147,7 +152,7 @@ describe("UsagePage", () => {
     renderInApp(<UsagePage />);
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
-    expect(await screen.findByText("Fel-ID: 8bc91e0a")).toBeTruthy();
+    expect(await screen.findByRole("alert")).toBeTruthy();
 
     apiState.failingPaths.delete("/api/v1/token-usage/users");
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
