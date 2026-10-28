@@ -41,7 +41,9 @@ const state = vi.hoisted(() => ({
 }));
 const post = vi.hoisted(() => vi.fn());
 
-vi.mock("next/navigation", () => ({
+// The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: () => {}, prefetch: () => {} }),
   useSearchParams: () => new URLSearchParams()
 }));

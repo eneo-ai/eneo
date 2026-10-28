@@ -4,7 +4,10 @@ import * as navigation from "./navigation";
 import type { AppRouter, ReadonlySearchParams } from "./navigation";
 
 const pathname = vi.hoisted(() => ({ current: "/" }));
-vi.mock("next/navigation", () => ({ usePathname: () => pathname.current }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  usePathname: () => pathname.current
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -30,10 +33,15 @@ describe("replaceUrl", () => {
   });
 });
 
-it("re-exports Next's hooks within the API the TanStack implementation offers", () => {
-  // Checked by tsc (`bun run check`): a Next hook that drifts outside the
-  // shared API fails here.
-  expectTypeOf<ReturnType<typeof navigation.useRouter>>().toExtend<AppRouter>();
-  expectTypeOf<ReturnType<typeof navigation.useSearchParams>>().toExtend<ReadonlySearchParams>();
+it("exposes only the API the TanStack implementation offers", () => {
+  // Checked by tsc (`bun run check`). That Next's hooks satisfy these types
+  // is checked where navigation.ts assigns them.
+  expectTypeOf<ReturnType<typeof navigation.useRouter>>().toEqualTypeOf<AppRouter>();
+  expectTypeOf<AppRouter>().not.toHaveProperty("prefetch");
+  expectTypeOf<AppRouter>().not.toHaveProperty("forward");
+  expectTypeOf<
+    ReturnType<typeof navigation.useSearchParams>
+  >().toEqualTypeOf<ReadonlySearchParams>();
+  expectTypeOf<ReadonlySearchParams>().not.toHaveProperty("set");
   expectTypeOf<ReturnType<typeof navigation.usePathname>>().toEqualTypeOf<string>();
 });

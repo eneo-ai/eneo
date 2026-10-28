@@ -2,19 +2,16 @@
  * The app's navigation: code outside src/app reads the route and navigates
  * through this module, never through next/navigation. It is Next's App Router
  * now; the Vite build aliases this module to the TanStack Router
- * implementation, which implements the API below (`AppRouter`,
- * `ReadonlySearchParams`, and the functions' own types). Feature tests mock it:
+ * implementation, which is typed against the exports here, so the API holds
+ * only what both routers honour. Feature tests mock it:
  *
  *   vi.mock("@/lib/navigation", () => import("@/test/navigation"));
  */
-import { usePathname } from "next/navigation";
-
-// Next's hooks themselves, not wrappers: a test that mocks next/navigation
-// reaches every caller through this module, and src/test/render.tsx checks
-// which useRouter is in place by identity. Live re-exports also keep a partial
-// next/navigation mock working until a missing hook is called.
-// navigation.test.ts checks that they satisfy the types below.
-export { useRouter, usePathname, useSearchParams } from "next/navigation";
+import {
+  usePathname as nextUsePathname,
+  useRouter as nextUseRouter,
+  useSearchParams as nextUseSearchParams
+} from "next/navigation";
 
 export type NavigateOptions = {
   /** `false` keeps the scroll position; by default the page scrolls to the top. */
@@ -37,6 +34,15 @@ export type AppRouter = {
 
 /** What `useSearchParams()` returns: the current query, read-only. */
 export type ReadonlySearchParams = Omit<URLSearchParams, "append" | "delete" | "set" | "sort">;
+
+// Next's hooks themselves, not wrappers, typed down to the shared API: a test
+// that mocks next/navigation reaches every caller through this module, and
+// src/test/render.tsx checks which useRouter is in place by identity. They are
+// read when this module loads, so a next/navigation mock must provide all
+// three (spread `importOriginal()` into a partial one).
+export const useRouter: () => AppRouter = nextUseRouter;
+export const usePathname: () => string = nextUsePathname;
+export const useSearchParams: () => ReadonlySearchParams = nextUseSearchParams;
 
 /**
  * Puts `href` in the address bar in place of the current history entry,
