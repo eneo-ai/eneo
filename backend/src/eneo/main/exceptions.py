@@ -102,6 +102,8 @@ class ErrorCodes(int, Enum):
     ICON_IN_USE = 9075
     # A resource can only show an icon the caller uploaded in their tenant.
     ICON_NOT_ATTACHABLE = 9076
+    # 9080-9089: reserved for the web-next migration (browser session and web
+    # app serving). Add members here only from those PRs.
 
 
 class NotFoundException(Exception):
