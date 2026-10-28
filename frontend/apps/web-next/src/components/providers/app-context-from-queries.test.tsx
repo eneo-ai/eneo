@@ -100,8 +100,8 @@ async function renderApp(browser = testQueryClient()) {
       </QueryAppContextProvider>
     </HydrationBoundary>
   );
-  contextValues = [];
   const html = renderToHtml(tree(), { queryClient: testQueryClient() });
+  contextValues = [];
   const view = renderInApp(tree(), { queryClient: browser });
   return {
     ...view,
@@ -227,21 +227,17 @@ it("loads an unavailable What's new state as null: unknown markers, not a first 
   expect(screen.getByTestId("seen").textContent).toBe("unknown");
 });
 
-it("starts a new user's document with their context, never the previous user's", async () => {
-  const { getQueryClient } = await import("@/lib/api/query");
-  const previousDocument = getQueryClient();
-  previousDocument.setQueryData(sessionKeys.me, signedIn.user);
-
-  // Logging in loads a new document (ContinueSignedIn): its modules, the browser's
-  // query client among them, start over.
-  vi.resetModules();
-  const { getQueryClient: inNewDocument } = await import("@/lib/api/query");
-  const browser = inNewDocument();
-  expect(browser).not.toBe(previousDocument);
+// Why every sign-in continues in a new document (ContinueSignedIn): a client
+// that outlives a client-side navigation still holds the previous user, and
+// HydrationBoundary applies newer data for a query it already holds only
+// after the first commit, so that commit (and its effects) shows the old one.
+it("renders the cached previous user first when a new user's data hydrates into the same client", async () => {
+  const sameClient = testQueryClient();
+  sameClient.setQueryData(sessionKeys.me, signedIn.user);
   backend.set(ME, ok({ ...signedIn.user, username: "Bo Ek" }));
 
-  await renderApp(browser);
+  await renderApp(sameClient);
 
-  expect(contextValues.length).toBeGreaterThan(0);
-  expect(contextValues.every((context) => context.user.username === "Bo Ek")).toBe(true);
+  expect(contextValues[0]?.user.username).toBe("Anna Lind");
+  await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("Bo Ek"));
 });
