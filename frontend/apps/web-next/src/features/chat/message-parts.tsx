@@ -5,7 +5,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useMutation } from "@tanstack/react-query";
-import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
@@ -512,59 +512,6 @@ export const FILE_CHIP_CLASS =
 /** A file chip that does something when pressed: opens, downloads. */
 export const FILE_TOKEN_CLASS = `${FILE_CHIP_CLASS} focus-visible:outline-ring transition-colors hover:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2`;
 
-function providerFile(part: Extract<Part, { type: "file" }>): Partial<Schema<"FilePublic">> {
-  return ((part.providerMetadata?.eneo ?? {}) as Partial<Schema<"FilePublic">>) ?? {};
-}
-
-function fileNameFromPart(part: Extract<Part, { type: "file" }>): string {
-  return part.filename ?? providerFile(part).name ?? part.mediaType;
-}
-
-function DownloadFileToken({
-  name,
-  mimetype,
-  size,
-  url
-}: {
-  name: string;
-  mimetype: string;
-  size?: number | null;
-  url: string;
-}) {
-  const t = useTranslations();
-  return (
-    <a href={url} target="_blank" rel="noreferrer" download={name} className={FILE_TOKEN_CLASS}>
-      <FileTokenBody name={name} mimetype={mimetype} size={size} />
-      <Download aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
-      <span className="sr-only">{t("download")}</span>
-    </a>
-  );
-}
-
-export function MessageFilePart({ part }: { part: Extract<Part, { type: "file" }> }) {
-  const name = fileNameFromPart(part);
-
-  if (part.mediaType.startsWith("image/")) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL or local data URL
-      <img
-        src={part.url}
-        alt={name}
-        className="border-ax-border rounded-ax-container max-h-96 border"
-      />
-    );
-  }
-
-  return (
-    <DownloadFileToken
-      name={name}
-      mimetype={part.mediaType}
-      size={providerFile(part).size}
-      url={part.url}
-    />
-  );
-}
-
 /** Display-only image references returned from MCP resource_link blocks. */
 export function McpImageStrip({ references }: { references: McpToolReference[] }) {
   const images = references
@@ -593,28 +540,4 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
       ))}
     </div>
   );
-}
-
-/** Renders a generated file from an assistant message (images inline, others as download tokens). */
-export function GeneratedFile({ file }: { file: Schema<"FilePublic"> }) {
-  if (file.mimetype.startsWith("image/")) return <InlineImage file={file} />;
-  return <GeneratedFileDownload file={file} />;
-}
-
-function GeneratedFileDownload({ file }: { file: Schema<"FilePublic"> }) {
-  const { url, error } = useSignedUrl(file.id);
-  const t = useTranslations();
-
-  if (error)
-    return (
-      <span className="text-muted-foreground text-sm">{t("attachment_error_loading_content")}</span>
-    );
-  if (!url) {
-    return (
-      <span className={FILE_TOKEN_CLASS}>
-        <FileTokenBody name={file.name} mimetype={file.mimetype} size={file.size} />
-      </span>
-    );
-  }
-  return <DownloadFileToken name={file.name} mimetype={file.mimetype} size={file.size} url={url} />;
 }
