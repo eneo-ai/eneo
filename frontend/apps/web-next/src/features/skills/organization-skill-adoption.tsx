@@ -546,10 +546,7 @@ export function OrganizationSkillAdoption({
               <Button
                 variant="outline"
                 aria-busy={bindings.isFetchingNextPage || undefined}
-                onClick={() => {
-                  // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                  if (!bindings.isFetchingNextPage) void bindings.fetchNextPage();
-                }}
+                onClick={() => void bindings.fetchNextPage()}
               >
                 {bindings.isFetchingNextPage
                   ? t("organization_skills_adoption_loading_more")

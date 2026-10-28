@@ -289,9 +289,7 @@ function DeletedRow({ template, kind }: { template: TemplateRowData; kind: Templ
             variant="outline"
             size="sm"
             aria-busy={restore.isPending || undefined}
-            onClick={() => {
-              if (!restore.isPending) restore.mutate();
-            }}
+            onClick={() => restore.mutate()}
           >
             {!restore.isPending && <RotateCcw className="size-4" />} {t("restore")}
           </Button>

@@ -180,7 +180,6 @@ export function MigrateModelDialog({
   // A missing target, or an unconfirmed override of a security blocker, shows
   // at its field on Migrate, which takes focus.
   function submit() {
-    if (migrate.isPending) return;
     const firstProblem = targetProblem
       ? "migration-target"
       : overrideProblem

@@ -341,9 +341,7 @@ export function ToolsTab({ serverId }: { serverId: string }) {
           variant="outline"
           size="sm"
           aria-busy={sync.isPending || undefined}
-          onClick={() => {
-            if (!sync.isPending) sync.mutate();
-          }}
+          onClick={() => sync.mutate()}
         >
           {!sync.isPending && <RefreshCw className="size-4" />}
           {sync.isPending ? t("syncing") : t("sync_tools")}

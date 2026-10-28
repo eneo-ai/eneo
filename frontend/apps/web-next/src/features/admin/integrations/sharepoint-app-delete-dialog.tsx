@@ -63,7 +63,6 @@ export function SharePointAppDeleteDialog({
     submitted && !confirmed ? t("form_problem_confirm_mismatch", { value: CONFIRM_WORD }) : null;
 
   function deleteApp() {
-    if (remove.isPending) return;
     if (!confirmed) {
       // Rendered before focus moves, so the field is read with its error.
       flushSync(() => setSubmitted(true));

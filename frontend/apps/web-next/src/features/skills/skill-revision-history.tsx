@@ -196,10 +196,7 @@ export function SkillRevisionHistory({
             <Button
               variant="outline"
               aria-busy={revisions.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!revisions.isFetchingNextPage) void revisions.fetchNextPage();
-              }}
+              onClick={() => void revisions.fetchNextPage()}
             >
               {revisions.isFetchingNextPage
                 ? t("skills_library_loading_older")

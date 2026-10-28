@@ -46,7 +46,6 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
 
   // Run is never disabled: an empty input shows at the field, which takes focus.
   function runService() {
-    if (run.isPending) return;
     if (!input.trim()) {
       // Rendered before focus moves, so the field is read with its problem.
       flushSync(() => setSubmitted(true));

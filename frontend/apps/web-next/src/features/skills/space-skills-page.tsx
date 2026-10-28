@@ -257,10 +257,7 @@ export function SpaceSkillsPage() {
               variant="outline"
               className="self-center"
               aria-busy={skills.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!skills.isFetchingNextPage) void skills.fetchNextPage();
-              }}
+              onClick={() => void skills.fetchNextPage()}
             >
               {skills.isFetchingNextPage ? t("loading") : t("load_more")}
             </Button>

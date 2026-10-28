@@ -195,12 +195,7 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
               {t("cancel")}
             </Button>
             {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-            <Button
-              aria-busy={rename.isPending || undefined}
-              onClick={() => {
-                if (!rename.isPending) rename.mutate();
-              }}
-            >
+            <Button aria-busy={rename.isPending || undefined} onClick={() => rename.mutate()}>
               {rename.isPending ? t("saving") : t("save_changes")}
             </Button>
           </DialogFooter>

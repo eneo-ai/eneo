@@ -153,10 +153,7 @@ export function ApiKeyUsageDialog({
                   variant="outline"
                   size="sm"
                   aria-busy={query.isFetchingNextPage || undefined}
-                  onClick={() => {
-                    // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                    if (!query.isFetchingNextPage) void query.fetchNextPage();
-                  }}
+                  onClick={() => void query.fetchNextPage()}
                 >
                   {t("api_keys_admin_usage_load_more")}
                 </Button>

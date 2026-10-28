@@ -122,7 +122,6 @@ export function SharePointSubscriptions() {
             size="sm"
             aria-busy={renewAll.isPending || undefined}
             onClick={() => {
-              if (renewAll.isPending) return;
               // Once nothing has expired the button goes; focus moves to the title.
               renewAll.mutate(undefined, { onSuccess: () => rescue(titleRef.current) });
             }}
@@ -181,9 +180,7 @@ export function SharePointSubscriptions() {
                       variant="ghost"
                       size="sm"
                       aria-busy={(recreate.isPending && renewingId === sub.id) || undefined}
-                      onClick={() => {
-                        if (!(recreate.isPending && renewingId === sub.id)) recreate.mutate(sub.id);
-                      }}
+                      onClick={() => recreate.mutate(sub.id)}
                     >
                       {recreate.isPending && renewingId === sub.id
                         ? t("sharepoint_subscription_renewing")

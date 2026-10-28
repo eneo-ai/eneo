@@ -673,10 +673,7 @@ export function SkillBindingsEditor({
             <Button
               variant="ghost"
               aria-busy={catalogue.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!catalogue.isFetchingNextPage) void catalogue.fetchNextPage();
-              }}
+              onClick={() => void catalogue.fetchNextPage()}
             >
               {catalogue.isFetchingNextPage ? t("loading") : t("load_more")}
             </Button>

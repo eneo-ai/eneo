@@ -125,7 +125,6 @@ function PolicyForm({
   // Never disabled: busy, it keeps focus and a second press is ignored; with
   // nothing changed there is nothing to send, and the dialog just closes.
   function submit() {
-    if (save.isPending) return;
     if (!dirty) {
       onClose();
       return;

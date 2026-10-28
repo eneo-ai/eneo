@@ -63,20 +63,12 @@ function IntegrationCard({ integration }: { integration: TenantIntegration }) {
           size="sm"
           disabled={!integration.id}
           aria-busy={unlink.isPending || undefined}
-          onClick={() => {
-            if (!unlink.isPending) unlink.mutate();
-          }}
+          onClick={() => unlink.mutate()}
         >
           {t("disable")}
         </Button>
       ) : (
-        <Button
-          size="sm"
-          aria-busy={link.isPending || undefined}
-          onClick={() => {
-            if (!link.isPending) link.mutate();
-          }}
-        >
+        <Button size="sm" aria-busy={link.isPending || undefined} onClick={() => link.mutate()}>
           {t("enable")}
         </Button>
       )}

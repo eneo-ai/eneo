@@ -547,7 +547,6 @@ export function WebsiteDialog({
             <Button
               aria-busy={save.isPending || undefined}
               onClick={() => {
-                if (save.isPending) return;
                 setExistingOnOrg(null);
                 save.mutate();
               }}

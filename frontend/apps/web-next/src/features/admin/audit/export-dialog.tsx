@@ -205,9 +205,7 @@ export function ExportDialog({
               variant="destructive"
               disabled={!jobId}
               aria-busy={cancel.isPending || undefined}
-              onClick={() => {
-                if (!cancel.isPending) cancel.mutate();
-              }}
+              onClick={() => cancel.mutate()}
             >
               {t("cancel")}
             </Button>
@@ -223,12 +221,7 @@ export function ExportDialog({
               <Button variant="outline" onClick={reset}>
                 {t("cancel")}
               </Button>
-              <Button
-                aria-busy={start.isPending || undefined}
-                onClick={() => {
-                  if (!start.isPending) start.mutate();
-                }}
-              >
+              <Button aria-busy={start.isPending || undefined} onClick={() => start.mutate()}>
                 {t("export")}
               </Button>
             </>

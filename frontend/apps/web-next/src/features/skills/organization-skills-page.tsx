@@ -396,9 +396,7 @@ export function OrganizationSkillsPage() {
               <Button
                 variant="outline"
                 aria-busy={skills.isFetchingNextPage || undefined}
-                onClick={() => {
-                  if (!skills.isFetchingNextPage) void skills.fetchNextPage();
-                }}
+                onClick={() => void skills.fetchNextPage()}
               >
                 {skills.isFetchingNextPage ? t("loading") : t("load_more")}
               </Button>

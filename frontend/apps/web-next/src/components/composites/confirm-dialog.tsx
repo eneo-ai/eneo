@@ -63,13 +63,7 @@ export function ConfirmDialogControlled({
         {children}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          <Button
-            variant={variant}
-            aria-busy={pending || undefined}
-            onClick={() => {
-              if (!pending) onConfirm();
-            }}
-          >
+          <Button variant={variant} aria-busy={pending || undefined} onClick={() => onConfirm()}>
             {confirmLabel}
           </Button>
         </AlertDialogFooter>
