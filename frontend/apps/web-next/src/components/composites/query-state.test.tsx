@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { onlineManager, useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { keepPreviousData, onlineManager, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -391,5 +391,84 @@ describe("LoadMore", () => {
     expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
     expect(retry.isConnected).toBe(true);
     expect(document.activeElement).toBe(retry);
+  });
+
+  it("keeps a failed next page's error through a refresh paused offline", async () => {
+    let phase: "ok" | "next-fails" | "recovered" = "ok";
+    const fetchPage = vi.fn(async (cursor: string | undefined) => {
+      if (!cursor) return { items: ["Anna"], total_count: 2, next_cursor: "page-2" };
+      if (phase === "next-fails") throw new Error("boom");
+      return { items: ["Bo"], total_count: 2, next_cursor: null };
+    });
+    const { queryClient } = renderInApp(<Names fetchPage={fetchPage} />);
+
+    phase = "next-fails";
+    fireEvent.click(await screen.findByRole("button", { name: "Visa fler" }));
+    await screen.findByText("Det gick inte att läsa in fler.");
+    const retry = screen.getByRole("button", { name: /^Försök igen/ });
+    retry.focus();
+
+    onlineManager.setOnline(false);
+    try {
+      void queryClient.refetchQueries({ queryKey: ["names"] });
+      await waitFor(() => expect(queryClient.getQueryState(["names"])?.fetchStatus).toBe("paused"));
+      expect(screen.getByText("Det gick inte att läsa in fler.")).toBeTruthy();
+      expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
+      expect(document.activeElement).toBe(retry);
+    } finally {
+      phase = "recovered";
+      act(() => onlineManager.setOnline(true));
+    }
+    // Back online the refresh succeeds: no failure is left to report.
+    await waitFor(() => expect(screen.queryByText("Det gick inte att läsa in fler.")).toBeNull());
+    expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
+  });
+});
+
+describe("RefreshError", () => {
+  function Filtered({
+    filter,
+    fetchNames
+  }: {
+    filter: string;
+    fetchNames: (filter: string) => Promise<string[]>;
+  }) {
+    const list = useQuery({
+      queryKey: ["filtered", filter],
+      queryFn: () => fetchNames(filter),
+      placeholderData: keepPreviousData
+    });
+    return (
+      <QueryStateBoundary query={list}>
+        {(items) => (
+          <ul>
+            {items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        )}
+      </QueryStateBoundary>
+    );
+  }
+
+  it("drops a refresh failure when the filter changes to a query that has not failed", async () => {
+    let failA = false;
+    const fetchNames = vi.fn(async (filter: string) => {
+      if (filter === "b") return new Promise<string[]>(() => {});
+      if (failA) throw new Error("refresh failed");
+      return ["Anna"];
+    });
+    const { queryClient, rerender } = renderInApp(<Filtered filter="a" fetchNames={fetchNames} />);
+    await screen.findByText("Anna");
+
+    failA = true;
+    await queryClient.refetchQueries({ queryKey: ["filtered", "a"] });
+    expect(await screen.findByText(/kunde inte uppdateras/)).toBeTruthy();
+
+    rerender(<Filtered filter="b" fetchNames={fetchNames} />);
+    await waitFor(() => expect(fetchNames).toHaveBeenLastCalledWith("b"));
+    // B shows A's rows as a placeholder while it loads; A's failure is not B's.
+    expect(screen.getByText("Anna")).toBeTruthy();
+    expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
   });
 });

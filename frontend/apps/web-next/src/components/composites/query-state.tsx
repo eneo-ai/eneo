@@ -17,6 +17,8 @@ export type QueryLike<T = unknown> = {
   isFetching: boolean;
   errorUpdatedAt: number;
   dataUpdatedAt: number;
+  /** "paused": a request waits offline (React Query's `fetchStatus`). */
+  fetchStatus?: "fetching" | "paused" | "idle";
   /** An infinite query's next page failed: `LoadMore` reports that, not the boundary. */
   isFetchNextPageError?: boolean;
   refetch: () => unknown;
@@ -208,20 +210,28 @@ function failureKind(query: Pick<QueryLike, "data" | "isError" | "isFetchNextPag
   return query.isFetchNextPageError ? "next-page" : "refresh";
 }
 
+type FailureSource = Pick<
+  QueryLike,
+  "data" | "isError" | "isFetching" | "fetchStatus" | "isFetchNextPageError"
+>;
+
 /**
- * The failure each query last settled with. While a fetch runs, React Query
- * describes that fetch (its direction), not the failure on screen: a failed
- * refresh would read as a failed next page once "Visa fler" is pressed, and a
- * failed next page as a failed refresh once a focus refetch starts. The kind
- * is kept until the fetch ends.
+ * The failure each query last settled with. While a request is in flight
+ * (fetching, or paused offline) React Query describes that request (its
+ * direction), not the failure on screen: a failed refresh would read as a
+ * failed next page once "Visa fler" is pressed, and a failed next page as a
+ * failed refresh once a focus refetch starts. The kind is kept until the
+ * request settles, and only while the query still holds a failure: a query
+ * that has none (another filter's placeholder data) reports none.
  */
-function useSettledFailures(
-  queries: readonly Pick<QueryLike, "data" | "isError" | "isFetching" | "isFetchNextPageError">[]
-): FailureKind[] {
+function useSettledFailures(queries: readonly FailureSource[]): FailureKind[] {
   const [settled, setSettled] = useState<FailureKind[]>(() => queries.map(failureKind));
-  const kinds = queries.map((query, index) =>
-    query.isFetching ? (settled[index] ?? null) : failureKind(query)
-  );
+  const kinds = queries.map((query, index) => {
+    const current = failureKind(query);
+    if (current === null) return null;
+    const inFlight = query.isFetching || query.fetchStatus === "paused";
+    return inFlight ? (settled[index] ?? current) : current;
+  });
   if (kinds.length !== settled.length || kinds.some((kind, index) => kind !== settled[index])) {
     setSettled(kinds);
   }
@@ -259,6 +269,7 @@ export type InfiniteQueryLike = {
   data: unknown;
   isError: boolean;
   isFetching: boolean;
+  fetchStatus: "fetching" | "paused" | "idle";
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   isFetchNextPageError: boolean;
