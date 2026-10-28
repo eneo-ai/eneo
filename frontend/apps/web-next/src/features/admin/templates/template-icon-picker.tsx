@@ -93,7 +93,7 @@ export function TemplateIconPicker({
   const label = value ? t("change_icon_current", { iconName: value }) : t("choose_template_icon");
 
   function iconButton(name: IconName) {
-    const isSelected = value !== null && compactIconName(name) === compactIconName(value);
+    const isSelected = name === selected;
     return (
       <li key={name}>
         <button

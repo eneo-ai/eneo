@@ -267,28 +267,47 @@ describe("TemplateEditorDialog", () => {
     const picker = await screen.findByRole("dialog", { name: "Välj en ikon" });
     fireEvent.change(
       within(picker).getByLabelText("Sök ikoner... (t.ex. 'raket', 'mejl', 'diagram')"),
-      { target: { value: "building 2" } }
+      { target: { value: "calendar check 2" } }
     );
-    fireEvent.click(within(picker).getByRole("button", { name: "Välj ikon: building-2" }));
+    fireEvent.click(within(picker).getByRole("button", { name: "Välj ikon: calendar-check-2" }));
     fireEvent.click(
-      await within(dialog).findByRole("button", { name: "Ändra ikon, nuvarande: building2" })
+      await within(dialog).findByRole("button", { name: "Ändra ikon, nuvarande: calendar-check2" })
     );
     // Reopened, the stored name marks its icon as chosen.
     const again = await screen.findByRole("dialog", { name: "Välj en ikon" });
     fireEvent.change(
       within(again).getByLabelText("Sök ikoner... (t.ex. 'raket', 'mejl', 'diagram')"),
-      { target: { value: "building 2" } }
+      { target: { value: "calendar check 2" } }
     );
     expect(
       within(again)
-        .getByRole("button", { name: "Välj ikon: building-2" })
+        .getByRole("button", { name: "Välj ikon: calendar-check-2" })
         .getAttribute("aria-pressed")
     ).toBe("true");
     fireEvent.keyDown(again, { key: "Escape" });
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
-    expect(lastBody(api.POST)).toMatchObject({ icon_name: "building2" });
+    expect(lastBody(api.POST)).toMatchObject({ icon_name: "calendar-check2" });
+  });
+
+  it("marks a stored old icon name as its current icon, once", async () => {
+    renderEditor({ kind: "assistants", template: { ...assistantTemplate, icon_name: "home" } });
+    const dialog = screen.getByRole("dialog", { name: "Redigera mall" });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Ändra ikon, nuvarande: home" })
+    );
+    const picker = await screen.findByRole("dialog", { name: "Välj en ikon" });
+    const pressed = within(picker).getAllByRole("button", { pressed: true });
+    expect(pressed.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Välj ikon: house"
+    ]);
+    // Lucide's old name is not offered next to the current one.
+    fireEvent.change(
+      within(picker).getByLabelText("Sök ikoner... (t.ex. 'raket', 'mejl', 'diagram')"),
+      { target: { value: "home" } }
+    );
+    expect(within(picker).queryByRole("button", { name: "Välj ikon: home" })).toBeNull();
   });
 
   it("picks the icon by searching, shows it, and can clear it", async () => {

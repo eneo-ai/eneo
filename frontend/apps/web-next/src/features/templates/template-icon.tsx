@@ -2,16 +2,20 @@
 
 import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import type { LucideProps } from "lucide-react";
+import { LUCIDE_ALIASES } from "./lucide-aliases";
 
 /**
  * Template icons are picked by name from the whole Lucide set, so they cannot
- * be imported one by one. lucide-react's dynamic entry lists every name (and
- * the aliases Lucide keeps for renamed icons, `home` for `house`) and fetches
- * each icon as its own small chunk when it is first drawn. The list (about
- * 60 KB gzipped with its chunk map) goes with the code that imports this
- * module, so keep it to the template surfaces.
+ * be imported one by one. lucide-react's dynamic entry lists every name and
+ * fetches each icon as its own small chunk when it is first drawn. The list
+ * (about 60 KB gzipped with its chunk map) goes with the code that imports
+ * this module, so keep it to the template surfaces.
  */
-export const TEMPLATE_ICON_NAMES: readonly IconName[] = iconNames;
+
+/** The names the picker offers: one current name per icon, without Lucide's old names. */
+export const TEMPLATE_ICON_NAMES: readonly IconName[] = iconNames.filter(
+  (name) => !Object.hasOwn(LUCIDE_ALIASES, name)
+);
 
 /** Lower-case letters and digits only: `MessageSquare`, `message-square` → `messagesquare`. */
 export function compactIconName(name: string): string {
@@ -21,14 +25,18 @@ export function compactIconName(name: string): string {
 let byCompactName: Map<string, IconName> | undefined;
 
 /**
- * The Lucide name for a stored icon name, or null when unset or unknown.
- * Names are stored in kebab-case; the Svelte picker derived them from Lucide's
- * PascalCase names (`arrow-down01` for `ArrowDown01`, which lucide-react calls
- * `arrow-down-0-1`), so they are matched without their dashes.
+ * The current Lucide name for a stored icon name, or null when unset or
+ * unknown. Names are stored in kebab-case; the Svelte picker derived them from
+ * Lucide's PascalCase names (`arrow-down01` for `ArrowDown01`, which
+ * lucide-react calls `arrow-down-0-1`), so they are matched without their
+ * dashes. An old name Lucide keeps for a renamed icon reads as the current one
+ * (`home` → `house`).
  */
 export function templateIconName(name: string | null | undefined): IconName | null {
   if (!name) return null;
-  byCompactName ??= new Map(TEMPLATE_ICON_NAMES.map((icon) => [compactIconName(icon), icon]));
+  byCompactName ??= new Map(
+    iconNames.map((icon) => [compactIconName(icon), (LUCIDE_ALIASES[icon] ?? icon) as IconName])
+  );
   return byCompactName.get(compactIconName(name)) ?? null;
 }
 
