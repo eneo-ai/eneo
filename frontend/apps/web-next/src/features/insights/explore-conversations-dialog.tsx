@@ -16,12 +16,12 @@ import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/features/chat/chat-message";
 import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./insights-range";
 
 const PAGE_SIZE = 50;
-const SEARCH_DEBOUNCE_MS = 250;
 
 type Partner = ChatPartner & { type: "assistant" | "group-chat" };
 
@@ -41,17 +41,11 @@ function SessionList({
   const headingId = useId();
   const listRef = useRef<HTMLUListElement>(null);
   const [searchInput, setSearchInput] = useState("");
-  const [filter, setFilter] = useState("");
   const params = insightRangeParams(range);
   const query = insightPartnerQuery(partner);
 
   // The name filter is sent once typing pauses.
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => setFilter(searchInput.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput]);
+  const filter = useDebouncedValue(searchInput.trim());
 
   const sessions = useInfiniteQuery({
     ...cursorPagination,

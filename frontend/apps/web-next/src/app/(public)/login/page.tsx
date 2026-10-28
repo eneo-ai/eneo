@@ -1,15 +1,15 @@
 import { getTranslations } from "next-intl/server";
-import { redirect } from "next/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { loginDiagnosticsFromRecord } from "@/lib/auth/login-diagnostics";
 import { isOidcEnabled } from "@/lib/auth/oidc";
-import { DEFAULT_LANDING } from "@/lib/auth/safe-next";
+import { safeNextPath } from "@/lib/auth/safe-next";
 import { getSession } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import type { Schema } from "@/lib/api/models";
 import { pageTitle } from "@/lib/page-metadata";
 import { PublicPage } from "../public-page";
+import { ContinueSignedIn } from "./continue-signed-in";
 import { LoginDiagnosticsAlert } from "./login-diagnostics-alert";
 import { LoginForm } from "./login-form";
 import { TenantFederationLogin } from "./tenant-federation-login";
@@ -41,10 +41,19 @@ export default async function LoginPage({
     rawDetail?: string;
   }>;
 }) {
-  if (await getSession()) redirect(DEFAULT_LANDING);
-
   const search = await searchParams;
   const { next, message } = search;
+  // Signed in, here or by the login action: continue in a new document.
+  if (await getSession()) {
+    const t = await getTranslations();
+    return (
+      <PublicPage title={t("login")}>
+        <ContinueSignedIn href={safeNextPath(next)} />
+        <p className="text-center">{t("redirecting")}</p>
+      </PublicPage>
+    );
+  }
+
   const diagnostics = loginDiagnosticsFromRecord(search);
   const federationStatus = await getFederationStatus();
   const multiTenantFederation = federationStatus?.has_multi_tenant_federation === true;
@@ -90,7 +99,7 @@ export default async function LoginPage({
           <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
         </>
       ) : null}
-      <LoginForm next={next} />
+      <LoginForm />
     </PublicPage>
   );
 }

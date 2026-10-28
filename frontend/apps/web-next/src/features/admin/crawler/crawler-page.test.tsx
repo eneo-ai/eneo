@@ -154,6 +154,7 @@ import { CrawlerPage } from "./crawler-page";
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllEnvs();
   state.requests = [];
   state.posted = [];
   state.overview = undefined;
@@ -166,6 +167,15 @@ const lastOverviewQuery = () =>
   state.requests.filter((request) => request.path === "/api/v1/admin/crawler/").at(-1)?.query;
 
 describe("CrawlerPage", () => {
+  it("labels each day card with its own calendar day, west of UTC too", async () => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    show();
+    const today = await screen.findByRole("group", { name: "Idag" });
+    expect(within(today).getByText("25 september")).toBeTruthy();
+    const yesterday = screen.getByRole("group", { name: "Igår" });
+    expect(within(yesterday).getByText("24 september")).toBeTruthy();
+  });
+
   it("shows skeletons, never dashes, while the overview loads", () => {
     state.overview = null;
     show();

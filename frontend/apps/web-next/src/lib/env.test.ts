@@ -28,7 +28,6 @@ it("accepts a minimal valid environment with defaults", () => {
   expect(env.ENEO_BACKEND_URL).toBe("http://localhost:8123");
   expect(env.APP_ORIGIN).toBe("http://localhost:3100");
   expect(env.OIDC_SCOPES).toBe("openid profile email offline_access");
-  expect(env.SHOW_WEB_SEARCH).toBe(false);
   expect(env.SHOW_HELP_CENTER).toBe(false);
   expect(env.OIDC_ISSUER).toBeUndefined();
   expect(env.ACCESSIBILITY_STATEMENT_URL).toBeUndefined();
@@ -74,9 +73,9 @@ it("parses enabled boolean feature flags", () => {
   const env = parseEnv({
     ENEO_BACKEND_URL: "http://localhost:8123",
     SESSION_SECRET: SECRET,
-    SHOW_WEB_SEARCH: "true"
+    SHOW_HELP_CENTER: "true"
   });
-  expect(env.SHOW_WEB_SEARCH).toBe(true);
+  expect(env.SHOW_HELP_CENTER).toBe(true);
 });
 
 it("normalizes APP_ORIGIN and rejects ambiguous callback bases", () => {

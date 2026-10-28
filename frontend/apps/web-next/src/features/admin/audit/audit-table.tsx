@@ -1,6 +1,5 @@
 "use client";
 
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
@@ -15,7 +14,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { actionLabel, type AuditLog } from "./audit";
 
 export function AuditTable({ logs }: { logs: AuditLog[] }) {
@@ -114,10 +113,10 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
 
 function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTranslations> }) {
   const hasMetadata = log.metadata && Object.keys(log.metadata).length > 0;
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   const copyMetadata = async () => {
-    if (!(await copy(JSON.stringify(log.metadata, null, 2)))) toast.error(t("chat_copy_failed"));
+    await copy(JSON.stringify(log.metadata, null, 2));
   };
 
   return (

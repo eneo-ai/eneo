@@ -5735,7 +5735,7 @@
   "chat_composer_placeholder": "Fråga, klistra in text eller släpp filer här",
   "chat_conversation_label": "Konversation",
   "chat_copy_answer": "Kopiera svaret",
-  "chat_copy_failed": "Det gick inte att kopiera. Försök igen eller markera texten och kopiera den.",
+  "copy_failed": "Det gick inte att kopiera. Försök igen eller markera texten och kopiera den.",
   "chat_delete_conversation": "Ta bort konversationen",
   "chat_drop_files": "Släpp filerna för att bifoga dem",
   "chat_edit_assistant": "Redigera assistenten",

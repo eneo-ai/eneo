@@ -4,7 +4,8 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
-import { renderInApp } from "@/test/render";
+import { sessionKeys } from "@/lib/api/session";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { WhatsNewBanner } from "./release-banner";
 import { TourProvider } from "./tour-provider";
 import { WhatsNewProvider } from "./whats-new-provider";
@@ -46,16 +47,22 @@ const banner = () => screen.queryByText("Nytt i Eneo")?.closest('[role="status"]
 function renderBanner(announced: string | null = null) {
   put.mockImplementation(() =>
     Promise.resolve({
-      data: { announced_version: latest.version },
+      data: { seen_version: null, announced_version: latest.version },
       response: new Response("{}", { status: 200 })
     })
   );
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(sessionKeys.whatsNew, {
+    seen_version: null,
+    announced_version: announced
+  });
   return renderInApp(
-    <WhatsNewProvider enabled initialSeen={null} initialAnnounced={announced}>
+    <WhatsNewProvider>
       <TourProvider>
         <WhatsNewBanner />
       </TourProvider>
-    </WhatsNewProvider>
+    </WhatsNewProvider>,
+    { queryClient }
   );
 }
 

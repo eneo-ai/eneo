@@ -1,7 +1,6 @@
 "use client";
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
@@ -44,7 +43,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/features/spaces/resource-filter";
@@ -85,10 +84,10 @@ export function BlobPreviewDialog({
     enabled: open
   });
   const data = content.data;
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   async function copyText() {
-    if (data?.text && !(await copy(data.text))) toast.error(t("chat_copy_failed"));
+    if (data?.text) await copy(data.text);
   }
 
   return (

@@ -32,6 +32,12 @@ const astryxWrappedImports = [
       'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
   },
   {
+    name: "@astryxdesign/core/Typeahead",
+    importNames: ["Typeahead"],
+    message:
+      'Use `Typeahead` from "@/components/astryx/typeahead": Astryx does not set aria-invalid on an error status.'
+  },
+  {
     name: "@astryxdesign/core/TextInput",
     message:
       'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'

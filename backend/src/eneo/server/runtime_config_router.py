@@ -35,7 +35,6 @@ _LINKS = {
 class WebRuntimeConfig(BaseModel):
     version: str
     revision: str
-    show_web_search: bool
     help_center_url: str | None
     legacy_app_url: str | None
     accessibility_statement_url: str | None
@@ -78,7 +77,6 @@ def build_runtime_config(settings: Settings) -> WebRuntimeConfig:
     return WebRuntimeConfig(
         version=settings.app_version,
         revision=settings.app_revision,
-        show_web_search=settings.show_web_search,
         mcp_app_content_origin=_origin(settings.mcp_app_content_base_url),
         **links,
     )
@@ -117,6 +115,7 @@ def log_unlinked_runtime_values(settings: Settings) -> None:
         "Public and never cached."
     ),
     response_model=WebRuntimeConfig,
+    responses={200: {"description": "Web app runtime config"}},
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,

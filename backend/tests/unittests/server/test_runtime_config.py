@@ -56,7 +56,6 @@ def runtime_log() -> Iterator[list[logging.LogRecord]]:
 def test_defaults(test_settings: Settings):
     config = build_runtime_config(_settings(test_settings))
 
-    assert config.show_web_search is False
     assert config.help_center_url is None
     assert config.legacy_app_url is None
     assert config.accessibility_statement_url is None
@@ -138,12 +137,10 @@ def test_version_and_revision_come_from_settings(test_settings: Settings):
             test_settings,
             app_version="9.8.7",
             app_revision="abc123",
-            show_web_search=True,
         )
     )
 
     assert (config.version, config.revision) == ("9.8.7", "abc123")
-    assert config.show_web_search is True
 
 
 async def test_endpoint_is_public_and_not_cached(test_settings: Settings):
@@ -168,7 +165,6 @@ async def test_endpoint_is_public_and_not_cached(test_settings: Settings):
     assert set(body) == {
         "version",
         "revision",
-        "show_web_search",
         "help_center_url",
         "legacy_app_url",
         "accessibility_statement_url",

@@ -147,6 +147,16 @@ export function apiErrorFromResponse(response: Response, body: unknown): EneoApi
   });
 }
 
+const FINAL_STATUSES = new Set([401, 403, 404, 410]);
+
+/**
+ * A refusal that asking again won't change: signed out (401), forbidden (403)
+ * or gone (404, 410). A conflict, a rate limit or a network error passes.
+ */
+export function isFinalError(error: unknown): boolean {
+  return error instanceof EneoApiError && FINAL_STATUSES.has(error.status);
+}
+
 /**
  * Unwraps an openapi-fetch result, throwing an EneoApiError on failure. Use as
  * the body of every queryFn/mutationFn:

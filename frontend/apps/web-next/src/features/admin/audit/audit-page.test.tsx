@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import { renderInApp } from "@/test/render";
 
-const state = vi.hoisted(() => ({ failLogs: false, requested: [] as string[] }));
+const state = vi.hoisted(() => ({
+  failLogs: false,
+  requested: [] as string[],
+  searches: [] as unknown[]
+}));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: (path: string) => {
+    GET: (path: string, options?: { params?: { query?: { search?: string } } }) => {
       state.requested.push(path);
       if (path === "/api/v1/audit/logs") {
+        state.searches.push(options?.params?.query?.search);
         if (state.failLogs) {
           return Promise.reject(new EneoApiError("boom", { status: 500, code: 9024 }));
         }
@@ -51,6 +56,8 @@ import { AuditPage } from "./audit-page";
 beforeEach(() => {
   state.failLogs = false;
   state.requested = [];
+  state.searches = [];
+  window.history.replaceState(null, "", "/admin/audit");
 });
 afterEach(cleanup);
 
@@ -79,5 +86,28 @@ describe("AuditPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("table", { name: "Granskningsloggar" })).toBeTruthy()
     );
+  });
+
+  it("searches again for a search restored right after clearing it", async () => {
+    renderInApp(<AuditPage />);
+    await screen.findByRole("table", { name: "Granskningsloggar" });
+    const search = screen.getByRole("textbox", { name: "Sök" });
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(search, { target: { value: "abc" } });
+      act(() => vi.advanceTimersByTime(300));
+      expect(window.location.search).toBe("?search=abc");
+
+      // Clearing applies at once; typing the same search back applies again.
+      fireEvent.change(search, { target: { value: "" } });
+      expect(window.location.search).toBe("");
+      fireEvent.change(search, { target: { value: "abc" } });
+      act(() => vi.advanceTimersByTime(300));
+      expect(window.location.search).toBe("?search=abc");
+      expect(state.searches.at(-1)).toBe("abc");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

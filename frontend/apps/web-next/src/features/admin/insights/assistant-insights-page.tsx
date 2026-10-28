@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
-import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Switch } from "@/components/astryx/switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -39,7 +39,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
@@ -131,7 +131,7 @@ function AnalysisTab({
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const questionProblem = asked && !question.trim() ? t("required_field") : null;
   const [answer, setAnswer] = useState("");
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   const ask = useMutation({
     mutationFn: (text: string) =>
@@ -203,9 +203,7 @@ function AnalysisTab({
                     <Copy className="size-4" aria-hidden="true" />
                   )
                 }
-                onClick={async () => {
-                  if (!(await copy(answer))) toast.error(t("chat_copy_failed"));
-                }}
+                onClick={() => void copy(answer)}
               />
             ) : null}
           </div>

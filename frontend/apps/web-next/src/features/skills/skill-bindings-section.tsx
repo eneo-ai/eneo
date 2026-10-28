@@ -29,6 +29,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { useSpace } from "@/features/spaces/use-space";
 import {
   candidateRevisionId,
@@ -176,7 +177,6 @@ export function SkillBindingsEditor({
   const [announcement, setAnnouncement] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
   const [created, setCreated] = useState<SkillCandidate[]>([]);
   const [previewCandidate, setPreviewCandidate] = useState<SkillCandidate | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -226,10 +226,7 @@ export function SkillBindingsEditor({
     return () => setSaveStatus("skills", null);
   }, [dirty, resource, saveError, saving, setSaveStatus]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  const search = useDebouncedValue(searchInput.trim());
 
   const catalogue = useInfiniteQuery({
     queryKey: ["skill-binding-catalogue", spaceId, search],
