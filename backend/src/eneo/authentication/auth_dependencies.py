@@ -4,10 +4,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Security, status
 
-from eneo.authentication.api_key_resolver import (
-    ApiKeyValidationError,
-    check_resource_permission,
-)
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.endpoint_access import (
@@ -16,16 +13,10 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.logging import get_logger
-from eneo.server.dependencies.auth_definitions import (
-    OAUTH2_SCHEME,
-    is_api_key_request,
-)
+from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.dependencies.container import get_container
 from eneo.tenants.tenant import TenantState
 from eneo.users.user import UserInDB, UserState
-
-logger = get_logger(__name__)
 
 
 def _raise_api_key_http_error(
@@ -311,42 +302,6 @@ def require_api_key_scope_check(
         }
 
     return _scope_check_dep
-
-
-def require_resource_permission(
-    resource_type: str, required: str
-) -> Callable[..., Awaitable[None]]:
-    """Dependency factory for fine-grained per-resource permission checks.
-
-    Fail-closed: if an API key header is present but request.state.api_key
-    was not set by the auth dependency, raise 500 to surface a dependency
-    ordering misconfiguration rather than silently allowing the request.
-    """
-
-    async def _resource_check_dep(request: Request) -> None:
-        key = getattr(request.state, "api_key", None)
-        if key is None:
-            # Check if an API key header was provided but auth didn't run
-            if is_api_key_request(request.headers, get_settings()):
-                logger.error(
-                    "API key header present but request.state.api_key missing — "
-                    "auth dependency may not have run before resource permission guard",
-                    extra={"resource_type": resource_type, "required": required},
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                        "code": "server_configuration_error",
-                        "message": "Authentication state missing.",
-                    },
-                )
-            return
-        try:
-            check_resource_permission(key, resource_type, required)
-        except ApiKeyValidationError as exc:
-            _raise_api_key_http_error(exc, request=request)
-
-    return _resource_check_dep
 
 
 def require_file_delete_scope_guard() -> Callable[..., Awaitable[None]]:
