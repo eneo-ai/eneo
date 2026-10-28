@@ -1,20 +1,11 @@
-import type { DateRange } from "@astryxdesign/core/DateRangeInput";
+import { isoDate, type IsoDate } from "@/lib/calendar-date";
 import type { ChatPartner } from "@/lib/chat/types";
-
-/** A local calendar date as YYYY-MM-DD (Astryx's ISODateString). */
-export type IsoDate = DateRange["start"];
 
 /** The period insights cover: whole local days, both ends included. */
 export type InsightRange = { start: IsoDate; end: IsoDate };
 
 export const DEFAULT_INSIGHT_DAYS = 30;
 export const INSIGHT_PRESET_DAYS = [7, 30, 90] as const;
-
-export function isoDate(date: Date): IsoDate {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}` as IsoDate;
-}
 
 function shiftDays(date: Date, days: number): Date {
   const shifted = new Date(date);

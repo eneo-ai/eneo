@@ -21,6 +21,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { API_KEY_POLICY_CONSTRAINTS_KEY } from "@/features/api-keys/api-keys";
 
 type Policy = Schema<"ApiKeyPolicyResponse">;
 type PolicyUpdate = Schema<"ApiKeyPolicyUpdate">;
@@ -90,6 +91,9 @@ function PolicyForm({
     mutationFn: () => {
       // ApiKeyPolicyUpdate is extra="forbid" — send only changed fields.
       const body: PolicyUpdate = {};
+      if (draft.require_tenant_allowed_origin !== policy.require_tenant_allowed_origin) {
+        body.require_tenant_allowed_origin = draft.require_tenant_allowed_origin ?? true;
+      }
       if (draft.require_expiration !== policy.require_expiration) {
         body.require_expiration = draft.require_expiration ?? null;
       }
@@ -115,6 +119,8 @@ function PolicyForm({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: POLICY_KEY });
+      // The limits the key forms and dialogs show.
+      void queryClient.invalidateQueries({ queryKey: API_KEY_POLICY_CONSTRAINTS_KEY });
       onClose();
     },
     onError: (error) => toastApiError(error, t)
@@ -152,6 +158,12 @@ function PolicyForm({
   return (
     <>
       <div className="flex flex-col gap-4">
+        <ToggleRow
+          label={t("api_keys_admin_policy_require_tenant_origin")}
+          description={t("api_keys_admin_policy_require_tenant_origin_desc")}
+          checked={draft.require_tenant_allowed_origin ?? true}
+          onCheckedChange={(value) => setField("require_tenant_allowed_origin", value)}
+        />
         <ToggleRow
           label={t("api_keys_admin_policy_require_expiration")}
           description={t("api_keys_admin_policy_require_expiration_desc")}

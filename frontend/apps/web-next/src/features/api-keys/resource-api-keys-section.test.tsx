@@ -20,14 +20,23 @@ const apiKey = {
 } as Schema<"ApiKeyV2">;
 
 const post = vi.hoisted(() => vi.fn());
+const put = vi.hoisted(() => vi.fn());
+const followed = vi.hoisted(() => ({ items: [] as unknown[] }));
+const keys = vi.hoisted(() => ({ items: null as unknown[] | null }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
       Promise.resolve({
-        data: path === "/api/v1/api-keys" ? { items: [apiKey], next_cursor: null } : {},
+        data:
+          path === "/api/v1/api-keys"
+            ? { items: keys.items ?? [apiKey], next_cursor: null }
+            : path === "/api/v1/api-keys/notification-subscriptions"
+              ? { items: followed.items }
+              : {},
         response: new Response("{}")
       }),
-    POST: post
+    POST: post,
+    PUT: put
   }
 }));
 
@@ -36,6 +45,9 @@ import { ResourceApiKeysSection } from "./resource-api-keys-section";
 afterEach(() => {
   cleanup();
   post.mockReset();
+  put.mockReset();
+  followed.items = [];
+  keys.items = null;
 });
 
 describe("ResourceApiKeysSection", () => {
@@ -82,28 +94,87 @@ describe("ResourceApiKeysSection", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Skapa" }));
     const dialog = await screen.findByRole("dialog", { name: "Skapa API-nyckel för Upphandling" });
-    const create = within(dialog).getByRole("button", { name: "Skapa" }) as HTMLButtonElement;
+    const create = (await within(dialog).findByRole("button", {
+      name: "Skapa"
+    })) as HTMLButtonElement;
     // Never disabled: a disabled button says nothing about what is missing.
     expect(create.disabled).toBe(false);
 
     fireEvent.click(create);
     const name = within(dialog).getByLabelText("Namn");
     expect(name.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(name.getAttribute("aria-describedby")!)?.textContent).toBe(
-      "Detta fält är obligatoriskt"
-    );
+    const [problemId] = name.getAttribute("aria-describedby")!.split(" ");
+    expect(document.getElementById(problemId!)?.textContent).toBe("Namn krävs");
     expect(document.activeElement).toBe(name);
     expect(post).not.toHaveBeenCalled();
-    // Its pickers are named by their labels.
-    expect(within(dialog).getByRole("combobox", { name: "Behörighetsnivå" })).toBeTruthy();
+    // The scope is the resource's own; each resource type's access is named by its label.
+    expect(within(dialog).getByText("Yta · Upphandling")).toBeTruthy();
+    expect(within(dialog).getByRole("combobox", { name: "Kunskap" })).toBeTruthy();
     await expectNoAxeViolations(dialog);
 
     fireEvent.change(name, { target: { value: "Upphandlingsflödet" } });
     fireEvent.click(create);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/api-keys", {
-        body: expect.objectContaining({ name: "Upphandlingsflödet", scope_id: "space-1" })
+        body: expect.objectContaining({
+          name: "Upphandlingsflödet",
+          key_type: "sk_",
+          scope_type: "space",
+          scope_id: "space-1"
+        })
       })
     );
+  });
+
+  it("follows the space's expiry reminders, which then cover each of its keys", async () => {
+    put.mockImplementation(() => {
+      followed.items = [{ target_type: "space", target_id: "space-1" }];
+      return Promise.resolve({ data: { items: followed.items }, response: new Response("{}") });
+    });
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />,
+      { appContext: testAppContext({ permissions: ["api_keys"] }) }
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Följ scopepåminnelser" }));
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(
+        "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}",
+        { params: { path: { target_type: "space", target_id: "space-1" } } }
+      )
+    );
+    expect(await screen.findByRole("button", { name: "Avfölj scopepåminnelser" })).toBeTruthy();
+
+    const trigger = await screen.findByRole("button", {
+      name: "Fler åtgärder för Upphandlingsflödet"
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Följs via scope" })).toBeTruthy();
+  });
+
+  it("says why there is no Create button without the API key permission", async () => {
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />
+    );
+    expect(
+      await screen.findByText(/Din roll saknar behörighet att skapa API-nycklar/)
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skapa" })).toBeNull();
+  });
+
+  it("says which listed keys expire soon", async () => {
+    keys.items = [
+      { ...apiKey, expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString() },
+      { ...apiKey, id: "key-2", expires_at: new Date(Date.now() + 10 * 86_400_000).toISOString() }
+    ];
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />
+    );
+    expect(
+      await screen.findByText(
+        "1 nyckel går ut inom 3 dagar, 1 nyckel går ut inom 14 dagar i denna vy"
+      )
+    ).toBeTruthy();
   });
 });

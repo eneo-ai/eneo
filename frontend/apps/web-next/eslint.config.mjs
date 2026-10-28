@@ -38,6 +38,12 @@ const astryxWrappedImports = [
       'Use `Typeahead` from "@/components/astryx/typeahead": Astryx does not set aria-invalid on an error status.'
   },
   {
+    name: "@astryxdesign/core/Tokenizer",
+    importNames: ["Tokenizer"],
+    message:
+      'Use `Tokenizer` from "@/components/astryx/tokenizer": Astryx does not set aria-invalid on an error status.'
+  },
+  {
     name: "@astryxdesign/core/TextInput",
     message:
       'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'

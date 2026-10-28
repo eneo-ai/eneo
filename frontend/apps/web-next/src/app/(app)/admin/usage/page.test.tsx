@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// Under node, as on the server: the page prefetches without retries.
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api/server", () => ({
