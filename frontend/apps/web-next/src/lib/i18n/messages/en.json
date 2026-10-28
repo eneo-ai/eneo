@@ -6726,6 +6726,8 @@
   "group_chat_created_announcement": "Group chat created",
   "editor_sections_label": "Sections",
   "query_error_title": "The content could not be loaded",
+  "query_error_refresh_title": "The content could not be refreshed. The last loaded data is shown.",
+  "query_error_load_more_title": "More could not be loaded.",
   "query_error_http_status": "HTTP status: {status}",
   "query_error_code": "Error code: {code}",
   "query_error_retry_named": "Try again: {section}",

@@ -1550,6 +1550,8 @@
   "group_chat_created_announcement": "Gruppchatten skapades",
   "editor_sections_label": "Avsnitt",
   "query_error_title": "Innehållet kunde inte hämtas",
+  "query_error_refresh_title": "Innehållet kunde inte uppdateras. Senast hämtade uppgifter visas.",
+  "query_error_load_more_title": "Det gick inte att läsa in fler.",
   "query_error_http_status": "HTTP-status: {status}",
   "query_error_code": "Felkod: {code}",
   "query_error_retry_named": "Försök igen: {section}",

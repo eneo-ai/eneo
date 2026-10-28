@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { ListError, QueryStateBoundary, type QueryLike } from "./query-state";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import {
+  ListError,
+  LoadMore,
+  QueryStateBoundary,
+  blockingError,
+  type QueryLike
+} from "./query-state";
 
 afterEach(cleanup);
 
@@ -15,6 +23,8 @@ function query<T>(overrides: Partial<QueryLike<T>>): QueryLike<T> {
     isError: false,
     error: null,
     isFetching: false,
+    errorUpdatedAt: 0,
+    dataUpdatedAt: 0,
     refetch: vi.fn(),
     ...overrides
   };
@@ -169,5 +179,138 @@ describe("ListError", () => {
     const alert = screen.getByRole("alert");
     expect(within(alert).getByText("Något gick fel. Försök igen.")).toBeTruthy();
     expect(within(alert).queryByText("Innehållet kunde inte hämtas")).toBeNull();
+  });
+});
+
+describe("query failure with data on screen", () => {
+  const names = (items: string[]) => (
+    <ul>
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+
+  it("keeps the content when a refetch fails and shows the error with a retry above it", () => {
+    const refetch = vi.fn();
+    renderInApp(
+      <QueryStateBoundary
+        query={query<string[]>({
+          data: ["Anna", "Bo"],
+          isError: true,
+          error: new Error("boom"),
+          dataUpdatedAt: 1,
+          errorUpdatedAt: 2,
+          refetch
+        })}
+      >
+        {names}
+      </QueryStateBoundary>
+    );
+
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Anna", "Bo"]);
+    const title = screen.getByText(
+      "Innehållet kunde inte uppdateras. Senast hämtade uppgifter visas."
+    );
+    expect(title.closest('[role="alert"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Försök igen/ }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces the content with the error when there is nothing to show", () => {
+    renderInApp(
+      <QueryStateBoundary
+        query={query<string[]>({ isError: true, error: new Error("boom"), errorUpdatedAt: 2 })}
+      >
+        {names}
+      </QueryStateBoundary>
+    );
+    expect(screen.getByText("Innehållet kunde inte hämtas")).toBeTruthy();
+    expect(screen.queryByRole("list")).toBeNull();
+  });
+
+  it("keeps the retry button, not a skeleton, while a failure without data is retried", () => {
+    // React Query reports a retry without data as pending and clears isError.
+    renderInApp(
+      <QueryStateBoundary
+        query={query<string[]>({ isPending: true, isFetching: true, errorUpdatedAt: 2 })}
+      >
+        {names}
+      </QueryStateBoundary>
+    );
+    const retry = screen.getByRole("button", { name: /^Försök igen/ });
+    expect(retry.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("Laddar...")).toBeNull();
+  });
+
+  it("decides blocking from data, not from the error flag alone", () => {
+    expect(blockingError(query({ isError: true, errorUpdatedAt: 2 }))).toBe(true);
+    expect(blockingError(query({ isFetching: true, errorUpdatedAt: 2 }))).toBe(true);
+    expect(
+      blockingError(query({ data: [], isError: true, dataUpdatedAt: 1, errorUpdatedAt: 2 }))
+    ).toBe(false);
+    expect(blockingError(query({ isPending: true, isFetching: true }))).toBe(false);
+  });
+});
+
+describe("LoadMore", () => {
+  function Names({ fetchPage }: { fetchPage: (cursor: string | undefined) => Promise<unknown> }) {
+    const list = useInfiniteQuery({
+      ...cursorPagination,
+      queryKey: ["names"],
+      queryFn: ({ pageParam }) =>
+        fetchPage(pageParam) as Promise<{
+          items: string[];
+          total_count: number;
+          next_cursor: string | null;
+        }>
+    });
+    return (
+      <QueryStateBoundary query={list}>
+        {(data) => (
+          <>
+            {names(flattenPages(data.pages))}
+            <LoadMore query={list} label="Visa fler" />
+          </>
+        )}
+      </QueryStateBoundary>
+    );
+  }
+  const names = (items: string[]) => (
+    <ul>
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+
+  it("keeps the loaded rows when the next page fails and retries only that page", async () => {
+    let failSecond = true;
+    const fetchPage = vi.fn(async (cursor: string | undefined) => {
+      if (!cursor) return { items: ["Anna"], total_count: 2, next_cursor: "page-2" };
+      if (failSecond) throw new Error("boom");
+      return { items: ["Bo"], total_count: 2, next_cursor: null };
+    });
+    renderInApp(<Names fetchPage={fetchPage} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Visa fler" }));
+    const title = await screen.findByText("Det gick inte att läsa in fler.");
+    expect(title.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Anna"]);
+    // The boundary leaves a next-page failure to LoadMore: one error, not two.
+    expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
+
+    failSecond = false;
+    fetchPage.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /^Försök igen/ }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+        "Anna",
+        "Bo"
+      ])
+    );
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(fetchPage).toHaveBeenCalledWith("page-2");
+    expect(screen.queryByText("Det gick inte att läsa in fler.")).toBeNull();
   });
 });

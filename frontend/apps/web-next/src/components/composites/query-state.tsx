@@ -15,8 +15,26 @@ export type QueryLike<T = unknown> = {
   isError: boolean;
   error: unknown;
   isFetching: boolean;
+  errorUpdatedAt: number;
+  dataUpdatedAt: number;
+  /** An infinite query's next page failed: `LoadMore` reports that, not the boundary. */
+  isFetchNextPageError?: boolean;
   refetch: () => unknown;
 };
+
+/**
+ * A failure that leaves nothing to show: the query failed without data, or
+ * it is retrying such a failure. React Query reports that retry as pending
+ * and clears isError, so this reads `errorUpdatedAt > dataUpdatedAt` to keep
+ * the retry button under the user's focus instead of swapping in a skeleton.
+ * A failure with data on screen is not blocking: the data stays.
+ */
+export function blockingError(
+  query: Pick<QueryLike, "data" | "isError" | "isFetching" | "errorUpdatedAt" | "dataUpdatedAt">
+): boolean {
+  if (query.data !== undefined) return false;
+  return query.isError || (query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt);
+}
 
 export type ListErrorProps = {
   /**
@@ -105,6 +123,8 @@ export function ListError({
 type LoadingProps = Pick<LoadingStateProps, "rows" | "variant" | "height"> & {
   /** Screen-reader label while loading; defaults to "Laddar…". */
   loadingLabel?: string;
+  /** Title of the error that replaces the content (ListError's `title`). */
+  errorTitle?: string;
 };
 
 type SingleQueryProps<T> = LoadingProps & {
@@ -126,9 +146,11 @@ type ManyQueriesProps = LoadingProps & {
 export type QueryStateBoundaryProps<T> = SingleQueryProps<T> | ManyQueriesProps;
 
 /**
- * Renders a query's three states the same way everywhere: `LoadingState`
- * skeleton rows while pending, `ListError` with a retry when it failed
- * (retrying the failed queries only) and the children once there is data.
+ * Renders a query's states the same way everywhere: `LoadingState` skeleton
+ * rows while pending, `ListError` with a retry when a failure leaves nothing
+ * to show (`blockingError`; retrying the failed queries only) and the children
+ * once there is data. A refetch that fails while data is shown keeps the
+ * children and puts a compact `ListError` above them.
  *
  * @example
  * <QueryStateBoundary query={logs} rows={5}>
@@ -141,17 +163,17 @@ export type QueryStateBoundaryProps<T> = SingleQueryProps<T> | ManyQueriesProps;
  * </QueryStateBoundary>
  */
 export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
-  const { rows, variant, height, loadingLabel } = props;
+  const { rows, variant, height, loadingLabel, errorTitle } = props;
   const queries: readonly QueryLike[] = props.queries ?? [props.query];
-  const failed = queries.filter((query) => query.isError);
-
-  if (failed.length > 0) {
+  const blocking = queries.filter(blockingError);
+  if (blocking.length > 0) {
     return (
       <ListError
-        error={failed[0]!.error}
-        isRetrying={failed.some((query) => query.isFetching)}
+        error={blocking.find((query) => query.error != null)?.error ?? null}
+        title={errorTitle}
+        isRetrying={blocking.some((query) => query.isFetching)}
         onRetry={() => {
-          for (const query of failed) void query.refetch();
+          for (const query of blocking) void query.refetch();
         }}
       />
     );
@@ -159,6 +181,92 @@ export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
   if (queries.some((query) => query.isPending)) {
     return <LoadingState rows={rows} variant={variant} height={height} label={loadingLabel} />;
   }
-  if (props.queries) return <>{props.children()}</>;
-  return <>{props.children(props.query.data as T)}</>;
+  return (
+    <>
+      <RefreshError queries={queries} />
+      {props.queries ? props.children() : props.children(props.query.data as T)}
+    </>
+  );
+}
+
+/**
+ * The compact error above content that stays on screen when a refetch of it
+ * failed (focus, invalidation, polling): "could not be refreshed, the last
+ * loaded data is shown" with a retry of the failed queries. Renders nothing
+ * otherwise; a failure with nothing to show is `blockingError`'s, and a failed
+ * next page is `LoadMore`'s. `QueryStateBoundary` renders it; use it directly
+ * where content cannot sit in a boundary.
+ */
+export function RefreshError({ queries }: { queries: readonly QueryLike[] }) {
+  const t = useTranslations();
+  const failed = queries.filter(
+    (query) => query.isError && query.data !== undefined && !query.isFetchNextPageError
+  );
+  if (failed.length === 0) return null;
+  return (
+    <ListError
+      error={failed[0]!.error}
+      title={t("query_error_refresh_title")}
+      isRetrying={failed.some((query) => query.isFetching)}
+      onRetry={() => {
+        for (const query of failed) void query.refetch();
+      }}
+      compact
+    />
+  );
+}
+
+/** The part of a `useInfiniteQuery` result `LoadMore` reads. */
+export type InfiniteQueryLike = {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  isFetchNextPageError: boolean;
+  error: unknown;
+  fetchNextPage: () => unknown;
+};
+
+/**
+ * The "load more" control under a paged list. While the next page loads the
+ * button stays enabled (it keeps focus) and a second press is ignored. A
+ * failed next page keeps the loaded rows: a compact `ListError` above the
+ * button retries that page only.
+ *
+ * @example
+ * <LoadMore query={sessions} label={t("load_more_conversations")} />
+ */
+export function LoadMore({
+  query,
+  label,
+  onLoad
+}: {
+  query: InfiniteQueryLike;
+  label: string;
+  /** Replaces `fetchNextPage`, e.g. to move focus to the first new row once it renders. */
+  onLoad?: () => void;
+}) {
+  const t = useTranslations();
+  if (!query.hasNextPage && !query.isFetchNextPageError) return null;
+  const load = () => {
+    if (query.isFetchingNextPage) return;
+    if (onLoad) onLoad();
+    else void query.fetchNextPage();
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {query.isFetchNextPageError ? (
+        <ListError
+          error={query.error}
+          title={t("query_error_load_more_title")}
+          isRetrying={query.isFetchingNextPage}
+          onRetry={load}
+          compact
+          className="w-full"
+        />
+      ) : null}
+      {query.hasNextPage ? (
+        <Button label={label} isLoading={query.isFetchingNextPage} isInterruptible onClick={load} />
+      ) : null}
+    </div>
+  );
 }
