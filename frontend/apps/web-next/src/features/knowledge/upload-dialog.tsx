@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { sessionQueries } from "@/lib/api/session";
 import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ type ValidationError = { fileName?: string; message: string };
 
 const FILES_ID = "knowledge-upload-files";
 const FILE_ERRORS_ID = `${FILES_ID}-errors`;
+const session = sessionQueries(browserApi);
 
 /** "Ladda upp filer" on a collection's page: the button and its upload dialog. */
 export function UploadBlobsButton({
@@ -103,10 +105,13 @@ export function UploadBlobsDialog({
     queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
     enabled: open && can("admin")
   });
-  // The session's user query refetches whenever a job finishes
-  // (features/jobs/job-invalidation.ts), so the quota stays current.
-  const quotaLimit = user.quota_limit;
-  const quotaUsed = user.quota_used;
+  // The quota needs a fresh answer: the backend computes it live, and deleted
+  // files or uploads in another tab move it without touching this tab's cache.
+  // Each opening refetches the session's user (the one ["users", "me"]
+  // entry, which the app context shows too).
+  const { data: me = user } = useQuery({ ...session.me, staleTime: 0, enabled: open });
+  const quotaLimit = me.quota_limit;
+  const quotaUsed = me.quota_used;
 
   const errors = useMemo<ValidationError[]>(() => {
     const found: ValidationError[] = [];

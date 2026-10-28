@@ -7,8 +7,9 @@ import type { Schema } from "./models";
  * The signed-in session's resources: the user, their organisation and its
  * settings, federation status, upload limits and the What's new markers. One
  * query each, under the key every other reader uses (keys mirror the backend
- * paths; ["users", "me"] is also refetched when a job finishes, for the
- * quota). The backend version is not one: it comes with the deployment.
+ * paths; ["users", "me"] is also refetched, for the quota, when a job
+ * finishes and when the upload dialog opens). The backend version is not one:
+ * it comes with the deployment.
  */
 export const sessionKeys = {
   me: ["users", "me"],
