@@ -1,7 +1,8 @@
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { API_BASE } from "@/lib/api/base";
 import type { paths } from "@/lib/api/schema";
-import { signedFileUrl } from "./signed-file-url";
+import { proxiedDownloadPath, signedFileUrl } from "./signed-file-url";
 
 describe("signed file URLs", () => {
   it.each(["inline", "attachment"] as const)(
@@ -25,10 +26,16 @@ describe("signed file URLs", () => {
         }
       });
       expect(await signedFileUrl(api, "file-1", disposition)).toBe(
-        "/api/eneo/api/v1/files/file-1/download/?token=signed%2Bvalue"
+        `${API_BASE}/api/v1/files/file-1/download/?token=signed%2Bvalue`
       );
     }
   );
+
+  it("proxiedDownloadPath prefixes API_BASE", () => {
+    expect(
+      proxiedDownloadPath("http://backend:8000/api/v1/files/file-1/download/?token=t", "file-1")
+    ).toBe(`${API_BASE}/api/v1/files/file-1/download/?token=t`);
+  });
 
   it.each([
     "http://backend:8000/api/v1/files/other/download/?token=value",

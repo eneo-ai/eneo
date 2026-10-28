@@ -6,7 +6,7 @@ import { setRoute } from "@/test/navigation";
 import { renderToHtml, testQueryClient } from "@/test/render";
 import { AppShellFrame } from "./app-shell";
 
-// The browser's API client has a relative base URL ("/api/eneo"): during the
+// The browser's API client has a relative base URL (API_BASE): during the
 // server render it cannot reach the backend ("Failed to parse URL").
 const browserGet = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet } }));
