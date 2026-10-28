@@ -9,7 +9,7 @@ import { Check, Circle, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
-import { blockingError } from "@/components/composites/query-state";
+import { blockingError, RefreshError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -273,6 +273,7 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
       }
     >
       <p className="text-ax-text-secondary text-sm">{description}</p>
+      <RefreshError queries={[query]} />
     </HealthCheck>
   );
 }

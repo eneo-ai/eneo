@@ -25,15 +25,16 @@ export type QueryLike<T = unknown> = {
 /**
  * A failure that leaves nothing to show: the query failed without data, or
  * it is retrying such a failure. React Query reports that retry as pending
- * and clears isError, so this reads `errorUpdatedAt > dataUpdatedAt` to keep
- * the retry button under the user's focus instead of swapping in a skeleton.
- * A failure with data on screen is not blocking: the data stays.
+ * (fetching, or paused while offline) and clears isError, so this reads
+ * `errorUpdatedAt > dataUpdatedAt` to keep the retry button under the user's
+ * focus instead of swapping in a skeleton. A failure with data on screen is
+ * not blocking: the data stays.
  */
 export function blockingError(
-  query: Pick<QueryLike, "data" | "isError" | "isFetching" | "errorUpdatedAt" | "dataUpdatedAt">
+  query: Pick<QueryLike, "data" | "isError" | "isPending" | "errorUpdatedAt" | "dataUpdatedAt">
 ): boolean {
   if (query.data !== undefined) return false;
-  return query.isError || (query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt);
+  return query.isError || (query.isPending && query.errorUpdatedAt > query.dataUpdatedAt);
 }
 
 export type ListErrorProps = {

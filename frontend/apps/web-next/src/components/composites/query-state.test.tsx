@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { onlineManager, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
@@ -243,9 +243,39 @@ describe("query failure with data on screen", () => {
     expect(screen.queryByText("Laddar...")).toBeNull();
   });
 
+  it("keeps the focused retry button while an offline retry waits for the network", async () => {
+    function Names() {
+      const list = useQuery({
+        queryKey: ["names-offline"],
+        queryFn: async (): Promise<string[]> => {
+          throw new Error("boom");
+        }
+      });
+      return <QueryStateBoundary query={list}>{names}</QueryStateBoundary>;
+    }
+    renderInApp(<Names />);
+    const retry = await screen.findByRole("button", { name: /^Försök igen/ });
+    retry.focus();
+
+    onlineManager.setOnline(false);
+    try {
+      fireEvent.click(retry);
+      // The paused retry is neither fetching nor failed: still no skeleton.
+      await waitFor(() => expect(screen.queryByText("Laddar...")).toBeNull());
+      expect(retry.isConnected).toBe(true);
+      expect(document.activeElement).toBe(retry);
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
   it("decides blocking from data, not from the error flag alone", () => {
     expect(blockingError(query({ isError: true, errorUpdatedAt: 2 }))).toBe(true);
-    expect(blockingError(query({ isFetching: true, errorUpdatedAt: 2 }))).toBe(true);
+    // A retry of a failure without data: pending, fetching or paused offline.
+    expect(blockingError(query({ isPending: true, isFetching: true, errorUpdatedAt: 2 }))).toBe(
+      true
+    );
+    expect(blockingError(query({ isPending: true, errorUpdatedAt: 2 }))).toBe(true);
     expect(
       blockingError(query({ data: [], isError: true, dataUpdatedAt: 1, errorUpdatedAt: 2 }))
     ).toBe(false);
