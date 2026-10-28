@@ -79,6 +79,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.questions.question import MessageFeedback
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import extract_request_id
 from eneo.server.protocol import responses
 from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
@@ -124,9 +125,7 @@ RECENT_CONVERSATIONS_MAX_LIMIT = 50
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
-    request_id = http_request.headers.get(
-        "x-correlation-id"
-    ) or http_request.headers.get("x-request-id")
+    request_id = extract_request_id(http_request)
     detail: dict[str, object] = {
         "code": "insufficient_scope",
         "message": message,

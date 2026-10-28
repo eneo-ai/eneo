@@ -14,6 +14,12 @@ from fastapi import HTTPException
 
 from eneo.authentication import federation_router
 from eneo.authentication.federation_router import CallbackRequest
+from eneo.main.request_context import (
+    clear_request_context,
+    get_request_context,
+    set_request_context,
+)
+from eneo.server.exception_handlers import correlation_headers
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
@@ -287,6 +293,58 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
 
     query = parse_qs(urlparse(response.authorization_url).query)
     assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
+
+
+@pytest.mark.asyncio
+async def test_initiate_auth_keeps_the_request_correlation_id(monkeypatch):
+    """The id the middleware stored (the caller's X-Correlation-ID without a
+    span) names the login in the logs, the state and the response header."""
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="CorrelatedTenant",
+        display_name="CorrelatedTenant",
+        quota_limit=1024**3,
+        slug="correlated-tenant",
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://canonical.example.com",
+            "redirect_path": "/auth/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    dummy_settings = DummySettings(federation_enabled=True)
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=None,
+        auth_service=None,
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+
+    set_request_context(correlation_id="abc")
+    try:
+        response = await federation_router.initiate_auth(
+            tenant=tenant.slug, state=None, container=container
+        )
+        assert get_request_context()["correlation_id"] == "abc"
+        assert correlation_headers() == {"X-Correlation-ID": "abc"}
+    finally:
+        clear_request_context()
+
+    state = jwt.decode(response.state, dummy_settings.jwt_secret, algorithms=["HS256"])
+    assert state["correlation_id"] == "abc"
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.main.request_context import get_request_context
+from eneo.server.exception_handlers import extract_request_id
 
 logger = get_logger(__name__)
 
@@ -51,17 +51,6 @@ def api_key_cursor_for(key: ApiKeyV2InDB) -> ApiKeyListCursor:
     if key.created_at is None:
         raise ValueError("Persisted API key is missing created_at.")
     return ApiKeyListCursor(created_at=key.created_at, key_id=key.id)
-
-
-def _resolve_request_id(request: Request | None = None) -> str | None:
-    if request is not None:
-        request_id = request.headers.get("x-correlation-id") or request.headers.get(
-            "x-request-id"
-        )
-        if request_id:
-            return request_id
-    context = get_request_context()
-    return cast(str | None, context.get("correlation_id"))
 
 
 def _infer_auth_layer(exc: ApiKeyValidationError) -> str | None:
@@ -115,7 +104,7 @@ def raise_api_key_http_error(
         dict(exc.context) if exc.context is not None else None,
         auth_layer=auth_layer,
     )
-    request_id = _resolve_request_id(request)
+    request_id = extract_request_id(request)
 
     logger.warning(
         "API key authentication failed",

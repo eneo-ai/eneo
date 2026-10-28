@@ -168,14 +168,18 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
     return ErrorCodes.BAD_REQUEST
 
 
-def _extract_request_id(request: Request) -> str | None:
-    # Documented contract: a caller-sent correlation/request header is echoed
-    # as ``request_id`` in the error body.
-    request_id = request.headers.get("x-correlation-id") or request.headers.get(
-        "x-request-id"
-    )
-    if request_id:
-        return request_id
+def extract_request_id(request: Request | None = None) -> str | None:
+    """The ``request_id`` an error body carries.
+
+    Documented contract: a caller-sent correlation/request header is echoed;
+    otherwise the request context's correlation id, which the logs carry.
+    """
+    if request is not None:
+        request_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
+        if request_id:
+            return request_id
     return get_request_context().get("correlation_id")
 
 
@@ -450,7 +454,7 @@ def add_exception_handlers(app: FastAPI):
             return Response(status_code=http_exc.status_code, headers=headers)
         return JSONResponse(
             status_code=http_exc.status_code,
-            content=_http_exception_body(http_exc, _extract_request_id(request)),
+            content=_http_exception_body(http_exc, extract_request_id(request)),
             headers=headers,
         )
 
@@ -543,7 +547,7 @@ def add_exception_handlers(app: FastAPI):
             message = error_message or str(exc)
             if not message or not message.strip():
                 message = _default_message_for_status(status_code)
-            request_id = _extract_request_id(request)
+            request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
             raw_details = getattr(exc, "details", None)
             details: dict[str, object] | None
@@ -590,7 +594,7 @@ def add_exception_handlers(app: FastAPI):
         if not is_active_display_name_violation(integrity_exc):
             raise exc
 
-        request_id = _extract_request_id(request)
+        request_id = extract_request_id(request)
         logger.warning(
             "%s %s → 409: display name collision (DB index)",
             request.method,

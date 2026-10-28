@@ -26,7 +26,7 @@ from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
-from eneo.main.request_context import set_request_context
+from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
@@ -597,8 +597,7 @@ async def initiate_auth(
             detail=f"No identity provider configured for tenant '{tenant}'",
         )
 
-    correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
-    set_request_context(correlation_id=correlation_id)
+    correlation_id = ensure_correlation_id()
 
     # Resolve redirect_uri server-side
     try:
