@@ -608,23 +608,9 @@ class CredentialResolver:
                     "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
                 )
 
-        # Origin should already be validated and normalized by Settings/Tenant validators
-        # But double-check HTTPS as defense in depth (allow http://localhost for development)
-        is_localhost = origin.startswith("http://localhost") or origin.startswith(
-            "http://127.0.0.1"
-        )
-        if not origin.startswith("https://") and not is_localhost:
-            logger.error(
-                f"Public origin must be HTTPS: {origin}",
-                extra={
-                    "tenant_id": str(self.tenant.id) if self.tenant else None,
-                    "origin": origin,
-                },
-            )
-            raise ValueError(
-                f"Public origin must be an https:// URL for security (or http://localhost for development). Got: {origin}"
-            )
-
+        # Settings and tenant validators already normalized the origin;
+        # validate_redirect_uri below holds it to https again (http only for a
+        # loopback host).
         # Normalize: strip trailing slash (defense in depth)
         origin = origin.rstrip("/")
 

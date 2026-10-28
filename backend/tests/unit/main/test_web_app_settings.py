@@ -184,3 +184,29 @@ def test_mcp_content_base_url_is_stored_as_a_browser_reads_it(
     request = SimpleNamespace(headers={"host": host})
     with patch.object(mcp_apps_router, "get_settings", return_value=settings):
         assert mcp_apps_router._on_content_origin(request)  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+
+
+@pytest.mark.parametrize(
+    ("content_base_url", "public_origin"),
+    [
+        ("https://eneo.example.se/views", "https://eneo.example.se"),
+        ("https://ENEO.example.se:443/views", "https://eneo.example.se/"),
+        ("http://[0:0::1]:8123/views", "http://[::1]:8123"),
+    ],
+)
+def test_mcp_content_origin_must_differ_from_public_origin(
+    content_base_url: str, public_origin: str
+):
+    with pytest.raises(SystemExit):
+        _settings(
+            mcp_app_content_base_url=content_base_url, public_origin=public_origin
+        )
+
+
+def test_mcp_content_origin_on_another_port_is_another_origin():
+    settings = _settings(
+        mcp_app_content_base_url="http://localhost:8124",
+        public_origin="http://localhost:8123",
+    )
+
+    assert settings.mcp_app_content_base_url == "http://localhost:8124"
