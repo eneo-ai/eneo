@@ -440,6 +440,29 @@ async def test_tool_opt_out_and_classification_filter_survive_preparation(
     assert turn.history.mock_calls == []
 
 
+@pytest.mark.parametrize("former", [False, True])
+@pytest.mark.parametrize("as_tool", [False, True])
+async def test_helper_followup_is_rejected_before_reading_saved_settings(
+    turn: TurnFixture, former: bool, as_tool: bool
+):
+    helper_id = uuid4() if as_tool else turn.assistant.id
+    turn.service.org_space_assistant_role_repo.exists_active_for_assistant.side_effect = (
+        lambda id: id == helper_id and not former
+    )
+    turn.service.help_assistant_assignment_history_repo.exists_for_assistant.side_effect = (
+        lambda id: id == helper_id and former
+    )
+    with pytest.raises(UnauthorizedException, match="helper"):
+        await turn.service.ask(
+            question="Follow up",
+            assistant_id=turn.assistant.id,
+            tool_assistant_id=helper_id if as_tool else None,
+            session_id=turn.session.id,
+        )
+    assert turn.history.mock_calls == []
+    assert turn.requests == []
+
+
 async def test_saved_tool_opt_out_survives_preparation(turn: TurnFixture):
     server = MCPServer(
         id=uuid4(),

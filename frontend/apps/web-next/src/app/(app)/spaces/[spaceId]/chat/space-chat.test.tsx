@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { SpaceChat } from "./space-chat.client";
 
@@ -88,6 +88,8 @@ vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: route.space, routeId: "space-1", can: () => true })
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+
+beforeEach(() => localStorage.clear());
 
 afterEach(() => {
   cleanup();

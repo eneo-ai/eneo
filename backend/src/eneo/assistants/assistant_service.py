@@ -3221,23 +3221,6 @@ class AssistantService:
         group_chat_id: UUID | None = None,
     ) -> _PreparedAssistantTurn:
         """Resolve the ordinary ask policy without creating conversation rows."""
-        # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
-        # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
-        # and ``POST /assistants/{id}/sessions/{session_id}/`` flow through
-        # here, so guarding this method covers both router entry points and
-        # short-circuits before any session row is created.
-        await assert_not_helper_assistant(
-            assistant_id=assistant_id,
-            role_repo=self.org_space_assistant_role_repo,
-            history_repo=self.help_assistant_assignment_history_repo,
-        )
-        if tool_assistant_id is not None:
-            await assert_not_helper_assistant(
-                assistant_id=tool_assistant_id,
-                role_repo=self.org_space_assistant_role_repo,
-                history_repo=self.help_assistant_assignment_history_repo,
-            )
-
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -3743,6 +3726,20 @@ class AssistantService:
         disabled_capabilities: list[CapabilityPurpose] | None = None,
         conversation_settings: "ConversationSettingsState | None" = None,
     ):
+        # Reject active/former helpers before reading saved settings or history.
+        # Both ordinary ask routes enter here; helper runs use their own service.
+        await assert_not_helper_assistant(
+            assistant_id=assistant_id,
+            role_repo=self.org_space_assistant_role_repo,
+            history_repo=self.help_assistant_assignment_history_repo,
+        )
+        if tool_assistant_id is not None:
+            await assert_not_helper_assistant(
+                assistant_id=tool_assistant_id,
+                role_repo=self.org_space_assistant_role_repo,
+                history_repo=self.help_assistant_assignment_history_repo,
+            )
+
         if conversation_settings is None and session_id is not None:
             existing = await self.session_service.get_session_by_uuid(
                 id=session_id,
