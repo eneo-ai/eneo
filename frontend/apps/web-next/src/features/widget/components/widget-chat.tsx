@@ -284,7 +284,15 @@ export function WidgetChat({
       launcherColors(config.theme),
       config.texts.title || config.name,
       persona
-        ? { name: persona.name, avatar_url: persona.inLauncher ? persona.avatarUrl : null }
+        ? {
+            name: persona.name,
+            // The launcher lives on the host page, so the avatar's address
+            // must be absolute there: the loader drops anything but http(s).
+            avatar_url:
+              persona.inLauncher && persona.avatarUrl
+                ? new URL(persona.avatarUrl, location.origin).href
+                : null
+          }
         : undefined
     );
     if (config.bot_protection === "altcha") void ensureAltcha();
