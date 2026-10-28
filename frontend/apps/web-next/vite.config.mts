@@ -8,9 +8,12 @@ import { defineConfig } from "vite";
 // router plugin, so a test run never rewrites the route tree.
 export default defineConfig({
   plugins: [
-    // Reads tsr.config.json, shared with the `tsr` CLI. It must come before
-    // the React plugin so route files are split before JSX is transformed.
-    tanstackRouter(),
+    // Paths come from tsr.config.json, shared with the `tsr` CLI. The plugin
+    // reads that file from process.cwd() when it is constructed, so the build
+    // flags are inline: route splitting must not depend on where Vite starts.
+    // It must come before the React plugin so route files are split before
+    // JSX is transformed.
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react()
   ],
   resolve: {
