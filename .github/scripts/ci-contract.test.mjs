@@ -93,6 +93,17 @@ test("the Svelte build is checked against a memory budget below its heap limit",
   assert.ok(workflow.indexOf("- name: Check build memory budget") > workflow.indexOf("- name: Build web app for E2E"));
 });
 
+test("the web-next build reports its peak memory as an artifact without a budget", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
+  const report = stepBody("Build web-next for E2E")?.match(/\/usr\/bin\/time -v -o "([^"]+)" bun run build/)?.[1];
+  assert.ok(report, "the web-next build runs under /usr/bin/time -v");
+  const upload = stepBody("Upload web-next build resource measurements");
+  assert.ok(upload?.includes("name: web-next-build-resources") && upload.includes("if: ${{ !cancelled() }}"));
+  assert.ok(upload.includes(`path: ${report.replace("$RUNNER_TEMP", "${{ runner.temp }}")}`));
+  assert.ok(!workflow.includes(`ci-build-memory.mjs "${report}"`), "report only, no budget yet");
+});
+
 test("the memory check passes within budget and fails above it or without a measurement", () => {
   const report = (kb) => `\tCommand being timed: "bun run build"\n\tMaximum resident set size (kbytes): ${kb}\n\tExit status: 0\n`;
   assert.equal(readPeakRssMb(report(6_291_456)), 6144);

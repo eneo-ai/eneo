@@ -1,0 +1,207 @@
+{
+  "meta": {
+    "commit": "78af12b93c701b27356b6600c9d2d681e4200859",
+    "framework": "next",
+    "frameworkVersion": "16.4.1",
+    "node": "v22.23.1",
+    "os": "darwin 27.0.0",
+    "cpu": "Apple M4 Pro",
+    "date": "2026-10-28T05:31:40.720Z",
+    "runs": 10,
+    "appCommit": "e0ae2866cb321da289b9edc23241a022d742b12f",
+    "note": "Measured on origin/develop e0ae2866c with only the perf harness added (commit is the harness commit; the samples field was added to the harness before this run). Local e2e stack (docker-compose.e2e.ci.yml, OrbStack 6 CPU / 16 GiB), next start on port 3210, Playwright Desktop Chrome, no other heavy step from this run; the shared-machine speech-to-text job ran its own guarded steps (guard: min free memory 89%, no swap growth). Build peak RSS is the largest single process (macOS /usr/bin/time -l), like GNU time -v in CI."
+  },
+  "metrics": {
+    "/spaces/personal/chat": {
+      "coldLcpMs": {
+        "median": 484,
+        "p75": 501
+      },
+      "coldCls": {
+        "median": 0.004937025308609009,
+        "p75": 0.004937025308609009
+      },
+      "htmlEncodedBytes": {
+        "median": 144487.5,
+        "p75": 148143.5
+      },
+      "htmlDecodedBytes": {
+        "median": 600990.5,
+        "p75": 602017
+      },
+      "warmLcpMs": {
+        "median": 444,
+        "p75": 464
+      },
+      "warmCls": {
+        "median": 0.004937025308609009,
+        "p75": 0.004937025308609009
+      },
+      "navigationToSpacesListMs": {
+        "median": 87,
+        "p75": 97
+      },
+      "chatTtftMs": {
+        "median": 156,
+        "p75": 160.75
+      },
+      "inpMs": {
+        "median": 24,
+        "p75": 24
+      }
+    },
+    "/spaces/list": {
+      "coldLcpMs": {
+        "median": 156,
+        "p75": 174
+      },
+      "coldCls": {
+        "median": 0.0030798339843750005,
+        "p75": 0.0030798339843750005
+      },
+      "htmlEncodedBytes": {
+        "median": 138985.5,
+        "p75": 138986.75
+      },
+      "htmlDecodedBytes": {
+        "median": 566464,
+        "p75": 566464
+      },
+      "warmLcpMs": {
+        "median": 148,
+        "p75": 148
+      },
+      "warmCls": {
+        "median": 0.0030798339843750005,
+        "p75": 0.0030798339843750005
+      }
+    },
+    "/admin/users": {
+      "coldLcpMs": {
+        "median": 168,
+        "p75": 175
+      },
+      "coldCls": {
+        "median": 0,
+        "p75": 0
+      },
+      "htmlEncodedBytes": {
+        "median": 142886,
+        "p75": 142888.75
+      },
+      "htmlDecodedBytes": {
+        "median": 592357,
+        "p75": 592357
+      },
+      "warmLcpMs": {
+        "median": 164,
+        "p75": 167
+      },
+      "warmCls": {
+        "median": 0,
+        "p75": 0
+      }
+    },
+    "/admin/insights": {
+      "coldLcpMs": {
+        "median": 160,
+        "p75": 174
+      },
+      "coldCls": {
+        "median": 0,
+        "p75": 0
+      },
+      "htmlEncodedBytes": {
+        "median": 140299,
+        "p75": 140300
+      },
+      "htmlDecodedBytes": {
+        "median": 579166,
+        "p75": 579166
+      },
+      "warmLcpMs": {
+        "median": 140,
+        "p75": 159
+      },
+      "warmCls": {
+        "median": 0,
+        "p75": 0
+      }
+    }
+  },
+  "samples": {
+    "/spaces/personal/chat": {
+      "coldLcpMs": [640, 364, 504, 492, 412, 400, 484, 384, 484, 508],
+      "coldCls": [
+        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009
+      ],
+      "htmlEncodedBytes": [
+        143922, 143917, 148144, 145053, 143922, 143915, 148142, 143920, 148150, 148150
+      ],
+      "htmlDecodedBytes": [
+        600064, 600064, 602017, 601917, 600064, 600064, 602017, 600064, 602017, 602017
+      ],
+      "warmLcpMs": [336, 340, 468, 468, 472, 372, 440, 452, 448, 352],
+      "warmCls": [
+        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009, 0.004937025308609009, 0.004937025308609009,
+        0.004937025308609009, 0.004937025308609009
+      ],
+      "navigationToSpacesListMs": [99, 80, 86, 91, 84, 79, 99, 87, 87, 108],
+      "chatTtftMs": [188, 159, 161, 169, 132, 160, 131, 149, 150, 153],
+      "inpMs": [24, 24, 16, 16, 24, 32, 24, 24, 24, 16]
+    },
+    "/spaces/list": {
+      "coldLcpMs": [148, 136, 180, 176, 144, 480, 164, 136, 140, 168],
+      "coldCls": [
+        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005,
+        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005,
+        0.0030798339843750005, 0.0030798339843750005
+      ],
+      "htmlEncodedBytes": [
+        138987, 138981, 138986, 138985, 138984, 138986, 138983, 138993, 138983, 138990
+      ],
+      "htmlDecodedBytes": [
+        566464, 566464, 566464, 566464, 566464, 566464, 566464, 566464, 566464, 566464
+      ],
+      "warmLcpMs": [148, 140, 164, 148, 148, 124, 148, 120, 128, 472],
+      "warmCls": [
+        0.0030798339843750005, 0.0030798339843750005, 0.0006796875000000001, 0.0006796875000000001,
+        0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005, 0.0030798339843750005,
+        0.0030798339843750005, 0.0030798339843750005
+      ]
+    },
+    "/admin/users": {
+      "coldLcpMs": [168, 172, 208, 156, 156, 156, 168, 176, 176, 156],
+      "coldCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "htmlEncodedBytes": [
+        142888, 142894, 142882, 142891, 142882, 142888, 142881, 142889, 142884, 142881
+      ],
+      "htmlDecodedBytes": [
+        592357, 592357, 592357, 592357, 592357, 592357, 592357, 592357, 592357, 592357
+      ],
+      "warmLcpMs": [408, 148, 180, 164, 164, 144, 168, 164, 152, 156],
+      "warmCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    },
+    "/admin/insights": {
+      "coldLcpMs": [144, 176, 160, 148, 160, 140, 180, 144, 168, 180],
+      "coldCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "htmlEncodedBytes": [
+        140299, 140307, 140300, 140300, 140299, 140298, 140298, 140296, 140300, 140297
+      ],
+      "htmlDecodedBytes": [
+        579166, 579166, 579166, 579166, 579166, 579166, 579166, 579166, 579166, 579166
+      ],
+      "warmLcpMs": [132, 136, 132, 160, 428, 140, 140, 172, 136, 156],
+      "warmCls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    }
+  },
+  "build": {
+    "coldSeconds": 24.45,
+    "warmSeconds": 8.2,
+    "peakRssMb": 2960,
+    "warmPeakRssMb": 1042
+  }
+}
