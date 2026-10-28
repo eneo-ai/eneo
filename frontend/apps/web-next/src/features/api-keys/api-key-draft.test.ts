@@ -136,7 +136,7 @@ describe("draftProblems", () => {
   it("names the missing name, scope target, origins and required expiry", () => {
     const draft = { ...withScopeType(withKeyType(newApiKeyDraft(), "pk_"), "space"), name: " " };
     const required = { ...constraints, require_expiration: true };
-    expect(draftProblems(draft, { mode: "create", constraints: required }, t)).toEqual({
+    expect(draftProblems(draft, { constraints: required }, t)).toEqual({
       name: "api_keys_name_required",
       scope: 'api_keys_select_scope {"scopeType":"api_keys_scope_space"}',
       origins: "api_keys_origin_required",
@@ -151,7 +151,7 @@ describe("draftProblems", () => {
       allowedIps: ["10.0.0.0/8", "300.1.1.1"],
       rateLimit: "5000"
     };
-    expect(draftProblems(draft, { mode: "create", constraints }, t)).toEqual({
+    expect(draftProblems(draft, { constraints }, t)).toEqual({
       ips: "300.1.1.1: api_keys_tag_invalid_octet",
       rateLimit: 'api_keys_rate_limit_max {"max":1000}'
     });
@@ -159,9 +159,43 @@ describe("draftProblems", () => {
 
   it("does not ask an edit for a scope target or an expiry", () => {
     const required = { ...constraints, require_expiration: true };
-    expect(draftProblems(draftFromApiKey(key), { mode: "edit", constraints: required }, t)).toEqual(
+    expect(draftProblems(draftFromApiKey(key), { constraints: required, stored: key }, t)).toEqual(
       {}
     );
+  });
+
+  it("renames an unlimited key (-1) without touching its rate limit", () => {
+    const unlimited = { ...key, rate_limit: -1 } as ApiKey;
+    const draft = { ...draftFromApiKey(unlimited), name: "Webbwidget 2" };
+    expect(draftProblems(draft, { constraints: undefined, stored: unlimited }, t)).toEqual({});
+    expect(updateRequest(draft, unlimited)).toEqual({ name: "Webbwidget 2" });
+  });
+
+  it("renames a key whose rate limit and origins a later policy or check would refuse", () => {
+    const old = { ...key, rate_limit: 800, allowed_origins: ["sundsvall.se"] } as ApiKey;
+    const draft = { ...draftFromApiKey(old), description: "Ny beskrivning" };
+    expect(
+      draftProblems(draft, { constraints: { ...constraints, max_rate_limit: 500 }, stored: old }, t)
+    ).toEqual({});
+    // A changed rate limit is checked as on create.
+    expect(
+      draftProblems(
+        { ...draft, rateLimit: "900" },
+        { constraints: { ...constraints, max_rate_limit: 500 }, stored: old },
+        t
+      )
+    ).toMatchObject({ rateLimit: 'api_keys_rate_limit_max {"max":500}' });
+  });
+
+  it("takes -1 (no limit) only where no tenant maximum is set, and never 0", () => {
+    const draft = { ...newApiKeyDraft(), name: "Batch", rateLimit: "-1" };
+    expect(draftProblems(draft, { constraints: undefined }, t)).toEqual({});
+    expect(draftProblems(draft, { constraints }, t)).toEqual({
+      rateLimit: 'api_keys_rate_limit_max {"max":1000}'
+    });
+    expect(draftProblems({ ...draft, rateLimit: "0" }, { constraints: undefined }, t)).toEqual({
+      rateLimit: "api_keys_rate_limit_invalid"
+    });
   });
 });
 
@@ -202,6 +236,14 @@ describe("updateRequest", () => {
       description: "För webbplatsen",
       rate_limit: null,
       allowed_origins: ["https://sundsvall.se", "https://www.sundsvall.se"]
+    });
+  });
+
+  it("sends only the name and description of a revoked or expired key", () => {
+    const revoked = { ...key, state: "revoked", resource_permissions: null } as ApiKey;
+    const draft = { ...draftFromApiKey(revoked), name: "Gamla widgeten", rateLimit: "" };
+    expect(updateRequest(draft, revoked, { metadataOnly: true })).toEqual({
+      name: "Gamla widgeten"
     });
   });
 

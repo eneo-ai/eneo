@@ -256,4 +256,17 @@ describe("OrgApiKeysPage", () => {
       })
     );
   });
+
+  it("shows an unlimited rate limit (-1) as unlimited", async () => {
+    serve();
+    const listed = api.GET.getMockImplementation()!;
+    api.GET.mockImplementation((path: string, options: unknown) =>
+      path === "/api/v1/admin/api-keys"
+        ? ok({ items: [{ ...apiKey, rate_limit: -1 }], next_cursor: null, total_count: 1 })
+        : listed(path, options)
+    );
+    renderInApp(<OrgApiKeysPage />, { appContext: testAppContext({ permissions: ["admin"] }) });
+    const table = await screen.findByRole("table", { name: "API-nycklar" });
+    expect(await within(table).findByText("Obegränsad")).toBeTruthy();
+  });
 });

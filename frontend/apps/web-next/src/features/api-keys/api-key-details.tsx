@@ -35,6 +35,7 @@ import { RESOURCE_KEYS } from "./api-key-draft";
 import { RESOURCE_LEVEL_LABEL, resourceLabelKey } from "./api-key-form";
 import {
   apiKeyUsagePage,
+  rateLimitLabel,
   type ApiKey,
   type ApiKeyMode,
   type ResourcePermissionLevel
@@ -209,11 +210,7 @@ function Overview({
           <List values={apiKey.allowed_ips} />
         </Row>
       )}
-      <Row label={t("api_keys_rate_limit_label")}>
-        {apiKey.rate_limit
-          ? t("api_keys_rate_limit_value", { count: apiKey.rate_limit })
-          : t("api_keys_default")}
-      </Row>
+      <Row label={t("api_keys_rate_limit_label")}>{rateLimitLabel(apiKey.rate_limit, t)}</Row>
       <Row label={t("api_keys_created")}>
         {apiKey.created_at ? <ClientTime value={apiKey.created_at} format="date_time" /> : "—"}
       </Row>

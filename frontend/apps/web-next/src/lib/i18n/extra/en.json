@@ -1646,10 +1646,11 @@
   "admin_user_group_assigned": "The user was added to {name}",
   "admin_user_group_unassigned": "The user was removed from {name}",
   "usage_cost_rates_error": "Estimated costs could not be loaded",
-  "api_keys_rate_limit_invalid": "Enter a whole number of requests per hour, 1 or more.",
+  "api_keys_rate_limit_invalid": "Enter a whole number of requests per hour, 1 or more (-1 for no limit, admins only).",
   "api_keys_allowed_ips_placeholder": "10.0.0.0/8",
   "api_keys_admin_policy_require_tenant_origin": "Require tenant-approved origins",
   "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list.",
   "api_keys_allowlist_unadded": "“{value}” is not added yet. Choose it in the list below the field to add it, or clear the field.",
-  "api_keys_extend_saved": "The expiration date is saved."
+  "api_keys_extend_saved": "The expiration date is saved.",
+  "api_keys_rate_limit_unlimited": "Unlimited"
 }

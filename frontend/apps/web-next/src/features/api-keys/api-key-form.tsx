@@ -37,15 +37,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import {
+  allowlistProblem,
   createRequest,
   draftFromApiKey,
   draftProblems,
   effectivePermission,
-  ipProblem,
   isLevelAllowed,
-  listProblem,
   newApiKeyDraft,
-  originProblem,
   RESOURCE_LEVELS,
   resourceLevel,
   updateRequest,
@@ -100,7 +98,7 @@ function defaultExpiry(constraints: ApiKeyCreationConstraints | undefined): stri
  */
 export function ApiKeyForm({
   idPrefix,
-  mode,
+  stored,
   initial,
   lockedScope,
   constraints,
@@ -114,7 +112,8 @@ export function ApiKeyForm({
 }: {
   /** Makes the field ids unique on the page. */
   idPrefix: string;
-  mode: "create" | "edit";
+  /** An edit: the key as it was when the dialog opened. Without it, a new key. */
+  stored?: ApiKey;
   /**
    * A revoked or expired key: only its name and description can change (the
    * backend refuses the rest).
@@ -140,13 +139,13 @@ export function ApiKeyForm({
   const [unadded, setUnadded] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const id = (field: string) => `${idPrefix}-key-${field}`;
-  const creating = mode === "create";
+  const creating = stored === undefined;
   const scopeType = draft.scopeType;
   const scopeLabel = t(`api_keys_scope_${scopeType}`);
   // Inside a sentence: "Välj assistent".
   const scopeNoun = scopeLabel.toLocaleLowerCase();
 
-  const allProblems = draftProblems(draft, { mode, constraints }, t);
+  const allProblems = draftProblems(draft, { constraints, stored }, t);
   // Typed but not added, a restriction would be dropped without a word: it
   // stops the submit until it is added or cleared.
   const allowlist = draft.keyType === "pk_" ? "origins" : "ips";
@@ -155,10 +154,7 @@ export function ApiKeyForm({
   }
   const problems = guardrailsLocked ? { name: allProblems.name } : allProblems;
   // An invalid origin or IP is named as soon as it is added; the rest on submit.
-  const live: Partial<Record<DraftField, string>> = {
-    origins: invalidEntry(draft.allowedOrigins, originProblem, t),
-    ips: invalidEntry(draft.allowedIps, ipProblem, t)
-  };
+  const live = allowlistProblem(draft, t, stored);
   const shown = (field: DraftField) => (submitted ? problems[field] : live[field]) ?? null;
   const update = (patch: Partial<ApiKeyDraft>) => setDraft((current) => ({ ...current, ...patch }));
 
@@ -424,15 +420,6 @@ export function ApiKeyForm({
   );
 }
 
-function invalidEntry(
-  values: string[],
-  problemOf: (value: string) => string | null,
-  t: (key: string) => string
-): string | undefined {
-  const invalid = listProblem(values, problemOf);
-  return invalid ? `${invalid.value}: ${t(invalid.key)}` : undefined;
-}
-
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-4">
@@ -694,18 +681,47 @@ export function CreateApiKeyDialog({
   defaultOwnership?: ApiKeyOwnership;
   onCreated: (secret: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        {/* Mounted while open: each opening starts empty, with no earlier failure. */}
+        <CreateBody
+          idPrefix={idPrefix}
+          lockedScope={lockedScope}
+          defaultOwnership={defaultOwnership}
+          onClose={() => setOpen(false)}
+          onCreated={onCreated}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateBody({
+  idPrefix,
+  lockedScope,
+  defaultOwnership,
+  onClose,
+  onCreated
+}: {
+  idPrefix: string;
+  lockedScope?: LockedScope;
+  defaultOwnership: ApiKeyOwnership;
+  onClose: () => void;
+  onCreated: (secret: string) => void;
+}) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const constraints = useQuery({
-    ...apiKeyPolicyConstraintsQueryOptions(browserApi),
-    enabled: open
-  });
+  const constraints = useQuery(apiKeyPolicyConstraintsQueryOptions(browserApi));
   const secret = useRef<string | null>(null);
   const title = lockedScope
     ? t("api_keys_create_for_resource", { resource: lockedScope.name })
     : t("api_keys_create");
 
+  // Its callbacks outlive the dialog: a key created after an early close
+  // still hands over its secret.
   const create = useMutation({
     mutationFn: (draft: ApiKeyDraft) =>
       withoutSecret(
@@ -716,54 +732,43 @@ export function CreateApiKeyDialog({
       ),
     onSuccess: () => {
       void invalidateApiKeys(queryClient);
-      setOpen(false);
+      onClose();
       if (secret.current) onCreated(secret.current);
       secret.current = null;
     }
   });
 
+  if (constraints.isPending) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <LoadingState rows={4} />
+      </>
+    );
+  }
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) create.reset();
+    <ApiKeyForm
+      idPrefix={idPrefix}
+      initial={{
+        ...newApiKeyDraft({
+          scopeType: lockedScope?.type,
+          scopeId: lockedScope?.id,
+          ownership: defaultOwnership
+        }),
+        expiresAt: defaultExpiry(constraints.data)
       }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        {constraints.isPending ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>{title}</DialogTitle>
-            </DialogHeader>
-            <LoadingState rows={4} />
-          </>
-        ) : (
-          <ApiKeyForm
-            idPrefix={idPrefix}
-            mode="create"
-            initial={{
-              ...newApiKeyDraft({
-                scopeType: lockedScope?.type,
-                scopeId: lockedScope?.id,
-                ownership: defaultOwnership
-              }),
-              expiresAt: defaultExpiry(constraints.data)
-            }}
-            lockedScope={lockedScope}
-            // Without the policy (it failed to load) the backend still enforces it.
-            constraints={constraints.data}
-            title={title}
-            description={t("generate_api_key_warning")}
-            pending={create.isPending}
-            error={create.error}
-            onSubmit={(draft) => create.mutate(draft)}
-            onCancel={() => setOpen(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      lockedScope={lockedScope}
+      // Without the policy (it failed to load) the backend still enforces it.
+      constraints={constraints.data}
+      title={title}
+      description={t("generate_api_key_warning")}
+      pending={create.isPending}
+      error={create.error}
+      onSubmit={(draft) => create.mutate(draft)}
+      onCancel={onClose}
+    />
   );
 }
 
@@ -784,58 +789,69 @@ export function EditApiKeyDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        {/* Mounted while open: each opening starts from the key as it is then. */}
+        <EditBody apiKey={apiKey} mode={mode} onClose={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditBody({
+  apiKey,
+  mode,
+  onClose
+}: {
+  apiKey: ApiKey;
+  mode: ApiKeyMode;
+  onClose: () => void;
+}) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const constraints = useQuery({
-    ...apiKeyPolicyConstraintsQueryOptions(browserApi),
-    enabled: open
-  });
+  const constraints = useQuery(apiKeyPolicyConstraintsQueryOptions(browserApi));
+  // The key as it was opened. The list may refetch it meanwhile (another
+  // admin's change): diffing against that would send their change back as
+  // this one's, so only what was edited here is sent.
+  const [opened] = useState(apiKey);
   const guardrailsLocked = apiKey.state === "revoked" || apiKey.state === "expired";
 
   const save = useMutation({
     mutationFn: (body: ApiKeyUpdateRequest) => updateApiKey(browserApi, mode, apiKey.id, body),
     onSuccess: () => {
       void invalidateApiKeys(queryClient);
-      onOpenChange(false);
+      onClose();
     }
   });
 
+  if (constraints.isPending) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>{t("api_keys_admin_edit_title")}</DialogTitle>
+        </DialogHeader>
+        <LoadingState rows={4} />
+      </>
+    );
+  }
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next);
-        if (!next) save.reset();
+    <ApiKeyForm
+      idPrefix={`edit-${apiKey.id}`}
+      stored={opened}
+      initial={draftFromApiKey(opened)}
+      constraints={constraints.data}
+      guardrailsLocked={guardrailsLocked}
+      title={t("api_keys_admin_edit_title")}
+      description={t("api_keys_admin_edit_description")}
+      pending={save.isPending}
+      error={save.error}
+      onSubmit={(draft) => {
+        const body = updateRequest(draft, opened, { metadataOnly: guardrailsLocked });
+        if (Object.keys(body).length === 0) onClose();
+        else save.mutate(body);
       }}
-    >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        {constraints.isPending ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("api_keys_admin_edit_title")}</DialogTitle>
-            </DialogHeader>
-            <LoadingState rows={4} />
-          </>
-        ) : (
-          <ApiKeyForm
-            idPrefix={`edit-${apiKey.id}`}
-            mode="edit"
-            initial={draftFromApiKey(apiKey)}
-            constraints={constraints.data}
-            guardrailsLocked={guardrailsLocked}
-            title={t("api_keys_admin_edit_title")}
-            description={t("api_keys_admin_edit_description")}
-            pending={save.isPending}
-            error={save.error}
-            onSubmit={(draft) => {
-              const body = updateRequest(draft, apiKey, { metadataOnly: guardrailsLocked });
-              if (Object.keys(body).length === 0) onOpenChange(false);
-              else save.mutate(body);
-            }}
-            onCancel={() => onOpenChange(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      onCancel={onClose}
+    />
   );
 }

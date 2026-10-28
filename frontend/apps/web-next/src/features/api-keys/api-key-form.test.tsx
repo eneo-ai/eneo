@@ -95,6 +95,26 @@ describe("CreateApiKeyDialog", () => {
     expect(cached).not.toContain("pk_live_secret_value");
   });
 
+  it("opens without the last refusal after Cancel", async () => {
+    api.POST.mockReturnValue(
+      Promise.resolve({
+        error: { message: "Expiration exceeds tenant maximum." },
+        response: new Response("{}", { status: 400 })
+      })
+    );
+    const { dialog } = await open();
+    fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Integration" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+    expect(await within(dialog).findByText("Expiration exceeds tenant maximum.")).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Skapa" }));
+    const again = await screen.findByRole("dialog", { name: "Skapa API-nyckel" });
+    await within(again).findByLabelText("Namn");
+    expect(within(again).queryByText("Expiration exceeds tenant maximum.")).toBeNull();
+  });
+
   it("flags an invalid allowed IP as soon as it is added", async () => {
     const { dialog } = await open();
     const ips = within(dialog).getByRole("combobox", { name: /Tillåtna IP-adresser/ });

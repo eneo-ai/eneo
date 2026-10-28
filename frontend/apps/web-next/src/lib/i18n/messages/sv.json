@@ -6822,8 +6822,9 @@
   "admin_user_group_assigned": "Användaren lades till i {name}",
   "admin_user_group_unassigned": "Användaren togs bort från {name}",
   "usage_cost_rates_error": "Beräknade kostnader kunde inte hämtas",
-  "api_keys_rate_limit_invalid": "Ange ett heltal, minst 1, i anrop per timme.",
+  "api_keys_rate_limit_invalid": "Ange ett heltal, minst 1, i anrop per timme (-1 för ingen gräns, bara för administratörer).",
   "api_keys_allowed_ips_placeholder": "10.0.0.0/8",
   "api_keys_allowlist_unadded": "”{value}” är inte tillagd än. Välj den i listan under fältet för att lägga till den, eller töm fältet.",
-  "api_keys_extend_saved": "Utgångsdatumet är sparat."
+  "api_keys_extend_saved": "Utgångsdatumet är sparat.",
+  "api_keys_rate_limit_unlimited": "Obegränsad"
 }

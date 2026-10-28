@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { ApiKeyActions } from "./api-key-actions";
+import { EditApiKeyDialog } from "./api-key-form";
 import type { ApiKeyMode } from "./api-keys";
 
 type ApiKey = Schema<"ApiKeyV2">;
@@ -214,11 +215,40 @@ describe("ApiKeyActions", () => {
     );
     expect(await within(dialog).findByText("Rate limit exceeds tenant maximum.")).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Redigera API-nyckel" })).toBeTruthy();
+
+    // Cancelled and opened again, the form starts over: no earlier refusal.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await choose("Redigera");
+    const again = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
+    await within(again).findByLabelText(/Anropsgräns/);
+    expect(within(again).queryByText("Rate limit exceeds tenant maximum.")).toBeNull();
+  });
+
+  it("renames a key whose rate limit a later, lower policy maximum would refuse", async () => {
+    serve({ constraints: { max_rate_limit: 500 } });
+    api.PATCH.mockReturnValue(ok(activeKey));
+    show({ ...activeKey, rate_limit: 800 });
+    await choose("Redigera");
+    const dialog = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
+    fireEvent.change(await within(dialog).findByLabelText("Beskrivning"), {
+      target: { value: "För webbplatsen" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/api-keys/{id}", {
+        params: { path: { id: "key-1" } },
+        body: { description: "För webbplatsen" }
+      })
+    );
   });
 
   it("edits only the name and description of a revoked key", async () => {
     serve();
-    show({ ...activeKey, state: "revoked" });
+    api.PATCH.mockReturnValue(ok(activeKey));
+    // A legacy key without stored access: a full edit would send it.
+    show({ ...activeKey, state: "revoked", resource_permissions: null });
     await choose("Redigera");
     const dialog = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
     expect(
@@ -227,6 +257,57 @@ describe("ApiKeyActions", () => {
       )
     ).toBeTruthy();
     expect(within(dialog).queryByLabelText(/Anropsgräns/)).toBeNull();
+
+    fireEvent.change(within(dialog).getByLabelText("Namn"), {
+      target: { value: "Gamla widgeten" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/api-keys/{id}", {
+        params: { path: { id: "key-1" } },
+        body: { name: "Gamla widgeten" }
+      })
+    );
+  });
+
+  it("sends only this edit when the key changed elsewhere while the dialog was open", async () => {
+    serve();
+    api.PATCH.mockReturnValue(ok(activeKey));
+    const secretKey = {
+      ...activeKey,
+      key_type: "sk_",
+      allowed_origins: null,
+      allowed_ips: null,
+      resource_permissions: { ...activeKey.resource_permissions, spaces: "write" }
+    } as ApiKey;
+    const { rerender } = renderInApp(
+      <EditApiKeyDialog apiKey={secretKey} mode="admin" open onOpenChange={() => {}} />,
+      { appContext: testAppContext({ permissions: ["admin"] }) }
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
+    const description = await within(dialog).findByLabelText("Beskrivning");
+    // Another admin restricts the key; the list refetches it under the open dialog.
+    rerender(
+      <EditApiKeyDialog
+        apiKey={{
+          ...secretKey,
+          allowed_ips: ["10.0.0.0/8"],
+          resource_permissions: { ...secretKey.resource_permissions, spaces: "read" }
+        }}
+        mode="admin"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    fireEvent.change(description, { target: { value: "Roterad av drift" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/admin/api-keys/{id}", {
+        params: { path: { id: "key-1" } },
+        body: { description: "Roterad av drift" }
+      })
+    );
   });
 
   it("changes the expiry with the current and the new date, and shows a refusal in place", async () => {

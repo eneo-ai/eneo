@@ -12,7 +12,6 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
-import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
@@ -47,11 +46,13 @@ import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/user
 import { ApiKeyActions } from "@/features/api-keys/api-key-actions";
 import { userLabel } from "@/features/api-keys/api-key-details";
 import { CreateApiKeyDialog } from "@/features/api-keys/api-key-form";
+import { useSecretReveal } from "@/features/api-keys/user-api-key-list";
 import {
   ADMIN_API_KEYS_KEY,
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATE_FILTERS,
   formatApiKeyDate,
+  rateLimitLabel,
   stateFilterLabelKey,
   type ApiKey,
   type ApiKeyScopeType,
@@ -111,21 +112,13 @@ export function OrgApiKeysPage() {
   const [formKey, setFormKey] = useState(0);
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const lookupRun = useRef(0);
-  const [secret, setSecret] = useState<string | null>(null);
-  const [secretTitle, setSecretTitle] = useState("");
+  const secrets = useSecretReveal();
   const [showPolicy, setShowPolicy] = useState(false);
   const [showConstraintPolicy, setShowConstraintPolicy] = useState(false);
   const headingId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const rescueFocus = useFocusRescue();
   const scopeNames = useScopeResourceNames();
-
-  function showSecret(title: string) {
-    return (value: string) => {
-      setSecretTitle(title);
-      setSecret(value);
-    };
-  }
 
   const list = usePaginatedQuery<ApiKey>({
     queryKey: [...ADMIN_API_KEYS_KEY, "list", state, adminKeyListQuery(applied, state, undefined)],
@@ -222,7 +215,7 @@ export function OrgApiKeysPage() {
         keys={keys}
         labelledBy={headingId}
         scopeNames={scopeNames}
-        onRotated={showSecret(t("api_keys_rotated_title"))}
+        onRotated={secrets.reveal(t("api_keys_rotated_title"))}
       />
     );
 
@@ -252,7 +245,7 @@ export function OrgApiKeysPage() {
               <Plus className="size-4" /> {t("api_keys_create_short")}
             </Button>
           }
-          onCreated={showSecret(t("api_keys_created_title"))}
+          onCreated={secrets.reveal(t("api_keys_created_title"))}
         />
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
@@ -334,7 +327,7 @@ export function OrgApiKeysPage() {
         <KeyTrackingSwitches />
       </SettingsGroup>
 
-      <SecretRevealDialog title={secretTitle} secret={secret} onClose={() => setSecret(null)} />
+      {secrets.dialog}
     </div>
   );
 }
@@ -655,11 +648,7 @@ function KeyTable({
                   {t(`api_keys_status_${apiKey.state}`)}
                 </Badge>
               </TableCell>
-              <TableCell className="text-sm">
-                {apiKey.rate_limit
-                  ? t("api_keys_rate_limit_value", { count: apiKey.rate_limit })
-                  : t("api_keys_default")}
-              </TableCell>
+              <TableCell className="text-sm">{rateLimitLabel(apiKey.rate_limit, t)}</TableCell>
               <TableCell className="text-muted-foreground text-sm">
                 {apiKey.last_used_at ? (
                   <ClientTime value={apiKey.last_used_at} format="auto" />

@@ -232,64 +232,87 @@ export function ipProblem(value: string): string | null {
   return "api_keys_tag_invalid_ip";
 }
 
-/** The first problem in a list of origins or IPs, with the entry it is about. */
-export function listProblem(
-  values: string[],
-  problemOf: (value: string) => string | null
-): { key: string; value: string } | null {
-  for (const value of values) {
-    const key = problemOf(value);
-    if (key) return { key, value };
-  }
-  return null;
-}
-
 export type DraftField = "name" | "scope" | "origins" | "ips" | "expiry" | "rateLimit";
 export type DraftProblems = Partial<Record<DraftField, string>>;
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+const sameList = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
+/** The draft's allowlist: allowed origins for a public key, allowed IPs for a secret one. */
+function allowlist(draft: ApiKeyDraft) {
+  return draft.keyType === "pk_"
+    ? { field: "origins" as const, values: draft.allowedOrigins, problemOf: originProblem }
+    : { field: "ips" as const, values: draft.allowedIps, problemOf: ipProblem };
+}
 
 /**
- * What stops the draft from being sent, per field, in the order the form
- * shows them. `t` translates (next-intl's, or a stub in tests).
+ * The allowlist's first invalid entry, as the form names it while typing and
+ * on submit. An edit is only checked when its list changed: what the key
+ * already has, the backend accepted.
  */
-export function draftProblems(
-  draft: ApiKeyDraft,
-  {
-    mode,
-    constraints
-  }: { mode: "create" | "edit"; constraints: ApiKeyCreationConstraints | undefined },
-  t: (key: string, values?: Record<string, string | number>) => string
-): DraftProblems {
-  const problems: DraftProblems = {};
-  if (!draft.name.trim()) problems.name = t("api_keys_name_required");
-  if (mode === "create" && draft.scopeType !== "tenant" && !draftScopeId(draft)) {
-    problems.scope = t("api_keys_select_scope", {
-      scopeType: t(`api_keys_scope_${draft.scopeType}`).toLocaleLowerCase()
-    });
+export function allowlistProblem(draft: ApiKeyDraft, t: Translate, stored?: ApiKey): DraftProblems {
+  const { field, values, problemOf } = allowlist(draft);
+  const storedValues = (field === "origins" ? stored?.allowed_origins : stored?.allowed_ips) ?? [];
+  if (stored && sameList(values, storedValues)) return {};
+  for (const value of values) {
+    const key = problemOf(value);
+    if (key) return { [field]: `${value}: ${t(key)}` };
   }
-  if (draft.keyType === "pk_") {
-    const invalid = listProblem(draft.allowedOrigins, originProblem);
-    if (draft.allowedOrigins.length === 0) problems.origins = t("api_keys_origin_required");
-    else if (invalid) problems.origins = `${invalid.value}: ${t(invalid.key)}`;
-  } else {
-    const invalid = listProblem(draft.allowedIps, ipProblem);
-    if (invalid) problems.ips = `${invalid.value}: ${t(invalid.key)}`;
-  }
-  if (mode === "create" && constraints?.require_expiration && !draft.expiresAt) {
-    problems.expiry = t("api_keys_exp_required");
-  }
-  const rate = draft.rateLimit.trim();
-  if (rate) {
-    const value = Number(rate);
-    const max = constraints?.max_rate_limit;
-    if (!Number.isInteger(value) || value < 1)
-      problems.rateLimit = t("api_keys_rate_limit_invalid");
-    else if (max != null && value > max) problems.rateLimit = t("api_keys_rate_limit_max", { max });
-  }
-  return problems;
+  return {};
 }
 
 function rateLimitBody(draft: ApiKeyDraft): number | null {
   return draft.rateLimit.trim() ? Number(draft.rateLimit) : null;
+}
+
+/**
+ * Why a rate limit cannot be sent: a whole number of requests per hour, or
+ * -1 for none (the backend lets only admins have that, and never under a
+ * tenant maximum).
+ */
+function rateLimitProblem(draft: ApiKeyDraft, max: number | null | undefined, t: Translate) {
+  const value = rateLimitBody(draft);
+  if (value === null) return undefined;
+  if (!Number.isInteger(value) || value === 0 || value < -1) {
+    return t("api_keys_rate_limit_invalid");
+  }
+  if (max != null && (value === -1 || value > max)) return t("api_keys_rate_limit_max", { max });
+  return undefined;
+}
+
+/**
+ * What stops the draft from being sent, per field, in the order the form
+ * shows them. An edit (`stored` is the key as it was opened) is only checked
+ * where it changes something: a key's own rate limit or allowlist, even one a
+ * later policy no longer allows, does not stop a rename. `t` translates
+ * (next-intl's, or a stub in tests).
+ */
+export function draftProblems(
+  draft: ApiKeyDraft,
+  { constraints, stored }: { constraints: ApiKeyCreationConstraints | undefined; stored?: ApiKey },
+  t: Translate
+): DraftProblems {
+  const problems: DraftProblems = {};
+  if (!draft.name.trim()) problems.name = t("api_keys_name_required");
+  if (!stored && draft.scopeType !== "tenant" && !draftScopeId(draft)) {
+    problems.scope = t("api_keys_select_scope", {
+      scopeType: t(`api_keys_scope_${draft.scopeType}`).toLocaleLowerCase()
+    });
+  }
+  Object.assign(problems, allowlistProblem(draft, t, stored));
+  const originsChanged = !stored || !sameList(draft.allowedOrigins, stored.allowed_origins ?? []);
+  if (draft.keyType === "pk_" && draft.allowedOrigins.length === 0 && originsChanged) {
+    problems.origins = t("api_keys_origin_required");
+  }
+  if (!stored && constraints?.require_expiration && !draft.expiresAt) {
+    problems.expiry = t("api_keys_exp_required");
+  }
+  if (!stored || rateLimitBody(draft) !== (stored.rate_limit ?? null)) {
+    const rate = rateLimitProblem(draft, constraints?.max_rate_limit, t);
+    if (rate) problems.rateLimit = rate;
+  }
+  return problems;
 }
 
 /** The create request for a draft without problems. */
@@ -309,9 +332,6 @@ export function createRequest(draft: ApiKeyDraft): ApiKeyCreateRequest {
     resource_permissions: resourcePermissionsBody(draft)
   };
 }
-
-const sameList = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((value, index) => value === b[index]);
 
 /**
  * The update request for what the draft changed on `key`; empty when nothing

@@ -38,6 +38,16 @@ export const API_KEY_STATE_BADGE_VARIANT: Record<
   expired: "outline"
 };
 
+/** A key's rate limit as text: the tenant default, none (-1), or requests per hour. */
+export function rateLimitLabel(
+  rateLimit: number | null | undefined,
+  t: (key: string, values?: Record<string, number>) => string
+): string {
+  if (rateLimit == null) return t("api_keys_default");
+  if (rateLimit === -1) return t("api_keys_rate_limit_unlimited");
+  return t("api_keys_rate_limit_value", { count: rateLimit });
+}
+
 export function formatApiKeyDate(value: string | null | undefined): string {
   if (!value) return "—";
   return new Date(value).toLocaleDateString();
