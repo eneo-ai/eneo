@@ -30,7 +30,7 @@ import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
-import { signedFileUrl } from "./signed-file-url";
+import { saveUrl, signedFileUrl, toastDownloadError } from "./signed-file-url";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
@@ -344,16 +344,9 @@ export function ResourceAttachmentsSection({
   async function downloadFile(file: Attachment) {
     setDownloadingId(file.id);
     try {
-      const url = await signedFileUrl(browserApi, file.id, "attachment");
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.name;
-      anchor.rel = "noreferrer";
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
+      saveUrl(await signedFileUrl(browserApi, file.id, "attachment"), file.name);
     } catch (error) {
-      toastApiError(error, t);
+      toastDownloadError(error, t);
     } finally {
       setDownloadingId(null);
     }

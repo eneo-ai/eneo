@@ -11,6 +11,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { toast } from "@/lib/toast";
 import {
   areasPresent,
@@ -93,10 +94,7 @@ export function WhatsNewPage({ title }: { title: string }) {
   }
 
   function formatDate(date: string): string {
-    const [year = 0, month = 1, day = 1] = date.split("-").map(Number);
-    return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(
-      new Date(year, month - 1, day)
-    );
+    return formatCalendarDate(date, locale, { dateStyle: "long" });
   }
 
   return (

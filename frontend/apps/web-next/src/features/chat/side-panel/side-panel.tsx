@@ -21,6 +21,7 @@ import { ListError } from "@/components/composites/query-state";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { findAppCall } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
+import { MEDIA } from "@/lib/breakpoints";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { useResizableSplit } from "@/lib/hooks/use-resizable-split";
 import { cn } from "@/lib/utils";
@@ -125,7 +126,7 @@ export type SidePanelProps = {
  * The side region beside a conversation. It holds one occupant at a time: an
  * answer's activity, a document or uploaded file, an interactive tool view
  * covering that file, or the overview of everything the conversation has to
- * show. Beside the conversation from 1024px, with a handle to resize it and
+ * show. Beside the conversation from Tailwind's `lg`, with a handle to resize it and
  * a maximise over the conversation; below that a BottomSheet, except a view,
  * whose frame stays mounted in the message and is laid out over a cover.
  */
@@ -142,7 +143,7 @@ export function SidePanel({
 }: SidePanelProps) {
   const t = useTranslations();
   const panelId = useId();
-  const beside = useMediaQuery("(min-width: 1024px)");
+  const beside = useMediaQuery(MEDIA.lg);
   const aside = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const fileArea = useRef<HTMLDivElement>(null);

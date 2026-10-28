@@ -10,9 +10,6 @@ export type AppContextData = {
   settings: Schema<"SettingsPublic">;
   federationStatus: Schema<"FederationStatusResponse">;
   limits: Schema<"Limits">;
-  featureFlags: {
-    showWebSearch: boolean;
-  };
   /** Deployment-configured links (env). `null` when not configured: hide the link. */
   links: {
     /** ACCESSIBILITY_STATEMENT_URL: the organisation's tillgänglighetsredogörelse. */

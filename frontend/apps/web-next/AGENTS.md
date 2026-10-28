@@ -92,7 +92,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `--type component`) before writing behaviour yourself: focus handling
   (`useFocusTrap`, `useListFocus`), shortcuts (`useHotkeys`), breakpoints
   (`useMediaQuery`), announcements (`useAnnounce`: never a hand-rolled
-  `aria-live`/`role="status"` region), copying (`useClipboard`), clickable
+  `aria-live`/`role="status"` region), copying (through our `useCopy` in
+  `src/lib/hooks/use-copy.ts`, which wraps `useClipboard` and adds the refusal
+  toast; raw `useClipboard` only for the secret reveal and chat's rich-text
+  copy), clickable
   cards with nested actions (`useClickableContainer`), overflow (`useOverflow`),
   truncation (`useTruncation`, exported from `@astryxdesign/core/Text`, paired
   with `Tooltip`), free-text tags (`Tokenizer` with `hasCreate`), table
@@ -103,8 +106,8 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `useChatPasteAsToken`) plus `useStreamingText` from `/hooks`.
   `useFocusReturnVisibility`, `useTriggerMenu` and `useScrollSpy` exist in
   Astryx's dist but are not exported; do not import them. Astryx has no
-  debounce, before-unload or cursor-pagination hook: ours live in
-  `src/lib/hooks`.
+  debounce, before-unload, cursor-pagination or copy-feedback hook: ours live
+  in `src/lib/hooks` (`useCopy` among them).
 - **One implementation per behaviour.** When an Astryx hook or component
   replaces ours, delete our version and its tests in the same change instead
   of keeping both.

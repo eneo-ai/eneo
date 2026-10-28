@@ -45,7 +45,7 @@ export function autoAcceptToolsPreference(): boolean {
  * the user's choices per tenant, user and assistant (mcp-preferences.ts).
  */
 export function useToolChoices(partner: ChatPartner) {
-  const { featureFlags, tenant, user, can } = useAppContext();
+  const { tenant, user, can } = useAppContext();
   // A model without tool calling never receives any tool: the backend drops
   // MCP servers, capabilities and loopback tools alike. Every tool row then
   // reads as unavailable for that reason, unless a more specific one applies.
@@ -53,9 +53,9 @@ export function useToolChoices(partner: ChatPartner) {
   const modelSupportsTools =
     partner.completionModel == null || modelSupportsToolCalling(partner.completionModel);
   const allCapabilities = useMemo(() => chatCapabilities(partner, can), [partner, can]);
-  const capabilities = allCapabilities
-    .filter((capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch)
-    .map((capability) => (modelSupportsTools ? capability : withoutToolCalling(capability)));
+  const capabilities = allCapabilities.map((capability) =>
+    modelSupportsTools ? capability : withoutToolCalling(capability)
+  );
   const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
   const preferenceIds = useMemo(
     () => [
@@ -171,7 +171,7 @@ export function useToolChoices(partner: ChatPartner) {
   return {
     /** False when the partner's model cannot call tools: every tool is unavailable. */
     modelSupportsTools,
-    /** Capabilities offered in the composer (web search only when the deployment shows it). */
+    /** Capabilities offered in the composer. */
     capabilities,
     disabledCapabilities,
     setDisabledCapabilities: setCapabilitiesDisabled,

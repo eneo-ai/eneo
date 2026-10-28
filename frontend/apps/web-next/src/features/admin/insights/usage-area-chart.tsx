@@ -16,6 +16,7 @@ import {
   type MetadataStatisticsAggregated,
   mergeInsightSeries
 } from "@/features/admin/insights/insights";
+import { formatCalendarDate } from "@/lib/calendar-date";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
 
@@ -31,15 +32,11 @@ export function UsageAreaChart({ data }: { data: MetadataStatisticsAggregated })
   const descriptionId = useId();
   const series = useMemo(() => mergeInsightSeries(data), [data]);
 
-  const dateFmt = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale === "sv" ? "sv-SE" : "en-US", {
-        day: "numeric",
-        month: "short"
-      }),
-    [locale]
-  );
-  const formatDay = (value: string) => dateFmt.format(new Date(`${value}T00:00:00`));
+  const formatDay = (value: string) =>
+    formatCalendarDate(value, locale === "sv" ? "sv-SE" : "en-US", {
+      day: "numeric",
+      month: "short"
+    });
 
   if (series.length === 0) {
     return (

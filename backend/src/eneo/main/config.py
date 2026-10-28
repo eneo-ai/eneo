@@ -559,7 +559,6 @@ class Settings(BaseSettings):
         ),
     )
     # Runtime links and switches, under the env names web-next reads today.
-    show_web_search: bool = False
     show_help_center: bool = False
     help_center_url: Optional[str] = None
     legacy_app_url: Optional[str] = None

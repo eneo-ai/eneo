@@ -199,7 +199,7 @@ function ConversationView({
   onActivityChange
 }: ChatViewProps) {
   const t = useTranslations();
-  const { featureFlags, can } = useAppContext();
+  const { can } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
@@ -578,11 +578,7 @@ function ConversationView({
     });
     return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      disabled_capabilities: disabledCapabilitiesForRequest(
-        partner,
-        toolChoices.disabledCapabilities,
-        featureFlags.showWebSearch
-      ),
+      disabled_capabilities: disabledCapabilitiesForRequest(toolChoices.disabledCapabilities),
       ...mcpOptions
     };
   }

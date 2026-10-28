@@ -50,7 +50,6 @@ export default async function AppLayout({
     <HydrationBoundary state={dehydrate(queryClient)}>
       <QueryAppContextProvider
         env={{
-          showWebSearch: env.SHOW_WEB_SEARCH,
           links: {
             legacyApp: env.LEGACY_APP_URL ?? null,
             accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null,
