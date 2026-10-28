@@ -234,11 +234,11 @@ describe("globals.css", () => {
         root[decl.prop] = decl.value;
       });
     });
-    expect(Object.keys(root).sort()).toEqual([
-      "--font-figtree",
-      "--font-jetbrains-mono",
-      "--font-source-serif"
-    ]);
+    expect(root).toEqual({
+      "--font-figtree": '"Figtree"',
+      "--font-jetbrains-mono": '"JetBrains Mono"',
+      "--font-source-serif": '"Source Serif 4", serif'
+    });
   });
 
   it("keeps what an Astryx table scrolls inside its scroll box", () => {

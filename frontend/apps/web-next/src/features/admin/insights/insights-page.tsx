@@ -27,8 +27,7 @@ import {
 const NUMBER = new Intl.NumberFormat("sv-SE");
 const PRESET_DAYS = [7, 30, 90] as const;
 const CHART_HEIGHT = 320;
-// recharts loads with the first chart. The series query stays in UsageChart,
-// so it runs in parallel with the chunk instead of after it.
+// recharts loads with the first chart, once its series has arrived.
 const UsageAreaChart = lazy(() =>
   import("./usage-area-chart").then((module) => ({ default: module.UsageAreaChart }))
 );

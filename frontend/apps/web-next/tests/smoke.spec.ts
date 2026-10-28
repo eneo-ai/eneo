@@ -61,6 +61,10 @@ test("preloads only Figtree and renders with it", async ({ page }) => {
       })
     )
     .toBe(true);
+  // The UI text picks it (Tailwind's base font, via the theme's --font-figtree).
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(
+    /^"?Figtree"?,/
+  );
 });
 
 // App shell (SideNav, ⌘K palette, phone drawer).
