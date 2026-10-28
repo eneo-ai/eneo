@@ -150,3 +150,88 @@ it("commits a dirty autosave field when the document is hidden", async () => {
   await waitFor(() => expect(save).toHaveBeenCalledWith("draft"));
   await waitFor(() => expect(screen.getByText("1 unsaved change")).toBeDefined());
 });
+
+function DebouncedFieldProbe({
+  save,
+  onSaved
+}: {
+  save: (value: string) => Promise<unknown>;
+  onSaved?: (result: unknown) => void;
+}) {
+  const field = useAutosaveField({
+    key: "debounced-field",
+    value: "server",
+    save,
+    onSaved,
+    commitDebounceMs: 100
+  });
+
+  return (
+    <>
+      <input
+        aria-label="Text field"
+        value={field.value}
+        onChange={(event) => field.setValue(event.target.value)}
+        onBlur={() => void field.commit()}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          field.setValue("applied");
+          void field.commit("applied");
+        }}
+      >
+        Apply
+      </button>
+    </>
+  );
+}
+
+it("sends a blur commit once even when the save outlasts the debounce", async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = deferred();
+    const save = vi.fn(() => pending.promise);
+    renderWithStatus(<DebouncedFieldProbe save={save} />);
+    const input = screen.getByRole("textbox", { name: "Text field" });
+
+    fireEvent.change(input, { target: { value: "draft" } });
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.blur(input);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    // The armed debounce and any later commit of the same in-flight value send nothing.
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.blur(input);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await act(async () => pending.resolve());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("commits a dirty draft when the field unmounts", async () => {
+  const save = vi.fn(() => Promise.resolve());
+  const { unmount } = renderWithStatus(<DebouncedFieldProbe save={save} />);
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Text field" }), {
+    target: { value: "draft" }
+  });
+  unmount();
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledWith("draft");
+});
+
+it("commits an explicit value before the draft state settles and reports the result", async () => {
+  const save = vi.fn((value: string) => Promise.resolve({ saved: value }));
+  const onSaved = vi.fn();
+  renderWithStatus(<DebouncedFieldProbe save={save} onSaved={onSaved} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledWith("applied");
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ saved: "applied" }));
+});

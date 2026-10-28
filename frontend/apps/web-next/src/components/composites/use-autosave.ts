@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import { useSetSaveStatus } from "./save-status";
 
@@ -64,30 +64,39 @@ export function useDirtySaveStatus(key: string, dirty: boolean) {
 }
 
 /**
- * Draft state for a text-like field that autosaves on blur. Holds a local draft
- * seeded from the server value, adopts external server changes only while the
- * user hasn't diverged locally, and on `commit()` saves through {@link useAutosave}
+ * Draft state for a text-like field that autosaves. Holds a local draft seeded
+ * from the server value, adopts external server changes only while the user
+ * hasn't diverged locally, and on `commit()` saves through {@link useAutosave}
  * when the (optionally normalized) value differs and passes `validate`.
+ *
+ * The hook owns the whole draft lifecycle: a commit clears the armed debounce,
+ * a value already in flight is not sent again (a blur during a slow save would
+ * otherwise create a second prompt version), `commit(value)` saves a value the
+ * caller has just set before the draft state settles, and a dirty draft is
+ * committed when the field unmounts (in-app navigation inside the debounce).
  */
-export function useAutosaveField<T>({
+export function useAutosaveField<T, R = unknown>({
   key,
   value: serverValue,
   save,
   equals = Object.is,
   validate,
   normalize,
+  onSaved,
   commitDebounceMs,
   commitOnVisibilityChange = false
 }: {
   key: string;
   value: T;
-  save: (value: T) => Promise<unknown>;
+  save: (value: T) => Promise<R>;
   /** Compare draft and server values. Defaults to `Object.is`. */
   equals?: (a: T, b: T) => boolean;
   /** Skip the save when the normalized value is invalid. */
   validate?: (value: T) => boolean;
   /** Canonicalize before saving (e.g. trim); the draft adopts the result. */
   normalize?: (value: T) => T;
+  /** Runs after a save succeeds, with its result. */
+  onSaved?: (result: R) => void;
   /** Commit after the draft has been idle for this many milliseconds. */
   commitDebounceMs?: number;
   /** Commit dirty draft state when the page is hidden. */
@@ -107,21 +116,52 @@ export function useAutosaveField<T>({
   const dirty = !equals(draft, serverValue);
   useDirtySaveStatus(key, dirty);
 
-  const commit = useCallback(async () => {
-    const next = normalize ? normalize(draft) : draft;
-    if (normalize && !equals(next, draft)) setDraft(next);
+  // `commit` is stable and reads the latest render, so the debounce timer, the
+  // hide handler and the unmount flush never save a stale draft.
+  const latest = useRef({
+    autosave,
+    draft,
+    serverValue,
+    save,
+    equals,
+    validate,
+    normalize,
+    onSaved
+  });
+  useLayoutEffect(() => {
+    latest.current = { autosave, draft, serverValue, save, equals, validate, normalize, onSaved };
+  });
+  const timer = useRef<number | undefined>(undefined);
+  const inFlight = useRef<{ value: T } | null>(null);
+
+  const commit = useCallback(async (override?: T) => {
+    window.clearTimeout(timer.current);
+    const { autosave, draft, serverValue, save, equals, validate, normalize, onSaved } =
+      latest.current;
+    const value = override === undefined ? draft : override;
+    const next = normalize ? normalize(value) : value;
+    if (normalize && !equals(next, value)) setDraft(next);
     if (equals(next, serverValue)) return;
     if (validate && !validate(next)) return;
-    await autosave(() => save(next));
-  }, [autosave, draft, equals, normalize, save, serverValue, validate]);
+    if (inFlight.current && equals(inFlight.current.value, next)) return;
+    const flight = { value: next };
+    inFlight.current = flight;
+    await autosave(async () => {
+      const result = await save(next);
+      onSaved?.(result);
+      return result;
+    });
+    if (inFlight.current === flight) inFlight.current = null;
+  }, []);
 
   const reset = useCallback(() => setDraft(serverValue), [serverValue]);
 
   useEffect(() => {
     if (!commitDebounceMs || !dirty) return;
-    const timer = window.setTimeout(() => void commit(), commitDebounceMs);
-    return () => window.clearTimeout(timer);
-  }, [commit, commitDebounceMs, dirty]);
+    const id = window.setTimeout(() => void commit(), commitDebounceMs);
+    timer.current = id;
+    return () => window.clearTimeout(id);
+  }, [commit, commitDebounceMs, dirty, draft]);
 
   useEffect(() => {
     if (!commitOnVisibilityChange || !dirty) return;
@@ -131,6 +171,9 @@ export function useAutosaveField<T>({
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
   }, [commit, commitOnVisibilityChange, dirty]);
+
+  // Fire-and-forget: the save still reports through the page's save status.
+  useEffect(() => () => void commit(), [commit]);
 
   return { value: draft, setValue: setDraft, dirty, commit, reset };
 }
