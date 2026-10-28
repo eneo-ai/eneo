@@ -295,12 +295,13 @@ describe("ChatPage", () => {
     ).toBe("true");
   });
 
-  it("starts over with focus in the composer after deleting the open conversation", async () => {
+  it("starts over and returns focus to the menu after deleting the open conversation", async () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });
     const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
     fireEvent.click(more!);
     const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort konversationen" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
