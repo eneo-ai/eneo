@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -48,6 +48,34 @@ it("says a user must be picked when adding a member, at the search field", async
   expect(document.activeElement).toBe(search);
   expect(api.POST).not.toHaveBeenCalled();
   await expectNoAxeViolations(dialog);
+});
+
+it("searches users once typing pauses, and not below three characters", async () => {
+  const { dialog } = await openDialog("Lägg till medlem");
+  const search = within(dialog).getByLabelText("E-post");
+  const searches = () =>
+    api.GET.mock.calls.filter(
+      (call) =>
+        (call as unknown[])[0] === "/api/v1/users/" &&
+        (call as { params: { query: { email?: string | null } } }[])[1]?.params.query.email
+    );
+
+  vi.useFakeTimers();
+  try {
+    for (const value of ["a", "an"]) fireEvent.change(search, { target: { value } });
+    act(() => vi.advanceTimersByTime(1000));
+    expect(searches()).toHaveLength(0);
+
+    for (const value of ["ann", "anna", "anna."]) fireEvent.change(search, { target: { value } });
+    act(() => vi.advanceTimersByTime(1000));
+    expect(searches()).toHaveLength(1);
+    expect(searches()[0]).toMatchObject([
+      "/api/v1/users/",
+      { params: { query: { email: "anna." } } }
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("says a group must be picked when adding a group, at its picker", async () => {
