@@ -36,6 +36,13 @@ class Authentication(str, Enum):
     PUBLIC = "public"
 
 
+# The policies the browser session cookie can satisfy (through OAUTH2_SCHEME):
+# their GETs must change no state unless they declare effect_on_get.
+COOKIE_CAPABLE = frozenset(
+    {Authentication.USER, Authentication.SESSION, Authentication.ASSISTANT}
+)
+
+
 class Authorization(str, Enum):
     # An explicit grant of endpoint admission to authenticated users. The
     # endpoint's service must still enforce object ownership/membership.

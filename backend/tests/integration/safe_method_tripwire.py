@@ -27,16 +27,14 @@ from redis.asyncio import Redis
 from redis.asyncio.client import Pipeline
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from eneo.authentication.endpoint_access import Authentication, access_for
+from eneo.authentication.browser_session import SAFE_METHODS
+from eneo.authentication.endpoint_access import COOKIE_CAPABLE, access_for
 from eneo.main.config import get_settings
+from eneo.server.dependencies.auth_definitions import is_api_key_request
 
-SAFE_METHODS = frozenset({"GET", "HEAD"})
-# The policies the browser session cookie can satisfy, through OAUTH2_SCHEME.
-COOKIE_CAPABLE = frozenset(
-    {Authentication.USER, Authentication.SESSION, Authentication.ASSISTANT}
-)
 _SQL_WRITE = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b"
     # A data-modifying CTE: WITH x AS (...) INSERT/UPDATE/DELETE ...
@@ -89,10 +87,7 @@ class SafeMethodTripwire:
         if (
             scope["type"] != "http"
             or scope["method"] not in SAFE_METHODS
-            or any(
-                name.decode().lower() == get_settings().api_key_header_name.lower()
-                for name, _ in scope["headers"]
-            )
+            or is_api_key_request(Headers(scope=scope), get_settings())
         ):
             await self.app(scope, receive, send)
             return
