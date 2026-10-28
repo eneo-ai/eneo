@@ -76,8 +76,9 @@ class EndpointAccess:
     # What a GET to this endpoint changes, and why that is safe. A same-origin
     # navigation carries the browser session cookie, so a cross-site page can
     # make the user's browser send any GET; GETs must therefore be free of
-    # state changes unless the change is declared and reasoned here. The
-    # integration tests' safe-method tripwire enforces this.
+    # state changes unless the change is declared and reasoned here. Enforced by
+    # tests/unit/test_get_routes_side_effect_free.py (every cookie-capable GET is
+    # classified) and the integration tests' safe-method tripwire.
     effect_on_get: str | None = None
 
     def __post_init__(self) -> None:

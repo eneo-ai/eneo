@@ -4,8 +4,11 @@ A same-origin navigation carries the browser session cookie, so any page can
 make the user's browser send a GET. A GET must therefore change nothing,
 unless its ``endpoint_access(effect_on_get=...)`` says what and why that is
 safe. This tripwire records database and Redis writes made while a GET or
-HEAD is handled and reports those of endpoints without that declaration.
+HEAD is handled and reports those of cookie-capable endpoints without that
+declaration.
 
+Only endpoints the cookie can authenticate are checked (``COOKIE_CAPABLE``);
+signed URLs, service keys and public routes carry no ambient credential.
 Requests carrying an API key are skipped: an API key rules the session cookie
 out, and authenticating one records its use. Bearer requests stand in for the
 cookie, which authenticates through the same dependency.
@@ -26,10 +29,14 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from eneo.authentication.endpoint_access import access_for
+from eneo.authentication.endpoint_access import Authentication, access_for
 from eneo.main.config import get_settings
 
-_SAFE_METHODS = frozenset({"GET", "HEAD"})
+SAFE_METHODS = frozenset({"GET", "HEAD"})
+# The policies the browser session cookie can satisfy, through OAUTH2_SCHEME.
+COOKIE_CAPABLE = frozenset(
+    {Authentication.USER, Authentication.SESSION, Authentication.ASSISTANT}
+)
 _SQL_WRITE = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b"
     # A data-modifying CTE: WITH x AS (...) INSERT/UPDATE/DELETE ...
@@ -81,7 +88,7 @@ class SafeMethodTripwire:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
             scope["type"] != "http"
-            or scope["method"] not in _SAFE_METHODS
+            or scope["method"] not in SAFE_METHODS
             or any(
                 name.decode().lower() == get_settings().api_key_header_name.lower()
                 for name, _ in scope["headers"]
@@ -94,14 +101,20 @@ class SafeMethodTripwire:
         try:
             await self.app(scope, receive, send)
         finally:
+            # Also when the request raised: what it wrote may already persist.
             _writes.reset(token)
-        # Starlette's router records the matched endpoint on this scope.
-        policy = access_for(scope.get("endpoint"))
-        if writes and (policy is None or policy.effect_on_get is None):
-            self.violations.append(
-                f"{scope['method']} {scope['path']} changed state without "
-                f"endpoint_access(effect_on_get=...): {writes}"
-            )
+            # Starlette's router records the matched endpoint on this scope.
+            policy = access_for(scope.get("endpoint"))
+            if (
+                writes
+                and policy is not None
+                and policy.authentication in COOKIE_CAPABLE
+                and policy.effect_on_get is None
+            ):
+                self.violations.append(
+                    f"{scope['method']} {scope['path']} changed state without "
+                    f"endpoint_access(effect_on_get=...): {writes}"
+                )
 
 
 def install() -> Callable[[], None]:
