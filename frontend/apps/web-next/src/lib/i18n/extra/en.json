@@ -1274,7 +1274,6 @@
   "skills_display_name_description": "Use a concise name that describes the capability.",
   "skills_instructions_description": "Write the specialized instructions in Markdown. There is no fixed character or line limit.",
   "skills_library_deleted_success": "Skill deleted.",
-  "skills_required_field": "This field is required.",
   "skills_slug_description": "Derived from the name. You can adjust it before creation, but not afterwards. The server performs the final validation.",
   "skip": "Skip",
   "skip_to_main": "Skip to main content",

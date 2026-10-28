@@ -1275,7 +1275,6 @@
   "skills_display_name_description": "Använd ett kort namn som beskriver förmågan.",
   "skills_instructions_description": "Skriv de specialiserade instruktionerna i Markdown. Det finns ingen fast gräns för antal tecken eller rader.",
   "skills_library_deleted_success": "Skill borttagen.",
-  "skills_required_field": "Det här fältet måste fyllas i.",
   "skills_slug_description": "Skapas från namnet. Du kan ändra den före skapandet, men inte efteråt. Servern gör den slutliga valideringen.",
   "skip": "Hoppa över",
   "skip_to_main": "Hoppa till huvudinnehåll",

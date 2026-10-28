@@ -3611,7 +3611,7 @@
   "skills_advanced_options": "Avancerade alternativ",
   "skills_slug_label": "Teknisk identifierare",
   "skills_slug_description": "Skapas från namnet. Du kan ändra den före skapandet, men inte efteråt. Servern gör den slutliga valideringen.",
-  "skills_required_field": "Det här fältet måste fyllas i.",
+  "skills_required_field": "Fältet är obligatoriskt.",
   "skills_form_error_title": "Skillen kunde inte skapas",
   "skills_create_action": "Skapa Skill",
   "skills_creating": "Skapar…",
