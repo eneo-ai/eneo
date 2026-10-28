@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
+
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
+import { OrgApiKeysPage } from "./org-api-keys";
 
 const apiKey = {
   id: "key-1",
@@ -12,64 +18,176 @@ const apiKey = {
   name: "Ärendesystemet",
   key_type: "sk_",
   permission: "read",
-  scope_type: "tenant",
+  scope_type: "space",
+  scope_id: "space-1",
+  ownership: "user",
+  owner_user_id: "user-2",
+  owner_user: { id: "user-2", email: "kim@example.se", username: null },
+  rate_limit: 600,
+  last_used_at: null,
   state: "active",
   expires_at: null,
   created_at: "2026-09-01T08:00:00Z"
 } as Schema<"ApiKeyV2">;
 
-vi.mock("@/lib/api/browser", () => ({
-  browserApi: {
-    GET: (path: string) => {
-      const data =
-        path === "/api/v1/admin/api-keys"
-          ? { items: [apiKey], next_cursor: null }
-          : path === "/api/v1/admin/api-keys/{id}/usage"
-            ? {
-                summary: { total_events: 1, used_events: 1, auth_failed_events: 0 },
-                items: [
-                  {
-                    id: "event-1",
-                    timestamp: "2026-09-20T08:00:00Z",
-                    action: "api_key_used",
-                    outcome: "used",
-                    method: "GET",
-                    request_path: "/api/v1/assistants/",
-                    ip_address: "10.0.0.1"
-                  }
-                ],
-                next_cursor: null
-              }
-            : {};
-      return Promise.resolve({ data, response: new Response("{}") });
+const secret = `sk_${"a1b2c3d4".repeat(5)}`;
+const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
+const notFound = () =>
+  Promise.resolve({
+    error: { message: "Not found" },
+    response: new Response("{}", { status: 404 })
+  });
+
+function serve() {
+  api.GET.mockImplementation((path: string) => {
+    if (path === "/api/v1/admin/api-keys") {
+      return ok({ items: [apiKey], next_cursor: null, total_count: 7 });
     }
-  }
-}));
+    if (path === "/api/v1/admin/api-keys/{id}") return ok({ ...apiKey, name: "Hittad nyckel" });
+    if (path === "/api/v1/spaces/") {
+      return ok({ items: [{ id: "space-1", name: "Upphandling", applications: null }] });
+    }
+    if (path === "/api/v1/audit/config/actions") {
+      return ok({
+        actions: [
+          { action: "api_key_used", enabled: false, category: "security_events" },
+          { action: "api_key_auth_failed", enabled: true, category: "security_events" }
+        ]
+      });
+    }
+    return notFound();
+  });
+}
 
-import { OrgApiKeysPage } from "./org-api-keys";
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
-afterEach(cleanup);
+const listQueries = () =>
+  api.GET.mock.calls
+    .filter(([path]) => path === "/api/v1/admin/api-keys")
+    .map(([, options]) => (options as { params: { query: Record<string, unknown> } }).params.query);
+
+function show() {
+  serve();
+  return renderInApp(<OrgApiKeysPage />, {
+    appContext: testAppContext({
+      permissions: ["admin"],
+      settings: { api_key_expiry_notifications: true }
+    })
+  });
+}
 
 describe("OrgApiKeysPage", () => {
-  it("names the key table by the page title", async () => {
-    renderInApp(<OrgApiKeysPage />, { appContext: testAppContext({ permissions: ["admin"] }) });
-
+  it("lists keys with their owner, scope, rate limit and last use", async () => {
+    const { container } = show();
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Ärendesystemet")).toBeTruthy();
-    // Each row's menu says whose it is.
+    expect(within(table).getByRole("link", { name: "kim@example.se" }).getAttribute("href")).toBe(
+      "/admin/users?search=kim%40example.se"
+    );
+    expect(await within(table).findByText("Upphandling")).toBeTruthy();
+    expect(within(table).getByText("600/h")).toBeTruthy();
+    // Never used, and no expiry.
+    expect(within(table).getAllByText("Aldrig")).toHaveLength(2);
     expect(
       within(table).getByRole("button", { name: "Fler åtgärder för Ärendesystemet" })
     ).toBeTruthy();
+    expect(screen.getByText("Visar 1 av 7 nycklar totalt")).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 
-  it("shows the keys in the panel of the selected state tab", async () => {
-    const { container } = renderInApp(<OrgApiKeysPage />, {
-      appContext: testAppContext({ permissions: ["admin"] })
-    });
-
+  it("shows the keys in the panel of the selected state tab, every state included", async () => {
+    show();
     const panel = screen.getByRole("tabpanel", { name: "Aktiv" });
     expect(screen.getByRole("tab", { name: "Aktiv" }).getAttribute("aria-controls")).toBe(panel.id);
     expect(await within(panel).findByText("Ärendesystemet")).toBeTruthy();
-    await expectNoAxeViolations(container);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Alla statusar" }));
+    await waitFor(() => expect(listQueries().at(-1)?.state).toBeUndefined());
+  });
+
+  it("applies the filters together: search, expiry window and page size", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: "Diariet" } });
+    fireEvent.change(screen.getByLabelText("Utgår inom (dagar)"), { target: { value: "14" } });
+    expect(listQueries().every((query) => query.search === undefined)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    await waitFor(() =>
+      expect(listQueries().at(-1)).toMatchObject({
+        search: "Diariet",
+        expires_within_days: 14,
+        state: "active"
+      })
+    );
+    expect(screen.getByText("3 filter aktiva")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Rensa alla" }));
+    expect(((await screen.findByLabelText("Sök")) as HTMLInputElement).value).toBe("");
+    // Only the state tab (Aktiv) narrows the list again.
+    expect(screen.getByText("1 filter aktivt")).toBeTruthy();
+  });
+
+  it("finds a pasted whole key by lookup, without the key in a list request", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-9" }, match_reason: "exact_secret" }));
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: secret } });
+    expect(screen.getByLabelText("Sök").getAttribute("autocomplete")).toBe("off");
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    expect(await screen.findByText("Hittad nyckel")).toBeTruthy();
+    expect(screen.getByText("Exakt nyckelmatchning")).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/api-keys/lookup", {
+      body: { secret }
+    });
+    expect(JSON.stringify(api.GET.mock.calls)).not.toContain(secret);
+  });
+
+  it("searches a whole key that matched nothing by its suffix", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    api.POST.mockReturnValue(notFound());
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    await waitFor(() => expect(listQueries().at(-1)?.search).toBe("a1b2c3d4"));
+    expect(JSON.stringify(api.GET.mock.calls)).not.toContain(secret);
+  });
+
+  it("saves the expiry-notification switch on toggle and reverts on error", async () => {
+    show();
+    api.PATCH.mockReturnValue(
+      Promise.resolve({ error: { message: "Nope" }, response: new Response("{}", { status: 500 }) })
+    );
+    const toggle = await screen.findByRole("switch", {
+      name: /Aktivera notiser för API-nyckelutgång/
+    });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/settings/api-key-expiry-notifications", {
+        body: { enabled: false }
+      })
+    );
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+  });
+
+  it("switches the audit log's tracking of key use", async () => {
+    show();
+    api.PATCH.mockReturnValue(ok({}));
+    const used = await screen.findByRole("switch", { name: /Spåra API-nyckelanvändning/ });
+    expect(used.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(used);
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/audit/config/actions", {
+        body: { updates: [{ action: "api_key_used", enabled: true }] }
+      })
+    );
   });
 });
