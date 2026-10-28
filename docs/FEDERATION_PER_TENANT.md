@@ -17,7 +17,7 @@
 Even with a single tenant, you may want `FEDERATION_PER_TENANT_ENABLED=true` if you prefer to:
 - Manage OIDC settings via the sysadmin API instead of environment variables
 - Change IdP configuration without restarting the backend
-- Let the organisation's admins change the client ID, secret and allowed domains in the web app
+- Let the organisation's admins change the client ID, secret and allowed domains themselves
 - Use the same API-based workflow as multi-tenant deployments
 
 ### Single-Tenant via Environment Variables (Default)
@@ -64,7 +64,7 @@ Admin APIs (super API key required)
 
 Secrets (`client_secret`) are encrypted; operator responses only return masked tails.
 
-After registration, an organisation's own admins can change the provider label, client ID, client secret and allowed email domains through `GET/PATCH /api/v1/admin/federation` (web app: **Admin → Sign-in (SSO)**). Everything else stays with the operator, the secret is never returned to them, and every change is audited regardless of the organisation's audit settings. See the [setup guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#21-what-the-organisations-admins-can-change-themselves) and its recovery runbook.
+After registration, an organisation's own admins can change the provider label, client ID, client secret and allowed email domains through `GET/PATCH /api/v1/admin/federation`. Everything else stays with the operator, the secret is never returned to them, and every change is audited regardless of the organisation's audit settings. See the [setup guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#21-what-the-organisations-admins-can-change-themselves) and its recovery runbook.
 
 ---
 

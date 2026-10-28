@@ -26,6 +26,7 @@ from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.config import get_settings, set_settings
 from eneo.tenants import tenant_federation_service
+from eneo.tenants.masking import mask_api_key
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -368,15 +369,28 @@ async def test_two_concurrent_saves_the_second_gets_409(
     assert len(await _audit_rows(test_tenant.id)) == 2  # operator PUT + winner
 
 
+@pytest.mark.parametrize(
+    "masked",
+    [
+        mask_api_key(SECRET),  # "...Zq7x", as the operator GET shows it
+        mask_api_key(f"sk-{SECRET}"),  # "sk-...Zq7x"
+        "********",
+        "••••••••••",
+    ],
+)
 async def test_a_masked_looking_secret_is_refused(
-    client: AsyncClient, admin_token: str, configured: dict[str, str], test_tenant
+    client: AsyncClient,
+    admin_token: str,
+    configured: dict[str, str],
+    test_tenant,
+    masked: str,
 ):
     before = await _stored(test_tenant.id)
     revision = (await _view(client, admin_token))["revision"]
 
     response = await client.patch(
         URL,
-        json={"revision": revision, "client_secret": "********"},
+        json={"revision": revision, "client_secret": masked},
         headers=_bearer(admin_token),
     )
 
@@ -584,7 +598,7 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
 ):
     """Fake IdP: knows two clients; sign-in uses whatever the tenant stores."""
     idp = _idp("org")
-    codes = [f"code-{i}" for i in range(5)]
+    codes = [f"code-{i}" for i in range(6)]
     fake_idp = oidc_mock(
         discovery=_discovery(idp),
         tokens={
@@ -614,8 +628,8 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
 
     assert await sign_in(codes[0]) == 200
 
-    # The admin points sign-in at another registered client and adds a domain:
-    # the next sign-in uses both.
+    # The admin points sign-in at another registered client and drops the
+    # user's domain: the next sign-in uses both and refuses the user ...
     view = await _view(client, admin_token)
     switched = await client.patch(
         URL,
@@ -623,22 +637,35 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
             "revision": view["revision"],
             "client_id": "second-client",
             "client_secret": "second-secret",
-            "allowed_domains": ["example.com", "example.se"],
+            "allowed_domains": ["example.se"],
         },
         headers=_bearer(admin_token),
     )
     assert switched.status_code == 200, switched.text
-    assert await sign_in(codes[1]) == 200
+    assert await sign_in(codes[1]) == 403
+    assert fake_idp()["token_clients"][-1] == "second-client"
+
+    # ... and admits them once the domain is back.
+    readmitted = await client.patch(
+        URL,
+        json={
+            "revision": switched.json()["revision"],
+            "allowed_domains": ["example.se", "example.com"],
+        },
+        headers=_bearer(admin_token),
+    )
+    assert readmitted.status_code == 200, readmitted.text
+    assert await sign_in(codes[2]) == 200
     assert fake_idp()["token_clients"][-1] == "second-client"
 
     # A wrong client ID locks every SSO user out ...
     broken = await client.patch(
         URL,
-        json={"revision": switched.json()["revision"], "client_id": "typo-client"},
+        json={"revision": readmitted.json()["revision"], "client_id": "typo-client"},
         headers=_bearer(admin_token),
     )
     assert broken.status_code == 200, broken.text
-    assert await sign_in(codes[2]) == 401
+    assert await sign_in(codes[3]) == 401
 
     # ... until one operator PATCH puts the registered client back.
     restored = await client.patch(
@@ -647,5 +674,5 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
         headers={"X-API-Key": super_admin_token},
     )
     assert restored.status_code == 200, restored.text
-    assert await sign_in(codes[3]) == 200
+    assert await sign_in(codes[4]) == 200
     assert fake_idp()["token_clients"][-1] == "operator-client"

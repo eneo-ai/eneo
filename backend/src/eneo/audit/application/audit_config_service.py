@@ -38,6 +38,19 @@ Cache TTL Reasoning:
 """
 
 
+def settable_action_updates(updates: list[ActionUpdate]) -> list[ActionUpdate]:
+    """The action updates that are stored: none for an always-audited action.
+
+    Refused without an error, since the old UI disables a category by sending
+    every action in it.
+    """
+    return [
+        update
+        for update in updates
+        if ActionType(update.action) not in ALWAYS_AUDITED_ACTIONS
+    ]
+
+
 class AuditConfigService:
     """Service for managing audit category configuration with Redis caching."""
 
@@ -357,11 +370,7 @@ class AuditConfigService:
         # Group updates by category (since we update JSONB per category)
         updates_by_category: dict[str, ActionOverrides] = {}
 
-        for update in updates:
-            if ActionType(update.action) in ALWAYS_AUDITED_ACTIONS:
-                # Refused, not an error: the old UI disables a category by
-                # sending every action in it.
-                continue
+        for update in settable_action_updates(updates):
             category = get_category_for_action(update.action)
             if category not in updates_by_category:
                 updates_by_category[category] = {}

@@ -18,10 +18,11 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Literal, Optional, Self, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Optional, Self, cast
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -221,20 +222,28 @@ class TenantAdminFederationPatch(BaseModel):
             "against an older revision is refused with 409."
         ),
     )
-    provider: str | None = Field(
-        None, min_length=1, max_length=100, description="Identity provider label"
+    # Omitted means unchanged; null is refused (reject_null), so the schema
+    # does not offer it.
+    provider: (
+        Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None]
+    ) = Field(default=None, description="Identity provider label")
+    client_id: (
+        Annotated[str, Field(min_length=1, max_length=512)] | SkipJsonSchema[None]
+    ) = Field(default=None, description="OAuth client ID")
+    # No min_length here: a masked display value ("...cret") is refused as
+    # such (400 federation_secret_looks_masked) before the length rule.
+    client_secret: (
+        Annotated[str, Field(max_length=EncryptionService.MAX_CREDENTIAL_LENGTH)]
+        | SkipJsonSchema[None]
+    ) = Field(
+        default=None,
+        description=(
+            "Replacement OAuth client secret, at least 8 characters. Write-only: "
+            "never returned."
+        ),
     )
-    client_id: str | None = Field(
-        None, min_length=1, max_length=512, description="OAuth client ID"
-    )
-    client_secret: str | None = Field(
-        None,
-        min_length=8,
-        max_length=EncryptionService.MAX_CREDENTIAL_LENGTH,
-        description="Replacement OAuth client secret. Write-only: never returned.",
-    )
-    allowed_domains: list[str] | None = Field(
-        None,
+    allowed_domains: list[str] | SkipJsonSchema[None] = Field(
+        default=None,
         description="Email domains allowed to sign in (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
@@ -243,6 +252,15 @@ class TenantAdminFederationPatch(BaseModel):
     @classmethod
     def strip_text(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("client_secret")
+    @classmethod
+    def validate_secret_length(cls, value: str | None) -> str | None:
+        if value is None or (value and looks_masked(value)):
+            return value
+        if len(value) < 8:
+            raise ValueError("The client secret must be at least 8 characters")
+        return value
 
     @field_validator("allowed_domains")
     @classmethod
@@ -610,10 +628,13 @@ def _merge_federation_config(
     return merged
 
 
-_NO_CONFIG = HTTPException(
-    status_code=status.HTTP_404_NOT_FOUND,
-    detail="No federation config found for tenant",
-)
+def _no_config() -> HTTPException:
+    # A new exception per request: re-raising one instance would keep growing
+    # its traceback, holding every earlier request's frames.
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="No federation config found for tenant",
+    )
 
 
 def _require_updates(updates: Mapping[str, Any]) -> None:
@@ -758,7 +779,7 @@ class TenantFederationService:
         Discovery is fetched before the tenant row is locked.
         """
         if not tenant.federation_config:
-            raise _NO_CONFIG
+            raise _no_config()
         updates = request.model_dump(exclude_unset=True)
         _require_updates(updates)
 
@@ -779,7 +800,7 @@ class TenantFederationService:
 
         current = await self._lock(tenant)
         if not current:
-            raise _NO_CONFIG
+            raise _no_config()
         federation_config = _merge_federation_config(
             current,
             updates,
@@ -825,7 +846,7 @@ class TenantFederationService:
     async def test_connection(self, tenant: TenantInDB) -> dict[str, Any]:
         """Fetch the stored discovery document (super API key)."""
         if not tenant.federation_config:
-            raise _NO_CONFIG
+            raise _no_config()
 
         discovery_endpoint = tenant.federation_config.get("discovery_endpoint")
         if not discovery_endpoint:

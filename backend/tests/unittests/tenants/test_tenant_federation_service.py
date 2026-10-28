@@ -159,6 +159,30 @@ class TestTenantAdminPatch:
         )
         assert patch.client_secret == "a-new-secret"
 
+    @pytest.mark.parametrize("secret", ["", "short", "1234567"])
+    def test_refuses_a_short_secret(self, secret: str):
+        with pytest.raises(ValidationError):
+            TenantAdminFederationPatch.model_validate(
+                {"revision": "r", "client_secret": secret}
+            )
+
+    @pytest.mark.parametrize("masked", ["...cret", "sk-...abcd", "***", "••••"])
+    def test_lets_a_masked_value_through_to_be_refused_as_such(self, masked: str):
+        # The service answers 400 federation_secret_looks_masked, not a 422
+        # about its length.
+        patch = TenantAdminFederationPatch.model_validate(
+            {"revision": "r", "client_secret": masked}
+        )
+        assert patch.client_secret == masked
+
+    def test_the_schema_offers_omission_not_null(self):
+        properties = TenantAdminFederationPatch.model_json_schema()["properties"]
+
+        for field in ("provider", "client_id", "client_secret", "allowed_domains"):
+            assert "anyOf" not in properties[field], field
+            assert properties[field]["type"] in ("string", "array"), field
+        assert properties["client_id"]["minLength"] == 1
+
 
 @pytest.mark.parametrize(
     ("value", "masked"),

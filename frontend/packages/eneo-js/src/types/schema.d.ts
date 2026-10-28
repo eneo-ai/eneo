@@ -22596,17 +22596,17 @@ export interface components {
        * Provider
        * @description Identity provider label
        */
-      provider?: string | null;
+      provider?: string;
       /**
        * Client Id
        * @description OAuth client ID
        */
-      client_id?: string | null;
+      client_id?: string;
       /**
        * Client Secret
-       * @description Replacement OAuth client secret. Write-only: never returned.
+       * @description Replacement OAuth client secret, at least 8 characters. Write-only: never returned.
        */
-      client_secret?: string | null;
+      client_secret?: string;
       /**
        * Allowed Domains
        * @description Email domains allowed to sign in (e.g., ['stockholm.se'])
@@ -22615,7 +22615,7 @@ export interface components {
        *       "stockholm.gov.se"
        *     ]
        */
-      allowed_domains?: string[] | null;
+      allowed_domains?: string[];
     };
     /**
      * TenantAppTestResult

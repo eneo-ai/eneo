@@ -4,7 +4,7 @@ A tenant admin can switch off audit categories, single actions and the whole
 audit log; none of those may hide a change to how the organisation signs in.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -66,3 +66,36 @@ async def test_the_config_api_does_not_store_an_override_that_disables_it(
     assert stored == {"user_created": False}
     federation = next(a for a in response.actions if a.action == "federation_updated")
     assert federation.enabled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("updates", "audited"),
+    [
+        ([("federation_updated", False)], None),
+        (
+            [("federation_updated", False), ("user_created", False)],
+            [{"action": "user_created", "enabled": False}],
+        ),
+    ],
+)
+async def test_the_config_api_audits_only_the_overrides_it_stored(updates, audited):
+    from eneo.api.audit.config_routes import update_action_config
+    from eneo.audit.schemas.audit_config_schemas import ActionConfigUpdateRequest
+
+    container = MagicMock()
+    container.audit_config_service.return_value.update_action_config = AsyncMock()
+    audit = container.audit_service.return_value
+    audit.log_async = AsyncMock()
+
+    await update_action_config(
+        ActionConfigUpdateRequest(
+            updates=[ActionUpdate(action=a, enabled=e) for a, e in updates]
+        ),
+        container,
+    )
+
+    if audited is None:
+        audit.log_async.assert_not_awaited()
+    else:
+        assert audit.log_async.await_args.kwargs["metadata"]["updates"] == audited

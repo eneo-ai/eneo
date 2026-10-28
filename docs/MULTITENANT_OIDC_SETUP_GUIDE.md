@@ -75,18 +75,19 @@ curl -X PATCH "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federa
 Use `PUT` when you want to provide a full new federation definition or replace the current one.
 
 ### 2.1 What the organisation's admins can change themselves
-Once the operator has registered an IdP, an admin of that organisation (`Permission.ADMIN`, signed in to the web app; API keys are refused) can change four settings at `GET/PATCH /api/v1/admin/federation`, under **Admin → Sign-in (SSO)**:
+Once the operator has registered an IdP, an admin of that organisation (`Permission.ADMIN`, in a signed-in session; API keys are refused) reads it with `GET /api/v1/admin/federation` and changes it with `PATCH /api/v1/admin/federation`:
 
 | Setting | Org admin | Operator (super API key) |
 |---|---|---|
-| Provider label, client ID, client secret (write-only), allowed email domains | edit | edit |
-| Discovery endpoint, issuer and every endpoint derived from it | read | edit |
-| Redirect URIs (`canonical_public_origin`, `redirect_path`, `additional_redirect_uris`) | read and copy | edit |
-| Scopes, claim mapping, token auth method | read | edit |
+| Provider label, client ID, allowed email domains | read and edit | edit |
+| Client secret | replace (write-only; never read) | edit |
+| Discovery endpoint, issuer, redirect URIs, scopes, token auth method | read | edit |
+| Other endpoints from discovery, claim mapping, `canonical_public_origin`, `redirect_path`, `additional_redirect_uris` | no | edit |
 | First registration, replacing the IdP, delete | no | yes |
 
-- The admin never sees the secret, not even its last characters: only that one is set and when it was replaced.
-- Each save sends the `revision` it was made against; a save against settings someone else changed meanwhile gets `409 federation_config_revision_conflict`.
+- The admin never sees the secret, not even its last characters: only that one is set and when it was replaced. A value that looks like a masked secret is refused (`400 federation_secret_looks_masked`).
+- A field the admin may not change is refused with `422`, and nothing is stored.
+- Each `PATCH` sends the `revision` from `GET`; a save against settings someone else changed meanwhile gets `409 federation_config_revision_conflict`.
 - Every change, from either door, is written to the audit log as `federation_updated` with each field from what to what (the secret only as `{"replaced": true}`). This action is logged even when the organisation switched off auditing, the admin-actions category or the action itself.
 
 ---
