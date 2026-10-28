@@ -156,14 +156,19 @@ def test_websocket_scope_passes_through():
         assert websocket.receive_text() == "hello"
 
 
-def test_production_app_applies_headers(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize(
+    ("environment", "hsts"), [("production", HSTS), ("development", None)]
+)
+def test_production_app_applies_headers(
+    monkeypatch: pytest.MonkeyPatch, environment: str, hsts: str | None
+):
     from eneo.main.config import get_settings
 
-    monkeypatch.setattr(get_settings(), "environment", "production")
+    monkeypatch.setattr(get_settings(), "environment", environment)
     response = TestClient(get_application()).get("/api/livez")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["content-security-policy"] == SANDBOX_CSP
-    assert response.headers["strict-transport-security"] == HSTS
+    assert response.headers.get("strict-transport-security") == hsts

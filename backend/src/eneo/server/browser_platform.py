@@ -5,8 +5,9 @@ route validation. Later browser-platform work (gzip, the browser session, SSO
 callbacks, runtime config, serving the web app) extends this function, so
 ``server/main.py`` keeps exactly one hook.
 
-Middleware added here is outermost on purpose (outside OTEL and CORS): every
-response, including CORS preflights, passes through it last.
+Middleware added here is the outermost user middleware (outside CORS, so CORS
+preflights pass through it too). OTEL and Starlette's ServerErrorMiddleware
+still wrap the whole user stack, so unhandled-exception 500s do not get it.
 """
 
 from fastapi import FastAPI
