@@ -135,6 +135,11 @@ test("the memory check passes within budget and fails above it or without a meas
   }
 });
 
+test("ci.yml can be run by hand on an integration branch", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  assert.ok(workflow.split("\njobs:\n")[0].includes("\n  workflow_dispatch:\n"));
+});
+
 test("push, tag and manual callers keep full validation even with only docs changed", () => {
   for (const event of ["push", "workflow_dispatch", "workflow_call", "unknown"]) {
     const plan = planCi([docsFile], event);

@@ -794,6 +794,10 @@ def get_application():
             version=get_settings().app_version, revision=get_settings().app_revision
         )
 
+    from eneo.server.browser_platform import install_browser_platform
+
+    install_browser_platform(app)
+
     _registered_endpoints = (
         http_exception_handler,
         custom_http_500_exception_handler,

@@ -263,24 +263,14 @@ def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
     return ("body", _LOGIN_FORM_FIELDS.get(str(first), first), *rest)
 
 
-@router.post(
-    "/login/token/",
-    response_model=AccessToken,
-    name="Login",
-    description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401, 403, 429, 500]),
-)
-@endpoint_access(
-    authentication=Authentication.PUBLIC,
-    authorization=Authorization.PUBLIC,
-    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
-)
-async def user_login_with_email_and_password(
-    request: Request,
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
-    container: Annotated[Container, Depends(get_container())],
+async def login_with_password(
+    *, request: Request, email: str, password: str, container: Container
 ) -> AccessToken:
-    """OAuth2 Login with comprehensive error handling and logging"""
+    """The password login flow: validation, the failed-attempt limiter, logging
+    and the public error contract (401 invalid_credentials with
+    attempts_remaining, 429 too_many_login_attempts with retry_after_seconds and
+    Retry-After, 403 account states, 422 form locations, login_unavailable).
+    Every password login endpoint calls it."""
 
     # Logs, the correlation header and support lookups share one id: the
     # request context's (the trace id when a span is active, otherwise the
@@ -294,9 +284,6 @@ async def user_login_with_email_and_password(
     source_ip = request.headers.get(
         "x-forwarded-for", request.client.host if request.client else None
     )
-
-    email = form_data.username
-    password = form_data.password
 
     # The shared request-validation handler owns the public 422 contract.
     # Do not pass credentials into its exception or into structured logs.
@@ -460,6 +447,32 @@ async def user_login_with_email_and_password(
             },
             headers={"X-Correlation-ID": correlation_id},
         ) from None
+
+
+@router.post(
+    "/login/token/",
+    response_model=AccessToken,
+    name="Login",
+    description="Authenticate with email and password (OAuth2 password flow).",
+    responses=responses.get_responses([401, 403, 429, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
+)
+async def user_login_with_email_and_password(
+    request: Request,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
+    container: Annotated[Container, Depends(get_container())],
+) -> AccessToken:
+    """OAuth2 Login with comprehensive error handling and logging"""
+    return await login_with_password(
+        request=request,
+        email=form_data.username,
+        password=form_data.password,
+        container=container,
+    )
 
 
 @router.post(

@@ -107,11 +107,21 @@ async def get_origin(
     settings = get_settings()
     # Password and bearer requests to the API itself do not require CORS opt-in.
     # API-key requests still enforce their key and tenant origin policies.
+    # Behind a TLS-terminating proxy the request arrives as http, because
+    # gunicorn does not trust X-Forwarded-Proto, so an http request also
+    # matches an https page on the same Host. X-Forwarded-* is never read, and
+    # an http origin never matches an https request.
     if (
         not is_preflight
         and request_url is not None
         and not headers.get(settings.api_key_header_name)
-        and _is_same_origin(origin, request_url)
+        and (
+            _is_same_origin(origin, request_url)
+            or (
+                request_url.scheme == "http"
+                and _is_same_origin(origin, request_url.replace(scheme="https"))
+            )
+        )
     ):
         return True
 

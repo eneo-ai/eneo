@@ -2,6 +2,9 @@ name: CI
 
 on:
   workflow_call:
+  # A branch that is not a pull request (a feature integration branch) can
+  # run the full CI by hand without publishing images.
+  workflow_dispatch:
   # Develop pushes are validated once by Build and Push Docker Images.
   push:
     branches:
