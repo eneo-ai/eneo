@@ -22,13 +22,14 @@ const apiKey = {
 const post = vi.hoisted(() => vi.fn());
 const put = vi.hoisted(() => vi.fn());
 const followed = vi.hoisted(() => ({ items: [] as unknown[] }));
+const keys = vi.hoisted(() => ({ items: null as unknown[] | null }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
       Promise.resolve({
         data:
           path === "/api/v1/api-keys"
-            ? { items: [apiKey], next_cursor: null }
+            ? { items: keys.items ?? [apiKey], next_cursor: null }
             : path === "/api/v1/api-keys/notification-subscriptions"
               ? { items: followed.items }
               : {},
@@ -46,6 +47,7 @@ afterEach(() => {
   post.mockReset();
   put.mockReset();
   followed.items = [];
+  keys.items = null;
 });
 
 describe("ResourceApiKeysSection", () => {
@@ -159,5 +161,20 @@ describe("ResourceApiKeysSection", () => {
       await screen.findByText(/Din roll saknar behörighet att skapa API-nycklar/)
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skapa" })).toBeNull();
+  });
+
+  it("says which listed keys expire soon", async () => {
+    keys.items = [
+      { ...apiKey, expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString() },
+      { ...apiKey, id: "key-2", expires_at: new Date(Date.now() + 10 * 86_400_000).toISOString() }
+    ];
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />
+    );
+    expect(
+      await screen.findByText(
+        "1 nyckel går ut inom 3 dagar, 1 nyckel går ut inom 14 dagar i denna vy"
+      )
+    ).toBeTruthy();
   });
 });

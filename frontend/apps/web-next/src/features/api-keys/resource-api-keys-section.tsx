@@ -2,38 +2,13 @@
 
 import { Bell, BellOff, KeyRound } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
-import { EmptyState } from "@/components/composites/empty-state";
-import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RemovalFocusScope } from "@/features/spaces/removal";
-import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
-import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-import { ApiKeyActions } from "./api-key-actions";
 import { CreateApiKeyDialog } from "./api-key-form";
-import {
-  API_KEY_STATE_BADGE_VARIANT,
-  API_KEY_STATE_FILTERS,
-  API_KEYS_KEY,
-  formatApiKeyDate,
-  stateFilterLabelKey,
-  type ApiKeyStateFilter,
-  type ResourceScopeType
-} from "./api-keys";
+import type { ResourceScopeType } from "./api-keys";
 import { useNotificationFollows } from "./notification-follows";
+import { UserApiKeyList, useSecretReveal } from "./user-api-key-list";
 
 export type ResourceApiKeyScopeType = ResourceScopeType;
 
@@ -53,40 +28,9 @@ export function ResourceApiKeysSection({
 }) {
   const t = useTranslations();
   const { can } = useAppContext();
-  const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
-  const [secret, setSecret] = useState<string | null>(null);
-  const [secretTitle, setSecretTitle] = useState("");
-  const panelRef = useRef<HTMLDivElement>(null);
+  const secrets = useSecretReveal();
   const follows = useNotificationFollows();
   const scopeFollowed = follows.follows(scopeType, scopeId);
-
-  const keys = usePaginatedQuery({
-    queryKey: [...API_KEYS_KEY, scopeType, scopeId, stateFilter],
-    limit: 10,
-    fetchPage: async ({ cursor, limit }) => {
-      const page = await unwrap(
-        browserApi.GET("/api/v1/api-keys", {
-          params: {
-            query: {
-              scope_type: scopeType,
-              scope_id: scopeId,
-              state: stateFilter === "all" ? null : stateFilter,
-              cursor: cursor ?? null,
-              limit
-            }
-          }
-        })
-      );
-      return { ...page, items: page.items, total_count: page.total_count ?? 0 };
-    }
-  });
-
-  function showSecret(title: string) {
-    return (value: string) => {
-      setSecretTitle(title);
-      setSecret(value);
-    };
-  }
 
   return (
     <SettingsGroup
@@ -122,7 +66,7 @@ export function ResourceApiKeysSection({
                   {t("api_keys_create_short")}
                 </Button>
               }
-              onCreated={showSecret(t("api_keys_created_title"))}
+              onCreated={secrets.reveal(t("api_keys_created_title"))}
             />
           )}
         </>
@@ -131,99 +75,12 @@ export function ResourceApiKeysSection({
       {!can("api_keys") && (
         <p className="text-muted-foreground text-sm">{t("api_keys_no_create_permission")}</p>
       )}
-      <Tabs
-        value={stateFilter}
-        onValueChange={(value) => setStateFilter(value as ApiKeyStateFilter)}
-        className="gap-6"
-      >
-        <TabsList>
-          {API_KEY_STATE_FILTERS.map((state) => (
-            <TabsTrigger key={state} value={state}>
-              {t(stateFilterLabelKey(state))}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {/* The keys in the selected state: the state tabs' panel. */}
-        <TabsContent ref={panelRef} value={stateFilter} className="flex flex-col gap-4">
-          <RemovalFocusScope target={panelRef}>
-            {keys.items.length === 0 && !keys.isPending ? (
-              <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
-            ) : (
-              <>
-                <Table aria-label={t("api_keys")}>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("name")}</TableHead>
-                      <TableHead>{t("status")}</TableHead>
-                      <TableHead>{t("api_keys_permission_level")}</TableHead>
-                      <TableHead>{t("api_keys_expires")}</TableHead>
-                      <TableHead>{t("api_keys_created")}</TableHead>
-                      <TableHead className="w-14 min-w-14" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {keys.items.map((apiKey) => (
-                      <TableRow key={apiKey.id}>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span className="font-medium">{apiKey.name}</span>
-                            <code className="text-muted-foreground font-mono text-xs">
-                              {apiKey.key_prefix}…{apiKey.key_suffix}
-                            </code>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                            {t(`api_keys_status_${apiKey.state}`)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                        <TableCell>
-                          {apiKey.expires_at
-                            ? formatApiKeyDate(apiKey.expires_at)
-                            : t("api_keys_never")}
-                        </TableCell>
-                        <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
-                        <TableCell className="text-end">
-                          <ApiKeyActions
-                            apiKey={apiKey}
-                            mode="user"
-                            scopeName={resourceName}
-                            onRotated={showSecret(t("api_keys_rotated_title"))}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {(keys.hasPreviousPage || keys.hasNextPage) && (
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!keys.hasPreviousPage}
-                      onClick={keys.previousPage}
-                    >
-                      {t("previous")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!keys.hasNextPage}
-                      onClick={keys.nextPage}
-                    >
-                      {t("next")}
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-          </RemovalFocusScope>
-        </TabsContent>
-      </Tabs>
-
-      <SecretRevealDialog title={secretTitle} secret={secret} onClose={() => setSecret(null)} />
+      <UserApiKeyList
+        scope={{ type: scopeType, id: scopeId, name: resourceName }}
+        limit={10}
+        onRotated={secrets.reveal(t("api_keys_rotated_title"))}
+      />
+      {secrets.dialog}
     </SettingsGroup>
   );
 }
