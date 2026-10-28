@@ -29,6 +29,7 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import type { StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { daysSince } from "@/lib/format";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
@@ -359,12 +360,12 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   // another user, even when this browser never registered their job.
   useQuery({
     ...spaceQueryOptions(browserApi, routeId),
-    refetchInterval: (query) =>
-      query.state.data?.knowledge.websites.items.some((website) =>
-        isActiveCrawl(website.latest_crawl)
-      )
-        ? ACTIVE_CRAWL_REFRESH_MS
-        : IDLE_WEBSITE_REFRESH_MS
+    refetchInterval: pollWhile(
+      (data) =>
+        !!data?.knowledge.websites.items.some((website) => isActiveCrawl(website.latest_crawl)),
+      ACTIVE_CRAWL_REFRESH_MS,
+      IDLE_WEBSITE_REFRESH_MS
+    )
   });
 
   const websites = space.knowledge.websites.items.filter(

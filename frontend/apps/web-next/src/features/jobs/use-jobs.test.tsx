@@ -531,3 +531,72 @@ it("stops a sync queued from a menu reading as queued once its job is over, not 
   await act(() => vi.advanceTimersByTimeAsync(2_000));
   await vi.waitFor(() => expect(pendingSyncs()).toEqual([]));
 });
+
+/** Whether the browser would ask before unloading the page now. */
+function unloadIsGuarded(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+/** An upload request that answers when the test says so. */
+class UploadRequest {
+  static sent: UploadRequest[] = [];
+  status = 0;
+  response: unknown = null;
+  responseType = "";
+  upload = { addEventListener: () => {} };
+  private listeners = new Map<string, () => void>();
+  open() {}
+  addEventListener(type: string, listener: () => void) {
+    this.listeners.set(type, listener);
+  }
+  send() {
+    UploadRequest.sent.push(this);
+  }
+  answer(status: number, response: unknown) {
+    this.status = status;
+    this.response = response;
+    this.listeners.get("load")?.();
+  }
+}
+
+it("warns before a reload loses a queued or running upload, until every upload is over", async () => {
+  UploadRequest.sent = [];
+  vi.stubGlobal("XMLHttpRequest", UploadRequest);
+  function Queue() {
+    const { queueUploads } = useJobs();
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          queueUploads("collection-1", [new File(["a"], "a.pdf"), new File(["b"], "b.pdf")])
+        }
+      >
+        Queue
+      </button>
+    );
+  }
+  try {
+    renderInApp(
+      <JobsProvider>
+        <Queue />
+      </JobsProvider>
+    );
+    expect(unloadIsGuarded()).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    expect(UploadRequest.sent).toHaveLength(2);
+    expect(unloadIsGuarded()).toBe(true);
+
+    act(() => UploadRequest.sent[0]!.answer(200, { ...job, id: "job-a" }));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1));
+    expect(unloadIsGuarded()).toBe(true);
+
+    // A failed upload is over too: nothing is left to lose.
+    act(() => UploadRequest.sent[1]!.answer(500, { message: "Lagringen är full" }));
+    await waitFor(() => expect(unloadIsGuarded()).toBe(false));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

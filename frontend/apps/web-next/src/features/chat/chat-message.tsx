@@ -371,7 +371,7 @@ function AnswerActions({
           ? await copyRichText({ text: plainText, html })
           : await copyText(plainText);
       if (copied) toast.success(t("copied"));
-      else toast.error(t("chat_copy_failed"));
+      else toast.error(t("copy_failed"));
     },
     [copyText, t, text]
   );

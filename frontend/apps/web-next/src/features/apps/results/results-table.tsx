@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
@@ -128,8 +129,10 @@ export function ResultsTable({
   const live = useJobEventsConnected();
   const { data: runs } = useSuspenseQuery({
     ...appRunsQueryOptions(browserApi, appId),
-    refetchInterval: (query) =>
-      !live && query.state.data?.some((run) => isRunActive(run.status)) ? RESULTS_POLL_MS : false
+    refetchInterval: pollWhile(
+      (runs) => !live && !!runs?.some((run) => isRunActive(run.status)),
+      RESULTS_POLL_MS
+    )
   });
 
   if (runs.length === 0) {
