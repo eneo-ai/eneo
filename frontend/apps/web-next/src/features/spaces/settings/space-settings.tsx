@@ -61,6 +61,7 @@ import {
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
+import { parseRetentionDays } from "@/features/spaces/retention-days";
 import type { Space } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -422,19 +423,17 @@ function RetentionSection() {
   const canEditRetention = can("edit", "space");
   const [daysVisited, setDaysVisited] = useState(false);
 
-  const validDays = (value: string) =>
-    value === "" ||
-    (/^[0-9]+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1);
-
   const days = useAutosaveField({
     key: "retention-days",
     value: space.data_retention_days?.toString() ?? "",
-    save: (value) =>
-      update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),
-    // Empty means "keep forever"; otherwise require a positive whole number.
-    validate: validDays
+    save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
+    // Empty means "keep forever".
+    validate: (value) => parseRetentionDays(value) !== undefined
   });
-  const daysProblem = daysVisited && !validDays(days.value) ? t("space_retention_invalid") : null;
+  const daysProblem =
+    daysVisited && parseRetentionDays(days.value) === undefined
+      ? t("space_retention_invalid")
+      : null;
 
   return (
     <SettingsRow

@@ -48,6 +48,21 @@ describe("assistant retention", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith({ data_retention_days: 30 }));
   });
 
+  it("keeps a value above the backend's 2555 days local and says why", async () => {
+    show(makeSpace({ permissions: ["read", "edit"] }));
+
+    fireEvent.change(retention(), { target: { value: "3000" } });
+    fireEvent.blur(retention());
+
+    const problem = await screen.findByText(
+      "Ange ett helt antal dagar från 1 till 2555, eller lämna fältet tomt för att följa utrymmets policy."
+    );
+    expect(retention().getAttribute("aria-invalid")).toBe("true");
+    expect(retention().getAttribute("aria-describedby")).toContain(problem.id);
+    expect(retention().getAttribute("max")).toBe("2555");
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("shows it read-only to an assistant editor who may not edit the space", async () => {
     const { container } = show(makeSpace({ permissions: ["read"] }));
 

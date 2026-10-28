@@ -180,7 +180,7 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
 
   expect((retention as HTMLInputElement).value).toBe("1.5");
   expect(retention.getAttribute("aria-invalid")).toBe("true");
-  expect(screen.getByText(/Ange ett helt antal dagar större än noll/)).toBeTruthy();
+  expect(screen.getByText(/Ange ett helt antal dagar från 1 till 2555/)).toBeTruthy();
   expect(api.PATCH).not.toHaveBeenCalled();
   await expectNoAxeViolations(container);
 
