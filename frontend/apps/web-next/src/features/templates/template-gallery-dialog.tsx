@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileKindIcon } from "@/features/chat/attachments";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
@@ -35,6 +35,7 @@ import {
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import {
   buildTemplateCreate,
   templateHasWizard,
@@ -169,6 +170,7 @@ function TemplateWizard({
 }) {
   const t = useTranslations();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { dragging, handlers } = useFileDrop(onAddFiles);
   const wizard = template.wizard;
 
   return (
@@ -216,14 +218,11 @@ function TemplateWizard({
         >
           {wizard.attachments.required ? (
             <div
-              className="flex flex-col gap-3 rounded-lg border-2 border-dashed p-4"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                void collectDroppedFiles(event.dataTransfer)
-                  .then(onAddFiles)
-                  .catch(() => toast.error(t("file_upload_error")));
-              }}
+              className={cn(
+                "flex flex-col gap-3 rounded-lg border-2 border-dashed p-4",
+                dragging && "border-primary bg-primary/5"
+              )}
+              {...handlers}
             >
               <input
                 ref={fileInputRef}

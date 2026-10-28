@@ -80,7 +80,13 @@ export function useAttachments(partner: ChatPartner, { findExisting }: UseAttach
   const canAddMore = maxFiles === Infinity || attachments.length < maxFiles;
 
   async function addFiles(files: File[]) {
-    const plan = planChatAttachmentUploads(files, attachments, formats, maxFiles, findExisting);
+    const plan = planChatAttachmentUploads(
+      files,
+      uploads.current(),
+      formats,
+      maxFiles,
+      findExisting
+    );
     toastRejections(plan.rejected, t);
     for (const { file, uploaded } of plan.reused) uploads.reuse(file, uploaded);
     await uploads.add(plan.accepted);
