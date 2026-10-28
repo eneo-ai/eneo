@@ -106,7 +106,8 @@ export function classify(rawFiles) {
     "frontend/packages/whats-new/version-order.cases.json",
     "frontend/packages/whats-new/releases.schema.json",
   ].includes(file));
-  const backend = full || whatsNewContract || files.some(isBackendFile)
+  const browserRedirectContract = files.includes("frontend/apps/web-next/src/lib/auth/safe-next.cases.json");
+  const backend = full || whatsNewContract || browserRedirectContract || files.some(isBackendFile)
     || files.includes("scripts/backend_test_shard.py");
   // The release-notes check runs in the frontend job against the real file.
   // Shared workspace files (root manifests, the lockfile, patches, packages)

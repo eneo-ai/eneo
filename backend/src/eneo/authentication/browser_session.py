@@ -1,12 +1,15 @@
 import base64
 import hashlib
+import re
 import time
 from collections.abc import Mapping
+from urllib.parse import unquote
 
 import jwt
 from starlette.requests import HTTPConnection, Request
 from starlette.responses import Response
 from starlette.types import Scope
+from yarl import URL
 
 from eneo.main.config import Settings, get_settings
 from eneo.main.logging import get_logger
@@ -27,6 +30,44 @@ TXN_COOKIE = "__Host-eneo_oidc_txn"
 DEV_TXN_COOKIE = "eneo_web_txn"
 # web-next's session and txn cookies, also cleared at logout.
 NEXT_ERA_COOKIES = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
+
+DEFAULT_LANDING = "/spaces/personal/chat"
+_BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
+
+
+def safe_next_path(value: str | None) -> str:
+    """The SPA's safeNextPath contract, checked against their shared case file.
+
+    Validate the decoded path after browser dot-segment normalization. Decoding
+    before parsing would turn an encoded ? or # into a different path boundary.
+    Keep the original query encoding when returning an accepted destination.
+    """
+    if not value or not value.startswith("/") or _BAD_ESCAPE.search(value):
+        return DEFAULT_LANDING
+    try:
+        decoded = unquote(value, errors="strict")
+        for candidate in (value, decoded):
+            if (
+                candidate.startswith("//")
+                or "\\" in candidate
+                or any(ord(char) <= 31 or ord(char) == 127 for char in candidate)
+            ):
+                return DEFAULT_LANDING
+        # Yarl already owns URL normalization in this backend. Like WHATWG URL,
+        # remove trailing spaces before parsing; Yarl 1.25 still encodes them.
+        url = URL("https://login-destination.invalid" + value.rstrip(" "))
+        path = unquote(url.raw_path, errors="strict")
+        if "//" in path or any(part in (".", "..") for part in path.split("/")):
+            return DEFAULT_LANDING
+        if any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ("/login", "/logout", "/api", "/auth", "/_next")
+        ):
+            return DEFAULT_LANDING
+    except (UnicodeError, ValueError):
+        return DEFAULT_LANDING
+    return value
+
 
 # The session generation: on a response, the cookie session the request was
 # admitted with; on a request, the one the sending page was loaded with. A
@@ -97,15 +138,22 @@ def txn_cookie_name(settings: Settings) -> str:
 
 
 def session_cookie(request: HTTPConnection, settings: Settings) -> str | None:
-    """The session cookie's value, read exactly from the raw Cookie headers.
+    return _cookie_value(request, session_cookie_name(settings))
 
-    Only a pair named exactly like the session counts, and only when it is the
+
+def transaction_cookie(request: HTTPConnection, settings: Settings) -> str | None:
+    return _cookie_value(request, txn_cookie_name(settings))
+
+
+def _cookie_value(request: HTTPConnection, name: str) -> str | None:
+    """A browser auth cookie's value, read exactly from the raw Cookie headers.
+
+    Only a pair with the exact cookie name counts, and only when it is the
     only one. Starlette's parser strips names of any whitespace, including
     U+00A0 and U+0085, and lets the last duplicate win, so a sibling host could
     plant the name with a leading U+00A0, which the browser does not treat as
     ``__Host-``, and have it read as the session.
     """
-    name = session_cookie_name(settings)
     pairs = (
         pair.strip(" \t").partition("=")
         for header in request.headers.getlist("cookie")
@@ -203,6 +251,22 @@ def set_session_cookie(response: Response, token: str, *, settings: Settings) ->
         max(0, int(exp - time.time())),
         settings,
     )
+
+
+def set_transaction_cookie(
+    response: Response, value: str, *, settings: Settings
+) -> None:
+    _set_cookie(
+        response,
+        txn_cookie_name(settings),
+        value,
+        settings.oidc_state_ttl_seconds,
+        settings,
+    )
+
+
+def clear_transaction_cookie(response: Response, *, settings: Settings) -> None:
+    _set_cookie(response, txn_cookie_name(settings), "", 0, settings)
 
 
 def clear_session_cookies(response: Response, *, settings: Settings) -> None:

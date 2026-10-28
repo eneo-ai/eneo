@@ -173,6 +173,7 @@ test("contract inputs select their consumers and developer tooling", () => {
     ["scripts/backend_test_shard.py", ["backend", "scripts"]],
     ["scripts/check_whats_new.py", ["frontend", "scripts"]],
     ["frontend/packages/whats-new/version-order.cases.json", ["backend", "frontend", "scripts"]],
+    ["frontend/apps/web-next/src/lib/auth/safe-next.cases.json", ["backend", "web_next", "web_next_e2e"]],
     ["frontend/packages/whats-new/releases.schema.json", ["backend", "frontend", "scripts"]],
     ["frontend/packages/eneo-js/src/types/schema.d.ts", ["schema", "frontend", "web_next"]],
     [".github/scripts/project-intake.mjs", ["scripts"]],

@@ -1,40 +1,63 @@
-"""The browser session: password sign-in, sign-out and the session probe.
+"""Browser sessions: password and federated sign-in, sign-out and the probe.
 
-Behind ``BROWSER_SESSION_ENABLED`` (404 while it is off). Sign-in and sign-out
-run the Sec-Fetch-Site gate before anything else: a cross-site form must not
-sign the browser in as someone else (login CSRF) or out. The session token
-only ever travels in the HttpOnly cookie, never in a body.
+Behind ``BROWSER_SESSION_ENABLED`` (404 while it is off). Password sign-in and
+sign-out run the Sec-Fetch-Site gate before body parsing. Federation initiation
+also uses that gate; cross-site IdP callbacks instead require signed state bound
+to this browser's transaction. The session token only travels in the HttpOnly
+cookie, never in a body.
 """
 
+import hashlib
+import hmac
+import re
+import secrets
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordRequestForm
+from starlette.datastructures import MutableHeaders
+from starlette.responses import JSONResponse, RedirectResponse
+from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.browser_session import (
     SAFE_METHODS,
     admitted_session_generation,
     clear_session_cookies,
+    clear_transaction_cookie,
     gate_allows,
     refuse_superseded_session,
+    safe_next_path,
     session_cookie,
     set_session_cookie,
+    set_transaction_cookie,
+    transaction_cookie,
 )
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
-from eneo.main.config import get_settings
+from eneo.authentication.federation_router import (
+    CallbackRequest,
+    auth_callback,
+    initiate_auth,
+)
+from eneo.main.config import LOOPBACK_HOSTS, get_settings, validate_content_base_url
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException
+from eneo.main.logging import get_logger
+from eneo.main.request_context import ensure_correlation_id
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
+
+logger = get_logger(__name__)
 
 
 def _admit(request: Request) -> None:
@@ -169,3 +192,233 @@ async def get_browser_session(
     if admitted_session_generation(request.scope) is None:
         raise AuthenticationException("No browser session")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _federation_failure(
+    detail_code: str, correlation: str | None = None
+) -> RedirectResponse:
+    query = {"message": "oidc_callback_failed", "detailCode": detail_code}
+    if correlation:
+        query["correlation"] = correlation[:1000]
+    return RedirectResponse(
+        "/login?" + urlencode(query),
+        status_code=303,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _http_federation_failure(
+    status_code: int, correlation: str | None = None
+) -> RedirectResponse:
+    code = {403: "access_denied", 401: "unauthorized"}.get(
+        status_code, f"http_{status_code}"
+    )
+    return _federation_failure(code, correlation)
+
+
+@router.get(
+    "/browser/initiate",
+    include_in_schema=False,
+    response_model=None,
+    description="Start a browser SSO transaction using a registered callback on this host.",
+    responses={
+        303: {"description": "Continue to the IdP or sign-in failure."},
+        **responses.get_responses([400, 404]),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Starts a signed OIDC transaction on the site's own navigation; the federation owner validates the tenant and registered callback.",
+    effect_on_get="Creates a short-lived transaction cookie and single-use state after the Sec-Fetch-Site gate. Does not change the signed-in identity.",
+)
+async def initiate_browser_federation(
+    request: Request,
+    container: Annotated[Container, Depends(get_container())],
+    tenant: Annotated[str | None, Query(pattern=r"^[a-z0-9-]+$")] = None,
+    next: str | None = None,
+    prompt: str | None = None,
+) -> Response:
+    if not gate_allows(request):
+        return _federation_failure("invalid_login_attempt")
+    # Organisation switching uses the guarded POST logout and tenant selector.
+    if prompt is not None:
+        raise HTTPException(400, "A prompt is not supported")
+    try:
+        scheme = "http" if request.url.hostname in LOOPBACK_HOSTS else "https"
+        origin = validate_content_base_url(f"{scheme}://{request.url.netloc}")
+    except ValueError:
+        return _federation_failure("invalid_login_attempt")
+    settings = get_settings()
+    transaction = secrets.token_urlsafe(32)
+    binding = (
+        hashlib.sha256(transaction.encode()).hexdigest() + ":" + safe_next_path(next)
+    )
+    for path in ("/login/callback", "/auth/callback"):
+        metadata = Response()
+        try:
+            result = await initiate_auth(
+                response=metadata,
+                container=container,
+                tenant=tenant,
+                state=binding,
+                redirect_uri_param=origin + path,
+            )
+        except HTTPException as exc:
+            if exc.status_code == 400 and exc.detail.startswith(
+                "The provided redirect_uri is not registered"
+            ):
+                continue
+            return _http_federation_failure(
+                exc.status_code, (exc.headers or {}).get("X-Correlation-ID")
+            )
+        response = RedirectResponse(
+            result.authorization_url,
+            status_code=303,
+            headers={"Cache-Control": "no-store"},
+        )
+        if correlation := metadata.headers.get("X-Correlation-ID"):
+            response.headers["X-Correlation-ID"] = correlation
+        set_transaction_cookie(response, transaction, settings=settings)
+        return response
+    logger.warning(
+        "browser_oidc_redirect_not_registered",
+        extra={"host": request.url.hostname, "tenant": tenant},
+    )
+    return _federation_failure("redirect_uri_not_registered")
+
+
+class _BrowserCallbackRoute(APIRoute):
+    """Clear the transaction on every callback outcome, including commit failure.
+
+    IdP navigations are cross-site. Admission belongs to the signed state and
+    transaction cookie, not the ordinary same-origin request gate.
+    """
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # FastAPI commits function-scoped dependencies outside get_route_handler.
+        # Finish the callback at the ASGI boundary, after that commit succeeds.
+        settings = get_settings()
+        cleanup = Response()
+        clear_transaction_cookie(cleanup, settings=settings)
+        started = False
+        failed_response = False
+
+        async def send_callback(message: Message) -> None:
+            nonlocal started, failed_response
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if message["status"] >= 400 and settings.browser_session_enabled:
+                    # Domain/HTTP exceptions may already have been handled by
+                    # the application's exception handlers, including at commit.
+                    failure = _http_federation_failure(
+                        message["status"], headers.get("X-Correlation-ID")
+                    )
+                    message = {
+                        "type": "http.response.start",
+                        "status": failure.status_code,
+                        "headers": failure.raw_headers,
+                    }
+                    headers = MutableHeaders(scope=message)
+                    failed_response = True
+                headers.append("set-cookie", cleanup.headers["set-cookie"])
+                headers["Cache-Control"] = "no-store"
+                headers["Referrer-Policy"] = "no-referrer"
+                started = True
+            elif message["type"] == "http.response.body" and failed_response:
+                message = {**message, "body": b""}
+            await send(message)
+
+        if not settings.browser_session_enabled:
+            response = JSONResponse({"detail": "Not Found"}, status_code=404)
+            await response(scope, receive, send_callback)
+            return
+        try:
+            await super().handle(scope, receive, send_callback)
+        except Exception as exc:
+            if started:
+                raise
+            correlation = ensure_correlation_id()
+            logger.error(
+                "browser_oidc_callback_failed",
+                extra={
+                    "error_type": type(exc).__name__,
+                    "correlation_id": correlation,
+                },
+            )
+            await _federation_failure("http_500", correlation)(
+                scope, receive, send_callback
+            )
+
+
+callback_router = APIRouter(route_class=_BrowserCallbackRoute)
+
+
+@callback_router.get(
+    "/login/callback",
+    include_in_schema=False,
+    response_model=None,
+    description="Complete the browser-bound SSO transaction and end the document.",
+    responses={
+        303: {"description": "Continue to a safe page or sign-in failure."},
+        **responses.get_responses([404]),
+    },
+)
+@callback_router.get(
+    "/auth/callback",
+    include_in_schema=False,
+    response_model=None,
+    description="Complete the browser-bound SSO transaction using the alternate callback path.",
+    responses={
+        303: {"description": "Continue to a safe page or sign-in failure."},
+        **responses.get_responses([404]),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="An IdP callback is admitted only by signed expiring state bound to this browser's transaction; the federation owner consumes state once and validates the identity.",
+    effect_on_get="Commits the federated identity and sets a session cookie only after transaction admission, then ends the document with a redirect.",
+)
+async def complete_browser_federation(
+    request: Request,
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> Response:
+    settings = get_settings()
+    transaction = transaction_cookie(request, settings)
+    if not transaction or not state:
+        return _federation_failure("invalid_login_attempt")
+    try:
+        payload = jwt.decode(
+            state,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "frontend_state"]},
+        )
+    except jwt.InvalidTokenError:
+        return _federation_failure("invalid_login_attempt")
+    binding = payload.get("frontend_state")
+    if not isinstance(binding, str):
+        return _federation_failure("invalid_login_attempt")
+    expected, separator, next_path = binding.partition(":")
+    if (
+        not separator
+        or not re.fullmatch(r"[0-9a-f]{64}", expected)
+        or not hmac.compare_digest(
+            expected, hashlib.sha256(transaction.encode()).hexdigest()
+        )
+    ):
+        return _federation_failure("invalid_login_attempt")
+    if error is not None:
+        return _federation_failure("identity_provider_error")
+    if not code:
+        return _federation_failure("no_code_received")
+    token = await auth_callback(CallbackRequest(code=code, state=state), container)
+    response = RedirectResponse(safe_next_path(next_path), status_code=303)
+    set_session_cookie(response, token["access_token"], settings=settings)
+    return response
