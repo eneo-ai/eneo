@@ -7,6 +7,7 @@ import type { Schema } from "@/lib/api/models";
 import { WidgetAutosave, type AutosaveSnapshot } from "./autosave";
 import { toastWidgetError, widgetFieldErrors } from "./errors";
 import { widgetApi } from "./queries";
+import { useAutosaveNavigationGuard } from "./use-autosave-navigation-guard";
 
 type Widget = Schema<"WidgetPublic">;
 
@@ -17,6 +18,8 @@ const SAVE_STATUS_KEY = "widget-editor";
 type AutosaveStore = {
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => AutosaveSnapshot<unknown>;
+  unsaved: boolean;
+  stranded: boolean;
   flush: () => Promise<void>;
   dispose: () => void;
 };
@@ -26,8 +29,9 @@ type AutosaveStore = {
  * through React's external-store hook, so every edit, save and refusal
  * re-renders what shows them; the header's aggregate save status follows
  * it under `statusKey`, which also guards reload and tab close while
- * something is unsaved (SaveStatusProvider). Whatever is still pending gets
- * one last attempt when the component unmounts.
+ * something is unsaved (SaveStatusProvider), and in-app navigation waits for
+ * the queued edits (useAutosaveNavigationGuard). Whatever is still pending
+ * gets one last attempt when the component unmounts.
  */
 export function useAutosave<Store extends AutosaveStore>(
   create: () => Store,
@@ -53,6 +57,8 @@ export function useAutosave<Store extends AutosaveStore>(
             : null;
     setStatus(statusKey, status);
   }, [setStatus, statusKey, state.status, state.unsaved]);
+
+  useAutosaveNavigationGuard(autosave);
 
   useEffect(() => {
     return () => {
