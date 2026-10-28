@@ -11,7 +11,6 @@ import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -25,11 +24,10 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-import { CreateApiKeyForm, type ApiKeyDraft } from "./create-api-key-form";
+import { CreateApiKeyDialog } from "./api-key-form";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATES,
-  buildScopedApiKeyCreateBody,
   formatApiKeyDate,
   type ApiKey,
   type ApiKeyScopeType,
@@ -37,60 +35,6 @@ import {
 } from "./api-keys";
 
 export type ResourceApiKeyScopeType = Extract<ApiKeyScopeType, "space" | "assistant" | "app">;
-
-function CreateScopedKeyDialog({
-  scopeType,
-  scopeId,
-  resourceName,
-  onCreated
-}: {
-  scopeType: ResourceApiKeyScopeType;
-  scopeId: string;
-  resourceName: string;
-  onCreated: (secret: string) => void;
-}) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["api-keys", scopeType, scopeId] });
-
-  const createKey = useMutation({
-    mutationFn: (draft: ApiKeyDraft) =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys", {
-          body: buildScopedApiKeyCreateBody({ ...draft, scopeType, scopeId })
-        })
-      ),
-    onSuccess: (created) => {
-      void invalidate();
-      setOpen(false);
-      onCreated(created.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <KeyRound className="size-4" />
-          {t("api_keys_create_short")}
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <CreateApiKeyForm
-          idPrefix={scopeType}
-          title={t("api_keys_create_for_resource", { resource: resourceName })}
-          pending={createKey.isPending}
-          onSubmit={(draft) => createKey.mutate(draft)}
-          onCancel={() => setOpen(false)}
-        />
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function ScopedKeyActions({
   apiKey,
@@ -221,10 +165,15 @@ export function ResourceApiKeysSection({
       description={t("api_keys_scoped_description", { resourceName })}
       headerEnd={
         can("api_keys") ? (
-          <CreateScopedKeyDialog
-            scopeType={scopeType}
-            scopeId={scopeId}
-            resourceName={resourceName}
+          <CreateApiKeyDialog
+            idPrefix={scopeType}
+            lockedScope={{ type: scopeType, id: scopeId, name: resourceName }}
+            trigger={
+              <Button size="sm">
+                <KeyRound className="size-4" />
+                {t("api_keys_create_short")}
+              </Button>
+            }
             onCreated={showSecret(t("api_keys_created_title"))}
           />
         ) : null

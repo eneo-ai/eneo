@@ -82,27 +82,34 @@ describe("ResourceApiKeysSection", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Skapa" }));
     const dialog = await screen.findByRole("dialog", { name: "Skapa API-nyckel för Upphandling" });
-    const create = within(dialog).getByRole("button", { name: "Skapa" }) as HTMLButtonElement;
+    const create = (await within(dialog).findByRole("button", {
+      name: "Skapa"
+    })) as HTMLButtonElement;
     // Never disabled: a disabled button says nothing about what is missing.
     expect(create.disabled).toBe(false);
 
     fireEvent.click(create);
     const name = within(dialog).getByLabelText("Namn");
     expect(name.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(name.getAttribute("aria-describedby")!)?.textContent).toBe(
-      "Detta fält är obligatoriskt"
-    );
+    const [problemId] = name.getAttribute("aria-describedby")!.split(" ");
+    expect(document.getElementById(problemId!)?.textContent).toBe("Namn krävs");
     expect(document.activeElement).toBe(name);
     expect(post).not.toHaveBeenCalled();
-    // Its pickers are named by their labels.
-    expect(within(dialog).getByRole("combobox", { name: "Behörighetsnivå" })).toBeTruthy();
+    // The scope is the resource's own; each resource type's access is named by its label.
+    expect(within(dialog).getByText("Yta · Upphandling")).toBeTruthy();
+    expect(within(dialog).getByRole("combobox", { name: "Kunskap" })).toBeTruthy();
     await expectNoAxeViolations(dialog);
 
     fireEvent.change(name, { target: { value: "Upphandlingsflödet" } });
     fireEvent.click(create);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/api-keys", {
-        body: expect.objectContaining({ name: "Upphandlingsflödet", scope_id: "space-1" })
+        body: expect.objectContaining({
+          name: "Upphandlingsflödet",
+          key_type: "sk_",
+          scope_type: "space",
+          scope_id: "space-1"
+        })
       })
     );
   });

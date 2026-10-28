@@ -10,7 +10,6 @@ import { PageHeader } from "@/components/composites/page-header";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +38,6 @@ import { toastApiError } from "@/lib/api/toast";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATES,
-  buildTenantApiKeyCreateBody,
   formatApiKeyDate,
   type ApiKey,
   type ApiKeyScopeType,
@@ -47,48 +45,10 @@ import {
   type ApiKeyType
 } from "@/features/api-keys/api-keys";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-import { CreateApiKeyForm, type ApiKeyDraft } from "@/features/api-keys/create-api-key-form";
+import { CreateApiKeyDialog } from "@/features/api-keys/api-key-form";
 import { NotificationPolicyDialog } from "./notification-policy-dialog";
 import { ApiKeyPolicyDialog } from "./policy-panel";
 import { ApiKeyUsageDialog } from "./usage-dialog";
-
-function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void }) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-
-  const create = useMutation({
-    mutationFn: (draft: ApiKeyDraft) =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys", {
-          body: buildTenantApiKeyCreateBody({ ...draft, ownership: "service" })
-        })
-      ),
-    onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: ["admin-api-keys"] });
-      setOpen(false);
-      onCreated(created.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Button onClick={() => setOpen(true)}>
-        <Plus className="size-4" /> {t("api_keys_create_short")}
-      </Button>
-      <DialogContent>
-        <CreateApiKeyForm
-          idPrefix="org"
-          title={t("api_keys_create")}
-          pending={create.isPending}
-          onSubmit={(draft) => create.mutate(draft)}
-          onCancel={() => setOpen(false)}
-        />
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function KeyActions({
   apiKey,
@@ -242,7 +202,16 @@ export function OrgApiKeysPage() {
         <Button variant="outline" onClick={() => setShowPolicy(true)}>
           <Settings className="size-4" /> {t("notification_policy")}
         </Button>
-        <CreateKeyDialog onCreated={setSecret} />
+        <CreateApiKeyDialog
+          idPrefix="org"
+          defaultOwnership="service"
+          trigger={
+            <Button>
+              <Plus className="size-4" /> {t("api_keys_create_short")}
+            </Button>
+          }
+          onCreated={setSecret}
+        />
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
       <ApiKeyPolicyDialog open={showConstraintPolicy} onOpenChange={setShowConstraintPolicy} />

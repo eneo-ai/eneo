@@ -72,3 +72,23 @@ it("keeps focus on a busy Save and sends a change once", async () => {
   resolve({ data: {}, response: new Response("{}") });
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 });
+
+it("switches 'require tenant-approved origins' and sends only that", async () => {
+  api.PATCH.mockReturnValue(ok({}));
+  const { onOpenChange, dialog } = show();
+  const origins = await within(dialog).findByRole("switch", {
+    name: "Kräv ursprung som organisationen har godkänt"
+  });
+  // The backend's default when the policy does not say.
+  expect(origins.getAttribute("aria-checked")).toBe("true");
+
+  fireEvent.click(origins);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara ändringar" }));
+
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/admin/api-key-policy", {
+      body: { require_tenant_allowed_origin: false }
+    })
+  );
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+});

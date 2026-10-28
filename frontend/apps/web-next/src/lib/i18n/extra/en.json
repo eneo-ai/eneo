@@ -1624,5 +1624,9 @@
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
+  "api_keys_rate_limit_invalid": "Enter a whole number of requests per hour, 1 or more.",
+  "api_keys_allowed_ips_placeholder": "10.0.0.0/8",
+  "api_keys_admin_policy_require_tenant_origin": "Require tenant-approved origins",
+  "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list."
 }

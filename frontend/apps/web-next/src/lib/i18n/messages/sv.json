@@ -3076,8 +3076,8 @@
   "api_keys_admin_super_keys_info": "Sysadmin-nyckeln konfigureras endast via en miljövariabel. Rotera den genom att uppdatera miljövärdet och starta om backend.",
   "api_keys_admin_policy_require_expiration": "Kräv utgångsdatum",
   "api_keys_admin_policy_require_expiration_desc": "Tvinga alla nya API-nycklar att inkludera ett utgångsdatum för förbättrad säkerhet",
-  "api_keys_admin_policy_require_tenant_origin": "Kräv tenant-godkända origins",
-  "api_keys_admin_policy_require_tenant_origin_desc": "Kräv att publika API-nycklars origins även finns under tenantens tillåtna origins. Inaktivera för att lita på varje aktiv publik nyckels egen origin-lista.",
+  "api_keys_admin_policy_require_tenant_origin": "Kräv ursprung som organisationen har godkänt",
+  "api_keys_admin_policy_require_tenant_origin_desc": "Ett ursprung i en publik API-nyckel måste också finnas bland organisationens tillåtna ursprung. Stäng av för att lita på varje aktiv publik nyckels egen lista.",
   "api_keys_admin_policy_max_expiration": "Maximalt antal utgångsdagar",
   "api_keys_admin_policy_max_expiration_desc": "Maximal tillåten utgångsperiod för nya nycklar. Lämna tomt för ingen gräns.",
   "api_keys_admin_policy_auto_expire": "Automatiskt förfalla oanvända nycklar",
@@ -6800,5 +6800,7 @@
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
+  "api_keys_rate_limit_invalid": "Ange ett heltal, minst 1, i anrop per timme.",
+  "api_keys_allowed_ips_placeholder": "10.0.0.0/8"
 }

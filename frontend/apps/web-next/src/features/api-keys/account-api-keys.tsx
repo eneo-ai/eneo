@@ -10,7 +10,6 @@ import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,53 +26,14 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-import { CreateApiKeyForm, type ApiKeyDraft } from "./create-api-key-form";
+import { CreateApiKeyDialog } from "./api-key-form";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATES,
-  buildTenantApiKeyCreateBody,
   formatApiKeyDate,
   type ApiKey,
   type ApiKeyState
 } from "./api-keys";
-
-function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void }) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-
-  const createKey = useMutation({
-    mutationFn: (draft: ApiKeyDraft) =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys", {
-          body: buildTenantApiKeyCreateBody({ ...draft, ownership: "user" })
-        })
-      ),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-      setOpen(false);
-      onCreated(created.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>{t("api_keys_create_short")}</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <CreateApiKeyForm
-          idPrefix="account"
-          title={t("api_keys_create")}
-          pending={createKey.isPending}
-          onSubmit={(draft) => createKey.mutate(draft)}
-          onCancel={() => setOpen(false)}
-        />
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function KeyActions({
   apiKey,
@@ -349,7 +309,11 @@ export function ApiKeys() {
             ))}
           </TabsList>
           {can("api_keys") && (
-            <CreateKeyDialog onCreated={showSecret(t("api_keys_created_title"))} />
+            <CreateApiKeyDialog
+              idPrefix="account"
+              trigger={<Button>{t("api_keys_create_short")}</Button>}
+              onCreated={showSecret(t("api_keys_created_title"))}
+            />
           )}
         </div>
 
