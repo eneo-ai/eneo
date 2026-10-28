@@ -39,18 +39,20 @@ describe("describeChatFailure", () => {
     expect(describeChatFailure(new Error("boom"), 9024, t).message).toBe("eneo_error_9024");
   });
 
-  it("keeps status, code, the backend's message and trace id as details", () => {
+  it("keeps status, code, the backend's message and the support references as details", () => {
     const error = new EneoApiError("Model not available", {
       status: 403,
       code: 9033,
       reason: "model_not_available",
+      errorId: "8bc91e0a",
       traceId: "trace-1"
     });
     expect(describeChatFailure(error, null, t).details).toEqual([
       "chat_error_detail_status 403",
       "chat_error_detail_code 9033 (model_not_available)",
       "Model not available",
-      "chat_error_detail_trace trace-1"
+      "error_id: 8bc91e0a",
+      "trace_id: trace-1"
     ]);
   });
 

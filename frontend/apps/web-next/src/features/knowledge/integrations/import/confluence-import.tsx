@@ -31,6 +31,7 @@ import {
   type IntegrationPreview,
   type UserIntegration
 } from "../queries";
+import { blockingError, RefreshError } from "@/components/composites/query-state";
 import { ImportPreviewError } from "./preview-state";
 
 type ConfluenceImport = { selected: IntegrationPreview; embeddingModelId: string };
@@ -174,6 +175,7 @@ function ConfluenceImportForm({
           />
           <Search className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2" />
         </div>
+        <RefreshError queries={[preview]} />
         <div
           id="confluence-spaces"
           role="group"
@@ -187,10 +189,12 @@ function ConfluenceImportForm({
               onBack={onBack}
               settingsHref={settingsHref}
             />
-          ) : preview.isError ? (
+          ) : blockingError(preview) ? (
             <ImportPreviewError
+              error={preview.error}
               message={t("integration_preview_failed")}
               onBack={onBack}
+              isRetrying={preview.isFetching}
               onRetry={() => void preview.refetch()}
               settingsHref={settingsHref}
             />

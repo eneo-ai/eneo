@@ -5,6 +5,7 @@ import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { FileKindIcon } from "@/features/chat/attachments";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { FileFormatDetails } from "@/features/files/file-format-details";
@@ -411,7 +411,7 @@ export function TemplateGalleryDialog({
         {step === "gallery" ? (
           <>
             {templates.isPending ? (
-              <Skeleton className="h-48 w-full" />
+              <LoadingState rows={1} height={192} />
             ) : (templates.data ?? []).length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">{t("no_results")}</p>
             ) : (

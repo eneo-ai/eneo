@@ -67,3 +67,11 @@ def test_port_wildcard_combines_with_subdomain_wildcard():
 def test_malformed_port_in_origin_fails_closed():
     """If the inbound Origin somehow has a malformed port, deny rather than 500."""
     assert not origin_matches_pattern("http://localhost:abc", "http://localhost:*")
+
+
+def test_ipv6_origin_without_a_port_matches():
+    """The colons of a bracketed IPv6 host are not a port."""
+    assert origin_matches_pattern("http://[::1]", "http://[::1]")
+    assert origin_matches_pattern("http://[::1]", "http://[::1]:*")
+    assert origin_matches_pattern("https://[2001:db8::1]", "https://[2001:db8::1]:443")
+    assert not origin_matches_pattern("http://[::1]", "http://[::1]:8080")

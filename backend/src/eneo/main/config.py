@@ -37,21 +37,10 @@ URL_SIGNING_KEY_MINIMUM_BYTES = 32
 # would stay replayable for as long. 1440 (24 hours) is the recommended value.
 JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
-
-def _same_origin(first: str, second: str) -> bool:
-    """Whether two URLs share scheme, host and port (default ports included)."""
-
-    def origin(url: str) -> tuple[str, str, int | None]:
-        parts = urlparse(url.strip())
-        scheme = parts.scheme.lower()
-        default_port = {"http": 80, "https": 443}.get(scheme)
-        try:
-            port = parts.port or default_port
-        except ValueError:
-            port = default_port
-        return scheme, (parts.hostname or "").lower(), port
-
-    return origin(first) == origin(second)
+# The hosts that name this machine, as urlsplit reports them (lowercase, IPv6
+# without brackets). A request to them stays on the machine, and a page served
+# from them runs on the user's own machine.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 # Printable ASCII without space, backslash, "?" or "#": a browser reads the
@@ -61,6 +50,29 @@ _BROWSER_LITERAL_URL = re.compile(r"[!-~]+")
 _HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
 # WHATWG parses a host whose last label is a number (decimal or 0x hex) as IPv4.
 _NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
+
+
+def serialize_origin(url: str) -> str | None:
+    """The origin of an absolute http(s) URL, serialized as a browser does.
+
+    Scheme and host lowercase, an IPv6 host compressed and in brackets, a
+    default port dropped; credentials, path, query and fragment are not part of
+    an origin. None when the URL has no http(s) origin. It normalizes, it does
+    not validate: the validators below decide which origins are acceptable.
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+        host = parts.hostname  # lowercased by urlsplit
+        if parts.scheme not in ("http", "https") or not host:
+            return None
+        if ":" in host:
+            host = f"[{ipaddress.IPv6Address(host).compressed}]"
+    except ValueError:
+        return None
+    default_port = 443 if parts.scheme == "https" else 80
+    authority = host if port in (None, default_port) else f"{host}:{port}"
+    return f"{parts.scheme}://{authority}"
 
 
 def validate_content_base_url(url: str) -> str:
@@ -118,10 +130,10 @@ def validate_public_origin(origin: str | None) -> str | None:
     Validate and normalize public origin.
 
     Rules:
-    - Must be HTTPS (production security)
-    - Must have hostname
+    - Must be HTTPS (production security); http only for a loopback host
+    - Must have hostname, without wildcards
     - No path, query, or fragment allowed
-    - Normalize: lowercase hostname, strip trailing slash
+    - Normalize: serialized as a browser does (serialize_origin)
 
     Args:
         origin: Raw origin string (e.g., "https://Example.com/")
@@ -147,9 +159,12 @@ def validate_public_origin(origin: str | None) -> str | None:
     if not origin:
         raise ValueError("public_origin cannot be an empty string")
     parsed = urlparse(origin)
+    # A wildcard host can never equal the origin of a request.
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"public_origin must not include wildcards: {origin}")
 
     # Validate HTTPS scheme (allow http://localhost for development)
-    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    is_localhost = parsed.hostname in LOOPBACK_HOSTS
     if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
         raise ValueError(
             f"public_origin must use https:// (or http://localhost for development), got: {origin}"
@@ -167,17 +182,10 @@ def validate_public_origin(origin: str | None) -> str | None:
     if parsed.query or parsed.fragment:
         raise ValueError(f"public_origin must not include query or fragment: {origin}")
 
-    # Normalize: lowercase hostname, preserve non-default port
-    host = parsed.hostname.lower()
-
-    # Preserve scheme for localhost (http allowed), otherwise use https
-    scheme = parsed.scheme if is_localhost else "https"
-
-    # Preserve non-default port (443 for https, 80 for http)
-    default_port = 443 if scheme == "https" else 80
-    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
-
-    return f"{scheme}://{host}{port}"
+    serialized = serialize_origin(origin)
+    if serialized is None:
+        raise ValueError(f"public_origin is not a valid URL: {origin}")
+    return serialized
 
 
 def validate_redirect_uri(uri: str | None) -> str | None:
@@ -202,7 +210,7 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     if "*" in (parsed.hostname or ""):
         raise ValueError(f"redirect_uri must not include wildcards: {uri}")
 
-    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    is_localhost = parsed.hostname in LOOPBACK_HOSTS
     if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
         raise ValueError(
             "redirect_uri must use https:// "
@@ -219,13 +227,10 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     if parsed.query or parsed.fragment:
         raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
 
-    host = parsed.hostname.lower()
-    scheme = parsed.scheme if is_localhost else "https"
-    default_port = 443 if scheme == "https" else 80
-    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
-    normalized_path = path.rstrip("/") or "/"
-
-    return f"{scheme}://{host}{port}{normalized_path}"
+    origin = serialize_origin(uri)
+    if origin is None:
+        raise ValueError(f"redirect_uri is not a valid URL: {uri}")
+    return f"{origin}{path.rstrip('/') or '/'}"
 
 
 def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
@@ -579,8 +584,7 @@ class Settings(BaseSettings):
         if (
             self.browser_session_enabled
             and self.is_development
-            and urlparse(self.public_origin or "").hostname
-            not in {"localhost", "127.0.0.1"}
+            and urlparse(self.public_origin or "").hostname not in LOOPBACK_HOSTS
         ):
             raise ValueError(
                 "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "
@@ -1235,7 +1239,8 @@ class Settings(BaseSettings):
         if (
             self.mcp_app_content_base_url
             and self.public_origin
-            and _same_origin(self.mcp_app_content_base_url, self.public_origin)
+            and serialize_origin(self.mcp_app_content_base_url)
+            == serialize_origin(self.public_origin)
         ):
             logging.error(
                 "MCP_APP_CONTENT_BASE_URL must be a different origin than "

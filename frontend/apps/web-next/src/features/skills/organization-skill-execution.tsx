@@ -23,8 +23,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 
 export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
@@ -37,7 +38,8 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const reasonProblem = submitted && !reason.trim() ? t("required_field") : null;
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The failed change (kept as the error for its references) and its title.
+  const [error, setError] = useState<{ cause?: unknown; title: string } | null>(null);
   const state = useQuery({
     queryKey: [...ORGANIZATION_SKILLS_KEY, skillId, "execution-block"],
     queryFn: () =>
@@ -73,7 +75,7 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
       } else {
         if (!block) {
           await state.refetch();
-          setError(t("organization_skills_execution_stale_error"));
+          setError({ title: t("organization_skills_execution_stale_error") });
           return;
         }
         next = await unwrap(
@@ -91,10 +93,15 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
       setAction(null);
       setReason("");
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError({ cause, title: t("organization_skills_execution_change_error_title") });
       if (cause instanceof EneoApiError && cause.code === 9052) {
         const refreshed = await state.refetch();
-        if (refreshed.isError) setError(t("organization_skills_execution_refresh_error"));
+        if (refreshed.isError) {
+          setError({
+            cause: refreshed.error,
+            title: t("organization_skills_execution_refresh_error")
+          });
+        }
       }
     } finally {
       setBusy(false);
@@ -115,56 +122,47 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
           {t("organization_skills_execution_description")}
         </p>
       </div>
-      {state.isPending ? (
-        <p role="status">{t("loading")}</p>
-      ) : state.isError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void state.refetch()}>
-              {t("retry")}
+      <QueryStateBoundary query={state} rows={2}>
+        {() => (
+          <>
+            <Badge variant={block ? "destructive" : "outline"}>
+              {t(
+                block
+                  ? "organization_skills_execution_blocked_status"
+                  : "organization_skills_execution_available_status"
+              )}
+            </Badge>
+            {block && (
+              <Alert variant="destructive">
+                <AlertTitle>{t("organization_skills_execution_blocked_status")}</AlertTitle>
+                <AlertDescription>
+                  <p>{t("organization_skills_execution_blocked_description")}</p>
+                  <p className="mt-2 font-medium">{block.reason}</p>
+                  <p className="mt-1 text-xs">
+                    {t("organization_skills_execution_blocked_at", {
+                      time: new Date(block.blocked_at).toLocaleString(locale)
+                    })}
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+            <Button
+              variant={block ? "outline" : "destructive"}
+              onClick={() => {
+                setError(null);
+                setAction(block ? "unblock" : "block");
+              }}
+            >
+              {block ? <ShieldCheck className="size-4" /> : <ShieldAlert className="size-4" />}
+              {t(
+                block
+                  ? "organization_skills_execution_unblock_action"
+                  : "organization_skills_execution_block_action"
+              )}
             </Button>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <>
-          <Badge variant={block ? "destructive" : "outline"}>
-            {t(
-              block
-                ? "organization_skills_execution_blocked_status"
-                : "organization_skills_execution_available_status"
-            )}
-          </Badge>
-          {block && (
-            <Alert variant="destructive">
-              <AlertTitle>{t("organization_skills_execution_blocked_status")}</AlertTitle>
-              <AlertDescription>
-                <p>{t("organization_skills_execution_blocked_description")}</p>
-                <p className="mt-2 font-medium">{block.reason}</p>
-                <p className="mt-1 text-xs">
-                  {t("organization_skills_execution_blocked_at", {
-                    time: new Date(block.blocked_at).toLocaleString(locale)
-                  })}
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-          <Button
-            variant={block ? "outline" : "destructive"}
-            onClick={() => {
-              setError(null);
-              setAction(block ? "unblock" : "block");
-            }}
-          >
-            {block ? <ShieldCheck className="size-4" /> : <ShieldAlert className="size-4" />}
-            {t(
-              block
-                ? "organization_skills_execution_unblock_action"
-                : "organization_skills_execution_block_action"
-            )}
-          </Button>
-        </>
-      )}
+          </>
+        )}
+      </QueryStateBoundary>
       <AlertDialog
         open={action !== null}
         onOpenChange={(open) => {
@@ -226,12 +224,7 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
               )}
             </p>
           </div>
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("organization_skills_execution_change_error_title")}</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {error && <ListError error={error.cause} title={error.title} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
             {/* Never disabled: busy, it keeps focus and a second press is ignored. */}

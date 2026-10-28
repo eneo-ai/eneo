@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { revealProblems } from "@/components/composites/field-problem";
 import { useRouter } from "@/lib/navigation";
 import { useCallback, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -13,7 +14,6 @@ import { useAppContext } from "@/components/providers/app-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
@@ -72,11 +72,7 @@ export function StorageAdminPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("storage_settings_title")} tour="admin-storage" />
       {policy.isPending ? (
-        <div className="space-y-4" aria-busy="true">
-          <Skeleton className="h-5 w-56" />
-          <Skeleton className="h-40 w-full" />
-          <span className="sr-only">{t("storage_settings_loading")}</span>
-        </div>
+        <LoadingState rows={2} label={t("storage_settings_loading")} />
       ) : policy.isError ? (
         <Alert variant="destructive" role="alert">
           <CircleAlert className="size-4" />

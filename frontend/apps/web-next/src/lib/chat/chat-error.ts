@@ -1,4 +1,4 @@
-import { EneoApiError, getErrorMessageForCode } from "@/lib/api/errors";
+import { EneoApiError, errorReferenceLines, getErrorMessageForCode } from "@/lib/api/errors";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -8,7 +8,7 @@ export type ChatFailure = {
   message: string;
   /**
    * Technical lines for support (HTTP status, backend code, the backend's
-   * own message, trace id), kept behind a disclosure. Empty when the sentence
+   * own message, error id and trace id), kept behind a disclosure. Empty when the sentence
    * already says everything there is to know.
    */
   details: string[];
@@ -104,7 +104,7 @@ export function describeChatFailure(
     }
     const backendMessage = parseJsonMessage(error.message)?.message ?? error.message;
     if (backendMessage) details.push(truncate(backendMessage));
-    if (error.traceId) details.push(t("chat_error_detail_trace", { traceId: error.traceId }));
+    details.push(...errorReferenceLines(error, t));
     return {
       message: getErrorMessageForCode(code, t) ?? sentenceForStatus(error.status, t),
       details

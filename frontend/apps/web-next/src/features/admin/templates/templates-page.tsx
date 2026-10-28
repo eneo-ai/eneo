@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -15,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -321,7 +321,7 @@ function DeletedTab() {
   const assistants = useQuery(deletedAssistantTemplatesQueryOptions(browserApi));
   const apps = useQuery(deletedAppTemplatesQueryOptions(browserApi));
 
-  if (assistants.isPending || apps.isPending) return <Skeleton className="h-40 w-full" />;
+  if (assistants.isPending || apps.isPending) return <LoadingState rows={1} height={160} />;
 
   const rows: { template: TemplateRowData; kind: TemplateKind }[] = [
     ...(assistants.data ?? []).map((template) => ({ template, kind: "assistants" as const })),

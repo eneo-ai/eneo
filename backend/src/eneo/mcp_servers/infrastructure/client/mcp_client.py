@@ -25,12 +25,11 @@ from mcp.types import (
 from pydantic import AnyUrl
 
 from eneo.files.file_reference import file_reference_base_url
-from eneo.main.config import get_settings
+from eneo.main.config import LOOPBACK_HOSTS, get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.credential_transport import (
     CREDENTIAL_TRANSPORT_REQUIREMENT,
-    LOOPBACK_HOSTS,
     credential_transport_violation,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (

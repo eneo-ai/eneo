@@ -25,8 +25,7 @@ import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -81,12 +80,13 @@ export function BlobPreviewDialog({
   properties?: readonly SourceMetadataEntry[];
 }) {
   const t = useTranslations();
-  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
+  const content = useQuery({
     queryKey: ["info-blobs", blob.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
     enabled: open
   });
+  const data = content.data;
   const { copy, isCopied } = useCopy();
 
   async function copyText() {
@@ -101,18 +101,14 @@ export function BlobPreviewDialog({
         </DialogHeader>
         <SourceMetadataList entries={properties} />
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
-          {isPending ? (
-            <LoadingState variant="text" rows={4} />
-          ) : isError ? (
-            <ListError
-              error={error}
-              title={t("attachment_error_loading_content")}
-              isRetrying={isFetching}
-              onRetry={() => void refetch()}
-            />
-          ) : (
-            <Streamdown>{data.text ?? ""}</Streamdown>
-          )}
+          <QueryStateBoundary
+            query={content}
+            variant="text"
+            rows={4}
+            errorTitle={t("attachment_error_loading_content")}
+          >
+            {(blobContent) => <Streamdown>{blobContent.text ?? ""}</Streamdown>}
+          </QueryStateBoundary>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => void copyText()} disabled={!data?.text}>

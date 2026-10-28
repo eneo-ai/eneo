@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -133,7 +133,7 @@ export function SharePointSubscriptions() {
       </div>
 
       {isPending ? (
-        <Skeleton className="h-32 w-full" />
+        <LoadingState rows={1} height={128} />
       ) : items.length === 0 ? (
         <p className="text-muted-foreground py-4 text-center text-sm">
           {t("sharepoint_subscriptions_empty")}
