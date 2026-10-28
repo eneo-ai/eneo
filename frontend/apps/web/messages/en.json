@@ -5213,7 +5213,7 @@
   "widget_admin_stat_active_one": "1 active",
   "widget_admin_url_invalid": "Enter a full address starting with https:// or http://.",
   "widget_admin_logo_broken": "The image could not be loaded from that address. Check that it is public and that the site allows it to be shown elsewhere.",
-  "widget_admin_logo_url_default": "No logo set: Eneo's logo shows in the header until you enter the address of your own image (square, at least 64 px, hosted on your website). Saved when you leave the field.",
+  "widget_admin_logo_url_default": "No logo set: the header shows only the title until you enter the address of your own image (square, at least 64 px, hosted on your website). Saved when you leave the field.",
   "eneo_error_9063": "Stop the active sync before removing this website source.",
   "eneo_error_9064": "The sync has stopped, but crawler cleanup is still in progress. Try removing the source again shortly.",
   "eneo_error_9069": "The prompt is active in the personal assistant governance. Deactivate it there first, then delete it.",

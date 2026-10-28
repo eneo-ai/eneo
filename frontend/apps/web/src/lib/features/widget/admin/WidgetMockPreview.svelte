@@ -7,7 +7,6 @@
 -->
 <script lang="ts">
   import type { WidgetPersona, WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
-  import { IconEneo } from "@eneo/icons/eneo";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -115,10 +114,6 @@
             width="32"
             height="32"
           />
-        {:else}
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center" aria-hidden="true">
-            <IconEneo size="md" class="text-brand-eneo" viewBox="0 -21 214 214" />
-          </span>
         {/if}
         <div class="min-w-0">
           <p class="truncate text-base font-semibold">{texts.title || name}</p>

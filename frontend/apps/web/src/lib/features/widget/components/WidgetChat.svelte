@@ -10,7 +10,6 @@
   import { onMount, tick, untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
-  import { IconEneo } from "@eneo/icons/eneo";
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -403,6 +402,8 @@
     ]}
   >
     <div class="flex min-w-0 items-center gap-3">
+      <!-- The header is the organisation's: its logo when it has set one,
+           otherwise only the title, never Eneo's own mark. -->
       {#if config.theme.logo_url && isHttpUrl(config.theme.logo_url)}
         <img
           class="h-8 w-8 shrink-0 rounded-md object-contain"
@@ -411,11 +412,6 @@
           width="32"
           height="32"
         />
-      {:else}
-        <!-- Eneo's mark stands in until the organisation sets its own logo. -->
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center" aria-hidden="true">
-          <IconEneo size="md" class="text-brand-eneo" viewBox="0 -21 214 214" />
-        </span>
       {/if}
       <div class="min-w-0">
         <h1 bind:this={title} tabindex="-1" class="text-base font-semibold break-words">

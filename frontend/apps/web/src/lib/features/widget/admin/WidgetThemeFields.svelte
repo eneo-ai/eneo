@@ -5,7 +5,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import { IconEneo } from "@eneo/icons/eneo";
+  import ImageIcon from "@lucide/svelte/icons/image";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import { isHttpUrl } from "../urls";
@@ -198,7 +198,7 @@
               onload={() => (logoBroken = false)}
             />
           {:else}
-            <IconEneo size="md" class="text-brand-eneo" viewBox="0 -21 214 214" />
+            <ImageIcon class="text-muted size-5" aria-hidden="true" />
           {/if}
         </span>
         <Input
