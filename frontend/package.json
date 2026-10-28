@@ -9,6 +9,7 @@
     "dev:restart": "bun scripts/frontend-dev.mjs restart",
     "dev:clean": "bun run dev:stop && bun run clean:cache && bun run dev",
     "dev:web-next": "NODE_ENV=development FORCE_COLOR=1 bun run --cwd apps/web-next dev",
+    "dev:web-next:vite": "NODE_ENV=development FORCE_COLOR=1 bun run --cwd apps/web-next dev:vite",
     "dev:web-next:clean": "bun run clean:cache:web-next && bun run dev:web-next",
     "clean:cache": "rm -rf apps/web/node_modules/.vite apps/web/.svelte-kit packages/ui/.svelte-kit",
     "clean:cache:web-next": "rm -rf apps/web-next/.next apps/web-next/node_modules/.cache",

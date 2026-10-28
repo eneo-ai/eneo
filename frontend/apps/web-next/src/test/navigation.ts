@@ -9,9 +9,10 @@
  *
  * The hooks then read the route the test set (`renderInApp(ui, { route })` or
  * `setRoute`), and `router` records where the app navigates. Both reset after
- * every test (src/test/setup-dom.ts).
+ * every test (src/test/setup-dom.ts). `replaceUrl` rerenders the hooks' users,
+ * as both routers do; after `setRoute`, rerender yourself.
  */
-import { createElement } from "react";
+import { createElement, useSyncExternalStore } from "react";
 import { vi } from "vitest";
 import type { LinkProps } from "@/lib/link";
 
@@ -54,12 +55,22 @@ export function resetNavigation(): void {
   replaceUrl.mockClear();
 }
 
+const listeners = new Set<() => void>();
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+const readPathname = () => url.pathname;
+const readSearchParams = () => searchParams;
+
 export function usePathname(): string {
-  return url.pathname;
+  return useSyncExternalStore(subscribe, readPathname, readPathname);
 }
 
 export function useSearchParams(): URLSearchParams {
-  return searchParams;
+  return useSyncExternalStore(subscribe, readSearchParams, readSearchParams);
 }
 
 export function useRouter(): typeof router {
@@ -73,6 +84,7 @@ export const replaceUrl = vi.fn((href: string | URL) => {
   setRoute(route);
   // The path, not `next`: jsdom's origin is not this module's base URL.
   if (typeof window !== "undefined") window.history.replaceState(null, "", route + next.hash);
+  for (const listener of listeners) listener();
 });
 
 export function useSpaceSegments(): string[] {

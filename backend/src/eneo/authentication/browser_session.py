@@ -10,7 +10,9 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 
-_SAFE_METHODS = frozenset({"GET", "HEAD"})
+# The methods the gate admits without Sec-Fetch-Site and on a direct visit
+# ("none"); a same-origin navigation can send them with the session cookie.
+SAFE_METHODS = frozenset({"GET", "HEAD"})
 
 # One session name per installation, chosen by environment, never by request.
 # ``__Host-`` makes the browser refuse a value planted from a sibling host.
@@ -33,7 +35,7 @@ def browser_request_allowed(method: str, headers: Mapping[str, str]) -> bool:
     non-browser client; it may only read, and only without ``Origin``, which
     every cross-origin CORS request carries.
     """
-    safe = method.upper() in _SAFE_METHODS
+    safe = method.upper() in SAFE_METHODS
     site = headers.get("sec-fetch-site")
     if site is None:
         return safe and "origin" not in headers

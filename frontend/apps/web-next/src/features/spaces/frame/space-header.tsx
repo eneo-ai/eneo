@@ -1,7 +1,5 @@
 "use client";
 
-import { Avatar } from "@astryxdesign/core/Avatar";
-import { AvatarGroup, AvatarGroupOverflow } from "@astryxdesign/core/AvatarGroup";
 import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -11,12 +9,10 @@ import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { cn } from "@/lib/utils";
 import { AddMemberDialog } from "../members/space-members";
-import { memberDisplayName, personToneClass } from "../members/member-avatar";
+import { MemberStack } from "../members/member-stack";
 import { useSpace } from "../use-space";
 import { spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
-
-const VISIBLE_MEMBERS = 3;
 
 /** The space's display name: personal and organization spaces use their alias. */
 export function useSpaceDisplayName(): string {
@@ -25,28 +21,6 @@ export function useSpaceDisplayName(): string {
   if (space.personal) return t("personal");
   if (space.organization) return t("organization");
   return space.name;
-}
-
-function MemberStack() {
-  const t = useTranslations();
-  const { space } = useSpace();
-  const members = space.members.items;
-  const hidden = members.length - VISIBLE_MEMBERS;
-
-  if (members.length === 0) return null;
-
-  return (
-    <AvatarGroup size={32} aria-label={t("space_members_count", { count: members.length })}>
-      {members.slice(0, VISIBLE_MEMBERS).map((member) => (
-        <Avatar
-          key={member.id}
-          name={memberDisplayName(member)}
-          className={personToneClass(member.id)}
-        />
-      ))}
-      {hidden > 0 ? <AvatarGroupOverflow count={hidden} /> : null}
-    </AvatarGroup>
-  );
 }
 
 /**
@@ -136,7 +110,7 @@ export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "pag
 
         {showMembers || canAddMember || canChat ? (
           <div className="flex flex-wrap items-center gap-2.5">
-            {showMembers ? <MemberStack /> : null}
+            {showMembers ? <MemberStack members={space.members.items} /> : null}
             {canAddMember ? <AddMemberDialog variant="header" /> : null}
             {canChat ? (
               <Button

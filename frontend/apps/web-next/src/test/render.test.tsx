@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQueryClient } from "@tanstack/react-query";
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { afterEach, expect, it, vi } from "vitest";
@@ -57,10 +57,9 @@ it("records where the app navigates", () => {
   expect(router.push).toHaveBeenCalledWith("/dashboard");
 });
 
-it("moves the route with replaceUrl, as the app does", () => {
-  const { rerender } = renderInApp(<Probe />, { route: "/spaces/s1/knowledge?tab=websites" });
-  replaceUrl("/a?tab=x");
-  rerender(<Probe />);
+it("moves the route with replaceUrl and rerenders, as the app does", () => {
+  renderInApp(<Probe />, { route: "/spaces/s1/knowledge?tab=websites" });
+  act(() => replaceUrl("/a?tab=x"));
   expect(screen.getByText("Logga in | Anna Lind | no admin | /a | x | 30000")).toBeTruthy();
   expect(window.location.pathname + window.location.search).toBe("/a?tab=x");
 });

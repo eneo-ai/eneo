@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -60,16 +61,21 @@ class RetentionService:
         return RetentionPolicyModel.model_validate(policy)
 
     async def _create_default_policy(self, tenant_id: UUID) -> AuditRetentionPolicy:
-        """Create default retention policy for a tenant."""
-        from sqlalchemy import insert
+        """Create default retention policy for a tenant.
 
-        query = (
-            insert(AuditRetentionPolicy)
+        Reached by a GET, so concurrent first reads must both succeed: the loser
+        of the insert race reads the winner's row.
+        """
+        await self.session.execute(
+            pg_insert(AuditRetentionPolicy)
             .values(tenant_id=tenant_id, retention_days=365)
-            .returning(AuditRetentionPolicy)
+            .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
-
-        result = await self.session.execute(query)
+        result = await self.session.execute(
+            select(AuditRetentionPolicy).where(
+                AuditRetentionPolicy.tenant_id == tenant_id
+            )
+        )
         return result.scalar_one()
 
     async def update_policy(
