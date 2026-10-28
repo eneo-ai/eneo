@@ -6809,5 +6809,9 @@
   "admin_user_groups_members_added": "{count, plural, one {# user was added to {name}} other {# users were added to {name}}}",
   "admin_user_groups_member_removed": "{email} was removed from {name}",
   "admin_user_groups_remove_member": "Remove {email} from the group",
-  "admin_user_groups_selected": "Selected users"
+  "admin_user_groups_selected": "Selected users",
+  "admin_user_groups_all_assigned": "The user is in every group",
+  "admin_user_groups_picker_trigger": "{label}: {group}",
+  "admin_user_group_assigned": "The user was added to {name}",
+  "admin_user_group_unassigned": "The user was removed from {name}"
 }

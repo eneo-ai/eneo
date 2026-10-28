@@ -6,7 +6,7 @@ import { brokenRule, readPasswordPolicy } from "@/features/auth/password-policy"
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
-const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   info: vi.fn(),
@@ -35,8 +35,14 @@ const existing = {
   id: "user-2",
   username: "bo.ek",
   email: "bo.ek@example.se",
-  roles: []
+  roles: [],
+  user_groups: [{ id: "g1", name: "Ekonomi" }]
 } as unknown as AdminUser;
+
+const groups = [
+  { id: "g1", name: "Ekonomi", users: [] },
+  { id: "g2", name: "Arkiv", users: [] }
+];
 
 async function renderEditor(
   user?: AdminUser,
@@ -45,10 +51,12 @@ async function renderEditor(
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/users/password-policy/"
       ? policyResponse
-      : ok({
-          predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
-          roles: { items: [] }
-        })
+      : path === "/api/v1/user-groups/"
+        ? ok({ items: groups })
+        : ok({
+            predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
+            roles: { items: [] }
+          })
   );
   const { queryClient } = renderInApp(<Harness user={user} />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -79,11 +87,14 @@ const type = (dialog: HTMLElement, name: RegExp, value: string) =>
   fireEvent.change(field(dialog, name), { target: { value } });
 const replaceSwitch = (dialog: HTMLElement) =>
   within(dialog).getByRole("switch", { name: /^Generera ett nytt lösenord/ });
+/** The submit button sits in the footer, outside the form it names. */
 const submit = (dialog: HTMLElement) =>
   fireEvent.submit(
-    within(dialog)
-      .getByRole("button", { name: /^(Skapa användare|Spara ändringar)$/ })
-      .closest("form")!
+    (
+      within(dialog).getByRole("button", {
+        name: /^(Skapa användare|Spara ändringar)$/
+      }) as HTMLButtonElement
+    ).form!
   );
 /** The field's error: the Astryx status message its aria-describedby names. */
 const errorOf = (input: HTMLInputElement) =>
@@ -285,5 +296,111 @@ describe("UserEditorDialog", () => {
     );
     expect(api.POST).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("UserEditorDialog username", () => {
+  it("changes an existing user's username, sent only when it changed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    const username = field(dialog, /^Användarnamn/);
+    expect(username.disabled).toBe(false);
+    within(dialog).getByText(/loggar ut och in igen/);
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(
+      (api.POST.mock.calls[0]?.[1] as { body: { username?: string } }).body.username
+    ).toBeUndefined();
+  });
+
+  it("sends a new username under the current one", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^Användarnamn/, "bo.lind");
+
+    submit(dialog);
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
+        params: { path: { username: "bo.ek" } },
+        body: expect.objectContaining({ username: "bo.lind" })
+      })
+    );
+  });
+
+  it("does not let an existing username be emptied", async () => {
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^Användarnamn/, " ");
+
+    submit(dialog);
+
+    expect(errorOf(field(dialog, /^Användarnamn/))).toContain("Ange ett användarnamn.");
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+});
+
+describe("UserEditorDialog user groups", () => {
+  // With a search field the trigger is a button that opens a listbox.
+  const picker = (dialog: HTMLElement) =>
+    within(dialog).getByRole("button", { name: /^Användargrupper/ });
+
+  it("has no group field when creating a user", async () => {
+    const { dialog } = await renderEditor();
+    expect(within(dialog).queryByRole("button", { name: /^Användargrupper/ })).toBeNull();
+  });
+
+  it("assigns a group at once, apart from the save", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+    await within(dialog).findByRole("button", { name: "Tilldela" });
+    within(dialog).getByText("Tilldelning och borttagning av grupper sparas direkt.");
+
+    // Nothing picked: pressing says so at the picker.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
+    expect(await within(dialog).findByText("Välj en användargrupp.")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+
+    fireEvent.click(picker(dialog));
+    // Ekonomi is assigned already, so only Arkiv is offered.
+    expect(screen.queryByRole("option", { name: "Ekonomi" })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "Arkiv" }));
+    // The trigger's name carries the pick (Astryx names it by its label alone).
+    expect(within(dialog).getByRole("button", { name: "Användargrupper: Arkiv" })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/user-groups/{id}/users/{user_id}/", {
+        params: { path: { id: "g2", user_id: "user-2" } }
+      })
+    );
+    expect(
+      await within(dialog).findByRole("button", { name: "Ta bort från gruppen Arkiv" })
+    ).toBeTruthy();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["user-groups"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] });
+    // The dialog stays open: the save is a separate step.
+    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("removes a group at once", async () => {
+    api.DELETE.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort från gruppen Ekonomi" }));
+
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/user-groups/{id}/users/{user_id}/", {
+        params: { path: { id: "g1", user_id: "user-2" } }
+      })
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole("button", { name: "Ta bort från gruppen Ekonomi" })
+      ).toBeNull()
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] });
+    expect(api.POST).not.toHaveBeenCalled();
   });
 });

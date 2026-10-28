@@ -6809,5 +6809,9 @@
   "admin_user_groups_members_added": "{count, plural, one {# användare lades till i {name}} other {# användare lades till i {name}}}",
   "admin_user_groups_member_removed": "{email} togs bort från {name}",
   "admin_user_groups_remove_member": "Ta bort {email} från gruppen",
-  "admin_user_groups_selected": "Valda användare"
+  "admin_user_groups_selected": "Valda användare",
+  "admin_user_groups_all_assigned": "Användaren är med i alla grupper",
+  "admin_user_groups_picker_trigger": "{label}: {group}",
+  "admin_user_group_assigned": "Användaren lades till i {name}",
+  "admin_user_group_unassigned": "Användaren togs bort från {name}"
 }

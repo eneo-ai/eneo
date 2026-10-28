@@ -27,6 +27,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
+import { UserGroupField } from "./user-group-field";
 import type { AdminUser } from "./users";
 
 function RolePicker({
@@ -147,6 +148,8 @@ function UserEditorForm({
           params: { path: { username: user.username } },
           body: {
             email: email.trim(),
+            // Sent only when changed: a new username signs the user out.
+            username: username.trim() !== user.username ? username.trim() : undefined,
             password: password ?? undefined,
             roles: [...roleIds].map((id) => ({ id }))
           }
@@ -161,8 +164,11 @@ function UserEditorForm({
   const needsPassword = mode === "create" || replacePassword;
   const policyUnavailable = !policyQuery.isPending && policy === null;
   const errors: Record<Field, string | undefined> = {
+    // A user without a username cannot be updated at all (see submit).
     username:
-      mode === "create" && !username.trim() ? t("admin_users_username_required") : undefined,
+      (mode === "create" || user?.username) && !username.trim()
+        ? t("admin_users_username_required")
+        : undefined,
     email: email.trim() ? undefined : t("admin_users_email_required"),
     // A password is drawn against the policy, so none can be set without it.
     policy: needsPassword && policyUnavailable ? t("password_policy_unavailable") : undefined
@@ -221,8 +227,7 @@ function UserEditorForm({
           }
           value={username}
           onChange={setUsername}
-          isRequired={mode === "create"}
-          isDisabled={mode === "update"}
+          isRequired
           autoComplete="off"
           status={usernameError ? { type: "error", message: usernameError } : undefined}
         />
@@ -282,27 +287,32 @@ function UserEditorForm({
             })
           }
         />
-
-        <DialogFooter>
-          <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
-          <Button
-            type="submit"
-            variant="primary"
-            label={mode === "create" ? t("create_user") : t("save_changes")}
-            // Keeps focus while saving; a second press is ignored above.
-            isLoading={pending}
-            isInterruptible
-          />
-        </DialogFooter>
       </form>
+
+      {/* Outside the form: its changes save on their own, and Enter in its
+          search field must not submit the user. */}
+      {user ? <UserGroupField user={user} isDisabled={pending} /> : null}
+
+      <DialogFooter>
+        <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
+        <Button
+          type="submit"
+          form={formId}
+          variant="primary"
+          label={mode === "create" ? t("create_user") : t("save_changes")}
+          // Keeps focus while saving; a second press is ignored above.
+          isLoading={pending}
+          isInterruptible
+        />
+      </DialogFooter>
     </DialogContent>
   );
 }
 
 /**
  * Create or edit a user. Update targets POST /api/v1/admin/users/{username}/
- * (username cannot change). User-groups assignment is dropped with the legacy
- * area (OQ-2); role assignment is kept.
+ * with the current username; a changed one goes in the body. Editing also
+ * assigns user groups, which save on their own as they change.
  */
 export function UserEditorDialog({
   open,
