@@ -14,6 +14,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { UserActions } from "./user-actions";
+import type { IssuedPassword } from "./user-editor";
 import type { AdminUser, UserState } from "./users";
 
 const STATE_TONE: Record<UserState, StatusTone> = {
@@ -68,12 +69,15 @@ function BadgeList({ items }: { items: { id: string; name: string }[] }) {
 export function UserTable({
   users,
   label,
-  onRemoved
+  onRemoved,
+  onIssued
 }: {
   users: AdminUser[];
   /** Accessible name of the table (the selected tab). */
   label: string;
   onRemoved?: () => void;
+  /** A password a row's editor set, for the page's one-time view. */
+  onIssued: (issued: IssuedPassword) => void;
 }) {
   const t = useTranslations();
   const stateLabel = useStateLabel();
@@ -137,7 +141,7 @@ export function UserTable({
                 </div>
               </TableCell>
               <TableCell className="text-end">
-                <UserActions user={user} onRemoved={onRemoved} />
+                <UserActions user={user} onRemoved={onRemoved} onIssued={onIssued} />
               </TableCell>
             </TableRow>
           );

@@ -16,7 +16,7 @@ const toast = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
-import { UserEditorDialog } from "./user-editor";
+import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
 import type { AdminUser } from "./users";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
@@ -67,9 +67,16 @@ async function renderEditor(
   return { dialog, invalidate };
 }
 
+/** The editor and, as the users page has it, the one-time password view. */
 function Harness({ user }: { user?: AdminUser }) {
   const [open, setOpen] = useState(true);
-  return <UserEditorDialog open={open} onOpenChange={setOpen} user={user} />;
+  const [issued, setIssued] = useState<IssuedPassword | null>(null);
+  return (
+    <>
+      <UserEditorDialog open={open} onOpenChange={setOpen} user={user} onIssued={setIssued} />
+      <IssuedPasswordDialog issued={issued} onClose={() => setIssued(null)} />
+    </>
+  );
 }
 
 /** The password a save sent, checked against the policy the backend sent. */
@@ -382,44 +389,6 @@ describe("UserEditorDialog user groups", () => {
     // The dialog stays open: the save is a separate step.
     expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
     await expectNoAxeViolations(document.body);
-  });
-
-  it("holds the save and the dialog until a group change has finished", async () => {
-    let release: () => void = () => {};
-    api.POST.mockImplementation((path: string) =>
-      path === "/api/v1/user-groups/{id}/users/{user_id}/"
-        ? new Promise(
-            (resolve) => (release = () => resolve({ data: {}, response: new Response("{}") }))
-          )
-        : ok({})
-    );
-    const { dialog } = await renderEditor(existing);
-    fireEvent.click(picker(dialog));
-    fireEvent.click(await screen.findByRole("option", { name: "Arkiv" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
-    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
-
-    // A rename (with a new password) saved now could have its one-time view
-    // dropped by the group change's refresh: the save waits.
-    type(dialog, /^Användarnamn/, "bo.lind");
-    fireEvent.click(replaceSwitch(dialog));
-    submit(dialog);
-    const cancel = within(dialog).getByRole("button", { name: "Avbryt" }) as HTMLButtonElement;
-    expect(cancel.disabled).toBe(true);
-    fireEvent.keyDown(dialog, { key: "Escape" });
-    expect(api.POST).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
-
-    release();
-    await within(dialog).findByRole("button", { name: "Ta bort från gruppen Arkiv" });
-    await waitFor(() => expect(cancel.disabled).toBe(false));
-    submit(dialog);
-    await waitFor(() =>
-      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
-        params: { path: { username: "bo.ek" } },
-        body: expect.objectContaining({ username: "bo.lind" })
-      })
-    );
   });
 
   it("removes a group at once", async () => {

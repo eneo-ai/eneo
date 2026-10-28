@@ -13,7 +13,10 @@ vi.mock("sonner", () => ({ toast }));
 vi.mock("@/lib/navigation", () => ({
   useSearchParams: () => new URLSearchParams(searchParams.value)
 }));
-vi.mock("./user-editor", () => ({ UserEditorDialog: () => null }));
+vi.mock("./user-editor", () => ({
+  UserEditorDialog: () => null,
+  IssuedPasswordDialog: () => null
+}));
 
 import { AdminUsersPage } from "./users-page";
 

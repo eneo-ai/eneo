@@ -18,7 +18,7 @@ import {
   userGroupsQueryOptions
 } from "@/features/admin/user-groups/user-groups";
 import { useRemovalMutation } from "@/features/spaces/removal";
-import { userEditorMutationKey, type AdminUser } from "./users";
+import type { AdminUser } from "./users";
 
 type GroupRef = AdminUser["user_groups"][number];
 
@@ -28,7 +28,7 @@ type GroupRef = AdminUser["user_groups"][number];
  * apart from the dialog's save, and the hint says so; a group can grant
  * access to spaces and capability sources, so a change takes effect for the
  * user straight away. While one change runs, its refetch included, the
- * others wait, and so do the dialog's save and close (`userEditorMutationKey`).
+ * others wait.
  */
 export function UserGroupField({ user, isDisabled }: { user: AdminUser; isDisabled: boolean }) {
   const t = useTranslations();
@@ -51,7 +51,6 @@ export function UserGroupField({ user, isDisabled }: { user: AdminUser; isDisabl
   const label = t("user_groups");
 
   const assign = useMutation({
-    mutationKey: userEditorMutationKey(user.id),
     mutationFn: (group: UserGroup) =>
       unwrap(
         browserApi.POST("/api/v1/user-groups/{id}/users/{user_id}/", {
@@ -70,7 +69,6 @@ export function UserGroupField({ user, isDisabled }: { user: AdminUser; isDisabl
   });
 
   const unassign = useRemovalMutation({
-    mutationKey: userEditorMutationKey(user.id),
     mutationFn: (group: GroupRef) =>
       unwrap(
         browserApi.DELETE("/api/v1/user-groups/{id}/users/{user_id}/", {

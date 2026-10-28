@@ -20,7 +20,7 @@ import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { PasswordPolicyPanel } from "./password-policy-panel";
-import { UserEditorDialog } from "./user-editor";
+import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, isSearchable, type StateFilter } from "./users";
 
@@ -87,6 +87,8 @@ export function AdminUsersPage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
   const [page, setPage] = useState(initialPage);
   const [showCreate, setShowCreate] = useState(false);
+  // Held here, not in the row whose editor set it: a refetch may drop that row.
+  const [issued, setIssued] = useState<IssuedPassword | null>(null);
   // E-mail and username searches combine (AND); a new search starts over at page 1.
   const emailBox = useSearchBox((searchParams.get("search") ?? "").trim(), () => setPage(1));
   const nameBox = useSearchBox((searchParams.get("search_name") ?? "").trim(), () => setPage(1));
@@ -204,6 +206,7 @@ export function AdminUsersPage() {
           users={users}
           label={tabLabel(stateFilter)}
           onRemoved={() => rescue(panelRef.current)}
+          onIssued={setIssued}
         />
       </div>
     );
@@ -329,7 +332,15 @@ export function AdminUsersPage() {
 
       <PasswordPolicyPanel />
 
-      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} />
+      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} onIssued={setIssued} />
+      <IssuedPasswordDialog
+        issued={issued}
+        onClose={() => {
+          setIssued(null);
+          // The row whose menu opened the editor may have gone meanwhile.
+          rescue(panelRef.current);
+        }}
+      />
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -28,7 +28,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { UserGroupField } from "./user-group-field";
-import { userEditorMutationKey, type AdminUser } from "./users";
+import type { AdminUser } from "./users";
 
 function RolePicker({
   selected,
@@ -76,7 +76,10 @@ function RolePicker({
 type Field = "username" | "email" | "policy";
 
 /** A password the backend has just set, for the one-time display. */
-type IssuedPassword = { password: string; email: string };
+type NewPassword = { password: string; email: string };
+
+/** A set password, for `IssuedPasswordDialog`: a new account's, or a replaced one. */
+export type IssuedPassword = NewPassword & { replaced: boolean };
 
 /**
  * Form body, mounted fresh each time the dialog opens so its initial values
@@ -93,7 +96,7 @@ function UserEditorForm({
   onDone
 }: {
   user?: AdminUser;
-  onDone: (issued?: IssuedPassword) => void;
+  onDone: (issued?: NewPassword) => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -125,7 +128,6 @@ function UserEditorForm({
   }
 
   const create = useMutation({
-    mutationKey: userEditorMutationKey(user?.id),
     mutationFn: (password: string) =>
       unwrap(
         browserApi.POST("/api/v1/admin/users/", {
@@ -142,7 +144,6 @@ function UserEditorForm({
   });
 
   const updateUser = useMutation({
-    mutationKey: userEditorMutationKey(user?.id),
     mutationFn: (password: string | null) => {
       if (!user?.username) throw new Error("missing username");
       return unwrap(
@@ -163,10 +164,6 @@ function UserEditorForm({
   });
 
   const pending = create.isPending || updateUser.isPending;
-  // A group change (it saves on its own) still running, its refetch included:
-  // the save waits for it, as a refreshed list may drop this user's row and,
-  // with it, the one-time password view the save can open.
-  const busy = useIsMutating({ mutationKey: userEditorMutationKey(user?.id) }) > 0;
   const needsPassword = mode === "create" || replacePassword;
   const policyUnavailable = !policyQuery.isPending && policy === null;
   const errors: Record<Field, string | undefined> = {
@@ -188,7 +185,7 @@ function UserEditorForm({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || policyQuery.isPending) return;
+    if (pending || policyQuery.isPending) return;
     const first = (Object.keys(errors) as Field[]).find((field) => errors[field]);
     if (first) {
       revealProblems(() => setSubmitted(true), fields[first].current);
@@ -300,15 +297,14 @@ function UserEditorForm({
       {user ? <UserGroupField user={user} isDisabled={pending} /> : null}
 
       <DialogFooter>
-        <Button label={t("cancel")} isDisabled={busy} onClick={() => onDone()} />
+        <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
         <Button
           type="submit"
           form={formId}
           variant="primary"
           label={mode === "create" ? t("create_user") : t("save_changes")}
-          // Busy while saving or while a group change runs; it keeps focus
-          // and a press then is ignored above.
-          isLoading={busy}
+          // Keeps focus while saving; a second press is ignored above.
+          isLoading={pending}
           isInterruptible
         />
       </DialogFooter>
@@ -319,56 +315,65 @@ function UserEditorForm({
 /**
  * Create or edit a user. Update targets POST /api/v1/admin/users/{username}/
  * with the current username; a changed one goes in the body. Editing also
- * assigns user groups, which save on their own as they change.
+ * assigns user groups, which save on their own as they change. A password
+ * the save sets goes to `onIssued`, for an `IssuedPasswordDialog` owned by
+ * the page: an edit dialog lives in its table row, which a refetch may drop
+ * (a renamed user under a username filter) before the password is copied.
  */
 export function UserEditorDialog({
   open,
   onOpenChange,
-  user
+  user,
+  onIssued
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Omitted → create mode. */
   user?: AdminUser;
+  onIssued: (issued: IssuedPassword) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && (
+        <UserEditorForm
+          user={user}
+          onDone={(next) => {
+            onOpenChange(false);
+            if (next) onIssued({ ...next, replaced: user !== undefined });
+          }}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * The one-time view of a password the user editor set. The list is refreshed
+ * once it closes, so its rows hold still while the password is on screen.
+ */
+export function IssuedPasswordDialog({
+  issued,
+  onClose
+}: {
+  issued: IssuedPassword | null;
+  onClose: () => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const [issued, setIssued] = useState<IssuedPassword | null>(null);
-  const busy = useIsMutating({ mutationKey: userEditorMutationKey(user?.id) }) > 0;
-
   return (
-    <>
-      <Dialog
-        open={open}
-        // Escape, the close button and Cancel wait for a save or group change.
-        onOpenChange={(next) => {
-          if (next || !busy) onOpenChange(next);
-        }}
-      >
-        {open && (
-          <UserEditorForm
-            user={user}
-            onDone={(next) => {
-              onOpenChange(false);
-              if (next) setIssued(next);
-            }}
-          />
-        )}
-      </Dialog>
-      <SecretRevealDialog
-        title={user ? t("admin_password_replaced_title") : t("admin_user_created_title")}
-        secret={issued?.password ?? null}
-        warning={
-          issued
-            ? `${t("admin_issued_password_handover", { email: issued.email })} ${t("admin_password_one_time_hint")}`
-            : undefined
-        }
-        copyFailedMessage={t("admin_issued_password_copy_failed")}
-        onClose={() => {
-          setIssued(null);
-          void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
-        }}
-      />
-    </>
+    <SecretRevealDialog
+      title={issued?.replaced ? t("admin_password_replaced_title") : t("admin_user_created_title")}
+      secret={issued?.password ?? null}
+      warning={
+        issued
+          ? `${t("admin_issued_password_handover", { email: issued.email })} ${t("admin_password_one_time_hint")}`
+          : undefined
+      }
+      copyFailedMessage={t("admin_issued_password_copy_failed")}
+      onClose={() => {
+        onClose();
+        void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+      }}
+    />
   );
 }
