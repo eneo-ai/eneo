@@ -34,7 +34,6 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
-import { MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
@@ -174,7 +173,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   const userProblem = submitted && !selected ? t("form_problem_choose_user") : null;
 
   // Users who are not members yet: the first ones on focus, then those matching
-  // the typed email once typing pauses at three or more characters.
+  // the typed email once typing pauses (any length, as the Svelte app).
   const members = space.members.items;
   const candidates = useMemo<SearchSource<SearchableItem>>(() => {
     const memberIds = new Set(members.map((member) => member.id));
@@ -185,10 +184,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
         .map((user) => ({ id: user.id, label: user.email }));
     };
     return {
-      search: (query) => {
-        const email = query.trim();
-        return email.length < MIN_SEARCH_LENGTH ? [] : load(email);
-      },
+      search: (query) => load(query.trim() || null),
       bootstrap: () => load(null)
     };
   }, [members, queryClient]);
@@ -252,7 +248,6 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
             value={selected}
             onChange={setSelected}
             hasEntriesOnFocus
-            minQueryLength={MIN_SEARCH_LENGTH}
             debounceMs={SEARCH_DEBOUNCE_MS}
             emptySearchResultsText={t("no_results")}
             status={userProblem ? { type: "error", message: userProblem } : undefined}

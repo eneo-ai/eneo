@@ -50,29 +50,29 @@ it("says a user must be picked when adding a member, at the search field", async
   await expectNoAxeViolations(dialog);
 });
 
-it("searches users once typing pauses, and not below three characters", async () => {
+it("searches users from the first character, once typing pauses", async () => {
   const { dialog } = await openDialog("Lägg till medlem");
   const search = within(dialog).getByLabelText("E-post");
   const searches = () =>
-    api.GET.mock.calls.filter(
-      (call) =>
-        (call as unknown[])[0] === "/api/v1/users/" &&
-        (call as { params: { query: { email?: string | null } } }[])[1]?.params.query.email
-    );
+    api.GET.mock.calls
+      .filter((call) => (call as unknown[])[0] === "/api/v1/users/")
+      .map(
+        (call) =>
+          (call as { params: { query: { email?: string | null } } }[])[1]?.params.query.email
+      )
+      .filter(Boolean);
 
   vi.useFakeTimers();
   try {
-    for (const value of ["a", "an"]) fireEvent.change(search, { target: { value } });
+    fireEvent.change(search, { target: { value: "a" } });
     act(() => vi.advanceTimersByTime(1000));
-    expect(searches()).toHaveLength(0);
+    expect(searches()).toEqual(["a"]);
 
-    for (const value of ["ann", "anna", "anna."]) fireEvent.change(search, { target: { value } });
+    for (const value of ["an", "ann", "anna", "anna."]) {
+      fireEvent.change(search, { target: { value } });
+    }
     act(() => vi.advanceTimersByTime(1000));
-    expect(searches()).toHaveLength(1);
-    expect(searches()[0]).toMatchObject([
-      "/api/v1/users/",
-      { params: { query: { email: "anna." } } }
-    ]);
+    expect(searches()).toEqual(["a", "anna."]);
   } finally {
     vi.useRealTimers();
   }
