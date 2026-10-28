@@ -37,9 +37,19 @@ const BEHAVIOUR_LABEL_KEYS: Record<ModelBehaviour, string> = {
   custom: "custom"
 };
 
-/** The id of a number setting's field, for focusing the first one that cannot be saved. */
-export function modelKwargFieldId(idPrefix: string, name: NumericSettingName): string {
-  return name === "temperature" ? `${idPrefix}-custom-temperature` : `${idPrefix}-kwarg-${name}`;
+/**
+ * The id of the field that holds a number setting, for focusing the first one
+ * that cannot be saved. A preset's temperature is held by the behaviour select.
+ */
+export function modelKwargFieldId(
+  idPrefix: string,
+  name: NumericSettingName,
+  kwargs: ModelKwargs
+): string {
+  if (name !== "temperature") return `${idPrefix}-kwarg-${name}`;
+  return behaviourFromKwargs(kwargs) === "custom"
+    ? `${idPrefix}-custom-temperature`
+    : `${idPrefix}-model-behaviour`;
 }
 
 /**
@@ -84,6 +94,25 @@ export function ModelKwargsRows({
         : t("temperature_not_available")
       : null;
 
+  /** Why a number cannot be saved for the setting, shown once problems are. */
+  function numberProblem(name: NumericSettingName, value: number | null | undefined) {
+    if (!showProblems || isValidNumericKwarg(model, name, value)) return null;
+    const range = numericKwargRange(model, name);
+    return t(
+      range.wholeNumber ? "form_problem_whole_number_between" : "form_problem_number_between",
+      { min: range.min, max: range.max }
+    );
+  }
+  // A preset outside the model's temperature range says so at the select, with the way out.
+  const temperatureRange = numericKwargRange(model, "temperature");
+  const presetProblem =
+    showProblems &&
+    presetsSupported &&
+    behaviour !== "custom" &&
+    !isValidNumericKwarg(model, "temperature", kwargs.temperature)
+      ? t("model_behaviour_out_of_range", { min: temperatureRange.min, max: temperatureRange.max })
+      : null;
+
   function selectBehaviour(next: ModelBehaviour) {
     const preset = kwargsForBehaviour(next);
     if (preset) {
@@ -94,18 +123,9 @@ export function ModelKwargsRows({
   }
 
   function numberField(name: NumericSettingName, value: number | null | undefined) {
-    const id = modelKwargFieldId(idPrefix, name);
+    const id = modelKwargFieldId(idPrefix, name, kwargs);
     const range = numericKwargRange(model, name);
-    const problem =
-      showProblems && !isValidNumericKwarg(model, name, value)
-        ? t(
-            range.wholeNumber ? "form_problem_whole_number_between" : "form_problem_number_between",
-            {
-              min: range.min,
-              max: range.max
-            }
-          )
-        : null;
+    const problem = numberProblem(name, value);
     return (
       <div key={name} className="flex flex-col gap-1">
         <div className="flex items-center justify-between gap-4">
@@ -153,7 +173,7 @@ export function ModelKwargsRows({
             <SelectTrigger
               id={behaviourId}
               className="w-full"
-              aria-describedby={note ? noteId : undefined}
+              {...fieldProblemProps(behaviourId, presetProblem, note ? noteId : undefined)}
             >
               <SelectValue />
             </SelectTrigger>
@@ -165,6 +185,7 @@ export function ModelKwargsRows({
               ))}
             </SelectContent>
           </Select>
+          <FieldProblem id={behaviourId} problem={presetProblem} />
           {note && (
             <p id={noteId} className="text-muted-foreground text-sm">
               {note}

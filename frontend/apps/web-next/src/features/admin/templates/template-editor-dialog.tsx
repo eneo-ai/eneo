@@ -241,7 +241,7 @@ function TemplateEditorForm({
             : isApp && !inputType
               ? "template-input-type"
               : invalidKwarg
-                ? modelKwargFieldId("template", invalidKwarg)
+                ? modelKwargFieldId("template", invalidKwarg, kwargs)
                 : null;
         if (firstProblem) {
           revealProblems(() => setSubmitted(true), firstProblem);

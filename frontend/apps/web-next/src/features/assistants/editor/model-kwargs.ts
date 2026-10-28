@@ -149,21 +149,18 @@ export function isValidNumericKwarg(
 }
 
 /**
- * The first typed number setting, in the editor's order, that the model takes
- * and that cannot be saved. Presets set the temperature themselves, so it is
- * checked only for a custom behaviour.
+ * The first number setting, in the editor's order, that the model takes and
+ * whose value cannot be saved. That includes a preset's temperature: a model
+ * may allow less than Kreativ's 1.25.
  */
 export function firstInvalidNumericKwarg(
   model: ModelWithKwargs | null | undefined,
   kwargs: ModelKwargs
 ): NumericSettingName | null {
   const sent = filterSupportedKwargs(kwargs, model);
-  const custom = behaviourFromKwargs(kwargs) === "custom";
   return (
     NUMERIC_SETTINGS.find(
-      (name) =>
-        (name !== "temperature" || custom) &&
-        !isValidNumericKwarg(model, name, sent[name] as number | null | undefined)
+      (name) => !isValidNumericKwarg(model, name, sent[name] as number | null | undefined)
     ) ?? null
   );
 }

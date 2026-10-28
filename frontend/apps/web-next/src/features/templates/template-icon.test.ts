@@ -22,7 +22,9 @@ describe("template icon names", () => {
     expect(templateIconName("")).toBeNull();
   });
 
-  it("stores a picked icon in the form both apps read back as the same icon", () => {
+  // The Svelte reader's rule, not its registry: web-next cannot depend on the
+  // Svelte app, whose older Lucide lacks the newest icons.
+  it("stores a picked icon in a form both readers turn back into its Lucide name", () => {
     expect(storedTemplateIconName("building-2")).toBe("building2");
     expect(storedTemplateIconName("arrow-down-0-1")).toBe("arrow-down01");
     expect(storedTemplateIconName("a-arrow-down")).toBe("a-arrow-down");

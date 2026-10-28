@@ -240,6 +240,7 @@
   "template_category_misc_apps_description": "Diverse appar för olika funktioner och behov.",
   "help_about": "Hjälp: {topic}",
   "form_problem_number_between": "Ange ett tal från {min} till {max}.",
+  "model_behaviour_out_of_range": "Modellen tillåter en temperatur från {min} till {max}. Välj ett annat beteende eller en anpassad temperatur.",
   "embedding_models_singular": "Inbäddning",
   "transcription_models_singular": "Transkribering",
   "key_missing": "Nyckel saknas",

@@ -5460,6 +5460,7 @@
   "template_category_misc_apps_description": "Assorted apps for different functions and needs.",
   "help_about": "Help: {topic}",
   "form_problem_number_between": "Enter a number from {min} to {max}.",
+  "model_behaviour_out_of_range": "This model allows a temperature from {min} to {max}. Choose another behaviour or a custom temperature.",
   "embedding_models_singular": "Embedding",
   "transcription_models_singular": "Transcription",
   "key_missing": "Key missing",

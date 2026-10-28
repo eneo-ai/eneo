@@ -29,7 +29,9 @@ const MODELS = [
   model("o3", "o3", {
     temperature: { supported: false },
     reasoning_effort: { supported: true, options: ["low", "medium", "high"] }
-  })
+  }),
+  // An administrator's override caps the temperature below Kreativ's 1.25.
+  model("capped", "Capped", { temperature: { supported: true, minimum: 0, maximum: 1 } })
 ];
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
@@ -223,6 +225,36 @@ describe("TemplateEditorDialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
     expect(lastBody(api.PATCH).completion_model_kwargs).toEqual({ top_p: 0.9, top_k: 40 });
+  });
+
+  it("will not save a preset the model's temperature range does not allow", async () => {
+    renderEditor({
+      kind: "apps",
+      template: appTemplate({
+        completion_model_id: "capped",
+        completion_model_kwargs: { temperature: 1.25 }
+      })
+    });
+    const dialog = screen.getByRole("dialog", { name: "Redigera mall" });
+    const behaviour = await within(dialog).findByRole("combobox", { name: "Modellbeteende" });
+    expect(behaviour.textContent).toBe("Kreativ");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    expect(behaviour.getAttribute("aria-invalid")).toBe("true");
+    expect(
+      within(dialog).getByText(
+        "Modellen tillåter en temperatur från 0 till 1. Välj ett annat beteende eller en anpassad temperatur."
+      )
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(behaviour);
+    expect(api.PATCH).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(behaviour, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Deterministisk" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    expect(lastBody(api.PATCH).completion_model_kwargs).toEqual({ temperature: 0.25 });
   });
 
   it("stores a picked icon the way the Svelte app reads it", async () => {
