@@ -174,6 +174,7 @@ export function ConfluenceImportDialog({
                 error={preview.error}
                 message={t("integration_preview_failed")}
                 onBack={onBack}
+                isRetrying={preview.isFetching}
                 onRetry={() => void preview.refetch()}
                 settingsHref={settingsHref}
               />

@@ -19,8 +19,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useId, useMemo, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
-import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { useModelTypeLabel } from "./model-type-label";
@@ -109,157 +108,156 @@ export function MigrationHistoryPanel() {
       return next;
     });
 
-  if (blockingError(historyQuery)) {
-    return (
-      <ListError
-        error={historyQuery.error}
-        title={t("migration_history_load_failed")}
-        isRetrying={historyQuery.isFetching}
-        onRetry={() => void historyQuery.refetch()}
-      />
-    );
-  }
-  if (!data) return <LoadingState rows={4} />;
-  if (data.length === 0) {
-    return (
-      <div className="flex flex-col gap-4">
-        <RefreshError queries={[historyQuery]} />
-        <EmptyState title={t("migration_history_empty")} />
-      </div>
-    );
-  }
-
   const filterValue = (label: string) => (option: { label?: string }) =>
     t("admin_models_filter_value", { label, value: option.label ?? "" });
 
   return (
     <div className="flex flex-col gap-4">
-      <RefreshError queries={[historyQuery]} />
-      <div className="flex flex-wrap items-center gap-2.5">
-        <TextInput
-          label={t("admin_models_history_search")}
-          isLabelHidden
-          placeholder={t("search")}
-          startIcon={Search}
-          value={search}
-          onChange={(value) => {
-            setSearch(value);
-            announceResults({ search: value });
-          }}
-          hasClear
-          className="w-full sm:w-72"
-        />
-        <Selector
-          label={t("model_type")}
-          isLabelHidden
-          options={[
-            { value: "all", label: t("filter_all") },
-            { value: "completion", label: typeLabel("completion") },
-            { value: "transcription", label: typeLabel("transcription") }
-          ]}
-          value={type}
-          onChange={(value) => {
-            setType(value as TypeFilter);
-            announceResults({ type: value as TypeFilter });
-          }}
-          renderValue={filterValue(t("model_type"))}
-          width="14rem"
-        />
-        <Selector
-          label={t("migration_history_status")}
-          isLabelHidden
-          options={[
-            { value: "all", label: t("filter_all") },
-            { value: "completed", label: t("migration_status_completed") },
-            { value: "failed", label: t("migration_status_failed") },
-            { value: "in_progress", label: t("migration_status_in_progress") }
-          ]}
-          value={status}
-          onChange={(value) => {
-            setStatus(value as StatusFilter);
-            announceResults({ status: value as StatusFilter });
-          }}
-          renderValue={filterValue(t("migration_history_status"))}
-          width="12rem"
-        />
-      </div>
+      <QueryStateBoundary
+        query={historyQuery}
+        rows={4}
+        errorTitle={t("migration_history_load_failed")}
+      >
+        {(history) =>
+          history.length === 0 ? (
+            <EmptyState title={t("migration_history_empty")} />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <TextInput
+                  label={t("admin_models_history_search")}
+                  isLabelHidden
+                  placeholder={t("search")}
+                  startIcon={Search}
+                  value={search}
+                  onChange={(value) => {
+                    setSearch(value);
+                    announceResults({ search: value });
+                  }}
+                  hasClear
+                  className="w-full sm:w-72"
+                />
+                <Selector
+                  label={t("model_type")}
+                  isLabelHidden
+                  options={[
+                    { value: "all", label: t("filter_all") },
+                    { value: "completion", label: typeLabel("completion") },
+                    { value: "transcription", label: typeLabel("transcription") }
+                  ]}
+                  value={type}
+                  onChange={(value) => {
+                    setType(value as TypeFilter);
+                    announceResults({ type: value as TypeFilter });
+                  }}
+                  renderValue={filterValue(t("model_type"))}
+                  width="14rem"
+                />
+                <Selector
+                  label={t("migration_history_status")}
+                  isLabelHidden
+                  options={[
+                    { value: "all", label: t("filter_all") },
+                    { value: "completed", label: t("migration_status_completed") },
+                    { value: "failed", label: t("migration_status_failed") },
+                    { value: "in_progress", label: t("migration_status_in_progress") }
+                  ]}
+                  value={status}
+                  onChange={(value) => {
+                    setStatus(value as StatusFilter);
+                    announceResults({ status: value as StatusFilter });
+                  }}
+                  renderValue={filterValue(t("migration_history_status"))}
+                  width="12rem"
+                />
+              </div>
 
-      <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
-        {/* Below its min width the table scrolls inside its own region. */}
-        <Table aria-label={t("migration_history_title")} className="min-w-200">
-          <TableHeader>
-            <TableRow className="bg-ax-sunken [&>th]:text-xs">
-              {/* Fits the 44 px touch-size button (AGENTS.md → Tables). */}
-              <TableHeaderCell scope="col" className="w-14 min-w-14">
-                <span className="sr-only">{t("details")}</span>
-              </TableHeaderCell>
-              <TableHeaderCell scope="col">{t("migration_history_date")}</TableHeaderCell>
-              <TableHeaderCell scope="col">{t("migration_history_from")}</TableHeaderCell>
-              <TableHeaderCell scope="col">{t("migration_history_to")}</TableHeaderCell>
-              <TableHeaderCell scope="col" className="text-end">
-                {t("migration_history_count")}
-              </TableHeaderCell>
-              <TableHeaderCell scope="col">{t("migration_history_by")}</TableHeaderCell>
-              <TableHeaderCell scope="col">{t("migration_history_status")}</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => {
-              const open = expanded.has(row.id);
-              const detailId = `${baseId}-${row.id}`;
-              const at = row.completed_at ?? row.started_at;
-              return (
-                <Fragment key={row.id}>
-                  <TableRow>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        isIconOnly
-                        label={t("admin_models_history_details", {
-                          from: row.from_model_name,
-                          to: row.to_model_name
-                        })}
-                        icon={
-                          open ? (
-                            <ChevronDown className="size-4" aria-hidden="true" />
-                          ) : (
-                            <ChevronRight className="size-4" aria-hidden="true" />
-                          )
-                        }
-                        aria-expanded={open}
-                        aria-controls={open ? detailId : undefined}
-                        onClick={() => toggle(row.id)}
-                      />
-                    </TableCell>
-                    <TableCell className="text-ax-text-secondary whitespace-nowrap">
-                      {at ? <ClientTime value={at} format="date_time" /> : "—"}
-                    </TableCell>
-                    <TableCell>{row.from_model_name}</TableCell>
-                    <TableCell>{row.to_model_name}</TableCell>
-                    <TableCell className="text-end tabular-nums">{row.migrated_count}</TableCell>
-                    <TableCell className="text-ax-text-secondary">
-                      {row.initiated_by_name}
-                    </TableCell>
-                    <TableCell>
-                      <StatusLabel
-                        status={STATUS_TONE[row.status] ?? "neutral"}
-                        label={
-                          DETAIL_STATUS_KEYS.has(row.status)
-                            ? t(`migration_status_${row.status}` as "migration_status_completed")
-                            : row.status
-                        }
-                        isPulsing={row.status === "in_progress"}
-                      />
-                    </TableCell>
-                  </TableRow>
-                  {open && <DetailRow id={detailId} row={row} t={t} typeLabel={typeLabel} />}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+              <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
+                {/* Below its min width the table scrolls inside its own region. */}
+                <Table aria-label={t("migration_history_title")} className="min-w-200">
+                  <TableHeader>
+                    <TableRow className="bg-ax-sunken [&>th]:text-xs">
+                      {/* Fits the 44 px touch-size button (AGENTS.md → Tables). */}
+                      <TableHeaderCell scope="col" className="w-14 min-w-14">
+                        <span className="sr-only">{t("details")}</span>
+                      </TableHeaderCell>
+                      <TableHeaderCell scope="col">{t("migration_history_date")}</TableHeaderCell>
+                      <TableHeaderCell scope="col">{t("migration_history_from")}</TableHeaderCell>
+                      <TableHeaderCell scope="col">{t("migration_history_to")}</TableHeaderCell>
+                      <TableHeaderCell scope="col" className="text-end">
+                        {t("migration_history_count")}
+                      </TableHeaderCell>
+                      <TableHeaderCell scope="col">{t("migration_history_by")}</TableHeaderCell>
+                      <TableHeaderCell scope="col">{t("migration_history_status")}</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((row) => {
+                      const open = expanded.has(row.id);
+                      const detailId = `${baseId}-${row.id}`;
+                      const at = row.completed_at ?? row.started_at;
+                      return (
+                        <Fragment key={row.id}>
+                          <TableRow>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                isIconOnly
+                                label={t("admin_models_history_details", {
+                                  from: row.from_model_name,
+                                  to: row.to_model_name
+                                })}
+                                icon={
+                                  open ? (
+                                    <ChevronDown className="size-4" aria-hidden="true" />
+                                  ) : (
+                                    <ChevronRight className="size-4" aria-hidden="true" />
+                                  )
+                                }
+                                aria-expanded={open}
+                                aria-controls={open ? detailId : undefined}
+                                onClick={() => toggle(row.id)}
+                              />
+                            </TableCell>
+                            <TableCell className="text-ax-text-secondary whitespace-nowrap">
+                              {at ? <ClientTime value={at} format="date_time" /> : "—"}
+                            </TableCell>
+                            <TableCell>{row.from_model_name}</TableCell>
+                            <TableCell>{row.to_model_name}</TableCell>
+                            <TableCell className="text-end tabular-nums">
+                              {row.migrated_count}
+                            </TableCell>
+                            <TableCell className="text-ax-text-secondary">
+                              {row.initiated_by_name}
+                            </TableCell>
+                            <TableCell>
+                              <StatusLabel
+                                status={STATUS_TONE[row.status] ?? "neutral"}
+                                label={
+                                  DETAIL_STATUS_KEYS.has(row.status)
+                                    ? t(
+                                        `migration_status_${row.status}` as "migration_status_completed"
+                                      )
+                                    : row.status
+                                }
+                                isPulsing={row.status === "in_progress"}
+                              />
+                            </TableCell>
+                          </TableRow>
+                          {open && (
+                            <DetailRow id={detailId} row={row} t={t} typeLabel={typeLabel} />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )
+        }
+      </QueryStateBoundary>
     </div>
   );
 }

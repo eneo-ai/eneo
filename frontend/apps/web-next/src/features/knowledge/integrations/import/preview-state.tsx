@@ -10,6 +10,7 @@ export function ImportPreviewError({
   message,
   onBack,
   onRetry,
+  isRetrying = false,
   settingsHref
 }: {
   /** The failed preview request; without one (no connection) only `message` shows. */
@@ -17,12 +18,14 @@ export function ImportPreviewError({
   message: string;
   onBack: () => void;
   onRetry?: () => void;
+  /** The retry is in flight (the preview query is fetching). */
+  isRetrying?: boolean;
   settingsHref?: string | null;
 }) {
   const t = useTranslations();
   return (
     <div className="flex flex-col gap-3">
-      <ListError error={error} title={message} onRetry={onRetry} />
+      <ListError error={error} title={message} isRetrying={isRetrying} onRetry={onRetry} />
       <div className="flex flex-wrap gap-2">
         {settingsHref ? (
           <Button type="button" size="sm" variant="outline" asChild>
