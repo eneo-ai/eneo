@@ -82,10 +82,14 @@ function Probe() {
 }
 
 /** What the (app) layout does: load on the server, hydrate, provide. */
-async function renderApp() {
+async function load() {
   const server = testQueryClient();
   await loadAppContext(server, serverApi);
-  const state = dehydrate(server);
+  return dehydrate(server);
+}
+
+async function renderApp() {
+  let state = await load();
   const tree = () => (
     <HydrationBoundary state={state}>
       <QueryAppContextProvider env={env}>
@@ -96,7 +100,16 @@ async function renderApp() {
   contextValues = [];
   const html = renderToHtml(tree(), { queryClient: testQueryClient() });
   const view = renderInApp(tree(), { queryClient: testQueryClient() });
-  return { ...view, html, rerender: () => view.rerender(tree()) };
+  return {
+    ...view,
+    html,
+    rerender: () => view.rerender(tree()),
+    /** router.refresh(): the layout loads again and its new snapshot reaches the mounted boundary. */
+    refresh: async () => {
+      state = await load();
+      view.rerender(tree());
+    }
+  };
 }
 
 /** Longer than any request takes. */
@@ -145,6 +158,18 @@ it("keeps the context value when a refetch answers the same, so consumers need n
 
   expect(requested()).toHaveLength(6);
   expect(contextValues.at(-1)).toBe(before);
+});
+
+it("takes a refreshed layout's newer data without remounting the app", async () => {
+  const { refresh } = await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
+  backend.set(TENANT, ok({ ...signedIn.tenant, display_name: "Timrå kommun" }));
+
+  await refresh();
+
+  await waitFor(() => expect(screen.getByTestId("tenant").textContent).toBe("Timrå kommun"));
+  expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
+  expect(browserGet).not.toHaveBeenCalled();
 });
 
 it("keeps the previous data and the app mounted when a refetch fails", async () => {
