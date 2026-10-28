@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from eneo.authentication.browser_session import SessionGenerationMismatchError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -261,6 +262,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
     ),
     PasswordChangeRequiredError: (403, None, ErrorCodes.PASSWORD_CHANGE_REQUIRED),
+    # --- Browser session ---
+    SessionGenerationMismatchError: (
+        401,
+        "The browser session changed after this page was loaded.",
+        ErrorCodes.SESSION_GENERATION_MISMATCH,
+    ),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),

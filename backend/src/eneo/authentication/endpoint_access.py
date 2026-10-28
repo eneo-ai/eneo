@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from fastapi.dependencies.models import Dependant
 from starlette.requests import HTTPConnection
 
+from eneo.authentication.browser_session import admit_session
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.password_lifecycle import enforce_password_change
 
@@ -204,6 +205,7 @@ def authorize_user(connection: HTTPConnection | None, user: "UserInDB") -> None:
         enforce_password_change(user)
     if isinstance(policy.authorization, Permission):
         validate_permission(user, policy.authorization)
+    admit_session(connection)
 
 
 async def require_endpoint_access(connection: HTTPConnection) -> None:

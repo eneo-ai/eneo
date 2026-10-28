@@ -16,6 +16,10 @@ theirs; the module-login pages keep their Referrer-Policy).
 Outside development both get HSTS; never conditioned on the request scheme,
 which is http behind Traefik.
 
+An ``/api/`` request admitted with the browser session cookie also names that
+session's generation (``Eneo-Session-Generation``), so a page can tell when
+the cookie now belongs to another session than the one it was loaded with.
+
 Pure ASGI, not BaseHTTPMiddleware: streaming, SSE and Range responses stay
 unbuffered, and status, body and length headers are never touched.
 """
@@ -24,6 +28,11 @@ from __future__ import annotations
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from eneo.authentication.browser_session import (
+    SESSION_GENERATION_HEADER,
+    admitted_session_generation,
+)
 
 _API_DEFAULTS = (
     ("cache-control", "no-store"),
@@ -50,13 +59,13 @@ class ResponseHeadersMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        if scope["path"].startswith("/api/"):
-            defaults = self.api_defaults
-        else:
-            defaults = self.other_defaults
+        api = scope["path"].startswith("/api/")
+        defaults = self.api_defaults if api else self.other_defaults
         if not defaults:
             await self.app(scope, receive, send)
             return
+        # Shared with request.state, where authentication records the session.
+        scope.setdefault("state", {})
 
         async def send_with_defaults(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -64,6 +73,9 @@ class ResponseHeadersMiddleware:
                 for name, value in defaults:
                     if name not in headers:
                         headers.append(name, value)
+                generation = admitted_session_generation(scope) if api else None
+                if generation is not None:
+                    headers[SESSION_GENERATION_HEADER] = generation
             await send(message)
 
         await self.app(scope, receive, send_with_defaults)

@@ -104,6 +104,8 @@ class ErrorCodes(int, Enum):
     ICON_NOT_ATTACHABLE = 9076
     # 9080-9089: reserved for the web-next migration (browser session and web
     # app serving). Add members here only from those PRs.
+    # The page that sent a request was loaded under another browser session.
+    SESSION_GENERATION_MISMATCH = 9080
 
 
 class NotFoundException(Exception):

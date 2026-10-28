@@ -14,6 +14,9 @@ from fastapi import FastAPI
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from eneo.authentication.browser_session_router import (
+    router as browser_session_router,
+)
 from eneo.main.config import get_settings
 from eneo.server.middleware.compression import SelectiveGZipMiddleware
 from eneo.server.middleware.response_headers import ResponseHeadersMiddleware
@@ -56,6 +59,7 @@ class _DocumentationOff:
 def install_browser_platform(app: FastAPI) -> None:
     settings = get_settings()
     app.include_router(runtime_config_router, prefix=settings.api_prefix)
+    app.include_router(browser_session_router, prefix=settings.api_prefix)
     browser_platform_on = settings.browser_session_enabled or settings.web_app_enabled
     if browser_platform_on:
         log_unlinked_runtime_values(settings)

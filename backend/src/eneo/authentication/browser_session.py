@@ -1,9 +1,12 @@
+import base64
+import hashlib
 import time
 from collections.abc import Mapping
 
 import jwt
 from starlette.requests import HTTPConnection, Request
 from starlette.responses import Response
+from starlette.types import Scope
 
 from eneo.main.config import Settings, get_settings
 from eneo.main.logging import get_logger
@@ -24,6 +27,21 @@ TXN_COOKIE = "__Host-eneo_oidc_txn"
 DEV_TXN_COOKIE = "eneo_web_txn"
 # web-next's session and txn cookies, also cleared at logout.
 NEXT_ERA_COOKIES = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
+
+# The session generation: on a response, the cookie session the request was
+# admitted with; on a request, the one the sending page was loaded with. A
+# fingerprint, neither a credential nor a CSRF token.
+SESSION_GENERATION_HEADER = "Eneo-Session-Generation"
+# Request-state keys: the generation of the cookie OAUTH2_SCHEME selected, and
+# the same value once canonical authentication admitted the request.
+_SELECTED_GENERATION = "browser_session_selected_generation"
+_ADMITTED_GENERATION = "browser_session_admitted_generation"
+
+
+class SessionGenerationMismatchError(Exception):
+    """The page that sent the request was loaded under another session."""
+
+    code = "session_generation_mismatch"
 
 
 def browser_request_allowed(method: str, headers: Mapping[str, str]) -> bool:
@@ -106,9 +124,59 @@ def session_token_from_request(request: Request) -> str | None:
     if not settings.browser_session_enabled:
         return None
     token = session_cookie(request, settings)
-    if not token:
+    if not token or not gate_allows(request):
         return None
-    return token if gate_allows(request) else None
+    generation = session_generation(token)
+    request.scope.setdefault("state", {})[_SELECTED_GENERATION] = generation
+    return token
+
+
+def session_generation(token: str) -> str:
+    """The generation of a session: 128 bits of the SHA-256 of its exact token.
+
+    A different credential has a different generation, and it reveals
+    nothing of the token. Not a session id: re-issuing an identical token
+    repeats it, which is fine, since only a different credential must never be
+    taken for the one a page was loaded with.
+    """
+    digest = hashlib.sha256(token.encode()).digest()[:16]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def admit_session(connection: HTTPConnection) -> None:
+    """Record that canonical authentication admitted this request.
+
+    When its credential was the session cookie, the response names the
+    cookie's generation (``ResponseHeadersMiddleware``). Selection alone is
+    not enough: the cookie is read before its token is verified.
+    """
+    state = connection.scope.get("state", {})
+    if _SELECTED_GENERATION in state:
+        state[_ADMITTED_GENERATION] = state[_SELECTED_GENERATION]
+
+
+def admitted_session_generation(scope: Scope) -> str | None:
+    return scope.get("state", {}).get(_ADMITTED_GENERATION)
+
+
+def refuse_superseded_session(request: Request, token: str) -> None:
+    """Refuse a request from a page loaded under another session.
+
+    The page names the generation it was loaded with; when the cookie now
+    holds another credential (another tab signed in or out), acting on it
+    would act as someone the page does not show. Without the header nothing
+    is compared.
+    """
+    expected = request.headers.get(SESSION_GENERATION_HEADER)
+    if expected is None or expected == session_generation(token):
+        return
+    logger.info(
+        "browser_session_superseded",
+        extra={"method": request.method, "path": request.url.path},
+    )
+    raise SessionGenerationMismatchError(
+        "The browser session changed after this page was loaded."
+    )
 
 
 def _set_cookie(
