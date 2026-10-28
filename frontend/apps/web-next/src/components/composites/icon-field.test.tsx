@@ -88,16 +88,17 @@ describe("IconField", () => {
     "reports a refused %i upload to the refusal owner once, then shows its own error",
     async (status, code) => {
       const onSave = vi.fn(async () => {});
+      const refused = Response.json({ message: "Refused", eneo_error_code: code }, { status });
 
-      const fetchMock = upload(onSave, () =>
-        Response.json({ message: "Refused", eneo_error_code: code }, { status })
-      );
+      const fetchMock = upload(onSave, () => refused);
 
       await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
       expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/icons/`, expect.anything());
       expect(rawRefusal).toHaveBeenCalledTimes(1);
       expect(rawRefusal).toHaveBeenCalledWith(expect.any(Response), `${API_BASE}/api/v1/icons/`);
       expect(onSave).not.toHaveBeenCalled();
+      // The owner read its copy; the upload's own response is still unread.
+      await expect(refused.json()).resolves.toMatchObject({ message: "Refused" });
     }
   );
 });
