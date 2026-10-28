@@ -48,7 +48,8 @@ complete bundle only after component checks and a combined smoke test pass.
 
 Download `release.env` and `release.json` from the selected GitHub release, or
 the completed workflow artifact for a development build. The JSON manifest
-records the version, revision and three immutable image digests. Take
+records the version, revision and the immutable digests of the four
+application images (backend, frontend, web-next and tool runtime). Take
 deployment templates from that recorded source revision as well. The
 environment file supplies those references to Compose, including the backend
 image used by workers and initialization jobs. After configuring the usual

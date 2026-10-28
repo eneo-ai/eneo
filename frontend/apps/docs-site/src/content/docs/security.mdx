@@ -7,9 +7,9 @@ import { Callout } from "nextra/components";
 # Security at Eneo
 
 Municipalities and agencies run Eneo with their own users, documents and model
-providers. This page explains how we protect them, from the people who decide
-what goes into the platform to the evidence that comes with every release. It is
-an overview: each section links to the page that owns the details.
+providers. This page explains how we protect them, from who decides what goes
+into the platform to the evidence that comes with every release. Each section
+links to the page that has the details.
 
 <Callout type="warning">
   Found a vulnerability? Report it privately on GitHub through [**Security →
@@ -18,6 +18,33 @@ an overview: each section links to the page that owns the details.
   you cannot use GitHub, e-mail `security@sundsvall.se`. Never report it in a
   public issue, pull request or discussion.
 </Callout>
+
+**In short**
+
+- The Core Maintainers at Sundsvalls kommun decide what is merged and
+  released. Everyone else contributes from a fork.
+- Every change passes CI, dependency and secret checks and the merge queue.
+  Changes to a release also need a second Core Maintainer's approval.
+- In a running deployment, every endpoint declares who may call it, data is
+  kept within its tenant, and code written by the model runs in a separate,
+  isolated tool runtime.
+- Every release comes with a release bundle of exact image digests, SBOMs and
+  attestations that you can verify.
+- Vulnerabilities are reported privately, fixed on the supported releases and
+  published as GitHub Security Advisories.
+
+**Where to start**
+
+- **Evaluating Eneo**, for example as a security officer or in a procurement:
+  read this page, then [Governance and Roles](/contributing/governance),
+  [Release SBOMs and Attestations](/docs/release-sboms) and the
+  [security policy](https://github.com/eneo-ai/eneo/security/policy).
+- **Running Eneo:** follow [Deploy Eneo](/guides/deployment), read
+  [Tool Runtime Security](/docs/tool-runtime-security) and set up the
+  [audit log](/guides/audit-logging). Install patch releases as they appear
+  (see [Vulnerabilities and updates](#vulnerabilities-and-updates)).
+- **Contributing:** start with [Contributing to Eneo](/contributing) and
+  [Security for Contributors](/contributing/security).
 
 ## Who is responsible for what
 
@@ -33,6 +60,42 @@ merge flow. `.github/CODEOWNERS` names the Core Maintainers as owners of the
 whole repository, so GitHub asks them to review every pull request. The roles,
 the permission table and the reasons behind them are in
 [Governance and Roles](/contributing/governance).
+
+## Protection in a deployment
+
+| Concern                       | How Eneo handles it                                                                                                                                                                    | Explanation                                                      | Configure or operate                                                                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signing in                    | Username and password, per-tenant OIDC federation, SCIM provisioning and scoped API keys.                                                                                              | [Authentication Architecture](/docs/authentication-architecture) | [Authentication & OIDC](/guides/oidc-federation), [SCIM Provisioning](/guides/scim-provisioning)                                                |
+| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check the tenant, space and resource.                                                         | [Security for Contributors](/contributing/security)              | Roles and permissions in **Admin**                                                                                                              |
+| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                    | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
+| Code and files from the model | Run in a separate tool runtime with no access to the database, keys or the internet. Each job is confined with Landlock where the host kernel supports it; operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
+| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                       | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
+| Network, TLS and secrets      | The database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                           | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
+| Traceability                  | A per-tenant audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                          | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
+
+## Evidence you can inspect
+
+You do not have to take this page on trust:
+
+- **Release bundle.** Each release publishes `release.json` and `release.env`
+  with the version, source revision and immutable image digests. Deploy by
+  digest from the bundle rather than from a moving tag.
+- **SBOMs.** Every release carries CycloneDX and SPDX SBOMs for each published
+  image, plus SBOMs of the backend's Python runtime and the frontend's source
+  dependencies. They show what is inside an image, not that it is free of
+  vulnerabilities.
+- **Attestations.** Images, release bundles and SBOM files carry GitHub
+  artifact attestations, so you can verify with `gh attestation verify` that
+  they were built by Eneo's workflows from the stated source.
+- **Rules and advisories.** The active
+  [rulesets](https://github.com/eneo-ai/eneo/rules) and the published
+  [security advisories](https://github.com/eneo-ai/eneo/security/advisories)
+  are public.
+
+[Release SBOMs and Attestations](/docs/release-sboms) explains the files and
+how to check a release. The bundled object store is built by Eneo from a pinned
+SeaweedFS source with its own supply-chain checks; see
+[Object Content Architecture](/docs/object-content-architecture).
 
 ## From change to release
 
@@ -71,9 +134,10 @@ The rules are public at
   that survive the evidence. The author fixes or answers each finding. The
   review is advisory: it cannot change the repository, approve or merge, and
   it is not a full security audit
-  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work), [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)). A separate advisory
-  report lists dead code and unused dependencies on pull requests into `develop` and
-  the release branches.
+  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work),
+  [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)).
+  A separate advisory report lists dead code and unused dependencies on pull
+  requests into `develop` and the release branches.
 - **How a release is published.** A `v*` tag starts the publication workflow.
   It builds the images, checks the runtimes, blocks fixable high and critical
   vulnerabilities in the frontend and tool runtime images, runs a combined
@@ -102,45 +166,6 @@ Some choices are deliberate, and some checks have known gaps:
 
 Automated checks find known patterns and known vulnerabilities, not design
 flaws; that is what review is for.
-
-## Protection in a deployment
-
-| Concern                       | How Eneo handles it                                                                                                                                                                    | Read more                                                        |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Signing in                    | Username and password, per-tenant OIDC federation, SCIM provisioning and scoped API keys.                                                                                              | [Authentication Architecture](/docs/authentication-architecture) |
-| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check the tenant, space and resource.                                                         | [Security for Contributors](/contributing/security)              |
-| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                    | [API Key Management](/docs/api-key-management)                   |
-| Code and files from the model | Run in a separate tool runtime with no access to the database, keys or the internet. Each job is confined with Landlock where the host kernel supports it; operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             |
-| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                       | [Object Content Architecture](/docs/object-content-architecture) |
-| Traceability                  | A per-tenant audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                          | [Audit Logging](/docs/audit-logging)                             |
-
-Several protections depend on the deployment. The
-[deployment guide](/guides/deployment) describes the internal networks, TLS and
-secrets the operator sets up.
-
-## Evidence you can inspect
-
-You do not have to take this page on trust:
-
-- **Release bundle.** Each release publishes `release.json` and `release.env`
-  with the version, source revision and immutable image digests. Deploy by
-  digest from the bundle rather than from a moving tag.
-- **SBOMs.** Every release carries CycloneDX and SPDX SBOMs for each published
-  image, plus SBOMs of the backend's Python runtime and the frontend's source
-  dependencies. They show what is inside an image, not that it is free of
-  vulnerabilities.
-- **Attestations.** Images, release bundles and SBOM files carry GitHub
-  artifact attestations, so you can verify with `gh attestation verify` that
-  they were built by Eneo's workflows from the stated source.
-- **Rules and advisories.** The active
-  [rulesets](https://github.com/eneo-ai/eneo/rules) and the published
-  [security advisories](https://github.com/eneo-ai/eneo/security/advisories)
-  are public.
-
-[Release SBOMs](/docs/release-sboms) explains the files and how to verify
-them. The bundled object store is built by Eneo from a pinned SeaweedFS source
-with its own supply-chain checks; see
-[Object Content Architecture](/docs/object-content-architecture).
 
 ## Vulnerabilities and updates
 
@@ -173,7 +198,6 @@ exceptions are recorded.
 Vulnerable dependencies are reported by Dependabot alerts and by the lockfile
 audit in CI, which also runs every week. The Core Maintainers patch them in
 focused pull requests and carry the fixes to the supported release lines.
-Automatic Dependabot update pull requests are paused for now.
 
 For operators, staying secure means installing patch releases. A new base image
 does not change an image that is already published: fixes reach a deployment
@@ -181,10 +205,7 @@ only through a new Eneo release.
 
 ## Take part
 
-- Report a suspected vulnerability privately, as described at the top of this
-  page.
-- Review open pull requests. Anyone can comment, and other reviews often find
-  problems early.
-- Contribute a fix from a fork; see [Contributing to Eneo](/contributing).
-- If your organisation runs Eneo and wants to build it with us, contact
-  `digitalisering@sundsvall.se` about becoming a Collaborator.
+To contribute a fix or review a pull request, start with
+[Contributing to Eneo](/contributing). To build Eneo with us as a partner
+organisation, see
+[how to become a Collaborator](/contributing/governance#how-does-my-organisation-become-a-collaborator).

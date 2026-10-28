@@ -1,6 +1,6 @@
 # Documentation
 
-Welcome to the Eneo technical documentation! This section covers the core concepts, architecture, and API reference for the Eneo platform.
+This section explains how Eneo works: its architecture, its security controls and the API.
 
 ## Getting Started
 
@@ -15,7 +15,9 @@ Set up a development instance and find your way around:
 - Default login and where each service listens
 - Common issues and where to get help
 
-## Technical Documentation
+## Architecture
+
+How Eneo is built and how its main subsystems work.
 
 ### [Architecture](/docs/architecture)
 
@@ -26,33 +28,6 @@ Understand how Eneo is built:
 - Database schema and migrations
 - Authentication and authorization
 - Real-time communication (SSE, WebSockets)
-
-### [Security at Eneo](/docs/security)
-
-One overview of how Eneo is secured, with links to the details:
-
-- Who decides what is merged and released
-- The checks every change passes and how a release is published
-- Protection in a running deployment
-- Evidence you can verify: release bundle, SBOMs and attestations
-- How vulnerabilities are reported, fixed and published
-
-### [Authentication Architecture](/docs/authentication-architecture)
-
-Technical reference for the OIDC authentication system:
-
-- OIDC protocol flow, step by step
-- State tokens, Redis state cache, and redirect URI handling
-- Token auth method selection and tenant state validation
-
-### [Module Authentication](/docs/module-authentication)
-
-How optional module applications reuse the Eneo session:
-
-- The module auth broker and its trust boundaries
-- Login handoff through one-time tickets
-- Credential lifetimes, refresh, and failure modes
-- Registration and binding model
 
 ### [Tools and MCP Architecture](/docs/tool-architecture)
 
@@ -80,14 +55,6 @@ The servers Eneo hosts in its own backend:
 - The placement rule: what belongs inside the backend and what does not
 - Adding a new built-in server
 
-### [Tool Runtime Security](/docs/tool-runtime-security)
-
-How the isolated runtime contains model-written code and untrusted files:
-
-- Design assumptions and the six layers of separation
-- Per-job process confinement, engine hardening and the container
-- What is not covered, and the checklist before raising a classification
-
 ### [Object Content Architecture](/docs/object-content-architecture)
 
 Understand how Eneo stores and protects durable file bytes:
@@ -97,14 +64,35 @@ Understand how Eneo stores and protects durable file bytes:
 - Database/bucket binding and failure behavior
 - SeaweedFS image build, provenance, and SBOM attestations
 
-### [Audit Logging](/docs/audit-logging)
+### [Token Counting](/docs/token-counting)
 
-Audit trails for compliance and security:
+How Eneo tracks token usage for LLM requests:
 
-- How audit logs are created and stored
-- Retention policies and conversation retention hierarchy
-- Viewing, exporting, and configuring audit logs
-- Adding audit logging to new features
+- Accurate counts from major providers
+- Estimation for self-hosted models
+- How token data flows to Insights dashboards
+
+## Security
+
+Start with [Security at Eneo](/docs/security); the other pages explain each control in detail.
+
+### [Security at Eneo](/docs/security)
+
+One overview of how Eneo is secured, with links to the details:
+
+- Who decides what is merged and released
+- The checks every change passes and how a release is published
+- Protection in a running deployment
+- Evidence you can verify: release bundle, SBOMs and attestations
+- How vulnerabilities are reported, fixed and published
+
+### [Authentication Architecture](/docs/authentication-architecture)
+
+Technical reference for the OIDC authentication system:
+
+- OIDC protocol flow, step by step
+- State tokens, Redis state cache, and redirect URI handling
+- Token auth method selection and tenant state validation
 
 ### [API Key Management](/docs/api-key-management)
 
@@ -115,15 +103,33 @@ Programmatic access with scoped keys:
 - Authentication flow, rate limiting, and guardrails
 - Key lifecycle: creation and rotation
 
-### [Token Counting](/docs/token-counting)
+### [Module Authentication](/docs/module-authentication)
 
-How Eneo tracks token usage for LLM requests:
+How optional module applications reuse the Eneo session:
 
-- Accurate counts from major providers
-- Estimation for self-hosted models
-- How token data flows to Insights dashboards
+- The module auth broker and its trust boundaries
+- Login handoff through one-time tickets
+- Credential lifetimes, refresh, and failure modes
+- Registration and binding model
 
-### [Release SBOMs](/docs/release-sboms)
+### [Audit Logging](/docs/audit-logging)
+
+Audit trails for compliance and security:
+
+- How audit logs are created and stored
+- Retention policies and conversation retention hierarchy
+- Viewing, exporting, and configuring audit logs
+- Adding audit logging to new features
+
+### [Tool Runtime Security](/docs/tool-runtime-security)
+
+How the isolated runtime contains model-written code and untrusted files:
+
+- Design assumptions and the six layers of separation
+- Per-job process confinement, engine hardening and the container
+- What is not covered, and the checklist before raising a classification
+
+### [Release SBOMs and Attestations](/docs/release-sboms)
 
 Downloadable SBOMs and attestations for released artifacts:
 
@@ -131,6 +137,8 @@ Downloadable SBOMs and attestations for released artifacts:
 - Frontend source dependency inventory from the release lockfile
 - Human-readable package lists for quick review
 - Image digests, checksums, and provenance verification
+
+## Reference
 
 ### [API Reference](/docs/api)
 

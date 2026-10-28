@@ -1,8 +1,14 @@
 # Audit Logging (Technical)
 
-Audit logging is a first-class subsystem in Eneo for security, compliance, and traceability. It records actions across the platform, stores them in PostgreSQL, and exposes controlled access for admins.
+The audit log records who did what, and when, in each tenant. This page explains how events are written, stored, read, kept and exported. For the administrator's guide, see [Audit Logging](/guides/audit-logging); for how the audit log fits with Eneo's other security controls, see [Security at Eneo](/docs/security).
 
-For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
+**In short**
+
+- Events are written through `AuditService` (`log_async` is preferred and queues an ARQ job) and stored in the PostgreSQL table `audit_logs`.
+- Logging is switched on or off per tenant with the `audit_logging_enabled` feature flag, with category and action overrides. Changes apply to new events only.
+- Reading the log requires an access justification session (`POST /api/v1/audit/access-session`). A session lasts one hour, and a user can open at most five per hour.
+- Retention is set per tenant; the default is 365 days (range 1–2555), and a daily job deletes older entries.
+- Exports up to 50,000 records are synchronous (at most 100,000 with `max_records`); larger exports run as async jobs whose files are kept for 24 hours.
 
 ## High-level architecture
 
@@ -10,11 +16,11 @@ Audit events are created through the `AuditService` application layer:
 
 1. API routes/services call `log_async` (preferred) or `log` (synchronous).
 2. `log_async` enqueues a background job in ARQ (Redis-backed).
-3. The worker persists the audit log in PostgreSQL.
+3. A worker writes the event to PostgreSQL.
 4. Retention is enforced by a scheduled purge job.
 5. Exports are generated via the `AuditExportService` (sync or async job).
 
-Audit logging is gated by:
+Two settings decide whether an event is logged:
 
 - The `audit_logging_enabled` feature flag (a kill switch, evaluated per tenant).
 - Per-tenant audit configuration (category-level and action-level overrides).
@@ -31,7 +37,7 @@ Key fields include:
 - `metadata` (JSONB)
 - `outcome`, `timestamp`
 
-Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
+All metadata uses the `AuditMetadata` schema, so every entry has the same shape. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
 
 ## Configuration model
 
@@ -113,11 +119,6 @@ Endpoint: `POST /api/v1/audit/logs/export/async`
 
 Async exports are streamed and resilient for large datasets. Each tenant can have at most two async exports running at once. Export files are retained for 24 hours before cleanup.
 
-## UI behavior notes
-
-- Free-text search matches the audit log description. Include names or identifiers in descriptions if you want them to be searchable.
-- Access to the audit log view is guarded by an access justification session.
-
 ## Implementation example
 
 ```python
@@ -159,3 +160,10 @@ await audit_service.log_async(
 ## Roadmap
 
 We plan to add optional external audit log storage (e.g., SIEM or analytics sink) to reduce long-term load on the primary database while keeping the same access controls and retention guarantees.
+
+## Related pages
+
+- [Audit Logging guide](/guides/audit-logging) for administrators
+- [API Key Management](/docs/api-key-management) for key lifecycle events
+- [Module Authentication](/docs/module-authentication) for module ticket and configuration events
+- [Authentication Architecture](/docs/authentication-architecture) for user provisioning and federation events

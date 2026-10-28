@@ -3,17 +3,35 @@
 Modules are optional web applications that run next to an Eneo installation
 on their own domains — for example Tal till text (speech-to-text). A module
 never talks to the identity provider and never stores user passwords. Instead,
-Eneo's **module auth broker** hands a logged-in Eneo user over to the module
+Eneo's **module auth broker** hands a signed-in Eneo user over to the module
 through a one-time ticket, and the module then acts with short-lived,
 module-scoped credentials.
 
 import { Callout } from "nextra/components";
 
+**In short**
+
+- Eneo is the only OIDC client. A module gets the user through a one-time
+  ticket that is valid for 30 seconds (`MODULE_AUTH_TICKET_TTL_SECONDS`).
+- Every call from a module backend sends two credentials: the module user
+  token and the bound `sk_` key. Eneo checks the live state on every call, so
+  disabling the user, tenant, key or module assignment takes effect on the
+  next request.
+- A module token lasts 60 minutes (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`) and can
+  be refreshed for up to 8 hours (`MODULE_AUTH_MAX_SESSION_HOURS`). After that
+  the module starts a new handoff.
+- The module must check `state` against its own cookie and accept each value
+  once, and its `redirect_uri` must match a registered URI exactly.
+- One module deployment serves one tenant. The operator mints a service-owned
+  `sk_` key with `write` permission, a narrow scope, an expiry and a rate
+  limit, and installs it under **Admin → Modules**.
+
 <Callout type="info">
   Looking for the step-by-step deployment commands? Use the [operator
   guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md).
   This page is the engineering reference for how the handoff works, what each
-  credential is for, and how lifetimes are designed.
+  credential is for, and how lifetimes are designed. For how modules fit with
+  Eneo's other security controls, see [Security at Eneo](/docs/security).
 </Callout>
 
 ## Why a broker
@@ -50,8 +68,8 @@ flowchart LR
 
 ## The four credentials
 
-The flow deliberately uses four different credentials with very different
-lifetimes. None of them can substitute for another.
+The flow uses four credentials. Each has its own lifetime, and none can
+replace another.
 
 | Credential | Held by | Lifetime | Purpose |
 | --- | --- | --- | --- |
@@ -340,3 +358,9 @@ configuration changes and organization assignment changes all produce audit even
   used by the Eneo API and internal MCP tools. Tokens require `token_version: 2`;
   pre-upgrade tokens and pending tickets cannot be exchanged or renewed after
   the upgrade. Restart the Eneo login handoff when authentication is rejected.
+
+## Related pages
+
+- [API Key Management](/docs/api-key-management#rotation) for service keys and rotation
+- [Authentication Architecture](/docs/authentication-architecture#eneo-session-identity) for the session identity contract
+- [Audit Logging](/docs/audit-logging) for the ticket and configuration events

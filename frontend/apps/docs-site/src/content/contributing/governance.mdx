@@ -10,14 +10,28 @@ Eneo is open source and built together by public-sector organisations.
 Municipalities and agencies run it in production, so everyone who uses it needs
 to trust what goes into the platform and what is released.
 
-We achieve that by separating two responsibilities. **Contributing** is open:
-partner organisations and anyone else can propose and build improvements.
+Eneo keeps two responsibilities apart. **Contributing** is open: partner
+organisations and anyone else can propose and build improvements.
 **Stewardship** sits with one accountable team, which decides what is merged
 and released.
 
 This page explains the roles and the protections behind them. For the practical
 steps, see [Contributing to Eneo](/contributing). For how these rules fit with
 Eneo's other security controls, see [Security at Eneo](/docs/security).
+
+**In short**
+
+- Anyone with a GitHub account can contribute from a fork. Collaborators from
+  partner organisations also get Triage rights. Core Maintainers is the only
+  team with write access.
+- On `develop`, the Core Maintainers agree on their own changes as a team,
+  without a formal approval, and approve every contribution from outside the
+  team before queueing it. The required checks and the merge queue always
+  apply, and there is no bypass.
+- On `release/**` and `main`, every pull request needs an approval from a Core
+  Maintainer other than its author.
+- Only Core Maintainers create release branches and `v*` tags, and a `v*` tag
+  starts the release build.
 
 ## Two roles
 
@@ -37,20 +51,19 @@ ships. It:
 ### Collaborators: building Eneo together
 
 Collaborators are developers from partner municipalities and government
-agencies who develop Eneo with us in the open (`@eneo-ai/collaborators`). They:
+agencies (`@eneo-ai/collaborators`). They:
 
 - build features and fixes and propose them as pull requests
 - report, discuss and organise issues
 - review each other's work and share what their organisations need
 
-Their work reaches the platform through pull requests that a Core Maintainer
-reviews.
+A Core Maintainer reviews and approves their pull requests.
 
 ### Everyone else
 
 You do not need to be in a team to contribute. Anyone with a GitHub account can
 open issues, take part in discussions, review pull requests and submit changes
-from a fork, in exactly the same way as Collaborators.
+from a fork, the same way Collaborators do, only without Triage rights.
 
 ## How a change reaches Eneo
 

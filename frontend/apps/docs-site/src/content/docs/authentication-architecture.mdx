@@ -1,22 +1,32 @@
 # Authentication Architecture
 
-Technical reference for Eneo's OIDC authentication system, including protocol details, security mechanisms, and internal components.
+This page explains how sign-in to Eneo works: the OIDC flow, the Eneo session token, local passwords and the settings that control them.
 
 import { Callout, Tabs, Steps } from 'nextra/components'
+
+**In short**
+
+- Sign-in uses the OAuth 2.0 Authorization Code Flow through `/api/v1/auth/initiate` and `/api/v1/auth/callback`. The `state` is a JWT that the server signs (HS256) and that expires after 600 seconds (`oidc_state_ttl_seconds`).
+- An Eneo session needs `token_version` `2`, and Eneo finds the account by both `user_id` and `tenant_id`. After this upgrade every user signs in again; update all API instances and workers together.
+- A password that an administrator sets is a one-time password. Password expiry (`max_age_days`) is off by default.
+- No account is created at sign-in by default (`tenant.provisioning: false`). When it is on, the tenant needs a domain allowlist, the email domain must match and the identity provider must send `email_verified: true`.
+- `ENCRYPTION_KEY` is required when `FEDERATION_ENABLED=true`. Back it up: without it, every tenant's identity provider must be registered again.
 
 <Callout type="info">
   Looking to set up authentication? See the [OIDC Federation](/guides/oidc-federation) guides
   ([single-tenant](/guides/oidc-federation/single-tenant) or
   [multi-tenant](/guides/oidc-federation/multi-tenant)).
   For how optional module applications reuse the Eneo session through one-time
-  tickets, see [Module Authentication](/docs/module-authentication).
+  tickets, see [Module Authentication](/docs/module-authentication). For how
+  sign-in fits with Eneo's other security controls, see [Security at
+  Eneo](/docs/security).
 </Callout>
 
 ---
 
 ## OIDC Protocol Flow
 
-Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`) and use server-signed state JWTs (HS256) for security.
+Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`) and protect `state` with a JWT that the server signs with HS256.
 
 ### Overview
 
@@ -684,3 +694,11 @@ These endpoints do NOT require authentication:
 | `GET` | `/api/v1/auth/tenants` | List active tenants with a slug for the selector |
 | `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` query parameters) |
 | `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`) and issue the Eneo session token |
+
+## Related pages
+
+- [Authentication & OIDC](/guides/oidc-federation) for the setup steps
+- [SCIM Provisioning](/guides/scim-provisioning) for provisioning users and groups from the identity provider
+- [Module Authentication](/docs/module-authentication) for how modules reuse the Eneo session
+- [API Key Management](/docs/api-key-management) for service keys and unattended access
+- [Audit Logging](/docs/audit-logging) for the events sign-in and federation changes record
