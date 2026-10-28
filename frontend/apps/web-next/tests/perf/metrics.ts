@@ -48,24 +48,34 @@ export function summarize(samples: Samples) {
  * The chat route's LCP is informational (`stable: null`, and no comparison
  * rule): its largest paint is always the greeting h1, whose text useNow() keeps
  * empty in the server HTML and through hydration, so it paints only after a
- * second, post-hydration React render. That measures React's commit timing, not
- * something the user waits for; the chat page's load metric is chat readiness
- * (coldChatReadyMs, warmChatReadyMs).
+ * second, post-hydration React render, later than the composer the user waits
+ * for. The chat page's load metric is chat readiness (coldChatReadyMs,
+ * warmChatReadyMs). On Next both still fall in two clusters: the page streams in
+ * a Suspense boundary that React reveals on the next frame when it arrives
+ * before the shell's first frame, and otherwise about 300 ms after that frame.
+ *
+ * A measurement only one of the runs has is never stable.
  */
 export function compareRuns(first: Metrics, second: Metrics) {
-  return Object.entries(first).flatMap(([route, byMetric]) =>
-    Object.entries(byMetric).map(([metric, { median }]) => {
-      // A metric the second run lacks compares as NaN, which is never stable.
-      const other = second[route]?.[metric]?.median ?? Number.NaN;
-      const apart = Math.abs(median - other);
+  const routes = new Set([...Object.keys(first), ...Object.keys(second)]);
+  return [...routes].flatMap((route) => {
+    const metrics = new Set([
+      ...Object.keys(first[route] ?? {}),
+      ...Object.keys(second[route] ?? {})
+    ]);
+    return [...metrics].map((metric) => {
+      const a = first[route]?.[metric]?.median ?? Number.NaN;
+      const b = second[route]?.[metric]?.median ?? Number.NaN;
+      const apart = Math.abs(a - b);
       let stable: boolean | null;
-      if (route === CHAT_ROUTE && /^(cold|warm)LcpMs$/.test(metric)) stable = null;
+      if (Number.isNaN(apart)) stable = false;
+      else if (route === CHAT_ROUTE && /^(cold|warm)LcpMs$/.test(metric)) stable = null;
       else if (metric === "inpMs") stable = apart <= 8;
       else if (metric.endsWith("Cls")) stable = apart <= 0.01;
-      else stable = apart <= 0.15 * Math.max(median, other);
-      return { route, metric, medians: [median, other], stable };
-    })
-  );
+      else stable = apart <= 0.15 * Math.max(a, b);
+      return { route, metric, medians: [a, b], stable };
+    });
+  });
 }
 
 /**

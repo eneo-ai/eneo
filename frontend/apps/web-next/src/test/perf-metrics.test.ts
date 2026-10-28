@@ -5,8 +5,27 @@ import {
   parseRuns,
   quantile,
   summarize,
-  worstInteractionMs
+  worstInteractionMs,
+  type Metrics
 } from "../../tests/perf/metrics";
+
+/** Summaries from medians alone (p75 plays no part in the stability rule). */
+function medians(values: Record<string, Record<string, number>>): Metrics {
+  return Object.fromEntries(
+    Object.entries(values).map(([route, byMetric]) => [
+      route,
+      Object.fromEntries(
+        Object.entries(byMetric).map(([metric, median]) => [metric, { median, p75: median }])
+      )
+    ])
+  );
+}
+
+function verdicts(first: Metrics, second: Metrics) {
+  return Object.fromEntries(
+    compareRuns(first, second).map(({ route, metric, stable }) => [`${route} ${metric}`, stable])
+  );
+}
 
 describe("perf baseline metrics", () => {
   it("counts only interactions that started at or after the measurement start", () => {
@@ -38,15 +57,6 @@ describe("perf baseline metrics", () => {
   });
 
   it("judges two consecutive runs by the stability rule", () => {
-    const medians = (values: Record<string, Record<string, number>>) =>
-      Object.fromEntries(
-        Object.entries(values).map(([route, byMetric]) => [
-          route,
-          Object.fromEntries(
-            Object.entries(byMetric).map(([metric, median]) => [metric, { median, p75: median }])
-          )
-        ])
-      );
     const first = medians({
       [CHAT_ROUTE]: {
         coldLcpMs: 324,
@@ -57,8 +67,7 @@ describe("perf baseline metrics", () => {
         coldCls: 0.005,
         warmCls: 0
       },
-      "/spaces/list": { coldLcpMs: 100, htmlEncodedBytes: 1_000, warmCls: 0 },
-      "/admin/users": { coldLcpMs: 100 }
+      "/spaces/list": { coldLcpMs: 100, htmlEncodedBytes: 1_000, warmCls: 0 }
     });
     const second = medians({
       [CHAT_ROUTE]: {
@@ -72,10 +81,7 @@ describe("perf baseline metrics", () => {
       },
       "/spaces/list": { coldLcpMs: 85, htmlEncodedBytes: 1_000, warmCls: 0 }
     });
-    const verdicts = Object.fromEntries(
-      compareRuns(first, second).map(({ route, metric, stable }) => [`${route} ${metric}`, stable])
-    );
-    expect(verdicts).toEqual({
+    expect(verdicts(first, second)).toEqual({
       // Informational: the greeting h1 paints after a post-hydration render.
       [`${CHAT_ROUTE} coldLcpMs`]: null,
       [`${CHAT_ROUTE} warmLcpMs`]: null,
@@ -88,9 +94,24 @@ describe("perf baseline metrics", () => {
       [`${CHAT_ROUTE} warmCls`]: false,
       "/spaces/list coldLcpMs": true,
       "/spaces/list htmlEncodedBytes": true,
-      "/spaces/list warmCls": true,
-      // A metric the second run lacks is not stable.
-      "/admin/users coldLcpMs": false
+      "/spaces/list warmCls": true
     });
+  });
+
+  it("treats a measurement only one run has as unstable, whichever run lacks it", () => {
+    const full = medians({
+      [CHAT_ROUTE]: { coldChatReadyMs: 200, warmChatReadyMs: 150, coldLcpMs: 300 },
+      "/admin/users": { coldLcpMs: 100 }
+    });
+    const partial = medians({ [CHAT_ROUTE]: { coldChatReadyMs: 200 } });
+    const expected = {
+      [`${CHAT_ROUTE} coldChatReadyMs`]: true,
+      [`${CHAT_ROUTE} warmChatReadyMs`]: false,
+      // Missing is a gap even for the informational chat LCP.
+      [`${CHAT_ROUTE} coldLcpMs`]: false,
+      "/admin/users coldLcpMs": false
+    };
+    expect(verdicts(full, partial)).toEqual(expected);
+    expect(verdicts(partial, full)).toEqual(expected);
   });
 });
