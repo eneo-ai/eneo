@@ -126,6 +126,36 @@ class TestPurposeModels:
 
 
 class TestCreateCapabilityServer:
+    @pytest.mark.parametrize("approved", [True, False])
+    async def test_create_readiness_uses_the_saved_tool(self, monkeypatch, approved):
+        service, repo, tool_repo, user = _make_service()
+        saved = _make_server(user.tenant_id)
+        saved_tool = _make_tool(approved=approved)
+        saved_tool.mcp_server_id = saved.id
+        repo.add.return_value = saved
+        tool_repo.upsert_by_server_and_name.return_value = saved_tool
+        monkeypatch.setattr(
+            service,
+            "_test_connection_and_discover_tools",
+            AsyncMock(
+                return_value=(
+                    [{"name": "search", "description": "Discovered description"}],
+                    ConnectionResult(success=True),
+                )
+            ),
+        )
+
+        result = await service.create_mcp_server(
+            name="Provider",
+            http_url="https://provider.example/mcp",
+            purpose=saved.purpose,
+        )
+
+        expected = None if approved else "no_approved_tools"
+        assert result.server.readiness_reason == expected
+        assert result.server.is_enabled is False
+        assert result.connection.tools_discovered == 1
+
     @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
     async def test_capability_server_is_created_inactive(self, monkeypatch, purpose):
         service, mock_repo, _, _ = _make_service()

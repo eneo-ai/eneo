@@ -52,10 +52,10 @@ class MCPServerRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
-        # Audience groups and the backing image model are part of the
-        # provider's identity for resolution, so every single-row read
-        # carries them.
+        # Every read needs the tools used by readiness_reason, as well as
+        # the provider's audience and backing model.
         self._options = [
+            selectinload(self._db_model.tools),
             selectinload(self._db_model.user_groups),
             *backing_model_options(),
         ]
@@ -162,12 +162,10 @@ class MCPServerRepoImpl(
             select(self._db_model)
             .where(self._db_model.tenant_id == tenant_id)
             .options(
-                selectinload(self._db_model.tools),
-                selectinload(self._db_model.user_groups),
+                *self._options,
                 selectinload(self._db_model.security_classification).selectinload(
                     SecurityClassificationDBModel.tenant
                 ),
-                *backing_model_options(),
             )
             .order_by(self._db_model.created_at, self._db_model.id)
         )

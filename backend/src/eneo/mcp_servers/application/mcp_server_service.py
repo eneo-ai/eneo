@@ -674,7 +674,10 @@ class MCPServerService:
                 meta=tool_def.get("meta"),
                 is_enabled_by_default=True,
             )
-            await self.tool_repo.upsert_by_server_and_name(tool)
+            # The server was read before discovery was persisted. Include the
+            # saved tools so the create response reports the same readiness.
+            saved_tool = await self.tool_repo.upsert_by_server_and_name(tool)
+            mcp_server.tools.append(saved_tool)
 
         deactivated_server_ids = []
         if activate:
