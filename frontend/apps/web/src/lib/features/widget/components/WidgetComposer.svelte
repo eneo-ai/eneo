@@ -70,7 +70,7 @@
 
 <div class="widget-input flex flex-col gap-2">
   <form
-    class="widget-composer border-default bg-primary focus-within:border-stronger flex items-end gap-2 border px-3 py-2"
+    class="widget-composer bg-primary flex items-end gap-2 border px-3 py-2"
     onsubmit={(event) => {
       event.preventDefault();
       submit();
@@ -102,6 +102,9 @@
 <style>
   .widget-composer {
     border-radius: calc(var(--widget-radius) + 4px);
+    /* The box is the field's only boundary, so it must read at 3:1 on both
+       surfaces (WCAG 1.4.11); the theme's hairlines are far below that. */
+    border-color: var(--widget-outline);
   }
   .widget-composer textarea {
     /* The app root is 15px. Keep phone inputs readable without disabling zoom. */

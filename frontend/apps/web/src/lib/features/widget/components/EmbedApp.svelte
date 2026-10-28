@@ -106,6 +106,7 @@
   style:--widget-on-header={header ? readableOn(header) : null}
   style:--widget-focus={focus}
   style:--widget-radius="{config.theme.radius ?? 12}px"
+  style:--widget-outline="color-mix(in srgb, var(--text-primary) 50%, transparent)"
   style:--widget-avatar-bg={avatarOnAccent ? accent : null}
   style:--widget-avatar-fg={avatarOnAccent ? readableOn(accent) : null}
 >

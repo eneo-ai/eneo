@@ -67,7 +67,7 @@
   .widget-ai-chip {
     display: inline-flex;
     align-items: center;
-    border: 1px solid var(--border-stronger);
+    border: 1px solid var(--widget-outline);
     border-radius: 999px;
     padding: 0 0.4em;
     min-height: 1.4em;
