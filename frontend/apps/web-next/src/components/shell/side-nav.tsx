@@ -2,7 +2,7 @@
 
 import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { SideNav, SideNavRenderContext } from "@astryxdesign/core/SideNav";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";

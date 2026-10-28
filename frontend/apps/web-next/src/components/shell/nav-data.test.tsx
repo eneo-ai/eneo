@@ -10,7 +10,7 @@ import { AppShellFrame } from "./app-shell";
 // server render it cannot reach the backend ("Failed to parse URL").
 const browserGet = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet } }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins for the shell's bells (they have their own tests).
 vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({

@@ -2,7 +2,7 @@
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useTranslations } from "next-intl";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "@/lib/navigation";
 import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { RemovalFocusScope } from "@/features/spaces/removal";

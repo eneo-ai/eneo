@@ -1,14 +1,19 @@
 /**
- * next/navigation for component tests. jsdom has no App Router, so a test
- * file that renders code using its hooks swaps the module for this one:
+ * The app's navigation (`@/lib/navigation`) for component tests. jsdom has no
+ * router, so a test file that renders code using it swaps the module for this
+ * one:
  *
- *   vi.mock("next/navigation", () => import("@/test/navigation"));
+ *   vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+ *
+ * (src/app code still imports next/navigation: mock that with this module.)
  *
  * The hooks then read the route the test set (`renderInApp(ui, { route })` or
  * `setRoute`), and `router` records where the app navigates. Both reset after
  * every test (src/test/setup-dom.ts).
  */
+import { createElement } from "react";
 import { vi } from "vitest";
+import type { LinkProps } from "@/lib/link";
 
 /** The route before a test sets one. */
 const HOME = "/";
@@ -46,6 +51,7 @@ export function resetNavigation(): void {
   for (const method of Object.values(router)) {
     if (vi.isMockFunction(method)) method.mockReset();
   }
+  replaceUrl.mockClear();
 }
 
 export function usePathname(): string {
@@ -58,4 +64,26 @@ export function useSearchParams(): URLSearchParams {
 
 export function useRouter(): typeof router {
   return router;
+}
+
+/** Puts `href` in the address bar, as the app's `replaceUrl` does, and reports it as the route. */
+export const replaceUrl = vi.fn((href: string | URL) => {
+  const next = new URL(href, url);
+  const route = next.pathname + next.search;
+  setRoute(route);
+  // The path, not `next`: jsdom's origin is not this module's base URL.
+  if (typeof window !== "undefined") window.history.replaceState(null, "", route + next.hash);
+});
+
+export function useSpaceSegments(): string[] {
+  return url.pathname.split("/").filter(Boolean).slice(2);
+}
+
+/** A plain anchor for `@/lib/link`: its router options do nothing here. */
+export function Link(props: LinkProps) {
+  const anchor = { ...props };
+  delete anchor.prefetch;
+  delete anchor.scroll;
+  delete anchor.replace;
+  return createElement("a", anchor);
 }

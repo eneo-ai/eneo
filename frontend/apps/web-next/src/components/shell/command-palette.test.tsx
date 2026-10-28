@@ -39,7 +39,7 @@ function descriptionOf(element: Element | null) {
 
 const recentKey = recentConversationsQueryOptions(browserApi).queryKey;
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 function seededClient() {
   const queryClient = testQueryClient();

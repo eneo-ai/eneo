@@ -1,10 +1,12 @@
+import ipaddress
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
     Field,
@@ -50,6 +52,65 @@ def _same_origin(first: str, second: str) -> bool:
         return scheme, (parts.hostname or "").lower(), port
 
     return origin(first) == origin(second)
+
+
+# Printable ASCII without space, backslash, "?" or "#": a browser reads the
+# scheme and authority of such a URL as written, while it would encode, trim or
+# reinterpret anything else, and the view links append a path and a query to it.
+_BROWSER_LITERAL_URL = re.compile(r"[!-~]+")
+_HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+# WHATWG parses a host whose last label is a number (decimal or 0x hex) as IPv4.
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
+
+
+def validate_content_base_url(url: str) -> str:
+    """An absolute http(s) URL whose origin is stored the way a browser serializes it.
+
+    The content origin is framed, compared with the Host header and put in a
+    CSP, so every reader must agree on it: the host is lowercased, an IPv6
+    address compressed and a default port dropped, and any authority a browser
+    would rewrite differently is refused. The path is kept as written; it is
+    only the prefix of the view links. Non-ASCII hosts are refused rather than
+    IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ (ß).
+    The check guarantees agreement, not reachability: a malformed punycode
+    label fails closed in the browser like any host that does not resolve.
+    Messages never repeat the URL.
+    """
+    url = url.strip()
+    if not _BROWSER_LITERAL_URL.fullmatch(url) or any(c in url for c in "\\?#"):
+        raise ValueError(
+            "must be printable ASCII without spaces, backslashes, a query or a "
+            "fragment; write an international host name in punycode (xn--...)"
+        )
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise ValueError("is not a valid URL") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an absolute http or https URL")
+    if "@" in parts.netloc:
+        raise ValueError("must not contain credentials")
+    host = parts.hostname  # lowercased by urlsplit
+    try:
+        if parts.netloc.startswith("["):
+            address = ipaddress.IPv6Address(host)
+            if address.scope_id or address.ipv4_mapped:
+                raise ValueError
+            host = f"[{address.compressed}]"
+        elif _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
+            # Dotted decimal only: no hex, octal or shortened forms.
+            host = str(ipaddress.IPv4Address(host))
+        elif not all(_HOST_LABEL.fullmatch(label) for label in host.split(".")):
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            "must name a DNS host, a dotted-decimal IPv4 address or a bracketed "
+            "IPv6 address"
+        ) from None
+    default_port = 443 if parts.scheme == "https" else 80
+    authority = host if port in (None, default_port) else f"{host}:{port}"
+    return f"{parts.scheme}://{authority}{parts.path}"
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -363,6 +424,11 @@ class Settings(BaseSettings):
     # public_origin.
     mcp_app_host_origins: list[str] = Field(default_factory=list)
 
+    @field_validator("mcp_app_content_base_url")
+    @classmethod
+    def validate_mcp_app_content_base_url(cls, v: str | None) -> str | None:
+        return None if v is None else validate_content_base_url(v)
+
     @field_validator("mcp_app_host_origins")
     @classmethod
     def validate_mcp_app_host_origins(cls, v: list[str]) -> list[str]:
@@ -500,6 +566,7 @@ class Settings(BaseSettings):
         "legacy_app_url",
         "accessibility_statement_url",
         "request_integration_form_url",
+        "mcp_app_content_base_url",
         mode="before",
     )
     @classmethod

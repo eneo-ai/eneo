@@ -14,7 +14,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn()
 }));
 vi.mock("@/lib/toast", () => ({ toast }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {

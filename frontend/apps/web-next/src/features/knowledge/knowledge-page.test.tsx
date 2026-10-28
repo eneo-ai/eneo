@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
   toasts: [] as { kind: string; message: string; description?: string }[]
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", () => ({
   useRouter: () => ({ push: () => {}, prefetch: () => {} }),
   useSearchParams: () => new URLSearchParams(state.tab ? { tab: state.tab } : {})
 }));
