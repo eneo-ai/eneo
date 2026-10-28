@@ -78,10 +78,12 @@ export async function loadSession(queryClient: QueryClient, api: EneoClient): Pr
     queryClient.query({ ...session.federationStatus, staleTime: "static" }),
     queryClient.query({ ...session.limits, staleTime: "static" }),
     // Optional during rolling deployments; an unavailable marker must not look
-    // like "never seen", and must not replace markers already known.
+    // like "never seen", and must not replace markers already known: not here,
+    // and not where this cache is hydrated into one that knows them (a
+    // refreshed Next layout), so it is dated as the oldest possible answer.
     queryClient.query({ ...session.whatsNew, staleTime: "static" }).catch(() => {
       if (queryClient.getQueryData(sessionKeys.whatsNew) === undefined) {
-        queryClient.setQueryData(sessionKeys.whatsNew, null);
+        queryClient.setQueryData(sessionKeys.whatsNew, null, { updatedAt: 0 });
       }
     })
   ]);

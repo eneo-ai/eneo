@@ -165,6 +165,21 @@ it("takes a refreshed layout's newer data without remounting the app", async () 
   expect(browserGet).not.toHaveBeenCalled();
 });
 
+it("keeps known What's new markers when a refreshed layout could not read them", async () => {
+  const { queryClient, refresh } = await renderApp();
+  backend.set(WHATS_NEW, failure);
+  backend.set(TENANT, ok({ ...signedIn.tenant, display_name: "Timrå kommun" }));
+
+  await refresh();
+
+  await waitFor(() => expect(screen.getByTestId("tenant").textContent).toBe("Timrå kommun"));
+  expect(queryClient.getQueryData(sessionKeys.whatsNew)).toEqual({
+    seen_version: "1.0.0",
+    announced_version: "1.0.0"
+  });
+  expect(screen.getByTestId("seen").textContent).toBe("1.0.0");
+});
+
 it("keeps the previous data and the app mounted when a refetch fails", async () => {
   const { queryClient } = await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
@@ -221,10 +236,15 @@ it("records What's new as seen in the session's markers, with the app still moun
 it("loads an unavailable What's new state as null: unknown markers, not a first visit", async () => {
   backend.set(WHATS_NEW, failure);
 
-  const { queryClient } = await renderApp();
+  const { queryClient, refresh } = await renderApp();
 
   expect(queryClient.getQueryData(sessionKeys.whatsNew)).toBeNull();
   expect(screen.getByTestId("seen").textContent).toBe("unknown");
+
+  // Any answer the backend gives later supersedes the fallback.
+  backend.set(WHATS_NEW, ok({ seen_version: "1.0.0", announced_version: "1.0.0" }));
+  await refresh();
+  await waitFor(() => expect(screen.getByTestId("seen").textContent).toBe("1.0.0"));
 });
 
 // Why every sign-in continues in a new document (ContinueSignedIn): a client
