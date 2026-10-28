@@ -1,3 +1,4 @@
+import ipaddress
 from urllib.parse import ParseResult, urlparse, urlsplit
 
 from eneo.main.config import serialize_origin
@@ -26,6 +27,21 @@ def _has_port_wildcard(parsed: ParseResult) -> bool:
     return host_and_port.endswith(":*")
 
 
+def _canonical_host(host: str) -> str | None:
+    """A pattern host in the form ``serialize_origin`` gives the Origin's.
+
+    An IPv6 literal is compressed, so any written form of an address matches
+    the one a browser sends; any other host is returned as is. None when the
+    host has a colon but is no IPv6 address, which matches nothing.
+    """
+    if ":" not in host:
+        return host
+    try:
+        return ipaddress.IPv6Address(host).compressed
+    except ValueError:
+        return None
+
+
 def origin_matches_pattern(origin: str, pattern: str) -> bool:
     """Whether a request's Origin matches one allowlist pattern.
 
@@ -45,7 +61,9 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
     origin_port = origin_parsed.port or (443 if origin_scheme == "https" else 80)
 
     if "://" not in pattern:
-        pattern_host = pattern.lower()
+        pattern_host = _canonical_host(pattern.lower())
+        if pattern_host is None:
+            return False
         if pattern_host.startswith("*."):
             base = pattern_host[2:]
             if not origin_host.endswith(f".{base}"):
@@ -63,7 +81,9 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
         return False
 
     pattern_scheme = pattern_parsed.scheme.lower()
-    pattern_host = pattern_parsed.hostname.lower()
+    pattern_host = _canonical_host(pattern_parsed.hostname.lower())
+    if pattern_host is None:
+        return False
 
     if pattern_scheme != origin_scheme:
         return False

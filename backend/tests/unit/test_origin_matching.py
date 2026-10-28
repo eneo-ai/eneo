@@ -127,3 +127,21 @@ def test_malformed_pattern_matches_nothing_without_raising():
     """One unparsable allowlist row must not fail every cross-origin request."""
     assert not origin_matches_pattern("http://app.example", "http://[app.example")
     assert not origin_matches_pattern("http://[::1]", "http://[::1")
+
+
+def test_ipv6_hosts_compare_in_one_form_on_both_sides():
+    """A browser sends an IPv6 origin compressed; a pattern written in another
+    form of the same address still matches, as an origin in that form does."""
+    assert origin_matches_pattern(
+        "http://[0:0:0:0:0:0:0:1]", "http://[0:0:0:0:0:0:0:1]"
+    )
+    assert origin_matches_pattern("http://[::1]", "http://[0:0:0:0:0:0:0:1]")
+    assert origin_matches_pattern(
+        "https://[2001:0db8::1]:8443", "https://[2001:0db8::1]:*"
+    )
+    assert origin_matches_pattern(
+        "https://[2001:db8::1]:8443", "https://[2001:db8::1]:*"
+    )
+    assert origin_matches_pattern("http://[0:0:0:0:0:0:0:1]", "0:0:0:0:0:0:0:1")
+    assert origin_matches_pattern("http://[::1]", "0:0:0:0:0:0:0:1")
+    assert not origin_matches_pattern("http://[::2]", "0:0:0:0:0:0:0:1")
