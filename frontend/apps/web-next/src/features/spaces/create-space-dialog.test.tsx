@@ -48,7 +48,11 @@ it("is a named modal form dialog with a labelled, required name field", async ()
   fireEvent.click(screen.getByRole("button", { name: "Ny yta" }));
   const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });
   expect(dialog.getAttribute("aria-modal")).toBe("true");
-  expect(within(dialog).getByLabelText(/Namn/).getAttribute("aria-required")).toBe("true");
+  // Required is the default and unmarked (decision 40), and still told to
+  // assistive technology.
+  const name = within(dialog).getByRole("textbox", { name: "Namn" });
+  expect(name.getAttribute("aria-required")).toBe("true");
+  expect(dialog.textContent).not.toContain("Obligatoriskt");
   await expectNoAxeViolations(document.body);
 });
 

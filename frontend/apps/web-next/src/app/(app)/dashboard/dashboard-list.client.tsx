@@ -1,6 +1,7 @@
 "use client";
 
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
+import { ListItem } from "@astryxdesign/core/List";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -9,6 +10,11 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
+import {
+  RESOURCE_GRID_CLASS,
+  ResourceCollection,
+  useResourceLayout
+} from "@/components/composites/resource-tile";
 import { browserApi } from "@/lib/api/browser";
 import { type CatalogEntry, catalogGroups, filterCatalog } from "./catalog";
 import { dashboardQueryOptions } from "./queries";
@@ -19,23 +25,40 @@ function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: strin
     entry.kind === "app" ? t("shell_catalog_app_in_space", { space: spaceName }) : spaceName;
   const icon =
     entry.kind === "app" ? <AppWindow /> : entry.kind === "personal-assistant" ? <User /> : null;
+  const avatar = (
+    <EntityAvatar id={entry.id} name={entry.name} icon={icon ?? undefined} size="lg" />
+  );
+
+  // A phone (decision 9): a row; its link reads the name and where it lives.
+  if (useResourceLayout() === "rows") {
+    return (
+      <ListItem
+        href={entry.href}
+        label={<span className="block truncate font-semibold">{entry.name}</span>}
+        description={subtitle}
+        startContent={avatar}
+      />
+    );
+  }
 
   return (
-    <ClickableCard
-      label={t("shell_catalog_card_label", { name: entry.name, space: subtitle })}
-      href={entry.href}
-      padding={3}
-      className="h-full"
-    >
-      {/* The card's link carries the same text as its name (read once). */}
-      <span aria-hidden="true" className="flex min-w-0 items-center gap-3">
-        <EntityAvatar id={entry.id} name={entry.name} icon={icon ?? undefined} size="lg" />
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate font-semibold">{entry.name}</span>
-          <span className="text-ax-text-secondary truncate text-xs">{subtitle}</span>
+    <li>
+      <ClickableCard
+        label={t("shell_catalog_card_label", { name: entry.name, space: subtitle })}
+        href={entry.href}
+        padding={3}
+        className="h-full"
+      >
+        {/* The card's link carries the same text as its name (read once). */}
+        <span aria-hidden="true" className="flex min-w-0 items-center gap-3">
+          {avatar}
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate font-semibold">{entry.name}</span>
+            <span className="text-ax-text-secondary truncate text-xs">{subtitle}</span>
+          </span>
         </span>
-      </span>
-    </ClickableCard>
+      </ClickableCard>
+    </li>
   );
 }
 
@@ -111,13 +134,11 @@ export function DashboardList() {
               />
               {group.name}
             </h2>
-            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ResourceCollection gridClassName={RESOURCE_GRID_CLASS}>
               {group.entries.map((entry) => (
-                <li key={`${entry.kind}:${entry.id}`}>
-                  <EntryCard entry={entry} spaceName={group.name} />
-                </li>
+                <EntryCard key={`${entry.kind}:${entry.id}`} entry={entry} spaceName={group.name} />
               ))}
-            </ul>
+            </ResourceCollection>
           </section>
         ))
       )}

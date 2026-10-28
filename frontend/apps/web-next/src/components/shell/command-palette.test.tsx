@@ -117,6 +117,13 @@ const ok = (data: unknown) =>
   Promise.resolve({ data, error: undefined, response: new Response("{}", { status: 200 }) });
 
 describe("ShellCommandPalette", () => {
+  it("closes from Avbryt beside the field (touch screens have no Escape)", () => {
+    const { onOpenChange } = renderPalette();
+    search("upph");
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("is a named dialog with a labelled combobox and grouped results", async () => {
     renderPalette();
     const dialog = screen.getByRole("dialog", { name: "Sök i Eneo" });

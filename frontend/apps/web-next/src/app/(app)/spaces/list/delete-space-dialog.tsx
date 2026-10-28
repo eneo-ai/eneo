@@ -3,6 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -57,7 +58,13 @@ export function DeleteSpaceDialog({
     submitted && !matches ? t("form_problem_confirm_mismatch", { value: name }) : null;
 
   return (
-    <Dialog isOpen={space !== null} onOpenChange={onOpenChange} purpose="form" width={460}>
+    <Dialog
+      isOpen={space !== null}
+      onOpenChange={onOpenChange}
+      purpose="form"
+      width={460}
+      className={DIALOG_TOP_ON_TOUCH}
+    >
       <Layout
         height="auto"
         header={<DialogHeader title={t("delete_space")} onOpenChange={onOpenChange} />}

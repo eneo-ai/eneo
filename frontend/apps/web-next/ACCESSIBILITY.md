@@ -103,7 +103,17 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   docked chat composer, toolbars, toasts, cookie-style banners. Give the scroll
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
-  part. Check by tabbing through a long list with the sticky UI present.
+  part. Check by tabbing through a long list with the sticky UI present. A
+  table's pinned column is sticky UI too: the Table wrapper moves a control
+  that takes focus under it out beside it. CSS cannot: the browser counts a
+  control under the pinned column as visible, so `scroll-margin` never
+  applies, and `scroll-padding` also moved the table when a pinned control
+  took focus.
+- A non-modal sheet over the page owns what it covers. The chat's activity
+  sheet (where the side panel cannot sit beside the answer) hides the dock
+  under it, pads the conversation's end and `scroll-padding` by its height so
+  the answer can be read and focused above it, and makes the rest it covers
+  `inert` (`ConversationLayout`'s `sheetOver`).
 - Toasts move themselves instead: while they would cover the focused element
   they rise just above it (`src/components/ui/toast-lift.ts`). A docked group
   that should stay clear as a whole while focus is anywhere in it (the chat
@@ -189,8 +199,10 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Related controls are grouped: `<fieldset>` + `<legend>` or `role="group"`
   with `aria-labelledby` (radio groups, checkbox lists).
 - Instructions and formats come before the field (`description`,
-  `aria-describedby`). Required fields say so in text, not only with `*` or
-  colour.
+  `aria-describedby`). Required is the default and unmarked; an optional field
+  says "Valfritt" in its label: Astryx `isOptional` inside
+  `<FormLayout defaultOptionality="required">`, which also gives every other
+  field `aria-required`. Nothing is marked only with `*` or colour.
 - Personal data fields have `autoComplete` tokens (`email`, `name`,
   `username`, `current-password`, `new-password`, `one-time-code`; 1.3.5).
 - Errors (3.3.1, 3.3.3): on submit, show the error as text at the field (Astryx
@@ -263,9 +275,13 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   (start at `h3`).
 - Follow new tokens with scrolling only while the user is at the bottom; never
   move focus into new content. "Scroll to latest" is a named button.
-- The composer has a persistent translated accessible name, and the keyboard
-  hint (Enter sends, Shift+Enter adds a line) is visible or in its
-  description.
+- The composer has a persistent translated accessible name that starts with
+  the words of its placeholder ("Fråga {namn}"). Return adds a line; ⌘ or
+  Ctrl+Return and Send send, so a half-written question is never sent by
+  accident. The hint is in the field's description, and the shortcut shows
+  beside Send where there is a mouse or trackpad. Send is never disabled: an
+  empty draft or a full context is explained at the field (`aria-describedby`,
+  `aria-invalid`), announced with `useAnnounce`, and focus stays in the field.
 
 ### 11. Images and icons (1.1.1, 4.1.2)
 
@@ -294,7 +310,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - Navigation, the profile menu and help (help center, support contact, the
   accessibility statement) sit in the same place and order on every page. The
-  shell owns them; screens don't add their own variants.
+  shell owns them; screens don't add their own variants. Below 1024 px the
+  drawer's profile row opens Konto, which holds what the profile menu holds
+  (decision 22): the same row, in the same place, on every page.
 - The same function has the same name and icon everywhere.
 
 ### 14. Dialogs, menus and popovers (1.4.13, 2.1.2, 2.4.3, 4.1.2)
@@ -403,8 +421,9 @@ column that collapsed to its padding, which axe does not check (rule 6). It
 covers the public pages, the chat
 (start state, a docked conversation, the activity panel and sheet), the shell
 (catalog, collapsed rail, drawer, profile menu, ⌘K palette), spaces
-(overview, knowledge, websites, a collection, a create dialog) and admin, on
-desktop and at 390 × 844 with touch. One route is skipped with the reason in
+(overview, knowledge, websites, a collection, a create dialog; a space and the
+organisation space on a phone and an iPad either way) and admin, on desktop
+and at 390 × 844 with touch. One route is skipped with the reason in
 the spec: `/deactivated` (needs a suspended tenant). Add a route when you add
 a screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
 violation fails the run. Locally, run it against a dev server with a seeded
@@ -468,5 +487,6 @@ that organisation's service.
 
 web-next links to it when `ACCESSIBILITY_STATEMENT_URL` is set (see
 [README](README.md#environment)): "Tillgänglighetsredogörelse" on the login
-page and in the profile menu. When the navigation changes, the link moves with
-it and stays in the same place on every page.
+page and in the profile menu, and below 1024 px on Konto, which the drawer's
+profile row opens. When the navigation changes, the link moves with it and
+stays in the same place on every page.

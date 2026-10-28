@@ -32,7 +32,7 @@ import type {
   SourceProblems,
   SyncFailure
 } from "../source-problems";
-import { SamePageLink, type InPlaceLink } from "./in-place-link";
+import { SamePageLink, type InPlaceLink } from "@/components/composites/in-place-link";
 
 const FILES_SHOWN = 10;
 

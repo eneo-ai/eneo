@@ -4,13 +4,22 @@ import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
+import { conversationContext } from "@/components/shell/conversation-context";
+import { conversationHref } from "@/components/shell/routes";
 import { browserApi } from "@/lib/api/browser";
+import {
+  ALL_CONVERSATIONS_LIMIT,
+  recentConversationsQueryOptions,
+  type RecentConversation
+} from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { displayPartnerName } from "@/lib/chat/partner-name";
@@ -28,12 +37,27 @@ import { useNow } from "./use-now";
 
 const PAGE_SIZE = 50;
 
+/** The history's width beside the conversation (in px, as the 480 px rule is). */
+export const HISTORY_WIDTH = 320;
+
 type SessionRow = {
   id: string;
   name: string;
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+/** A listed conversation; under "Alla" it says whom it is with. */
+type ListedSession = SessionRow & { with?: RecentConversation };
+
+/** Under "Alla", the latest conversations with every assistant, as rows. */
+const listed = (conversation: RecentConversation): ListedSession => ({
+  id: conversation.id,
+  name: conversation.name,
+  created_at: conversation.created_at,
+  updated_at: conversation.last_activity_at,
+  with: conversation
+});
 
 const BUCKET_KEY = {
   today: "chat_history_today",
@@ -79,12 +103,13 @@ export function filterSessions<T extends SessionRow>(
 }
 
 /**
- * "Konversationer med <partner>": the conversations with this assistant or
- * group chat, with a title search at the top and the rows grouped by date
- * (Idag, Igår, …). The sidebar's "Senaste" is the primary list across all
- * assistants; this panel is the complete list for one of them. Each row
- * opens the conversation; its menu renames or deletes it. "Visa fler"
- * appends the next page and moves focus to the first row it added.
+ * "Konversationer" (decision 29): one panel, scoped to this assistant or
+ * group chat, or to all of them ("Den här assistenten | Alla"), with a title
+ * search at the top and the rows grouped by date (Idag, Igår, …). This
+ * assistant's list is complete: "Visa fler" appends the next page and moves
+ * focus to the first row it added. "Alla" lists the latest conversations
+ * across assistants, each saying whom it is with; one with another assistant
+ * opens where it lives. Each row's menu renames or deletes it.
  */
 function HistoryPanel({
   partner,
@@ -105,12 +130,14 @@ function HistoryPanel({
   focusHeadingOnMount?: boolean;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const titleId = useId();
   const now = useNow();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const rescue = useFocusRescue();
   const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<"partner" | "all">("partner");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const partnerName = displayPartnerName(partner, t);
@@ -150,10 +177,26 @@ function HistoryPanel({
         })
       )
   });
+  const everyone = useQuery({
+    ...recentConversationsQueryOptions(browserApi, ALL_CONVERSATIONS_LIMIT),
+    enabled: scope === "all"
+  });
+  const all = scope === "all";
+  const list = all ? everyone : history;
   const pages = history.data?.pages;
-  const sessions = flattenPages(pages);
+  const sessions: ListedSession[] = all ? (everyone.data ?? []).map(listed) : flattenPages(pages);
   const shown = filterSessions(sessions, query, t("chat_history_untitled"));
   const groups = groupSessions(shown, now);
+
+  /** Opens a conversation: here when it is with this partner, else where it lives. */
+  function open(session: ListedSession) {
+    const other = session.with?.partner;
+    if (other && (other.type !== partner.type || other.id !== partner.id)) {
+      router.push(conversationHref(session.with!));
+    } else {
+      onSelect(session.id);
+    }
+  }
 
   // "Visa fler": once the page it asked for renders, focus that page's first
   // conversation (the button itself goes away with the last page).
@@ -185,7 +228,7 @@ function HistoryPanel({
           tabIndex={-1}
           className="min-w-0 truncate text-[13px] font-semibold focus:outline-none"
         >
-          {t("chat_history_with", { name: partnerName })}
+          {t("chat_history_title")}
         </h2>
         <IconButton
           label={t("chat_history_close")}
@@ -195,8 +238,22 @@ function HistoryPanel({
           onClick={onClose}
         />
       </div>
-      {sessions.length > 0 && (
-        <div className="border-ax-border shrink-0 border-b px-2 py-2">
+      <div className="border-ax-border flex shrink-0 flex-col gap-2 border-b px-2 py-2">
+        <SegmentedControl
+          label={t("chat_history_scope")}
+          value={scope}
+          onChange={(value) => setScope(value === "all" ? "all" : "partner")}
+          size="sm"
+        >
+          <SegmentedControlItem
+            value="partner"
+            label={
+              isGroupChat ? t("chat_history_scope_group_chat") : t("chat_history_scope_assistant")
+            }
+          />
+          <SegmentedControlItem value="all" label={t("chat_history_scope_all")} />
+        </SegmentedControl>
+        {sessions.length > 0 && (
           <TextInput
             label={t("chat_history_search")}
             isLabelHidden
@@ -208,16 +265,16 @@ function HistoryPanel({
             size="sm"
             width="100%"
           />
-        </div>
-      )}
+        )}
+      </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
-        {history.isPending ? (
+        {list.isPending ? (
           <LoadingState rows={6} className="p-2" />
-        ) : history.isError ? (
+        ) : list.isError ? (
           <p className="text-ax-error p-2 text-[13px]">{t("request_failed")}</p>
         ) : sessions.length === 0 ? (
           <p className="text-ax-text-secondary p-2 text-[13px]">
-            {t("chat_history_empty_with", { name: partnerName })}
+            {all ? t("chat_history_empty") : t("chat_history_empty_with", { name: partnerName })}
           </p>
         ) : shown.length === 0 ? (
           <p className="text-ax-text-secondary p-2 text-[13px]">
@@ -227,11 +284,7 @@ function HistoryPanel({
           groups.map((group, index) => (
             <section
               key={`${group.bucket}-${index}`}
-              aria-label={
-                group.bucket
-                  ? t(BUCKET_KEY[group.bucket])
-                  : t("chat_history_with", { name: partnerName })
-              }
+              aria-label={group.bucket ? t(BUCKET_KEY[group.bucket]) : t("chat_history_title")}
               className="flex flex-col"
             >
               {group.bucket && (
@@ -243,6 +296,9 @@ function HistoryPanel({
                 {group.sessions.map((session) => {
                   const active = session.id === activeSessionId;
                   const name = session.name || t("chat_history_untitled");
+                  const context = session.with
+                    ? (conversationContext(session.with, t) ?? t("personal_assistant"))
+                    : null;
                   return (
                     <li
                       key={session.id}
@@ -255,13 +311,18 @@ function HistoryPanel({
                         type="button"
                         data-session-row={session.id}
                         aria-current={active ? "true" : undefined}
-                        onClick={() => onSelect(session.id)}
+                        onClick={() => open(session)}
                         className={cn(
-                          "focus-visible:outline-ring rounded-ax-element min-h-9 min-w-0 flex-1 truncate px-2.5 text-start text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 pointer-coarse:min-h-11",
+                          "focus-visible:outline-ring rounded-ax-element flex min-h-9 min-w-0 flex-1 flex-col justify-center px-2.5 py-1 text-start text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 pointer-coarse:min-h-11",
                           active ? "font-semibold" : "text-ax-text-secondary hover:text-ax-text"
                         )}
                       >
-                        {name}
+                        <span className="w-full truncate">{name}</span>
+                        {context && (
+                          <span className="text-ax-text-secondary w-full truncate text-xs font-normal">
+                            {context}
+                          </span>
+                        )}
                       </button>
                       <MoreMenu
                         label={t("chat_history_actions", { name })}
@@ -287,7 +348,7 @@ function HistoryPanel({
             </section>
           ))
         )}
-        {history.hasNextPage && (
+        {!all && history.hasNextPage && (
           <div className="flex justify-center p-2">
             <AxButton
               label={t("chat_history_load_more")}
@@ -320,8 +381,9 @@ function HistoryPanel({
 }
 
 /**
- * History as a side panel (≥768px, focus moves to its heading, Escape closes)
- * or an Astryx bottom sheet on phones (modal: it traps focus and returns it).
+ * History as a side panel (where the conversation keeps 480 px beside it; focus
+ * moves to its heading, Escape closes) or an Astryx bottom sheet (modal: it
+ * traps focus and returns it). The chat page decides which.
  * The caller returns focus to the history button when the panel closes.
  */
 export function HistoryAside({
@@ -331,7 +393,7 @@ export function HistoryAside({
 }: Omit<Parameters<typeof HistoryPanel>[0], "focusHeadingOnMount"> & { inline: boolean }) {
   const t = useTranslations();
   const asideRef = useRef<HTMLElement>(null);
-  const label = t("chat_history_with", { name: displayPartnerName(props.partner, t) });
+  const label = t("chat_history_title");
 
   useEffect(() => {
     const aside = asideRef.current;
@@ -358,7 +420,8 @@ export function HistoryAside({
       ref={asideRef}
       id="chat-history"
       aria-label={label}
-      className="bg-ax-sunken border-ax-border flex w-72 shrink-0 flex-col border-s"
+      style={{ width: HISTORY_WIDTH }}
+      className="bg-ax-sunken border-ax-border flex shrink-0 flex-col border-s"
     >
       <HistoryPanel {...props} onClose={onClose} focusHeadingOnMount />
     </aside>

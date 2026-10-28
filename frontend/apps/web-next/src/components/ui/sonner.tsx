@@ -54,6 +54,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
       containerAriaLabel={t("notifications")}
       closeButton
       duration={TOAST_DURATION_MS}
+      // Clear of the home indicator (the page runs under it, viewport-fit=cover);
+      // sonner's own 24 px / 16 px where there is none.
+      offset={{ bottom: "max(24px, calc(env(safe-area-inset-bottom, 0px) + 12px))" }}
+      mobileOffset={{ bottom: "max(16px, calc(env(safe-area-inset-bottom, 0px) + 8px))" }}
       toastOptions={{ closeButtonAriaLabel: t("ui_toast_close") }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,

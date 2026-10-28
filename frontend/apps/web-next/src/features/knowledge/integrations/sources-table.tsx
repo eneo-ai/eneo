@@ -16,12 +16,15 @@ import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
-import { Table } from "@/components/astryx/table";
+import { Table, type TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { useCollator } from "@astryxdesign/core/i18n";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import type { IntegrationKnowledge } from "../knowledge";
+import { RowsOrTable } from "../knowledge-list";
+import { sourceRow } from "../knowledge-rows";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
 import { SourceStateLabel, SourceUpdated, SyncProgress } from "./source-status";
@@ -41,7 +44,7 @@ import {
   type SourceSummary
 } from "./sources";
 import type { ProgressById } from "./sync-progress";
-import { useAnnounceChange } from "./use-announce-change";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { useSourceListAnnouncements } from "./use-sync-announcements";
 import { VendorIcon } from "./vendor";
 
@@ -196,8 +199,32 @@ function SignInStoppedBanner({
   );
 }
 
+/** A source's menu: the wrapper's or its one item's. */
+function SourceActions({ row }: { row: SourceRow }) {
+  const [single] = row.source.items;
+  return row.source.kind === "wrapper" ? (
+    <WrapperActions
+      wrapperId={row.source.id}
+      wrapperName={row.name}
+      items={row.source.items}
+      {...wrapperPermissions(row.source.items)}
+      syncActive={isSyncActive(row.summary)}
+    />
+  ) : single ? (
+    <IntegrationActions item={single} syncActive={isSyncActive(row.summary)} />
+  ) : null;
+}
+
 /** One table of sources, sortable by every column but the actions. */
-function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: string }) {
+function SourcesTable({
+  rows,
+  name,
+  empty
+}: {
+  rows: SourceRow[];
+  name: TableName;
+  empty: React.ReactNode;
+}) {
   const t = useTranslations();
   const format = useFormatter();
   const { sortedData, sortConfig } = useTableSortableState<SourceRow, SourceSortKey>({
@@ -211,7 +238,7 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
     {
       key: "name",
       header: t("integration_source_column_source"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (row) => <SourceNameCell source={row.source} />
     },
@@ -228,52 +255,38 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
     {
       key: "status",
       header: t("status"),
-      width: proportional(2),
+      width: pixel(200),
       sortable: true,
       renderCell: (row) => <SourceStatusCell row={row} />
     },
     {
       key: "updated",
       header: t("integration_source_column_updated"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (row) => <SourceUpdated summary={row.summary} />
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
-      renderCell: (row) => {
-        const [single] = row.source.items;
-        return row.source.kind === "wrapper" ? (
-          <WrapperActions
-            wrapperId={row.source.id}
-            wrapperName={row.name}
-            items={row.source.items}
-            {...wrapperPermissions(row.source.items)}
-            syncActive={isSyncActive(row.summary)}
-          />
-        ) : single ? (
-          <IntegrationActions item={single} syncActive={isSyncActive(row.summary)} />
-        ) : null;
-      }
+      renderCell: (row) => <SourceActions row={row} />
     }
   ];
 
   return (
-    <SpaceTableFrame>
+    <TableFrame>
       <Table
         data={sortedData}
         columns={columns}
         idKey="id"
-        aria-labelledby={labelledBy}
+        {...name}
+        pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
-        emptyState={
-          <EmptyState title={t("no_results_found")} headingLevel={3} isCompact framed={false} />
-        }
+        emptyState={empty}
       />
-    </SpaceTableFrame>
+    </TableFrame>
   );
 }
 
@@ -287,14 +300,14 @@ export type SourceGroup = { key: string; heading: string | null; sources: Integr
  * or its folders' names sit once above every group; a group the filter
  * empties is left out, and a filter that matches nothing any more says so,
  * with a way back to every source. A source's sync starting, finishing or
- * being queued is announced. `labelledBy` names an ungrouped table.
+ * being queued is announced. `name` names an ungrouped table.
  */
 export function SourcesList({
   groups,
   progress,
   queued,
   progressLoaded,
-  labelledBy
+  name
 }: {
   groups: SourceGroup[];
   progress: ProgressById;
@@ -302,9 +315,15 @@ export function SourcesList({
   queued: QueuedIds;
   /** Whether the progress poll has answered; nothing is announced before. */
   progressLoaded: boolean;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
+  const { routeId } = useSpace();
+  const collator = useCollator();
+  // A search that matches no source of a group, said by its table or rows.
+  const noResults = (
+    <EmptyState title={t("no_results_found")} headingLevel={3} isCompact framed={false} />
+  );
   const headingIds = useId();
   const bannerRef = useRef<HTMLDivElement>(null);
   const allFilterRef = useRef<HTMLButtonElement>(null);
@@ -419,7 +438,22 @@ export function SourcesList({
                   {group.heading}
                 </h3>
               ) : null}
-              <SourcesTable rows={group.rows} labelledBy={headingId ?? labelledBy} />
+              <RowsOrTable
+                items={[...group.rows]
+                  .sort((a, b) => collator.compare(a.name, b.name))
+                  .map((row) => ({
+                    row: sourceRow(row.source, row.summary, routeId),
+                    actions: <SourceActions row={row} />
+                  }))}
+                name={headingId ? { "aria-labelledby": headingId } : name}
+                empty={noResults}
+              >
+                <SourcesTable
+                  rows={group.rows}
+                  name={headingId ? { "aria-labelledby": headingId } : name}
+                  empty={noResults}
+                />
+              </RowsOrTable>
             </div>
           );
         })

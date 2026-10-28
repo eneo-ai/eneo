@@ -1,8 +1,8 @@
 "use client";
 
-import { IconTile, type IconTileHue } from "@/components/composites/icon-tile";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
+import { FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useId, type ReactNode } from "react";
@@ -40,14 +40,16 @@ export function BrandMark({ className }: { className?: string }) {
 type Starter = {
   key: "summarize" | "draft" | "plan";
   icon: LucideIcon;
-  hue: IconTileHue;
 };
 
 const STARTERS: Starter[] = [
-  { key: "summarize", icon: FileText, hue: "blue" },
-  { key: "draft", icon: PenLine, hue: "purple" },
-  { key: "plan", icon: ListChecks, hue: "teal" }
+  { key: "summarize", icon: FileText },
+  { key: "draft", icon: PenLine },
+  { key: "plan", icon: ListChecks }
 ];
+
+/** Section headings of the start state: 18 px, in a 44 px row so "Visa alla" beside one is a full target. */
+const SECTION_HEADING = "text-lg leading-tight font-semibold text-balance";
 
 const STARTER_TEXT = {
   summarize: {
@@ -101,31 +103,75 @@ function useQuickAssistants(enabled: boolean): QuickAssistant[] {
   return result;
 }
 
+/**
+ * "Prova att fråga": the three starters as rows (decision 8). Tapping one
+ * fills the composer with its prompt; the icon takes the same 36 px slot as
+ * an assistant's tile, so both lists start their text on one line.
+ */
+function Starters({ onPick }: { onPick: (prompt: string) => void }) {
+  const t = useTranslations();
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex w-full flex-col">
+      <div className="flex min-h-11 items-center">
+        <h2 id={headingId} className={SECTION_HEADING}>
+          {t("chat_try_asking")}
+        </h2>
+      </div>
+      <List hasDividers edgeCompensation="inline">
+        {STARTERS.map((starter) => {
+          const text = STARTER_TEXT[starter.key];
+          const Icon = starter.icon;
+          return (
+            <ListItem
+              key={starter.key}
+              label={t(text.label)}
+              description={t(text.description)}
+              onClick={() => onPick(t(text.prompt))}
+              startContent={
+                <span className="flex size-9 shrink-0 items-center justify-center">
+                  <Icon aria-hidden="true" className="text-ax-text-secondary size-5" />
+                </span>
+              }
+            />
+          );
+        })}
+      </List>
+    </section>
+  );
+}
+
+/**
+ * "Dina assistenter": up to four of the user's assistants with their space,
+ * and "Visa alla" to the catalog. A row opens a chat, so no chevron (as in
+ * the catalog and the switcher).
+ */
 function QuickAssistants() {
   const t = useTranslations();
   const headingId = useId();
   const assistants = useQuickAssistants(true);
   if (assistants.length === 0) return null;
   return (
-    <section aria-labelledby={headingId} className="flex w-full flex-col gap-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id={headingId} className="text-ax-text-secondary text-[13px] font-semibold">
+    <section aria-labelledby={headingId} className="flex w-full flex-col">
+      <div className="flex min-h-11 items-center justify-between gap-2">
+        <h2 id={headingId} className={SECTION_HEADING}>
           {t("chat_your_assistants")}
         </h2>
         <Link
           href="/dashboard"
-          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-[13px] font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner -me-2 inline-flex min-h-11 items-center px-2 text-sm font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2"
         >
           {t("chat_show_all_assistants")}
         </Link>
       </div>
-      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <List hasDividers edgeCompensation="inline">
         {assistants.map((assistant) => (
-          <li key={assistant.id}>
-            <Link
-              href={assistant.href}
-              className="border-ax-border hover:bg-ax-hover focus-visible:outline-ring flex min-h-[58px] items-center gap-3 rounded-[0.875rem] border py-2 ps-2.5 pe-3 focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
+          <ListItem
+            key={assistant.id}
+            href={assistant.href}
+            label={assistant.name}
+            description={assistant.spaceName}
+            startContent={
               <EntityAvatar
                 id={assistant.id}
                 name={assistant.name}
@@ -133,26 +179,20 @@ function QuickAssistants() {
                 size="lg"
                 className="size-9"
               />
-              <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span className="truncate font-semibold">{assistant.name}</span>
-                <span className="text-ax-text-secondary truncate text-[12.5px]">
-                  {assistant.spaceName}
-                </span>
-              </span>
-              <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
-            </Link>
-          </li>
+            }
+          />
         ))}
-      </ul>
+      </List>
     </section>
   );
 }
 
 /**
  * The empty conversation: a greeting (personal assistant) or the partner's
- * name and description, the composer centred, and for the personal assistant
- * three starter cards (they fill the composer) plus quick links to the user's
- * assistants.
+ * name and description; the composer, centred under it from 640px (on phones
+ * the view docks it at the bottom, where it stays: decision 5); and for the
+ * personal assistant "Prova att fråga" and "Dina assistenter" (decision 8),
+ * side by side where the column is wide enough.
  */
 export function StartState({
   partner,
@@ -160,7 +200,8 @@ export function StartState({
   onPickStarter
 }: {
   partner: ChatPartner;
-  composer: ReactNode;
+  /** The centred composer; absent on phones, where the view docks it. */
+  composer?: ReactNode;
   onPickStarter: (prompt: string) => void;
 }) {
   const t = useTranslations();
@@ -174,11 +215,25 @@ export function StartState({
   return (
     // Auto margins centre the content vertically but, unlike justify-center,
     // never push it above the scroll edge when it is taller (zoom, short phones).
-    <div className="flex w-full flex-1 flex-col items-center px-4 py-8 sm:py-10">
-      <div className="my-auto flex w-full max-w-[720px] flex-col items-center gap-7">
-        <div className="flex flex-col items-center gap-2.5 text-center">
+    // The personal start leads with its greeting on a phone, start-aligned
+    // above its lists; another assistant's has only its introduction, centred
+    // at every width.
+    <div className="flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
+      <div
+        className={cn(
+          "@container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
+          personal ? "sm:my-auto sm:items-center" : "my-auto items-center"
+        )}
+      >
+        <div
+          className={cn(
+            "flex flex-col gap-2.5",
+            personal ? "sm:items-center sm:text-center" : "items-center text-center"
+          )}
+        >
           {personal ? (
-            <BrandMark className="size-[38px]" />
+            // The mark only where there is room; on a phone the greeting leads.
+            <BrandMark className="size-[38px] max-sm:hidden" />
           ) : (
             <EntityAvatar
               id={partner.id}
@@ -187,7 +242,7 @@ export function StartState({
               size="xl"
             />
           )}
-          <h1 className="mt-1 text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] sm:text-[1.9375rem]">
+          <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] text-balance sm:mt-1 sm:text-[1.9375rem]">
             {personal
               ? (greeting ?? (
                   <span className="invisible">{t("hi_firstname", { firstName: name })}</span>
@@ -202,37 +257,18 @@ export function StartState({
           </p>
         </div>
 
-        {/* The one-time release notice sits above the composer, never over it. */}
+        {/* The one-time release notice sits above the composer (from 640px; on
+            phones above the lists, the composer docked under them), never over it. */}
         {personal && <WhatsNewBanner />}
         {composer}
 
         {personal && (
-          <>
-            <ul className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-3">
-              {STARTERS.map((starter) => {
-                const text = STARTER_TEXT[starter.key];
-                const Icon = starter.icon;
-                return (
-                  <li key={starter.key} className="flex">
-                    <button
-                      type="button"
-                      onClick={() => onPickStarter(t(text.prompt))}
-                      className="border-ax-border hover:bg-ax-hover focus-visible:outline-ring flex w-full items-start gap-3 rounded-[0.875rem] border p-3.5 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
-                    >
-                      <IconTile icon={<Icon />} hue={starter.hue} size="sm" />
-                      <span className="flex flex-col gap-0.5">
-                        <span className="font-semibold">{t(text.label)}</span>
-                        <span className="text-ax-text-secondary text-[12.5px] leading-snug">
-                          {t(text.description)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+          // Side by side where the column has room for both (not the window: a
+          // side panel narrows it); a lone section (no assistants yet) takes the width.
+          <div className="grid w-full grid-cols-1 gap-x-6 gap-y-6 @2xl:grid-cols-2 @2xl:[&>:only-child]:col-span-2">
+            <Starters onPick={onPickStarter} />
             <QuickAssistants />
-          </>
+          </div>
         )}
       </div>
     </div>

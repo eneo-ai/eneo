@@ -18,10 +18,13 @@ function ignoreSelection() {}
 export function SpaceTabs({
   sections,
   activeSection,
+  showCounts = true,
   className
 }: {
   sections: SpaceSection[];
   activeSection: SpaceSectionId | null;
+  /** Off on a phone, where the four content tabs fit only without them. */
+  showCounts?: boolean;
   className?: string;
 }) {
   const t = useTranslations();
@@ -39,7 +42,7 @@ export function SpaceTabs({
     >
       {sections.map((section) => {
         const label = t(section.id);
-        const count = section.count;
+        const count = showCounts ? section.count : undefined;
         return (
           <Tab
             key={section.id}

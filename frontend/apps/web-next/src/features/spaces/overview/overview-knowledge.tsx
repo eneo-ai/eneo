@@ -24,12 +24,8 @@ import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
 import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
 import { useSpace } from "../use-space";
-import {
-  overviewKnowledgeRows,
-  uploadTargets,
-  type KnowledgeKind,
-  type KnowledgeRow
-} from "./overview-data";
+import type { KnowledgeKind, KnowledgeRow } from "@/features/knowledge/knowledge-rows";
+import { overviewKnowledgeRows, uploadTargets } from "./overview-data";
 import { OverviewLink, OverviewSection } from "./overview-section";
 
 const VISIBLE_ROWS = 5;

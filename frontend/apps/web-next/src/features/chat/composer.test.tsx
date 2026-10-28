@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -21,12 +21,14 @@ function Harness({
   busy = false,
   onSubmit = vi.fn(),
   onStop = vi.fn(),
-  initial = ""
+  initial = "",
+  sendBlocked = null
 }: {
   busy?: boolean;
   onSubmit?: () => void;
   onStop?: () => void;
   initial?: string;
+  sendBlocked?: string | null;
 }) {
   const [value, setValue] = useState(initial);
   const attachments = useAttachments(partner);
@@ -35,11 +37,11 @@ function Harness({
       value={value}
       onChange={setValue}
       onSubmit={onSubmit}
-      canSubmit={value.trim().length > 0}
+      sendBlocked={sendBlocked}
       busy={busy}
       onStop={onStop}
-      label="Meddelande till Upphandlingsassistenten"
-      placeholder="Fråga, klistra in text eller släpp filer här"
+      label="Fråga Upphandlingsassistenten"
+      placeholder="Fråga Upphandlingsassistenten"
       attachments={attachments}
       onOpenFileDialog={vi.fn()}
       knowledge={partner.knowledge}
@@ -51,35 +53,88 @@ function renderComposer(props: Parameters<typeof Harness>[0] = {}) {
   return renderInApp(<Harness {...props} />);
 }
 
+/** The text of the elements a field's aria-describedby points at. */
+function descriptionOf(element: Element) {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+}
+
 describe("Composer", () => {
   it("is a named textarea with the keyboard hint as its description", () => {
     renderComposer();
-    const textarea = screen.getByRole("textbox", {
-      name: "Meddelande till Upphandlingsassistenten"
-    });
+    const textarea = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
     expect(textarea.tagName).toBe("TEXTAREA");
-    const hint = document.getElementById(textarea.getAttribute("aria-describedby") ?? "");
-    expect(hint?.textContent).toBe("Enter skickar, Skift+Enter ger en ny rad.");
+    expect(descriptionOf(textarea)).toBe(
+      "Retur ger en ny rad. Skicka med Skicka-knappen, Kommando+Retur eller Ctrl+Retur."
+    );
   });
 
-  it("sends on Enter, not on Shift+Enter, and only with text", () => {
+  it("adds a line on Return and sends on ⌘ or Ctrl+Return and with Send (decision 3)", () => {
+    const onSubmit = vi.fn();
+    renderComposer({ onSubmit, initial: "Hej" });
+    const textarea = screen.getByRole("textbox");
+
+    // Return and Shift+Return keep the textarea's own newline.
+    expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    expect(fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })).toBe(false);
+    expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect(onSubmit).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not send a word being composed with an input method", () => {
+    const onSubmit = vi.fn();
+    renderComposer({ onSubmit, initial: "にほん" });
+    const textarea = screen.getByRole("textbox");
+    fireEvent.compositionStart(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keeps Send enabled and says at the field what is missing, with focus in it (decision 44)", async () => {
     const onSubmit = vi.fn();
     renderComposer({ onSubmit });
     const textarea = screen.getByRole("textbox");
     const send = screen.getByRole("button", { name: "Skicka meddelande" });
-    expect(send.hasAttribute("disabled")).toBe(true);
-
-    fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSubmit).not.toHaveBeenCalled();
-
-    fireEvent.change(textarea, { target: { value: "Hej" } });
     expect(send.hasAttribute("disabled")).toBe(false);
-    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
-    expect(onSubmit).not.toHaveBeenCalled();
-    fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(send.getAttribute("aria-disabled")).not.toBe("true");
+
     fireEvent.click(send);
-    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.getAttribute("aria-invalid")).toBe("true");
+    expect(descriptionOf(textarea)).toContain("Skriv en fråga först.");
+    // Announced too: the text appears where the user is not looking.
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[aria-live]")].some((region) =>
+          region.textContent?.includes("Skriv en fråga först.")
+        )
+      ).toBe(true)
+    );
+
+    // Typing clears it.
+    fireEvent.change(textarea, { target: { value: "H" } });
+    expect(textarea.getAttribute("aria-invalid")).toBeNull();
+    expect(descriptionOf(textarea)).not.toContain("Skriv en fråga först.");
+  });
+
+  it("says why it cannot send when the caller blocks it, and keeps the draft", () => {
+    const onSubmit = vi.fn();
+    renderComposer({ onSubmit, initial: "Lång fråga", sendBlocked: "Konversationen är full." });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    act(() => {
+      fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(descriptionOf(textarea)).toContain("Konversationen är full.");
+    expect(textarea.value).toBe("Lång fråga");
   });
 
   it("is one group for the toasts to clear, so Send stays in view while the user types", () => {
@@ -100,7 +155,7 @@ describe("Composer", () => {
     expect(stop.hasAttribute("disabled")).toBe(false);
     fireEvent.click(stop);
     expect(onStop).toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", ctrlKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

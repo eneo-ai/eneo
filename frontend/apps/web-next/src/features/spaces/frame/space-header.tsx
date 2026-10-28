@@ -5,8 +5,9 @@ import { AvatarGroup, AvatarGroupOverflow } from "@astryxdesign/core/AvatarGroup
 import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Building2, ShieldCheck, SquarePen, User } from "lucide-react";
+import { Building2, SquarePen, User } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ClassificationToken } from "@/components/composites/classification-token";
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { cn } from "@/lib/utils";
@@ -56,7 +57,13 @@ function MemberStack() {
  * the page's h1; below a tab (details, editors) the page brings its own h1 and
  * the name is a small label, so it doesn't compete with that heading.
  */
-export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "page" }> }) {
+export function SpaceHeader({
+  route,
+  className
+}: {
+  route: Extract<SpaceRoute, { kind: "page" }>;
+  className?: string;
+}) {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
@@ -77,7 +84,7 @@ export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "pag
   const isOverview = route.section === "overview" && route.isSectionRoot;
 
   return (
-    <header className="border-ax-border flex flex-col gap-4 border-b px-6 pt-5">
+    <header className={cn("border-ax-border flex flex-col gap-4 border-b px-6 pt-5", className)}>
       <Breadcrumbs variant="supporting">
         <BreadcrumbItem href="/spaces/list" isCurrent={false}>
           {t("spaces")}
@@ -120,13 +127,7 @@ export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "pag
               ) : (
                 <p className="text-ax-text text-sm font-semibold break-words">{name}</p>
               )}
-              {classification ? (
-                <span className="bg-ax-muted text-ax-text-secondary inline-flex min-h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold">
-                  <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-                  <span className="sr-only">{t("space_security_classification_prefix")} </span>
-                  {classification.name}
-                </span>
-              ) : null}
+              <ClassificationToken name={classification?.name} />
             </div>
             {description && route.isSectionRoot ? (
               <p className="text-ax-text-secondary max-w-prose text-sm">{description}</p>

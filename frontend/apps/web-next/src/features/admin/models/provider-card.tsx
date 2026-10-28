@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -125,6 +126,7 @@ export function ProviderCard({
   const queryClient = useQueryClient();
   const notices = useProviderNotices();
   const headingId = useId();
+  const phone = useMediaMatch(PHONE_QUERY);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   // All of them, not only those the filters show: any one blocks a delete.
@@ -228,13 +230,46 @@ export function ProviderCard({
           {t("provider_no_models")}
         </Text>
       ) : (
-        <ModelTable
-          models={models}
-          labelledBy={headingId}
-          showKind={showKind}
-          classifications={classifications}
-          securityEnabled={securityEnabled}
-        />
+        <>
+          {/* Rows on a phone (decision 31), the table from 768 px; both until
+              the width is known, CSS showing one. */}
+          {phone !== false ? (
+            <div className="md:hidden">
+              {/* The table's header in short: what the switch at each row's end is. */}
+              <div
+                aria-hidden="true"
+                className="text-ax-text-secondary border-ax-border flex justify-between border-b px-4 py-1.5 text-xs font-medium"
+              >
+                <span>{t("model")}</span>
+                <span className="pe-14">{t("active")}</span>
+              </div>
+              <ul aria-labelledby={headingId} className="divide-ax-border divide-y px-4">
+                {models.map(({ model, kind }) => (
+                  <ModelRow
+                    key={model.id}
+                    model={model}
+                    kind={kind}
+                    classifications={classifications}
+                    securityEnabled={securityEnabled}
+                    showKind={showKind}
+                    layout="list"
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {phone !== true ? (
+            <div className="max-md:hidden">
+              <ModelTable
+                models={models}
+                labelledBy={headingId}
+                showKind={showKind}
+                classifications={classifications}
+                securityEnabled={securityEnabled}
+              />
+            </div>
+          ) : null}
+        </>
       )}
 
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />

@@ -28,7 +28,7 @@ import { unwrap } from "@/lib/api/errors";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
-import { AppRunStatusBadge } from "../status-badge";
+import { AppRunStatusToken } from "../status-token";
 
 const RESULTS_POLL_MS = 5_000;
 
@@ -157,7 +157,7 @@ export function ResultsTable({
                 </Link>
               </TableCell>
               <TableCell>
-                <AppRunStatusBadge status={run.status} />
+                <AppRunStatusToken status={run.status} />
               </TableCell>
               <TableCell className="text-muted-foreground font-mono text-sm">
                 {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}

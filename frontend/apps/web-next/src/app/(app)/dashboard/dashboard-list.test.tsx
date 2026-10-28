@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
+import { setViewport } from "@/test/setup-dom";
 import { DashboardList } from "./dashboard-list.client";
 import type { Dashboard } from "./queries";
 
@@ -102,5 +103,18 @@ describe("DashboardList", () => {
   it("explains an empty catalog", () => {
     renderList({ spaces: { items: [] } } as unknown as Dashboard);
     expect(screen.getByRole("heading", { name: "Inga assistenter än" })).toBeTruthy();
+  });
+});
+
+describe("DashboardList on a phone (decision 9)", () => {
+  it("lists assistants and apps as rows under their space", async () => {
+    setViewport("phone");
+    const { container } = renderList();
+    const upphandling = screen.getByRole("region", { name: "Upphandling" });
+    const app = within(upphandling).getByRole("link", { name: /^Avtalsanalys/ });
+    expect(app.getAttribute("href")).toBe("/dashboard/app/app1");
+    expect(app.textContent).toContain("App i Upphandling");
+    expect(app.closest(".astryx-item")).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 });

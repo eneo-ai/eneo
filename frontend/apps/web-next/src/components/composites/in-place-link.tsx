@@ -2,8 +2,9 @@ import Link from "next/link";
 import type { ComponentProps, MouseEvent } from "react";
 
 /**
- * A link that switches the source page's tab or folder in place, without a
- * server round trip, and keeps a real address: a modified click, "open in new
+ * A link that switches a view of the page in place (a source page's tab or
+ * folder, an editor's section on a phone), without a server round trip, and
+ * keeps a real address: a modified click, "open in new
  * tab" and copying the link still use `href`. Its address is this page's own,
  * so it is never prefetched: next/link takes `prefetch={false}`, Astryx's
  * Link and Button `as={SamePageLink}`.

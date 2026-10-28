@@ -28,7 +28,7 @@ describe("source list", () => {
       pageRange: null
     }));
 
-    renderInApp(<SourceList messageId="answer-1" sources={sources} focusIndex={null} />);
+    renderInApp(<SourceList messageId="answer-1" sources={sources} />);
 
     const cards = screen.getAllByRole("listitem");
     expect(cards).toHaveLength(3);

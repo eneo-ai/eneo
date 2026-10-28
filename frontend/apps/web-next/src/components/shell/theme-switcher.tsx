@@ -9,7 +9,8 @@ import { Monitor, Moon, Sun, SunMoon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 
-const THEMES = [
+/** The colour modes next-themes takes, as the profile menu and Konto offer them. */
+export const THEMES = [
   { value: "light", labelKey: "light", icon: Sun },
   { value: "dark", labelKey: "dark", icon: Moon },
   { value: "system", labelKey: "system", icon: Monitor }

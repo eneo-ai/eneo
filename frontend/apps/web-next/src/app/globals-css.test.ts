@@ -106,7 +106,16 @@ describe("globals.css", () => {
     expect(coarse.get(":scope")).toMatchObject({
       "--size-element-sm": "44px",
       "--size-element-md": "44px",
-      "--size-element-lg": "44px"
+      "--size-element-lg": "44px",
+      // The touch type scale: body and labels 15 px, supporting text 13 px.
+      "--text-body-size": "0.9375rem",
+      "--text-label-size": "0.9375rem",
+      "--text-supporting-size": "0.8125rem"
+    });
+    // Hand-built text follows it: Tailwind's text-sm and text-xs.
+    expect(coarse.get(":root")).toMatchObject({
+      "--text-sm": "0.9375rem",
+      "--text-xs": "0.8125rem"
     });
     for (const component of [
       "segmented-control-item",
@@ -123,6 +132,47 @@ describe("globals.css", () => {
       selector.includes(".astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field")
     );
     expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
+  });
+
+  it("keeps phones and tablets steady: no pull-to-refresh, no blur, the theme's drawer timing, safe areas", () => {
+    // selector → declarations of every rule in @layer components (it beats
+    // Astryx's own styles in astryx-base whatever their specificity).
+    const components = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("layer", (layer: AtRule) => {
+      if (layer.params !== "components") return;
+      layer.walkRules((rule: Rule) => {
+        const selector = rule.selector.replace(/\s+/g, " ");
+        const declarations = components.get(selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        components.set(selector, declarations);
+      });
+    });
+
+    // Pulling down never reloads the page (and drops a draft or a streaming
+    // answer); main#main-content, the one scroller, keeps its bounce to itself.
+    expect(components.get("html, body")).toMatchObject({ "overscroll-behavior": "none" });
+    expect(components.get("#main-content")).toMatchObject({ "overscroll-behavior-y": "contain" });
+    // The scrim alone separates the drawer and dialogs from the page.
+    expect(components.get(".astryx-mobile-nav::backdrop, .astryx-dialog::backdrop")).toMatchObject({
+      "backdrop-filter": "none"
+    });
+    // The drawer moves at the theme's open duration (225 ms), not 300 ms.
+    expect(components.get(".astryx-mobile-nav")).toMatchObject({
+      "--duration-medium": "var(--duration-medium-min)"
+    });
+    // Its panel keeps its content clear of the notch and the home indicator.
+    expect(components.get(".astryx-mobile-nav > div:first-child")).toMatchObject({
+      "padding-top": "env(safe-area-inset-top, 0px)",
+      "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+      "padding-inline-start": "env(safe-area-inset-left, 0px)"
+    });
+    // A PageBar's title is hidden until the page scrolls it in.
+    expect(components.get(".page-bar-title")).toMatchObject({
+      opacity: "0",
+      "animation-timeline": "scroll(nearest block)"
+    });
   });
 
   it("marks what is selected, current or highlighted with Highlight in forced colours", () => {
@@ -206,6 +256,49 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
   });
 
+  it("makes an Astryx list row with a link one target, its own controls above the link", () => {
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.includes(".astryx-item")) return;
+      const decls: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        decls[decl.prop] = decl.value;
+      });
+      rules.set(rule.selector, decls);
+    });
+    expect(rules.get(".astryx-item > a::after")).toMatchObject({
+      content: '""',
+      position: "absolute",
+      inset: "0"
+    });
+    const controls = [...rules].find(([selector]) => selector.includes(":has(> a)"));
+    expect(controls?.[1]).toMatchObject({ position: "relative", "z-index": "1" });
+  });
+
+  it("keeps a phone's toasts above its docked action bar", () => {
+    let offsets: Record<string, string> = {};
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.includes("[data-docked-actions]") || !rule.selector.includes("toaster")) {
+        return;
+      }
+      rule.walkDecls((decl) => {
+        offsets = {
+          ...offsets,
+          [decl.prop]: `${decl.value}${decl.important ? " !important" : ""}`
+        };
+      });
+    });
+    // sonner sets these inline: only !important moves them.
+    expect(offsets).toMatchObject({
+      "--offset-bottom": expect.stringMatching(
+        /^calc\(\s*var\(--docked-actions-height[\s\S]* !important$/
+      ),
+      "--mobile-offset-bottom": expect.stringMatching(
+        /^calc\(\s*var\(--docked-actions-height[\s\S]* !important$/
+      )
+    });
+  });
+
   it("keeps what an Astryx table scrolls inside its scroll box", () => {
     let position: string | undefined;
     postcss.parse(css).walkRules(".astryx-table-scroll-wrapper", (rule: Rule) => {
@@ -214,5 +307,31 @@ describe("globals.css", () => {
       });
     });
     expect(position).toBe("relative");
+  });
+
+  it("wraps a sortable header's label, and on touch makes it a 44 px target with its arrows shown", () => {
+    const header = ".astryx-table-header-cell";
+    // "<media> <selector>" → declarations
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(header)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector}`.trim(), declarations);
+    });
+    // Astryx's ellipsis cannot reach a label inside the flex sort button: a
+    // long one was cut off mid-word.
+    expect(rules.get(`${header} button`)).toMatchObject({ "white-space": "normal" });
+    expect(rules.get(`(pointer: coarse) ${header} button`)).toMatchObject({
+      "min-block-size": "44px"
+    });
+    // The unsorted arrows Astryx shows only on hover.
+    expect(
+      rules.get(`(pointer: coarse) ${header} button > span:has(> .astryx-icon)`)
+    ).toMatchObject({ opacity: "1" });
   });
 });

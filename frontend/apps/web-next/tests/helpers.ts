@@ -9,9 +9,9 @@ export function uniqueName(prefix: string) {
   return `${prefix} ${Date.now()} ${counter}`;
 }
 
-/** The chat composer's text field ("Meddelande till <assistent>"), in either layout. */
+/** The chat composer's text field ("Fråga <assistent>"), in either layout. */
 export function chatComposer(page: Page) {
-  return page.getByRole("textbox", { name: /^(Meddelande till|Message to) / });
+  return page.getByRole("textbox", { name: /^(Fråga|Ask) / });
 }
 
 export async function askChatQuestion(page: Page, question: string) {
@@ -104,4 +104,65 @@ export async function openCreateCollectionDialog(page: Page) {
   const dialog = page.getByRole("dialog", { name: /skapa en ny samling|create a new collection/i });
   await expect(dialog.getByLabel(/^(namn|name)$/i)).toBeVisible();
   return dialog;
+}
+
+/**
+ * A write through the app's API proxy, which accepts writes from the app's
+ * own origin only; returns the created resource's id. The page must have
+ * loaded an app page first (its URL is the origin).
+ */
+export async function apiPost(page: Page, path: string, data: object): Promise<string> {
+  const response = await page.request.post(`/api/eneo/api/v1${path}`, {
+    data,
+    headers: { origin: new URL(page.url()).origin }
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/**
+ * A new shared space with an assistant, an app and a text run of it. The e2e
+ * stack runs no worker, so the run stays queued: its result page is pending.
+ */
+export async function spaceWithWork(page: Page, name: string) {
+  await page.goto("/spaces/list");
+  const spaceId = await apiPost(page, "/spaces/", { name });
+  const assistant = await apiPost(page, `/spaces/${spaceId}/applications/assistants/`, {
+    name: uniqueName("Bygglov")
+  });
+  const app = await apiPost(page, `/spaces/${spaceId}/applications/apps/`, {
+    name: uniqueName("Protokoll")
+  });
+  const run = await apiPost(page, `/apps/${app}/runs/`, {
+    text: "Sammanfatta protokollet",
+    files: []
+  });
+  const space = `/spaces/${spaceId}`;
+  return {
+    space,
+    editor: `${space}/assistants/${assistant}/edit`,
+    result: `${space}/apps/${app}/results/${run}`
+  };
+}
+
+/**
+ * The audit logs, past their gate: a justified access session. The backend
+ * allows five an hour, so a run opens as few as it can.
+ */
+export async function auditLogs(page: Page) {
+  await page.goto("/admin/audit-logs");
+  const table = page.getByRole("table", { name: "Granskningsloggar" });
+  const gate = page.getByRole("combobox", { name: "Åtkomstskäl" });
+  await expect(table.or(gate)).toBeVisible();
+  if (await gate.isVisible()) {
+    await gate.click();
+    await page.getByRole("option").first().click();
+    await expect(page.getByRole("listbox")).toBeHidden();
+    const reason = page.getByLabel("Detaljerad motivering");
+    await reason.fill("Granskning av responsiva tabeller i testmiljön.");
+    await expect(reason).toHaveValue("Granskning av responsiva tabeller i testmiljön.");
+    await page.getByRole("button", { name: "Få åtkomst till loggar" }).click();
+  }
+  await expect(table).toBeVisible();
+  return { table, region: page.getByRole("group", { name: "Granskningsloggar" }) };
 }

@@ -191,6 +191,14 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+/** Headers of the columns held in view (Astryx offsets them from the start). */
+function pinnedHeaders(table: HTMLElement) {
+  return within(table)
+    .getAllByRole("columnheader")
+    .filter((cell) => cell.style.insetInlineStart)
+    .map((cell) => cell.textContent);
+}
+
 function liveRegion() {
   return document.querySelector("[data-astryx-live-region='polite']")?.textContent ?? "";
 }
@@ -271,6 +279,8 @@ describe("WrapperDetail", () => {
     expect(within(nav).queryByRole("link", { name: /Protokoll/ })).toBeNull();
 
     const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    // The folder stays in view while its row scrolls sideways on a phone.
+    expect(pinnedHeaders(overview)).toEqual(["Mapp"]);
     expect(within(overview).getByRole("link", { name: "Protokoll" }).getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i2"
     );
@@ -320,6 +330,7 @@ describe("WrapperDetail", () => {
 
     const documents = await screen.findByRole("table", { name: "Dokument i Mallar" });
     expect(within(documents).getByRole("button", { name: /Avtalsmall\.docx/ })).toBeTruthy();
+    expect(pinnedHeaders(documents)).toEqual(["Namn"]);
     expect(within(documents).getByText("Sökbar")).toBeTruthy();
     await expectNoAxeViolations(container);
 

@@ -4,7 +4,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import type { Activity } from "./activity";
-import { SourceList } from "./activity-sources";
+import { SourceList, sourceAnchorId } from "./activity-sources";
 import { StepList } from "./activity-steps";
 import type { TurnDurations } from "./activity-timings";
 import { DebugTabPanel, type DebugTabConfig } from "./debug-panel";
@@ -25,6 +25,13 @@ export type ActivityPanelProps = {
   focusSource: number | null;
   /** The Felsök tab (users with `assistant_debug`, saved conversations only). */
   debug?: DebugTabConfig | null;
+  /**
+   * Whether the body may move focus for `key` (an answer, and the source asked
+   * for), recording that it did. Kept by the caller: a change of presentation
+   * (sheet, beside) mounts the body again, which must not move focus again
+   * (F7). Without it, the body keeps its own record.
+   */
+  claimFocus?: (key: string) => boolean;
 };
 
 /**
@@ -44,7 +51,8 @@ export function ActivityPanelBody({
   tab: requestedTab,
   onTabChange,
   focusSource,
-  debug = null
+  debug = null,
+  claimFocus
 }: ActivityPanelProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -58,12 +66,31 @@ export function ActivityPanelBody({
   const debugPanelId = `${ACTIVITY_PANEL_ID}-debug`;
   const steps = activity.steps.length;
 
+  // Focus moves once per opened answer (WCAG 2.4.3): to the source a citation
+  // asked for, else to the selected tab. In a modal sheet this runs before the
+  // sheet's dialog opens, and nothing in a closed dialog takes focus; the
+  // sheet opens in its own effect, later in the same task: focus right after.
   useEffect(() => {
-    if (focusedFor.current === messageId) return;
-    focusedFor.current = messageId;
-    if (tab === "sources" && focusSource !== null) return;
-    tabListRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
-  }, [messageId, tab, focusSource]);
+    const source = tab === "sources" ? focusSource : null;
+    const key = `${messageId}:${source ?? ""}`;
+    if (claimFocus) {
+      if (!claimFocus(key)) return;
+    } else {
+      if (focusedFor.current === key) return;
+      focusedFor.current = key;
+    }
+    const target =
+      source === null
+        ? tabListRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+        : document.getElementById(sourceAnchorId(messageId, source + 1));
+    if (!target) return;
+    const focus = () => {
+      target.focus();
+      if (source !== null) target.scrollIntoView({ block: "nearest" });
+    };
+    if (target.closest("dialog:not([open])")) queueMicrotask(focus);
+    else focus();
+  }, [messageId, tab, focusSource, claimFocus]);
 
   return (
     <div id={ACTIVITY_PANEL_ID} className="flex min-h-0 flex-1 flex-col">
@@ -112,11 +139,7 @@ export function ActivityPanelBody({
         hidden={tab !== "sources"}
         className="focus-visible:outline-ring min-h-0 flex-1 overflow-y-auto p-3 focus-visible:outline-2 focus-visible:-outline-offset-2"
       >
-        <SourceList
-          messageId={messageId}
-          sources={activity.sources}
-          focusIndex={tab === "sources" ? focusSource : null}
-        />
+        <SourceList messageId={messageId} sources={activity.sources} />
       </div>
       {/* Mounted only while shown: its queries run the first time the tab opens. */}
       {debug && tab === "debug" && (

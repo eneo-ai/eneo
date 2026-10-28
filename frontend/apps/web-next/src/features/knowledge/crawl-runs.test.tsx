@@ -75,6 +75,16 @@ describe("CrawlRunsTable", () => {
     // Named like the website page's tab it fills.
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     expect(statusColumn()).toEqual(["Delvis klar", "Misslyckades", "Klar"]);
+    // On a phone the start time stays in view while the run scrolls sideways
+    // (Astryx offsets pinned cells); an iPad held upright (770 px) shows it whole.
+    const table = screen.getByRole("table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .filter((cell) => cell.style.insetInlineStart)
+        .map((cell) => cell.textContent)
+    ).toEqual(["Startad"]);
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();

@@ -1,17 +1,15 @@
 import type { ChatAppItem } from "@/features/assistants/assistants";
 import {
   groupIntegrationSources,
-  sourceHref,
-  sourceStateStatus,
   summarizeSource
 } from "@/features/knowledge/integrations/sources";
+import type { Collection } from "@/features/knowledge/knowledge";
 import {
-  formatWebsiteName,
-  type Collection,
-  type IntegrationKnowledge,
-  type Website
-} from "@/features/knowledge/knowledge";
-import { websiteStatus, type KnowledgeStatus } from "@/features/knowledge/website-status";
+  collectionRow,
+  sourceRow,
+  websiteRow,
+  type KnowledgeRow
+} from "@/features/knowledge/knowledge-rows";
 import type { Space, SpaceRouteId } from "../space";
 
 /** Locale-aware string order: `collator.compare` from Astryx `useCollator()`. */
@@ -30,33 +28,6 @@ export function recentChatItems(space: Space, compare: Compare): ChatAppItem[] {
   ].sort((a, b) => time(b.updated_at) - time(a.updated_at) || compare(a.name, b.name));
 }
 
-export type KnowledgeKind = "collection" | "website" | "integration";
-
-/** One item in the overview's knowledge list. */
-export type KnowledgeRow = {
-  key: string;
-  kind: KnowledgeKind;
-  name: string;
-  href: string;
-  /** Translation key and values for the content summary; null when unknown. */
-  content: { key: string; values: Record<string, string | number> } | null;
-  status: KnowledgeStatus;
-  updatedAt: string | null;
-  source:
-    | { kind: "collection"; collection: Collection }
-    | { kind: "website"; website: Website }
-    | { kind: "integration"; item: IntegrationKnowledge }
-    | { kind: "wrapper"; wrapperId: string; wrapperName: string; items: IntegrationKnowledge[] };
-};
-
-function latest(values: (string | null | undefined)[]): string | null {
-  let best: string | null = null;
-  for (const value of values) {
-    if (value && time(value) > time(best)) best = value;
-  }
-  return best;
-}
-
 /**
  * The space's own collections, websites and integrations as one list, most
  * recently updated first. Items shared in from other spaces are left out, as
@@ -67,78 +38,18 @@ export function overviewKnowledgeRows(
   routeId: SpaceRouteId,
   compare: Compare
 ): KnowledgeRow[] {
-  const base = `/spaces/${routeId}/knowledge`;
   const own = (item: { space_id: string }) => item.space_id === space.id;
-  const rows: KnowledgeRow[] = [];
-
-  for (const collection of space.knowledge.groups.items.filter(own)) {
-    const files = collection.metadata.num_info_blobs;
-    rows.push({
-      key: `collection-${collection.id}`,
-      kind: "collection",
-      name: collection.name,
-      href: `${base}/collections/${collection.id}`,
-      content: { key: "space_files_count", values: { count: files } },
-      status:
-        files > 0
-          ? { tone: "success", labelKey: "space_status_indexed" }
-          : { tone: "neutral", labelKey: "empty" },
-      updatedAt: collection.updated_at ?? collection.created_at ?? null,
-      source: { kind: "collection", collection }
-    });
-  }
-
-  for (const website of space.knowledge.websites.items.filter(own)) {
-    const href = `${base}/websites/${website.id}`;
-    const pages = website.latest_crawl?.pages_crawled;
-    rows.push({
-      key: `website-${website.id}`,
-      kind: "website",
-      name: formatWebsiteName(website),
-      href,
-      content: pages == null ? null : { key: "space_pages_count", values: { count: pages } },
-      status: websiteStatus(website, href),
-      updatedAt:
-        latest([
-          website.latest_crawl?.finished_at,
-          website.latest_crawl?.created_at,
-          website.updated_at
-        ]) ?? null,
-      source: { kind: "website", website }
-    });
-  }
-
   const integrations = space.knowledge.integration_knowledge_list.items.filter(own);
-  for (const source of groupIntegrationSources(integrations, compare)) {
+  return [
+    ...space.knowledge.groups.items
+      .filter(own)
+      .map((collection) => collectionRow(collection, routeId)),
+    ...space.knowledge.websites.items.filter(own).map((website) => websiteRow(website, routeId)),
     // The overview does not poll sync progress; a running sync shows on the source itself.
-    const summary = summarizeSource(source.items, {});
-    const { tone, labelKey } = sourceStateStatus(summary.state);
-    const status: KnowledgeStatus =
-      summary.state === "attention"
-        ? { tone, labelKey, fixHref: sourceHref(routeId, source, { tab: "problems" }) }
-        : { tone, labelKey };
-    const [single] = source.items;
-    rows.push({
-      key: `${source.kind === "wrapper" ? "wrapper" : "integration"}-${source.id}`,
-      kind: "integration",
-      name: source.name,
-      href: sourceHref(routeId, source),
-      content: { key: "space_documents_count", values: { count: summary.documentCount } },
-      status,
-      updatedAt: summary.lastSyncedAt,
-      source:
-        source.kind === "wrapper" || !single
-          ? {
-              kind: "wrapper",
-              wrapperId: source.id,
-              wrapperName: source.name,
-              items: source.items
-            }
-          : { kind: "integration", item: single }
-    });
-  }
-
-  return rows.sort((a, b) => time(b.updatedAt) - time(a.updatedAt) || compare(a.name, b.name));
+    ...groupIntegrationSources(integrations, compare).map((source) =>
+      sourceRow(source, summarizeSource(source.items, {}), routeId)
+    )
+  ].sort((a, b) => time(b.updatedAt) - time(a.updatedAt) || compare(a.name, b.name));
 }
 
 /**

@@ -12,7 +12,7 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
-import { RESOURCE_GRID_CLASS, ResourceCard } from "@/components/composites/resource-tile";
+import { ResourceCard, ResourceCollection } from "@/components/composites/resource-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useShell } from "@/components/shell/shell-context";
 import { browserApi } from "@/lib/api/browser";
@@ -136,13 +136,11 @@ export function SpacesList({ title }: { title: string }) {
           {visibleSpaces.length === 0 ? (
             <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
           ) : (
-            <ul className={RESOURCE_GRID_CLASS}>
+            <ResourceCollection>
               {visibleSpaces.map((space) => (
-                <li key={space.id} className="min-w-0">
-                  <SpaceCard space={space} onDelete={setDeleteTarget} />
-                </li>
+                <SpaceCard key={space.id} space={space} onDelete={setDeleteTarget} />
               ))}
-            </ul>
+            </ResourceCollection>
           )}
         </>
       )}

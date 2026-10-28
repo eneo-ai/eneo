@@ -2,21 +2,23 @@
 
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { Button } from "@astryxdesign/core/Button";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Check, ChevronLeft, Copy, Download } from "lucide-react";
+import { ChevronLeft, Download } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { PageHeader } from "@/components/composites/page-header";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
 import { signedFileUrl } from "@/features/files/signed-file-url";
 import { appRunQueryOptions, getResultTitle, isRunActive, type AppRun } from "../apps";
-import { AppRunStatusBadge } from "../status-badge";
+import { AppRunStatusToken } from "../status-token";
 
 const RESULT_POLL_MS = 3_000;
 
@@ -35,47 +37,71 @@ function downloadText(text: string, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(anchor.href), 1500);
 }
 
-function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
+/**
+ * Kopiera and Ladda ner for the run's output: the page's own actions, docked
+ * with Ny körning on a phone and in the page header from 768 px.
+ */
+function OutputActions({ text, fileName }: { text: string; fileName: string }) {
   const t = useTranslations();
   const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
   return (
-    <div className="flex justify-end gap-1">
+    <>
       <Button
-        variant="ghost"
-        size="sm"
         label={isCopied ? t("copied") : t("copy")}
-        icon={
-          isCopied ? (
-            <Check className="size-4" aria-hidden="true" />
-          ) : (
-            <Copy className="size-4" aria-hidden="true" />
-          )
-        }
         onClick={async () => {
           if (!(await copy(text))) toast.error(t("chat_copy_failed"));
         }}
       />
-      <Button
-        variant="ghost"
-        size="sm"
-        label={t("download")}
-        icon={<Download className="size-4" aria-hidden="true" />}
-        onClick={() => downloadText(text, fileName)}
-      />
-    </div>
+      <Button label={t("download")} onClick={() => downloadText(text, fileName)} />
+    </>
   );
 }
 
-function RunOutput({ run, fileName }: { run: AppRun; fileName: string }) {
+function RunOutput({ run }: { run: AppRun }) {
   const t = useTranslations();
   if (!run.output) {
     return <p className="text-muted-foreground text-center">{t("no_output_generated")}</p>;
   }
+  return <Streamdown>{run.output}</Streamdown>;
+}
+
+// Shaped like a result: a short paragraph, then two headings with their lines.
+const SKELETON_LINES = [
+  { height: 16, width: "88%" },
+  { height: 16, width: "54%" },
+  null,
+  { height: 20, width: 96 },
+  { height: 16, width: "80%" },
+  { height: 16, width: "92%" },
+  { height: 16, width: "70%" },
+  null,
+  { height: 20, width: 112 },
+  { height: 16, width: "84%" }
+];
+
+/** A run still queued or running: what happens, and that leaving is safe. */
+function PendingResult() {
+  const t = useTranslations();
   return (
-    <>
-      <OutputToolbar text={run.output} fileName={fileName} />
-      <Streamdown>{run.output}</Streamdown>
-    </>
+    <div className="flex flex-col gap-1">
+      <p className="font-semibold">{t("result_being_generated")}</p>
+      <p className="text-muted-foreground text-sm">{t("app_result_leave_hint")}</p>
+      <div data-result-skeleton="" aria-hidden="true" className="flex flex-col gap-3 pt-5">
+        {SKELETON_LINES.map((line, index) =>
+          line ? (
+            <Skeleton
+              key={index}
+              index={index}
+              height={line.height}
+              width={line.width}
+              radius={1}
+            />
+          ) : (
+            <div key={index} className="h-2" />
+          )
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -102,7 +128,9 @@ function FailedFileDownloads({ run }: { run: AppRun }) {
 function TranscriptionTab({ run }: { run: AppRun }) {
   const transcribed = run.input.files.filter((file) => file.transcription);
   const { data: urls = {} } = useQuery({
-    queryKey: ["app-runs", run.id, "audio-urls"],
+    // Outside the "app-runs" prefix a finished job refreshes: signing again
+    // would swap the players' sources and stop an audio mid-playback.
+    queryKey: ["app-run-audio-urls", run.id],
     queryFn: async (): Promise<Record<string, string>> => {
       const entries = await Promise.all(
         transcribed.map(
@@ -145,11 +173,20 @@ function TranscriptionTab({ run }: { run: AppRun }) {
  * The output and the input's transcriptions as WAI-ARIA tabs: the arrow keys
  * move between the tabs (TabList's roving focus), Enter or Space opens one,
  * and each panel is named by its tab. Only the open panel renders, so the
- * audio players stop and the signed audio URLs load on first view.
+ * audio players stop and the signed audio URLs load on first view. The page
+ * holds the open tab: its Kopiera and Ladda ner act on the output, so they
+ * show only while the output does.
  */
-function ResultTabs({ run, fileName }: { run: AppRun; fileName: string }) {
+function ResultTabs({
+  run,
+  tab,
+  onTabChange
+}: {
+  run: AppRun;
+  tab: ResultTab;
+  onTabChange: (tab: ResultTab) => void;
+}) {
   const t = useTranslations();
-  const [tab, setTab] = useState<ResultTab>("results");
   const baseId = useId();
   const tabId = (value: ResultTab) => `${baseId}-tab-${value}`;
   const panelId = (value: ResultTab) => `${baseId}-panel-${value}`;
@@ -175,7 +212,7 @@ function ResultTabs({ run, fileName }: { run: AppRun; fileName: string }) {
         role="tablist"
         aria-label={t("legacy_result_tabs_label")}
         value={tab}
-        onChange={(value) => setTab(value === "transcription" ? "transcription" : "results")}
+        onChange={(value) => onTabChange(value === "transcription" ? "transcription" : "results")}
         hasDivider
       >
         <Tab
@@ -191,7 +228,7 @@ function ResultTabs({ run, fileName }: { run: AppRun; fileName: string }) {
           panelId={panelId("transcription")}
         />
       </TabList>
-      {panel("results", <RunOutput run={run} fileName={fileName} />)}
+      {panel("results", <RunOutput run={run} />)}
       {panel("transcription", <TranscriptionTab run={run} />)}
     </div>
   );
@@ -223,6 +260,8 @@ export function ResultDetail({
 
   const complete = !isRunActive(run.status);
   const transcribedCount = run.input.files.filter((file) => file.transcription).length;
+  const [tab, setTab] = useState<ResultTab>("results");
+  const outputShown = transcribedCount === 0 || tab === "results";
   const title = getResultTitle(run, resultTitleLabels(t));
   const outputFileName = `${title.slice(0, 40)}.txt`;
 
@@ -241,31 +280,24 @@ export function ResultDetail({
           actions={
             <>
               {editHref && <Button href={editHref} label={t("edit")} />}
-              <Button href={newRunHref} variant="primary" label={t("new_run")} />
+              <DockedActions label={t("app_result_actions")}>
+                {complete && run.output && outputShown && (
+                  <OutputActions text={run.output} fileName={outputFileName} />
+                )}
+                <Button href={newRunHref} variant="primary" label={t("new_run")} />
+              </DockedActions>
             </>
           }
         />
       </div>
 
-      <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-        <div className="border-border bg-card min-h-72 w-full flex-1 rounded-lg border p-6 shadow-sm lg:p-10">
-          {!complete ? (
-            <div className="flex h-64 flex-col items-center justify-center gap-3">
-              <span className="border-primary size-8 animate-spin rounded-full border-2 border-t-transparent" />
-              <span className="text-muted-foreground">{t("result_being_generated")}</span>
-            </div>
-          ) : transcribedCount > 0 ? (
-            <ResultTabs run={run} fileName={outputFileName} />
-          ) : run.output ? (
-            <RunOutput run={run} fileName={outputFileName} />
-          ) : run.status === "failed" && run.input.files.length > 0 ? (
-            <FailedFileDownloads run={run} />
-          ) : (
-            <p className="text-muted-foreground text-center">{t("no_outputs_generated")}</p>
-          )}
-        </div>
-
+      {/* The summary comes first, so a phone shows the status above the
+          result; from 1024 px it is the column on the right. */}
+      <div className="flex flex-col gap-8 lg:flex-row-reverse lg:items-start">
         <aside className="flex w-full flex-col gap-3 lg:sticky lg:top-6 lg:w-64">
+          <div className="flex">
+            <AppRunStatusToken status={run.status} />
+          </div>
           <div className="border-border flex items-center justify-between border-b pb-1">
             <span>{t("started")}</span>
             <span className="text-sm">
@@ -280,16 +312,32 @@ export function ResultDetail({
               </span>
             </div>
           )}
-          <AppRunStatusBadge status={run.status} variant="full" />
-          {run.input.files.map((file) => (
-            <div
-              key={file.id}
-              className="border-border bg-card flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm"
-            >
-              <span className="truncate">{file.name}</span>
+          {/* One line for all the files, so a phone's summary stays short above
+              the result however many there are. */}
+          {run.input.files.length > 0 && (
+            <div className="border-border flex justify-between gap-4 border-b pb-1">
+              <span>{t("input")}</span>
+              <span className="min-w-0 text-end text-sm break-words">
+                {run.input.files.map((file) => file.name).join(", ")}
+              </span>
             </div>
-          ))}
+          )}
         </aside>
+
+        {/* A card from 768 px; on a phone the result runs flat on the page. */}
+        <div className="md:border-border md:bg-card w-full flex-1 md:min-h-72 md:rounded-lg md:border md:p-6 md:shadow-sm lg:p-10">
+          {!complete ? (
+            <PendingResult />
+          ) : transcribedCount > 0 ? (
+            <ResultTabs run={run} tab={tab} onTabChange={setTab} />
+          ) : run.output ? (
+            <RunOutput run={run} />
+          ) : run.status === "failed" && run.input.files.length > 0 ? (
+            <FailedFileDownloads run={run} />
+          ) : (
+            <p className="text-muted-foreground text-center">{t("no_outputs_generated")}</p>
+          )}
+        </div>
       </div>
     </div>
   );
