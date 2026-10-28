@@ -338,17 +338,56 @@ async def test_input_without_speaker_labels_fails_typed(harness) -> None:
         )
 
 
+async def test_a_speaker_the_model_leaves_out_stays_unnamed_for_the_review(
+    harness,
+) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {"label": "SPEAKER_01", "name": "Bo", "confidence": "high", "evidence": "x"}
+        ]
+    }
+    handler, _ = _handler(activate)
+    state, _ = _state()
+
+    result = await handler.execute(
+        step=_step(),
+        run=SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Anna, Bo"}),
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+
+    output = result.output
+    assert output.structured_output == {
+        "speakers": [
+            {"label": "SPEAKER_00", "name": None, "confidence": "low", "evidence": ""},
+            {
+                "label": "SPEAKER_01",
+                "name": "Bo",
+                "confidence": "high",
+                "evidence": "x",
+            },
+        ]
+    }
+    assert output.full_text.splitlines() == [
+        "[00:00:00 - 00:00:04] SPEAKER_00: Hej, jag heter Anna.",
+        "[00:00:05 - 00:00:09] Bo: Hej Anna, Bo här.",
+    ]
+    assert any(
+        d.code == "speaker_mapping_unmapped_labels" and "SPEAKER_00" in d.message
+        for d in output.diagnostics
+    )
+
+
 @pytest.mark.parametrize(
     "labels",
     [
-        ["SPEAKER_00"],
         ["SPEAKER_00", "SPEAKER_00"],
         ["SPEAKER_00", "SPEAKER_01", "SPEAKER_09"],
     ],
 )
-async def test_mapping_must_cover_exactly_the_transcript_inventory(
-    harness, labels
-) -> None:
+async def test_mapping_names_only_transcript_labels_each_once(harness, labels) -> None:
     calls, activate = harness
     calls["structured"] = {
         "speakers": [

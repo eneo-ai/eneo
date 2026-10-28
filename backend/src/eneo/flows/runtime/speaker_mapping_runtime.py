@@ -144,7 +144,9 @@ def validate_speaker_mapping(
     and at most once a label the transcript's own speaker edits split off
     after the inventory was taken. Names are restricted to participants
     unless free text is allowed. A reviewer's name that is not one short line
-    is refused; a model's proposed name is cleaned to one instead."""
+    is refused; a model's proposed name is cleaned to one instead. A known
+    label a reviewer leaves out is refused; one a model leaves out is kept
+    unnamed."""
     if not isinstance(structured, Mapping):
         raise SpeakerMappingValidationError("Speaker mapping must be an object.")
     raw_speakers = cast(Mapping[str, object], structured).get("speakers")
@@ -205,7 +207,16 @@ def validate_speaker_mapping(
             "evidence": evidence if isinstance(evidence, str) else "",
         }
     missing = [label for label in known_labels if label not in by_label]
-    if missing:
+    if missing and model_proposal:
+        # A label the model left out stays, unnamed, for the reviewer.
+        for label in missing:
+            by_label[label] = {
+                "label": label,
+                "name": None,
+                "confidence": "low",
+                "evidence": "",
+            }
+    elif missing:
         raise SpeakerMappingValidationError(
             f"Mapping is missing speaker labels: {', '.join(missing)}."
         )

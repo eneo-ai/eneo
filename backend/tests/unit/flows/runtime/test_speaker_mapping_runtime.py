@@ -220,6 +220,54 @@ def test_a_model_proposed_name_is_cleaned_not_refused(
     assert mapping["speakers"][0]["name"] == kept
 
 
+INVENTORY_THREE = [
+    *INVENTORY,
+    {"label": "SPEAKER_02", "file_index": 0, "line_count": 1, "samples": ["Ja"]},
+]
+
+
+def test_a_label_the_model_leaves_out_stays_unnamed_in_its_place() -> None:
+    mapping = validate_speaker_mapping(
+        {
+            "speakers": [
+                {"label": "SPEAKER_02", "name": "Bo Berg", "confidence": "high"},
+                {"label": "SPEAKER_00", "name": None, "confidence": "medium"},
+            ]
+        },
+        inventory=INVENTORY_THREE,
+        participants=PARTICIPANTS,
+        allow_free_text=False,
+        model_proposal=True,
+    )
+    assert mapping == {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": None,
+                "confidence": "medium",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+            {
+                "label": "SPEAKER_02",
+                "name": "Bo Berg",
+                "confidence": "high",
+                "evidence": "",
+            },
+        ]
+    }
+
+
+def test_a_label_a_person_leaves_out_is_refused() -> None:
+    with pytest.raises(SpeakerMappingValidationError, match="SPEAKER_01"):
+        validate_speaker_mapping(
+            {"speakers": [INVENTORY_NAMES[0]]},
+            inventory=INVENTORY,
+            participants=PARTICIPANTS,
+            allow_free_text=True,
+        )
+
+
 def test_a_speaker_name_at_the_bound_is_kept() -> None:
     name = "x" * ONE_LINE_TEXT_MAX_CHARS
     mapping = validate_speaker_mapping(
