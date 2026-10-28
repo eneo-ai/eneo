@@ -2,7 +2,7 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "./errors";
-import { pollWhile } from "./query";
+import { makeQueryClient, pollWhile, readCached, readFresh, warmQuery } from "./query";
 
 type Job = { status: "running" | "done" };
 
@@ -78,5 +78,147 @@ describe("pollWhile", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(stopped.requests()).toBe(1);
     stopped.stop();
+  });
+});
+
+/** A backend resource that answers with `answers`, one per request, repeating the last. */
+function resource(...answers: Array<string | number>) {
+  let requests = 0;
+  return {
+    requests: () => requests,
+    options: {
+      queryKey: ["resource"],
+      queryFn: async () => {
+        const answer = answers[Math.min(requests++, answers.length - 1)];
+        if (typeof answer === "number") throw new EneoApiError("no", { status: answer });
+        return answer;
+      }
+    }
+  };
+}
+
+/** Runs the retries' timers (backoff 1 + 2 + 4 s), not the cache's garbage collection. */
+const retriesRun = () => vi.advanceTimersByTimeAsync(10_000);
+
+async function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  const result = Promise.allSettled([promise]);
+  await retriesRun();
+  return (await result)[0]!;
+}
+
+describe("the default retry policy", () => {
+  it.each([400, 403, 404, 409, 429])("fails at once on a %i", async (status) => {
+    const backend = resource(status);
+    const client = makeQueryClient();
+
+    const observer = new QueryObserver(client, backend.options);
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+
+    expect(observer.getCurrentResult().error).toMatchObject({ status });
+    expect(backend.requests()).toBe(1);
+    unsubscribe();
+  });
+
+  it("tries a server failure three more times", async () => {
+    const backend = resource(503);
+    const client = makeQueryClient();
+
+    const observer = new QueryObserver(client, backend.options);
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+
+    expect(observer.getCurrentResult().error).toMatchObject({ status: 503 });
+    expect(backend.requests()).toBe(4);
+    unsubscribe();
+  });
+
+  it("leaves a query's own policy alone", async () => {
+    const backend = resource(503);
+    const client = makeQueryClient();
+
+    const observer = new QueryObserver(client, { ...backend.options, retry: false });
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+
+    expect(backend.requests()).toBe(1);
+    unsubscribe();
+  });
+});
+
+describe("readCached", () => {
+  it("returns cached data without asking, also after a failed background refresh", async () => {
+    const backend = resource("first", 503);
+    const client = makeQueryClient();
+    await settle(readCached(client, backend.options));
+    await settle(client.refetchQueries({ queryKey: ["resource"] }));
+    expect(client.getQueryState(["resource"])?.isInvalidated).toBe(true);
+    const asked = backend.requests();
+
+    await expect(readCached(client, backend.options)).resolves.toBe("first");
+    expect(backend.requests()).toBe(asked);
+  });
+
+  it("loads what is not cached, and fails when it cannot", async () => {
+    const backend = resource(404);
+
+    const result = await settle(readCached(makeQueryClient(), backend.options));
+
+    expect(result).toMatchObject({ status: "rejected", reason: { status: 404 } });
+  });
+});
+
+describe("readFresh", () => {
+  it("asks again after a failed background refresh, and keeps the guard's 404", async () => {
+    const backend = resource("first", 403, 404);
+    const client = makeQueryClient();
+    await settle(readCached(client, backend.options));
+    await settle(client.refetchQueries({ queryKey: ["resource"] }));
+    const asked = backend.requests();
+
+    const result = await settle(readFresh(client, backend.options));
+
+    expect(result).toMatchObject({ status: "rejected", reason: { status: 404 } });
+    expect(backend.requests()).toBe(asked + 1);
+  });
+
+  it("fails a cold read at once, without retries", async () => {
+    const backend = resource(503);
+
+    const result = await settle(readFresh(makeQueryClient(), backend.options));
+
+    expect(result).toMatchObject({ status: "rejected", reason: { status: 503 } });
+    expect(backend.requests()).toBe(1);
+  });
+});
+
+describe("warmQuery", () => {
+  it("keeps the query's retries for a component that joins it", async () => {
+    const backend = resource(503, "loaded");
+    const client = makeQueryClient();
+
+    warmQuery(client, backend.options);
+    const observer = new QueryObserver(client, backend.options);
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+
+    expect(observer.getCurrentResult().data).toBe("loaded");
+    expect(backend.requests()).toBe(2);
+    unsubscribe();
+  });
+
+  it("keeps a query's deliberate retry: false", async () => {
+    const backend = resource(503, "loaded");
+    const client = makeQueryClient();
+    const options = { ...backend.options, retry: false as const };
+
+    warmQuery(client, options);
+    const observer = new QueryObserver(client, options);
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+
+    expect(observer.getCurrentResult().error).toMatchObject({ status: 503 });
+    expect(backend.requests()).toBe(1);
+    unsubscribe();
   });
 });

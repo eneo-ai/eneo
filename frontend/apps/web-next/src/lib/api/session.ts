@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { EneoClient } from "./browser";
 import { unwrap } from "./errors";
 import type { Schema } from "./models";
+import { readCached } from "./query";
 
 /**
  * The signed-in session's resources: the user, their organisation and its
@@ -65,24 +66,24 @@ export function sessionQueries(api: EneoClient) {
 }
 
 /**
- * Loads the session into `queryClient`, cache first: a resource already
- * cached is used as it is, even after a failed background refresh (which
- * marks it invalidated); mounted observers refresh it. Rejects when a required
- * resource has no data and cannot be read.
+ * Loads the session into `queryClient`, cache first (`readCached`): a
+ * resource already cached is used as it is, even after a failed background
+ * refresh; mounted observers refresh it. Rejects when a required resource has
+ * no data and cannot be read.
  */
 export async function loadSession(queryClient: QueryClient, api: EneoClient): Promise<void> {
   const session = sessionQueries(api);
   await Promise.all([
-    queryClient.query({ ...session.me, staleTime: "static" }),
-    queryClient.query({ ...session.tenant, staleTime: "static" }),
-    queryClient.query({ ...session.settings, staleTime: "static" }),
-    queryClient.query({ ...session.federationStatus, staleTime: "static" }),
-    queryClient.query({ ...session.limits, staleTime: "static" }),
+    readCached(queryClient, session.me),
+    readCached(queryClient, session.tenant),
+    readCached(queryClient, session.settings),
+    readCached(queryClient, session.federationStatus),
+    readCached(queryClient, session.limits),
     // Optional during rolling deployments; an unavailable marker must not look
     // like "never seen", and must not replace markers already known: not here,
     // and not where this cache is hydrated into one that knows them (a
     // refreshed Next layout), so it is dated as the oldest possible answer.
-    queryClient.query({ ...session.whatsNew, staleTime: "static" }).catch(() => {
+    readCached(queryClient, session.whatsNew).catch(() => {
       if (queryClient.getQueryData(sessionKeys.whatsNew) === undefined) {
         queryClient.setQueryData(sessionKeys.whatsNew, null, { updatedAt: 0 });
       }

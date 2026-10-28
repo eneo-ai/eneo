@@ -265,6 +265,44 @@ the default name on a backend name collision (9017).
   (`src/components/ui/toast-lift.ts`, WCAG 2.4.11); put `data-clear-of-toasts`
   on a docked group (like the chat composer) that should stay clear as a whole.
 
+## Routing (Vite)
+
+The Vite build (`bun run build:vite`) routes with TanStack Router:
+`src/router.tsx` owns every router option, `src/routes/` holds the route
+files and `src/routes/__root.tsx` renders the providers of the Next root
+layout.
+
+- **Loading has no side effects.** `beforeLoad` and loaders also run when a
+  link is hovered, so they never mutate: logout, a module ticket or an
+  integration callback runs once in an effect or a click handler, without
+  retries or the query cache.
+- **Loaders and guards read through `src/lib/api/query.ts`**, never a bare
+  `queryClient.query`:
+  - `readCached`: session and display data, as cached, even when stale or
+    after a failed background refresh (mounted observers refresh it);
+  - `readFresh`: a guard's evidence (a permission, a resource that may be
+    gone), read again when stale or invalidated, without retries; the guard
+    keeps its 403/404 handling;
+  - `warmQuery`: starts what the page will need without waiting, with the
+    query's own retry policy.
+
+  `makeQueryClient` owns the default retry (never on a 4xx, three more tries
+  on a server or network failure). A query that must not retry sets
+  `retry: false` after spreading its options.
+
+- **`loaderDeps` hold no UI state** (`tab`, `page`, `search`, `role_id`,
+  `session_id`, `step`): a tab or filter change must not show pending UI or
+  run the loader again.
+- **Every page route has a title**: `head: routeTitle("key")`
+  (`src/lib/route-head.ts`), shown as "<Page> · Eneo".
+- **Pending UI belongs to page routes**, not `_app`, so the shell stays while
+  a page loads. Chat routes show none for a change of parameters alone.
+- **Errors**: `RouteError` is for a route that failed to load or render. A
+  query that fails while its data is on screen stays with
+  `QueryStateBoundary`.
+- **Search** is flat `URLSearchParams` (`src/lib/router/search.ts`): every
+  value is a string, a repeated key a list.
+
 ## Styling
 
 1. Component props first (`variant`, `size`, `status`, …).
