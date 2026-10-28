@@ -53,3 +53,31 @@ it("treats a saved JSON schema as saved, whatever its formatting", async () => {
 
   expect(update).toHaveBeenCalledTimes(1);
 });
+
+it("treats a saved schema as saved when the server returns its keys in another order", async () => {
+  update.mockResolvedValue({});
+  const { rerender, unmount } = renderInApp(<ServiceEditor service={service(null)} />);
+  const schema = () => document.getElementById("service-json-schema") as HTMLTextAreaElement;
+  const typed =
+    '{"type":"object","properties":{"name":{"type":"string","description":"Namn"}},"required":["name"]}';
+
+  fireEvent.change(schema(), { target: { value: typed } });
+  fireEvent.blur(schema());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+
+  // JSONB keeps no key order; arrays keep theirs.
+  rerender(
+    <ServiceEditor
+      service={service({
+        required: ["name"],
+        properties: { name: { description: "Namn", type: "string" } },
+        type: "object"
+      })}
+    />
+  );
+  fireEvent.blur(schema());
+  unmount();
+  await act(async () => {});
+
+  expect(update).toHaveBeenCalledTimes(1);
+});

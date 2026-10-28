@@ -58,10 +58,21 @@ function parseJsonSchema(value: string): Record<string, unknown> {
 
 type OutputDraft = { format: ServiceOutputFormat | null; schema: string };
 
-/** A schema as the server renders it (`schemaText`); text that is no schema yet stays as typed. */
+/** JSON with object keys sorted (arrays keep their order): JSONB keeps no key order. */
+function sortedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedKeys);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortedKeys((value as Record<string, unknown>)[key])])
+  );
+}
+
+/** A schema's content for comparison; text that is no schema yet stays as typed. */
 function canonicalSchema(text: string): string {
   try {
-    return schemaText(parseJsonSchema(text));
+    return JSON.stringify(sortedKeys(parseJsonSchema(text)));
   } catch {
     return text;
   }
