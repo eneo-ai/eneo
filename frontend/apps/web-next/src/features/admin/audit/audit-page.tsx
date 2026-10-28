@@ -31,17 +31,11 @@ function LogsTab() {
   const [paging, setPaging] = useState<"previous" | "next" | null>(null);
 
   // The free-text search commits into the filters once typing pauses; a new
-  // search starts over at page 1. Only a change of the debounced draft
-  // commits, so clearing (committed at once, below) is not undone meanwhile.
+  // search starts over at page 1. Only a debounced value that matches the box
+  // commits, so clearing (committed at once, below) is not undone by an older one.
   const debouncedSearch = useDebouncedValue(searchInput.trim());
-  const [committedSearch, setCommittedSearch] = useState(debouncedSearch);
-  if (debouncedSearch !== committedSearch) {
-    setCommittedSearch(debouncedSearch);
-    setFilters((current) =>
-      current.search === debouncedSearch
-        ? current
-        : { ...current, search: debouncedSearch, page: 1 }
-    );
+  if (debouncedSearch === searchInput.trim() && debouncedSearch !== filters.search) {
+    setFilters({ ...filters, search: debouncedSearch, page: 1 });
   }
 
   useEffect(() => {
