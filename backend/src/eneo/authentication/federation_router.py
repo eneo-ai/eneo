@@ -919,7 +919,8 @@ async def auth_callback(
 
     if redis_client and state_cache_key:
         try:
-            cached_raw = await redis_client.get(state_cache_key)
+            # The state is single-use: GETDEL admits exactly one callback.
+            cached_raw = await redis_client.getdel(state_cache_key)
             if cached_raw:
                 cached_state = cast(OIDCStateCache, json.loads(cached_raw))
             await _log_oidc_debug(

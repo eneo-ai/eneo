@@ -1,5 +1,6 @@
 """Unit tests for OIDC federation router edge cases."""
 
+import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,9 @@ class FakeRedis:
 
     async def get(self, key: str) -> str | None:
         return self._store.get(key)
+
+    async def getdel(self, key: str) -> str | None:
+        return self._store.pop(key, None)
 
     async def delete(self, key: str) -> None:
         self._store.pop(key, None)
@@ -1394,3 +1398,152 @@ async def test_global_oidc_endpoint_uses_shared_admission(monkeypatch, admission
             assert caught.value.status_code == 403
             assert caught.value.headers["X-Correlation-ID"]
             assert repository._created_user is None
+
+
+class InterleavingRedis(FakeRedis):
+    """Lets the other callback run between a plain read and the later delete,
+    as two server workers can; GETDEL reads and deletes in one step."""
+
+    async def get(self, key: str) -> str | None:
+        value = self._store.get(key)
+        await asyncio.sleep(0)
+        return value
+
+
+class FailingStateRedis(FakeRedis):
+    async def getdel(self, key: str) -> str | None:
+        raise ConnectionError("redis unavailable")
+
+
+async def _single_use_callback(monkeypatch, redis_client: FakeRedis):
+    """A valid tenant callback whose state is cached once in redis_client."""
+    dummy_settings = DummySettings(federation_enabled=True)
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+    tenant_id = uuid4()
+    slug = "tenant-single-use"
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Tenant Single Use",
+        display_name="Tenant Single Use",
+        slug=slug,
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "canonical_public_origin": "https://tenant.example.com",
+            "redirect_path": "/login/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="user@example.com",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant_id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+    issue_time = int(time.time())
+    version = datetime.now(timezone.utc).isoformat()
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "frontend_state": "{}",
+        "nonce": "single-use-nonce",
+        "redirect_uri": "https://tenant.example.com/login/callback",
+        "correlation_id": "corr-single-use",
+        "exp": issue_time + 600,
+        "iat": issue_time,
+        "config_version": version,
+    }
+    await redis_client.setex(
+        "oidc:state:single-use-nonce",
+        dummy_settings.oidc_state_ttl_seconds,
+        json.dumps(
+            {
+                "tenant_id": str(tenant_id),
+                "tenant_slug": slug,
+                "redirect_uri": state_payload["redirect_uri"],
+                "config_version": version,
+                "iat": issue_time,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        federation_router,
+        "aiohttp_client",
+        lambda: FakeAioHttpClient(
+            FakeResponse({"id_token": "id", "access_token": "token"})
+        ),
+    )
+    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
+    return CallbackRequest(code="auth-code", state=signed_state), container
+
+
+def _is_expired_session(error: BaseException) -> bool:
+    return (
+        isinstance(error, HTTPException)
+        and error.status_code == 400
+        and "Authorization session is invalid or has expired" in str(error.detail)
+    )
+
+
+async def test_auth_callback_state_is_single_use(monkeypatch):
+    callback, container = await _single_use_callback(monkeypatch, FakeRedis())
+
+    first = await federation_router.auth_callback(callback, container=container)
+    assert first["access_token"] == "access-token"
+
+    with pytest.raises(HTTPException) as caught:
+        await federation_router.auth_callback(callback, container=container)
+    assert _is_expired_session(caught.value)
+
+
+async def test_concurrent_callbacks_admit_exactly_one(monkeypatch):
+    callback, container = await _single_use_callback(monkeypatch, InterleavingRedis())
+
+    results = await asyncio.gather(
+        federation_router.auth_callback(callback, container=container),
+        federation_router.auth_callback(callback, container=container),
+        return_exceptions=True,
+    )
+
+    admitted = [r for r in results if isinstance(r, dict)]
+    refused = [r for r in results if isinstance(r, BaseException)]
+    assert len(admitted) == 1
+    assert len(refused) == 1 and _is_expired_session(refused[0])
+
+
+async def test_state_lookup_failure_rejects(monkeypatch):
+    callback, container = await _single_use_callback(monkeypatch, FailingStateRedis())
+
+    with pytest.raises(HTTPException) as caught:
+        await federation_router.auth_callback(callback, container=container)
+    assert _is_expired_session(caught.value)
