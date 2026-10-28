@@ -1,5 +1,5 @@
 /**
- * Vitest setup (vitest.config.ts → setupFiles): what jsdom lacks and the app
+ * Vitest setup (vitest.config.mts → setupFiles): what jsdom lacks and the app
  * uses, installed once for every jsdom test file and kept faithful to the
  * browser (Chromium, which the e2e tests drive), so a test passes only when
  * users get the same:
