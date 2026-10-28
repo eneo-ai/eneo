@@ -43,6 +43,13 @@ from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
+_READINESS_ON_GET = (
+    "The storage readiness probe binds the deployment to its object store on first "
+    "use or after a lost pairing marker, and imports an environment-configured "
+    "connection once. Idempotent, and the outcome follows from deployment state, "
+    "not from the request."
+)
+
 router = APIRouter()
 logger = get_logger(__name__)
 
@@ -273,6 +280,7 @@ async def _read_moves(session: AsyncSession) -> ObjectContentMovesPublic:
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Tenant administrators may read sanitized deployment storage settings.",
+    effect_on_get=_READINESS_ON_GET,
 )
 async def get_deployment_policy(
     container: Annotated[

@@ -63,6 +63,13 @@ def test_defaults(test_settings: Settings):
     assert config.mcp_app_content_origin is None
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_federation_enabled_follows_the_setting(test_settings: Settings, enabled: bool):
+    config = build_runtime_config(_settings(test_settings, federation_enabled=enabled))
+
+    assert config.federation_enabled is enabled
+
+
 @pytest.mark.parametrize("field", LINKS)
 @pytest.mark.parametrize(
     "value",
@@ -170,6 +177,7 @@ async def test_endpoint_is_public_and_not_cached(test_settings: Settings):
         "accessibility_statement_url",
         "request_integration_form_url",
         "mcp_app_content_origin",
+        "federation_enabled",
     }
 
 

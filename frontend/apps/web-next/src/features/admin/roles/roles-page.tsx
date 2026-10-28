@@ -557,48 +557,49 @@ function RoleRow({
               <span className="hidden lg:inline">{t("roles_view_users")}</span>
             </Link>
           </Button>
-          {(!isDefault || role.predefined_source) && (
-            <DropdownMenu
-              button={{
-                label: t("ui_more_actions_for", { name: role.name }),
-                tooltip: t("ui_more_actions_for", { name: role.name }),
-                icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-                isIconOnly: true,
-                variant: "ghost",
-                size: "sm",
-                className: "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-              }}
-              hasChevron={false}
-              alignment="end"
-            >
-              {!isDefault && (
-                <DropdownMenuItem
-                  icon={Star}
-                  label={t("set_as_default_role")}
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("default")}
-                />
-              )}
-              {role.predefined_source && (
-                <DropdownMenuItem
-                  icon={RotateCcw}
-                  label={t("reset_to_template")}
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("reset")}
-                />
-              )}
-              {!isDefault && <DropdownMenuDivider />}
-              {!isDefault && (
-                <DropdownMenuItem
-                  icon={Trash2}
-                  label={t("delete_role")}
-                  variant="destructive"
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("delete")}
-                />
-              )}
-            </DropdownMenu>
-          )}
+          {/* Always there: the default role's menu shows why it cannot be deleted. */}
+          <DropdownMenu
+            button={{
+              label: t("ui_more_actions_for", { name: role.name }),
+              tooltip: t("ui_more_actions_for", { name: role.name }),
+              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+              isIconOnly: true,
+              variant: "ghost",
+              size: "sm",
+              className: "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            }}
+            hasChevron={false}
+            alignment="end"
+          >
+            {!isDefault && (
+              <DropdownMenuItem
+                icon={Star}
+                label={t("set_as_default_role")}
+                className="pointer-coarse:min-h-11"
+                onClick={() => onAction("default")}
+              />
+            )}
+            {role.predefined_source && (
+              <DropdownMenuItem
+                icon={RotateCcw}
+                label={t("reset_to_template")}
+                className="pointer-coarse:min-h-11"
+                onClick={() => onAction("reset")}
+              />
+            )}
+            {(!isDefault || role.predefined_source) && <DropdownMenuDivider />}
+            <DropdownMenuItem
+              icon={Trash2}
+              label={t("delete_role")}
+              // Visible but disabled for the default role, with the reason
+              // (the Svelte app's RoleRow does the same).
+              description={isDefault ? t("roles_cannot_delete_default") : undefined}
+              isDisabled={isDefault}
+              variant="destructive"
+              className="pointer-coarse:min-h-11"
+              onClick={() => onAction("delete")}
+            />
+          </DropdownMenu>
         </div>
       </div>
       <ul className="flex flex-wrap gap-1.5" aria-label={t("roles_group_summary_label")}>

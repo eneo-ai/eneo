@@ -153,6 +153,9 @@ from eneo.tenants.presentation.tenant_federation_router import (
 from eneo.tenants.presentation.tenant_self_credentials_router import (
     router as tenant_self_credentials_router,
 )
+from eneo.tenants.presentation.tenant_self_federation_router import (
+    router as tenant_self_federation_router,
+)
 from eneo.token_usage.presentation.token_usage_router import (
     router as token_usage_router,
 )
@@ -663,6 +666,10 @@ router.include_router(
 )
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/admin/modules", tags=["modules"])
+# Session-only: an API key is refused before any federation data is read.
+router.include_router(
+    tenant_self_federation_router, prefix="/admin/federation", tags=["admin"]
+)
 router.include_router(module_auth_router, prefix="/module-auth", tags=["module-auth"])
 router.include_router(
     federation_router, prefix="", tags=["authentication"]

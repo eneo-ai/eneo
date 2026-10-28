@@ -185,3 +185,11 @@ class ActionType(str, Enum):
     AUDIT_SESSION_CREATED = "audit_session_created"
     AUDIT_LOG_VIEWED = "audit_log_viewed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
+
+
+# Logged whatever the tenant's audit configuration says: a tenant admin can
+# switch off categories, actions and the whole audit log, and none of those may
+# hide a change to how the organisation signs in.
+ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
+    {ActionType.FEDERATION_UPDATED}
+)
