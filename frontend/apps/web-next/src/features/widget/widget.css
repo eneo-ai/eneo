@@ -205,37 +205,6 @@
   outline-offset: 1px;
 }
 
-/* The persona's avatar: accent only when its text colour reaches 4.5:1 on
-   it (embed-app.tsx decides); otherwise a neutral plate. A transparent
-   upload still has an edge on either scheme (WCAG 1.4.11). */
-.widget-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--widget-avatar-bg, var(--color-background-muted));
-  color: var(--widget-avatar-fg, var(--color-text-primary));
-  font-weight: 600;
-  line-height: 1;
-  box-shadow: inset 0 0 0 1px var(--color-border);
-}
-
-/* Text and a border, never colour alone; sized in em so it zooms with the
-   name. Small text on the log's faint ground, so it keeps the full text
-   colour for 4.5:1 (WCAG 1.4.3). */
-.widget-ai-chip {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--widget-outline);
-  border-radius: 999px;
-  padding: 0 0.4em;
-  min-height: 1.4em;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-}
-
 .widget-notice-close {
   display: flex;
   width: 2.25rem;

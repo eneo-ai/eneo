@@ -7,9 +7,8 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -23,6 +22,7 @@ import { TemplatePicker } from "./template-picker";
 import { isGroupLocked, lockedTextFields } from "./template-locks";
 import { collapseWhitespace } from "./text";
 import { DraftWrapper, useTextDraft } from "./use-text-draft";
+import { useUrlTab } from "./use-url-tab";
 import { useWidgetAutosave } from "./use-widget-autosave";
 import { WidgetLiveTest } from "./widget-live-test";
 import { WidgetPersonaFields } from "./widget-persona-fields";
@@ -44,29 +44,6 @@ const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
 
 /** What linking copies from the template's release onto the widget. */
 const RELEASE_GROUPS = ["texts", "theme", "language"];
-
-/**
- * A tab selection mirrored in `?tab=` so a tab can be linked to and survives
- * a reload, without adding history entries for every click.
- */
-function useUrlTab(fallback: TabId): [TabId, (tab: TabId) => void] {
-  const params = useSearchParams();
-  const initial = params.get("tab");
-  const [tab, setTab] = useState<TabId>(
-    TABS.includes(initial as TabId) ? (initial as TabId) : fallback
-  );
-  const select = useCallback(
-    (next: TabId) => {
-      setTab(next);
-      const url = new URL(window.location.href);
-      if (next === fallback) url.searchParams.delete("tab");
-      else url.searchParams.set("tab", next);
-      window.history.replaceState(window.history.state, "", url);
-    },
-    [fallback]
-  );
-  return [tab, select];
-}
 
 /**
  * The "Webbwidget" page body. Status and lifecycle on top; then four tabs in
@@ -100,7 +77,7 @@ export function WidgetEditor({
   const templates = allTemplates.filter((template) => template.published_at != null);
   const { autosave, state } = useWidgetAutosave(widget);
   const current = state.widget;
-  const [tab, setTab] = useUrlTab("content");
+  const [tab, setTab] = useUrlTab(TABS, "content");
 
   // A blank name is never sent: the API would refuse it and hold every
   // later edit back with it.

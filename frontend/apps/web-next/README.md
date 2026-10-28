@@ -52,8 +52,11 @@ The widget's admin page lives under its assistant
 the editor with its autosave store, the live preview (the embed page framed
 with a preview token, so the app's CSP allows same-origin frames), "Test in
 Eneo" with the real loader, the install snippet (pointing at `APP_ORIGIN`)
-and the usage table. Widget templates, the organisation's widget overview and
-its usage pages are not ported yet.
+and the usage table. The organisation's side is under `/admin/widgets`
+(`src/features/widget/admin/org`): the overview of every widget with its
+usage and the pause/activate actions, the policy every widget stays within,
+and the templates with their editor (`/admin/widgets/templates/<id>`), whose
+preview is a static mock since a template has no widget behind it.
 
 ## Auth
 

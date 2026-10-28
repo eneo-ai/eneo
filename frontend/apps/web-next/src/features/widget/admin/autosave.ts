@@ -343,3 +343,9 @@ export class WidgetAutosave extends Autosave<Widget, Omit<WidgetUpdate, "revisio
     super(widget, (update, baseline) => save({ ...update, revision: baseline.revision }), options);
   }
 }
+
+export type WidgetTemplate = Schema<"WidgetTemplatePublic">;
+export type WidgetTemplateUpdate = Schema<"WidgetTemplateUpdate">;
+
+/** The template editor's autosave: whole documents, no revision, the same field errors. */
+export class WidgetTemplateAutosave extends Autosave<WidgetTemplate, WidgetTemplateUpdate> {}

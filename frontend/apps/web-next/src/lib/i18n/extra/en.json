@@ -1624,5 +1624,8 @@
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
   "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
-  "widget_admin_snippet_description": "Paste this once on the website, preferably at the end of the page's body. The floating version updates automatically with Eneo."
+  "widget_admin_snippet_description": "Paste this once on the website, preferably at the end of the page's body. The floating version updates automatically with Eneo.",
+  "widget_admin_overview_failed": "The overview could not be loaded.",
+  "widget_admin_policy_failed": "The policy could not be loaded.",
+  "widget_admin_template_failed": "The template could not be loaded."
 }

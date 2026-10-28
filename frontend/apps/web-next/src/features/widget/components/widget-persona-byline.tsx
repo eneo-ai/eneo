@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { PersonaView } from "../persona";
+import "../persona.css";
 
 /**
  * Who is answering: the persona's avatar, name and an AI marker, above the

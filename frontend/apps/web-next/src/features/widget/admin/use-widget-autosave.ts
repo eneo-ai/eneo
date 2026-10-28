@@ -13,38 +13,32 @@ type Widget = Schema<"WidgetPublic">;
 /** The header's save chip: the page's autosave reported like any other field's. */
 const SAVE_STATUS_KEY = "widget-editor";
 
+/** What the hook needs of a store; the generic class itself varies in its update type. */
+type AutosaveStore = {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => AutosaveSnapshot<unknown>;
+  flush: () => Promise<void>;
+  dispose: () => void;
+};
+
 /**
- * One autosave for the widget being edited, kept for the editor's lifetime.
- * Its state is read through React's external-store hook, so every edit,
- * save and refusal re-renders what shows them; the header's aggregate save
- * status follows it, which also guards reload and tab close while something
- * is unsaved (SaveStatusProvider).
+ * One autosave store, kept for the component's lifetime. Its state is read
+ * through React's external-store hook, so every edit, save and refusal
+ * re-renders what shows them; the header's aggregate save status follows
+ * it under `statusKey`, which also guards reload and tab close while
+ * something is unsaved (SaveStatusProvider). Whatever is still pending gets
+ * one last attempt when the component unmounts.
  */
-export function useWidgetAutosave(widget: Widget): {
-  autosave: WidgetAutosave;
-  state: AutosaveSnapshot<Widget>;
-} {
-  const t = useTranslations();
-  const [autosave] = useState(
-    () =>
-      new WidgetAutosave(
-        widget,
-        async (update) => {
-          try {
-            return await widgetApi.update(widget.id, update);
-          } catch (error) {
-            toastWidgetError(error, t);
-            throw error;
-          }
-        },
-        { fieldErrors: (error) => widgetFieldErrors(error, t) }
-      )
-  );
+export function useAutosave<Store extends AutosaveStore>(
+  create: () => Store,
+  statusKey: string
+): { autosave: Store; state: ReturnType<Store["getSnapshot"]> } {
+  const [autosave] = useState(create);
   const state = useSyncExternalStore(
     autosave.subscribe,
     autosave.getSnapshot,
     autosave.getSnapshot
-  );
+  ) as AutosaveSnapshot<unknown>;
 
   const setStatus = useSetSaveStatus();
   useEffect(() => {
@@ -57,16 +51,39 @@ export function useWidgetAutosave(widget: Widget): {
           : state.unsaved
             ? "dirty"
             : null;
-    setStatus(SAVE_STATUS_KEY, status);
-  }, [setStatus, state.status, state.unsaved]);
+    setStatus(statusKey, status);
+  }, [setStatus, statusKey, state.status, state.unsaved]);
 
   useEffect(() => {
     return () => {
-      setStatus?.(SAVE_STATUS_KEY, null);
-      // Whatever is still pending gets one last attempt on the way out.
+      setStatus?.(statusKey, null);
       void autosave.flush().finally(() => autosave.dispose());
     };
-  }, [autosave, setStatus]);
+  }, [autosave, setStatus, statusKey]);
 
-  return { autosave, state };
+  return { autosave, state: state as ReturnType<Store["getSnapshot"]> };
+}
+
+/** The autosave of the widget being edited (the widget page). */
+export function useWidgetAutosave(widget: Widget): {
+  autosave: WidgetAutosave;
+  state: AutosaveSnapshot<Widget>;
+} {
+  const t = useTranslations();
+  return useAutosave(
+    () =>
+      new WidgetAutosave(
+        widget,
+        async (update) => {
+          try {
+            return await widgetApi.update(widget.id, update);
+          } catch (error) {
+            toastWidgetError(error, t);
+            throw error;
+          }
+        },
+        { fieldErrors: (error) => widgetFieldErrors(error, t) }
+      ),
+    SAVE_STATUS_KEY
+  );
 }
