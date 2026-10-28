@@ -58,9 +58,24 @@ function parseJsonSchema(value: string): Record<string, unknown> {
 
 type OutputDraft = { format: ServiceOutputFormat | null; schema: string };
 
-/** The schema text only counts while the output format is JSON. */
+/** A schema as the server renders it (`schemaText`); text that is no schema yet stays as typed. */
+function canonicalSchema(text: string): string {
+  try {
+    return schemaText(parseJsonSchema(text));
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * The schema only counts while the output format is JSON, and by content: a
+ * saved schema renders pretty-printed, so the typed text never matches it.
+ */
 function outputEquals(a: OutputDraft, b: OutputDraft): boolean {
-  return a.format === b.format && (a.format !== "json" || a.schema === b.schema);
+  return (
+    a.format === b.format &&
+    (a.format !== "json" || canonicalSchema(a.schema) === canonicalSchema(b.schema))
+  );
 }
 
 function outputSchemaProblem(output: OutputDraft): "required_field" | "invalid_format" | null {
