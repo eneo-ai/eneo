@@ -244,7 +244,6 @@
   {#if preview}
     <div class="border-default flex flex-col gap-3 rounded-lg border p-4" aria-live="polite">
       <p class="text-secondary text-xs">{m.widget_admin_persona_preview()}</p>
-      <WidgetPersonaByline persona={preview} intro />
       <WidgetPersonaByline persona={preview} />
     </div>
   {/if}

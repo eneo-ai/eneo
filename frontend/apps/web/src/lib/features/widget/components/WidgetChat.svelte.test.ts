@@ -972,31 +972,35 @@ describe("WidgetChat with a persona", () => {
   const persona = { name: "Sigge", avatar_icon_id: null, avatar_in_launcher: false };
   const bylines = () => document.querySelectorAll("[data-widget-chat] .widget-byline");
 
-  test("opens with the persona's name and AI marker, then names every answer", async () => {
+  test("opens with the welcome text as the persona's first message, then names every answer", async () => {
     renderApp({ persona });
     await expect.element(composer()).toBeVisible();
-    // The intro: the name, the AI marker written out, then the welcome text.
-    const intro = bylines()[0];
-    expect(intro.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "S Sigge widget_persona_ai_assistant"
+    // The opening: the same byline every answer gets, then the welcome text,
+    // inside the conversation log.
+    expect(answers()).toHaveLength(1);
+    const opening = answers()[0];
+    expect(opening.querySelector(".widget-byline")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "S Sigge widget_persona_ai_chip widget_persona_ai_assistant"
     );
-    expect(intro.querySelector(".widget-avatar")?.getAttribute("aria-hidden")).toBe("true");
+    expect(opening.querySelector(".widget-avatar")?.getAttribute("aria-hidden")).toBe("true");
+    expect(opening.textContent).toContain("Hej! Vad kan jag hjälpa dig med?");
     expect(page.getByText("Hej! Vad kan jag hjälpa dig med?").elements()).toHaveLength(1);
 
     await userEvent.click(suggestion());
-    // The intro leaves with the first question; the pending answer already carries the byline.
-    await vi.waitFor(() => expect(answers()).toHaveLength(1));
-    expect(answers()[0].querySelector(".widget-byline")?.textContent).toContain("Sigge");
+    // The opening stays; the pending answer already carries the byline.
+    await vi.waitFor(() => expect(answers()).toHaveLength(2));
+    expect(answers()[0]).toBe(opening);
+    expect(answers()[1].querySelector(".widget-byline")?.textContent).toContain("Sigge");
     await releaseAnswer();
+    expect(answers()).toHaveLength(2);
     // The byline is the sender: no second, hidden "Assistant:" prefix.
-    const hidden = [...answers()[0].querySelectorAll(".sr-only")].map((el) =>
+    const hidden = [...answers()[1].querySelectorAll(".sr-only")].map((el) =>
       el.textContent?.trim()
     );
     expect(hidden).not.toContain("widget_assistant:");
-    expect(answers()[0].querySelector(".widget-ai-chip")?.textContent).toContain(
+    expect(answers()[1].querySelector(".widget-ai-chip")?.textContent).toContain(
       "widget_persona_ai_assistant"
     );
-    expect(document.querySelector("[data-widget-chat] .widget-byline.mb-2")).toBeNull();
   });
 
   test("announces who is answering and prefixes the answer with the name", async () => {

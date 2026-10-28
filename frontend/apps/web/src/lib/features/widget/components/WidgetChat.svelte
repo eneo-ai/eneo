@@ -156,6 +156,8 @@
   const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
   const busy = $derived(restoring || status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
+  // With a persona the welcome text is its first message (see the log below).
+  const opening = $derived(persona && config.texts.welcome ? config.texts.welcome : null);
   // A long description is clamped to two lines in the header; the toggle is
   // offered only while something is actually hidden. Screen readers get the
   // whole text either way, the clamp is visual.
@@ -488,67 +490,75 @@
     <div class="widget-column">
       {#if unavailable}
         <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
-      {:else if messages.length === 0 && !showPending}
-        <!-- The opening belongs to the empty state: it goes when the first
-             question does, like the welcome text, and stays out while a
-             stored conversation is being restored so it never flashes. -->
-        {#if !restoring}
-          {#if persona}
-            <WidgetPersonaByline {persona} intro />
-          {/if}
-          {#if config.texts.welcome}
+      {:else}
+        {#if opening || messages.length > 0 || showPending}
+          <!-- The list keeps its semantics; the log role sits on a wrapper so list
+             items stay inside a real list (axe: listitem). Its implicit polite
+             live region is switched off: streamed chunks would be read token by
+             token, and the announcement region below reports completion. -->
+          <div role="log" aria-live="off" aria-label={m.widget_conversation_log()}>
+            <ol class="flex flex-col gap-6">
+              {#if opening && persona}
+                <!-- The welcome text is the persona's first message: the same
+                     form as every answer, first in the conversation, and it
+                     stays while the conversation runs. It comes from the
+                     configuration, so a restored conversation opens with it too. -->
+                <li class="flex flex-col gap-2">
+                  <WidgetPersonaByline {persona} />
+                  <p class="text-primary text-base whitespace-pre-wrap">{opening}</p>
+                </li>
+              {/if}
+              {#each messages as message, index (index)}
+                <WidgetMessage
+                  {message}
+                  {index}
+                  isLast={index === messages.length - 1}
+                  isLoading={chat.askQuestion.isLoading}
+                  showSources={config.show_sources ?? true}
+                  showActivity={config.show_tool_activity ?? true}
+                  {persona}
+                />
+              {/each}
+              {#if showPending && pendingQuestion !== null}
+                <li class="widget-enter flex flex-col gap-3">
+                  <WidgetQuestionBubble text={pendingQuestion} />
+                  <div>
+                    {#if persona}
+                      <WidgetPersonaByline {persona} />
+                    {/if}
+                    <!-- Announced once when the question is sent, not by the dots. -->
+                    <div aria-hidden="true"><TypingIndicator /></div>
+                  </div>
+                </li>
+              {/if}
+            </ol>
+          </div>
+        {/if}
+        {#if messages.length === 0 && !showPending}
+          <!-- Without a persona the welcome text is a plain opening paragraph
+               that goes with the first question; it stays out while a stored
+               conversation is being restored so it never flashes. -->
+          {#if !persona && config.texts.welcome && !restoring}
             <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
           {/if}
+          {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
+            <ul
+              class="widget-suggestions mt-4 flex flex-col gap-2"
+              aria-label={m.widget_suggested_questions()}
+            >
+              {#each config.texts.suggested_questions as suggestion, index (index)}
+                <li>
+                  <button
+                    type="button"
+                    class="border-default bg-primary text-primary hover:bg-secondary min-h-[44px] w-full rounded-lg border px-3 py-2 text-left text-sm"
+                    disabled={unavailable || coolingDown}
+                    onclick={() => void send(suggestion)}>{suggestion}</button
+                  >
+                </li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
-        {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
-          <ul
-            class="widget-suggestions mt-4 flex flex-col gap-2"
-            aria-label={m.widget_suggested_questions()}
-          >
-            {#each config.texts.suggested_questions as suggestion, index (index)}
-              <li>
-                <button
-                  type="button"
-                  class="border-default bg-primary text-primary hover:bg-secondary min-h-[44px] w-full rounded-lg border px-3 py-2 text-left text-sm"
-                  disabled={unavailable || coolingDown}
-                  onclick={() => void send(suggestion)}>{suggestion}</button
-                >
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      {:else}
-        <!-- The list keeps its semantics; the log role sits on a wrapper so list
-           items stay inside a real list (axe: listitem). Its implicit polite
-           live region is switched off: streamed chunks would be read token by
-           token, and the announcement region below reports completion. -->
-        <div role="log" aria-live="off" aria-label={m.widget_conversation_log()}>
-          <ol class="flex flex-col gap-6">
-            {#each messages as message, index (index)}
-              <WidgetMessage
-                {message}
-                {index}
-                isLast={index === messages.length - 1}
-                isLoading={chat.askQuestion.isLoading}
-                showSources={config.show_sources ?? true}
-                showActivity={config.show_tool_activity ?? true}
-                {persona}
-              />
-            {/each}
-            {#if showPending && pendingQuestion !== null}
-              <li class="widget-enter flex flex-col gap-3">
-                <WidgetQuestionBubble text={pendingQuestion} />
-                <div>
-                  {#if persona}
-                    <WidgetPersonaByline {persona} />
-                  {/if}
-                  <!-- Announced once when the question is sent, not by the dots. -->
-                  <div aria-hidden="true"><TypingIndicator /></div>
-                </div>
-              </li>
-            {/if}
-          </ol>
-        </div>
         {#if !singleTurn && chat.currentConversation.id && rateableSession === chat.currentConversation.id}
           <WidgetFeedback
             sessionId={chat.currentConversation.id}

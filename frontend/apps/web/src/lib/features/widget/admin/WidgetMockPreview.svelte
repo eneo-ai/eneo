@@ -128,7 +128,7 @@
         style:--widget-avatar-fg={avatarOnAccent ? readableOn(accent) : null}
       >
         {#if personaPreview}
-          <WidgetPersonaByline persona={personaPreview} intro />
+          <WidgetPersonaByline persona={personaPreview} />
         {/if}
         {#if texts.welcome}
           <p class="text-sm whitespace-pre-wrap">{texts.welcome}</p>
