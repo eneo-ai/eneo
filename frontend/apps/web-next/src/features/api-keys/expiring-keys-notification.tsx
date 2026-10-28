@@ -57,6 +57,9 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
 
   const daysWindow = Math.max(...(preferences.data?.days_before_expiry ?? [30]), 1);
   const hasSubscriptions = (subscriptions.data?.items.length ?? 0) > 0;
+  // Off (tenant switch or user preference) or nothing followed: no bell, even
+  // with an earlier summary in the cache.
+  const active = featureEnabled && (preferences.data?.enabled ?? false) && hasSubscriptions;
   const summary = useQuery({
     queryKey: ["api-keys", "expiring-soon", "subscribed", daysWindow],
     queryFn: () =>
@@ -65,11 +68,11 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
           params: { query: { days: daysWindow, mode: "subscribed" } }
         })
       ),
-    enabled: featureEnabled && (preferences.data?.enabled ?? false) && hasSubscriptions,
+    enabled: active,
     staleTime: 60_000
   });
 
-  const items = summary.data ? summaryToDisplayItems(summary.data.items) : [];
+  const items = active && summary.data ? summaryToDisplayItems(summary.data.items) : [];
   if (items.length === 0) return null;
 
   const counts = summary.data?.counts_by_severity ?? {};

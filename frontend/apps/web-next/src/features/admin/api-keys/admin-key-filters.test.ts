@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ADMIN_KEY_FILTERS,
+  MAX_RESULT_LIMIT,
+  RESULT_LIMITS,
   activeFilterCount,
   adminKeyListQuery,
   isFullApiKeySecret,
@@ -79,4 +81,9 @@ describe("activeFilterCount", () => {
       )
     ).toBe(3);
   });
+});
+
+it("offers only page sizes the admin list endpoint accepts (1-200)", () => {
+  expect(MAX_RESULT_LIMIT).toBe(200);
+  expect(RESULT_LIMITS.every((limit) => limit >= 1 && limit <= MAX_RESULT_LIMIT)).toBe(true);
 });

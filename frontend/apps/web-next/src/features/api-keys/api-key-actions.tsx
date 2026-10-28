@@ -58,15 +58,12 @@ export function ApiKeyActions({
   apiKey,
   mode,
   onRotated,
-  followedViaScope = false,
   scopeName
 }: {
   apiKey: ApiKey;
   mode: ApiKeyMode;
   /** The rotated key's new secret, for the one-time reveal. */
   onRotated: (secret: string) => void;
-  /** Its scope's reminders are followed, which covers this key. */
-  followedViaScope?: boolean;
   scopeName?: string;
 }) {
   const t = useTranslations();
@@ -83,6 +80,12 @@ export function ApiKeyActions({
   const ended = state === "revoked" || state === "expired";
   const follows = useNotificationFollows({ enabled: !admin });
   const followed = follows.follows("key", apiKey.id);
+  // A followed space, assistant or app covers its keys.
+  const followedViaScope =
+    !followed &&
+    apiKey.scope_type !== "tenant" &&
+    apiKey.scope_id != null &&
+    follows.follows(apiKey.scope_type, apiKey.scope_id);
 
   const label = (user: string, adminKey: string) => t(admin ? adminKey : user);
 

@@ -17,7 +17,9 @@ export type AdminKeyFilters = {
   limit: number;
 };
 
-export const RESULT_LIMITS = [25, 50, 100, 250];
+/** The page sizes offered; the admin list endpoint takes at most 200 (AdminApiKeysQueryParams). */
+export const MAX_RESULT_LIMIT = 200;
+export const RESULT_LIMITS = [25, 50, 100, MAX_RESULT_LIMIT];
 
 export const DEFAULT_ADMIN_KEY_FILTERS: AdminKeyFilters = {
   search: "",

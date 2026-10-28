@@ -79,24 +79,13 @@ afterEach(() => {
   subscriptions = [];
 });
 
-function show(
-  apiKey: ApiKey = activeKey,
-  {
-    mode = "user",
-    followedViaScope = false
-  }: { mode?: ApiKeyMode; followedViaScope?: boolean } = {}
-) {
+function show(apiKey: ApiKey = activeKey, { mode = "user" }: { mode?: ApiKeyMode } = {}) {
   const onRotated = vi.fn();
   const queryClient = testQueryClient();
-  renderInApp(
-    <ApiKeyActions
-      apiKey={apiKey}
-      mode={mode}
-      onRotated={onRotated}
-      followedViaScope={followedViaScope}
-    />,
-    { queryClient, appContext: testAppContext({ permissions: ["api_keys"] }) }
-  );
+  renderInApp(<ApiKeyActions apiKey={apiKey} mode={mode} onRotated={onRotated} />, {
+    queryClient,
+    appContext: testAppContext({ permissions: ["api_keys"] })
+  });
   return { onRotated, queryClient };
 }
 
@@ -291,7 +280,10 @@ describe("ApiKeyActions", () => {
 
   it("follows one key's reminders, and says when its scope's cover it", async () => {
     serve();
-    api.PUT.mockReturnValue(ok({ items: [{ target_type: "key", target_id: "key-1" }] }));
+    api.PUT.mockImplementation(() => {
+      subscriptions = [{ target_type: "key", target_id: "key-1" }];
+      return ok({ items: subscriptions });
+    });
     show();
     await choose("Följ utgångspåminnelser");
     await waitFor(() =>
@@ -303,10 +295,14 @@ describe("ApiKeyActions", () => {
     expect(await items()).toContain("Avfölj utgångspåminnelser");
     cleanup();
 
-    show(activeKey, { followedViaScope: true });
+    // A key whose assistant is followed is covered by it, wherever it is listed.
+    subscriptions = [{ target_type: "assistant", target_id: "assistant-1" }];
+    show({ ...activeKey, scope_type: "assistant", scope_id: "assistant-1" });
     const menu = await openMenu();
     expect(
-      within(menu).getByRole("menuitem", { name: "Följs via scope" }).getAttribute("aria-disabled")
+      (await within(menu).findByRole("menuitem", { name: "Följs via scope" })).getAttribute(
+        "aria-disabled"
+      )
     ).toBe("true");
   });
 
@@ -338,5 +334,31 @@ describe("ApiKeyActions", () => {
     // The audit log is an admin's.
     expect(within(dialog).queryByText("Öppna i granskningsloggar")).toBeNull();
     await expectNoAxeViolations(dialog);
+  });
+
+  it("does not rotate or change the expiry while the policy cannot be read", async () => {
+    serve();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/api-keys/policy-constraints"
+        ? Promise.resolve({
+            error: { message: "Policy unavailable" },
+            response: new Response("{}", { status: 503 })
+          })
+        : ok({ items: [] })
+    );
+    show();
+    await choose("Rotera");
+    const rotate = await screen.findByRole("dialog", { name: "Rotera API-nyckel" });
+    expect(await within(rotate).findByText("Policy unavailable")).toBeTruthy();
+    expect(within(rotate).queryByText(/24 timmar/)).toBeNull();
+    fireEvent.click(within(rotate).getByRole("button", { name: "Rotera" }));
+    expect(api.POST).not.toHaveBeenCalled();
+    fireEvent.keyDown(rotate, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await choose("Ändra utgångsdatum");
+    const extend = await screen.findByRole("dialog", { name: "Ändra API-nyckelns utgång" });
+    expect(await within(extend).findByText("Policy unavailable")).toBeTruthy();
+    expect(within(extend).queryByRole("radiogroup")).toBeNull();
   });
 });

@@ -4,8 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -93,7 +92,8 @@ function RotateBody({
   const [alsoExtend, setAlsoExtend] = useState(false);
   const [expiresAt, setExpiresAt] = useState(apiKey.expires_at ?? null);
   const secret = useRef<string | null>(null);
-  const graceHours = constraints.data?.rotation_grace_hours ?? 24;
+  // Without the policy the grace period is unknown: the dialog says so and does not rotate.
+  const ready = constraints.data !== undefined;
 
   const rotate = useMutation({
     mutationFn: () =>
@@ -116,77 +116,79 @@ function RotateBody({
 
   return (
     <>
-      {constraints.isPending ? (
-        <LoadingState rows={3} />
-      ) : (
-        <div className="flex flex-col gap-4">
-          <KeyCard apiKey={apiKey} />
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-            <dt className="text-muted-foreground">{t("api_keys_rotate_grace_period_label")}</dt>
-            <dd className="font-medium">
-              {disableGrace
-                ? t("api_keys_rotate_grace_period_disabled_value")
-                : t("api_keys_rotate_grace_period_value", { hours: graceHours })}
-            </dd>
-            {apiKey.last_used_at && (
-              <>
-                <dt className="text-muted-foreground">{t("api_keys_rotate_last_used_label")}</dt>
-                <dd>
-                  <ClientTime value={apiKey.last_used_at} format="relative" />
-                </dd>
-              </>
-            )}
-            {apiKey.expires_at && (
-              <>
-                <dt className="text-muted-foreground">{t("api_keys_rotate_expires_label")}</dt>
-                <dd>
-                  <ClientTime value={apiKey.expires_at} format="date" />
-                </dd>
-              </>
-            )}
-          </dl>
-          <Alert variant={disableGrace ? "destructive" : "default"}>
-            <AlertDescription>
-              {disableGrace
-                ? t("api_keys_rotate_disable_grace_warning")
-                : t("api_keys_rotate_grace_info", { hours: graceHours })}
-            </AlertDescription>
-          </Alert>
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id={`${id}-grace`}
-              className="mt-0.5"
-              checked={disableGrace}
-              onCheckedChange={(checked) => setDisableGrace(checked === true)}
-              aria-describedby={`${id}-grace-help`}
-            />
-            <div className="flex flex-col gap-0.5">
-              <Label htmlFor={`${id}-grace`}>{t("api_keys_rotate_disable_grace_label")}</Label>
-              <span id={`${id}-grace-help`} className="text-muted-foreground text-xs">
-                {t("api_keys_rotate_disable_grace_help")}
-              </span>
+      <QueryStateBoundary query={constraints} rows={3}>
+        {(policy) => (
+          <div className="flex flex-col gap-4">
+            <KeyCard apiKey={apiKey} />
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+              <dt className="text-muted-foreground">{t("api_keys_rotate_grace_period_label")}</dt>
+              <dd className="font-medium">
+                {disableGrace
+                  ? t("api_keys_rotate_grace_period_disabled_value")
+                  : t("api_keys_rotate_grace_period_value", {
+                      hours: policy.rotation_grace_hours ?? 24
+                    })}
+              </dd>
+              {apiKey.last_used_at && (
+                <>
+                  <dt className="text-muted-foreground">{t("api_keys_rotate_last_used_label")}</dt>
+                  <dd>
+                    <ClientTime value={apiKey.last_used_at} format="relative" />
+                  </dd>
+                </>
+              )}
+              {apiKey.expires_at && (
+                <>
+                  <dt className="text-muted-foreground">{t("api_keys_rotate_expires_label")}</dt>
+                  <dd>
+                    <ClientTime value={apiKey.expires_at} format="date" />
+                  </dd>
+                </>
+              )}
+            </dl>
+            <Alert variant={disableGrace ? "destructive" : "default"}>
+              <AlertDescription>
+                {disableGrace
+                  ? t("api_keys_rotate_disable_grace_warning")
+                  : t("api_keys_rotate_grace_info", { hours: policy.rotation_grace_hours ?? 24 })}
+              </AlertDescription>
+            </Alert>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id={`${id}-grace`}
+                className="mt-0.5"
+                checked={disableGrace}
+                onCheckedChange={(checked) => setDisableGrace(checked === true)}
+                aria-describedby={`${id}-grace-help`}
+              />
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor={`${id}-grace`}>{t("api_keys_rotate_disable_grace_label")}</Label>
+                <span id={`${id}-grace-help`} className="text-muted-foreground text-xs">
+                  {t("api_keys_rotate_disable_grace_help")}
+                </span>
+              </div>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`${id}-extend`}
+                checked={alsoExtend}
+                onCheckedChange={(checked) => setAlsoExtend(checked === true)}
+              />
+              <Label htmlFor={`${id}-extend`}>{t("api_keys_rotate_also_extend_label")}</Label>
+            </div>
+            {alsoExtend && (
+              <ExpirationPicker
+                id={`${id}-expiry`}
+                value={expiresAt}
+                onChange={setExpiresAt}
+                maxDays={policy.max_expiration_days}
+                required={policy.require_expiration ?? false}
+              />
+            )}
+            {rotate.error != null && <ListError error={rotate.error} compact />}
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id={`${id}-extend`}
-              checked={alsoExtend}
-              onCheckedChange={(checked) => setAlsoExtend(checked === true)}
-            />
-            <Label htmlFor={`${id}-extend`}>{t("api_keys_rotate_also_extend_label")}</Label>
-          </div>
-          {alsoExtend && (
-            <ExpirationPicker
-              id={`${id}-expiry`}
-              value={expiresAt}
-              onChange={setExpiresAt}
-              maxDays={constraints.data?.max_expiration_days}
-              required={constraints.data?.require_expiration ?? false}
-            />
-          )}
-          {rotate.error != null && <ListError error={rotate.error} compact />}
-        </div>
-      )}
+        )}
+      </QueryStateBoundary>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
           {t("cancel")}
@@ -195,7 +197,7 @@ function RotateBody({
         <Button
           aria-busy={rotate.isPending || undefined}
           onClick={() => {
-            if (!rotate.isPending && !constraints.isPending) rotate.mutate();
+            if (!rotate.isPending && ready) rotate.mutate();
           }}
         >
           {mode === "admin" ? t("api_keys_admin_action_rotate") : t("api_keys_action_rotate")}
@@ -239,6 +241,8 @@ function ExtendBody({ apiKey, mode, open, onOpenChange }: KeyDialogProps) {
   const currentText = useClientTimeText(current, "date_time");
   const nextText = useClientTimeText(expiresAt, "date_time");
 
+  const ready = constraints.data !== undefined;
+
   const extend = useMutation({
     mutationFn: () => extendApiKey(browserApi, mode, apiKey.id, expiresAt),
     onSuccess: () => {
@@ -250,40 +254,43 @@ function ExtendBody({ apiKey, mode, open, onOpenChange }: KeyDialogProps) {
 
   return (
     <>
-      {constraints.isPending ? (
-        <LoadingState rows={3} />
-      ) : (
-        <div className="flex flex-col gap-4">
-          <KeyCard apiKey={apiKey} />
-          <dl className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-            <div>
-              <dt className="text-muted-foreground text-xs">
-                {t("api_keys_extend_summary_previous")}
-              </dt>
-              <dd className="text-sm font-medium">
-                {current ? currentText : t("api_keys_extend_summary_no_expiration")}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-xs">{t("api_keys_extend_summary_new")}</dt>
-              <dd className="text-sm font-medium">
-                {expiresAt ? nextText : t("api_keys_extend_summary_no_expiration")}
-              </dd>
-            </div>
-          </dl>
-          <ExpirationPicker
-            id={`${id}-expiry`}
-            value={expiresAt}
-            onChange={setExpiresAt}
-            maxDays={constraints.data?.max_expiration_days}
-            required={constraints.data?.require_expiration ?? false}
-          />
-          {!changed && (
-            <p className="text-muted-foreground text-xs">{t("api_keys_extend_no_change_hint")}</p>
-          )}
-          {extend.error != null && <ListError error={extend.error} compact />}
-        </div>
-      )}
+      {/* Without the policy whether a key may go without expiry is unknown: no change runs. */}
+      <QueryStateBoundary query={constraints} rows={3}>
+        {(policy) => (
+          <div className="flex flex-col gap-4">
+            <KeyCard apiKey={apiKey} />
+            <dl className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+              <div>
+                <dt className="text-muted-foreground text-xs">
+                  {t("api_keys_extend_summary_previous")}
+                </dt>
+                <dd className="text-sm font-medium">
+                  {current ? currentText : t("api_keys_extend_summary_no_expiration")}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground text-xs">
+                  {t("api_keys_extend_summary_new")}
+                </dt>
+                <dd className="text-sm font-medium">
+                  {expiresAt ? nextText : t("api_keys_extend_summary_no_expiration")}
+                </dd>
+              </div>
+            </dl>
+            <ExpirationPicker
+              id={`${id}-expiry`}
+              value={expiresAt}
+              onChange={setExpiresAt}
+              maxDays={policy.max_expiration_days}
+              required={policy.require_expiration ?? false}
+            />
+            {!changed && (
+              <p className="text-muted-foreground text-xs">{t("api_keys_extend_no_change_hint")}</p>
+            )}
+            {extend.error != null && <ListError error={extend.error} compact />}
+          </div>
+        )}
+      </QueryStateBoundary>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
           {t("cancel")}
@@ -292,7 +299,7 @@ function ExtendBody({ apiKey, mode, open, onOpenChange }: KeyDialogProps) {
         <Button
           aria-busy={extend.isPending || undefined}
           onClick={() => {
-            if (extend.isPending || constraints.isPending) return;
+            if (extend.isPending || !ready) return;
             if (changed) extend.mutate();
             else onOpenChange(false);
           }}

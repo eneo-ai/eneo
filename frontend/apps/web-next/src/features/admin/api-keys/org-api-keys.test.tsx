@@ -190,4 +190,57 @@ describe("OrgApiKeysPage", () => {
       })
     );
   });
+
+  it("reports a failed lookup with a retry that looks the key up again", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    api.POST.mockReturnValue(
+      Promise.resolve({
+        error: { message: "Lookup down" },
+        response: new Response("{}", { status: 503 })
+      })
+    );
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    expect(await screen.findByText("Lookup down")).toBeTruthy();
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-9" } }));
+    fireEvent.click(screen.getByRole("button", { name: /^Försök igen/ }));
+    expect(await screen.findByText("Hittad nyckel")).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(api.GET.mock.calls)).not.toContain('"id":""');
+  });
+
+  it("says the list could not be read instead of showing no keys", async () => {
+    serve();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/api-keys"
+        ? Promise.resolve({
+            error: { message: "List down" },
+            response: new Response("{}", { status: 500 })
+          })
+        : notFound()
+    );
+    renderInApp(<OrgApiKeysPage />, { appContext: testAppContext({ permissions: ["admin"] }) });
+    expect(await screen.findByText("List down")).toBeTruthy();
+    expect(screen.queryByText("Inga API-nycklar hittades")).toBeNull();
+  });
+
+  it("filters by a resource given by id, one the admin is not a member of", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    fireEvent.click(screen.getByRole("combobox", { name: "Omfångstyp" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Assistent" }));
+    fireEvent.change(screen.getByLabelText("Eller ange assistent-ID manuellt"), {
+      target: { value: "assistant-77" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    await waitFor(() =>
+      expect(listQueries().at(-1)).toMatchObject({
+        scope_type: "assistant",
+        scope_id: "assistant-77"
+      })
+    );
+  });
 });

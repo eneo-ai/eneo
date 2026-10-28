@@ -59,12 +59,18 @@ export function invalidateApiKeys(queryClient: QueryClient): Promise<unknown> {
   ]);
 }
 
+/** The keys, assistants, apps and spaces whose expiring keys the user is reminded of. */
+export const API_KEY_SUBSCRIPTIONS_KEY = ["api-key-notification-subscriptions"] as const;
+
 /**
- * The shell's expiring-keys bell reads again: what the user follows changed,
- * or publishing an assistant or app changed which keys auto-follow covers.
+ * The shell's expiring-keys bell reads again, what the user follows included:
+ * a follow changed, or publishing an assistant or app (auto-follow) added one.
  */
-export function invalidateExpiringApiKeys(queryClient: QueryClient): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: [...API_KEYS_KEY, "expiring-soon"] });
+export function invalidateExpiringApiKeys(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: API_KEY_SUBSCRIPTIONS_KEY }),
+    queryClient.invalidateQueries({ queryKey: [...API_KEYS_KEY, "expiring-soon"] })
+  ]);
 }
 
 export const API_KEY_POLICY_CONSTRAINTS_KEY = ["api-key-policy-constraints"] as const;

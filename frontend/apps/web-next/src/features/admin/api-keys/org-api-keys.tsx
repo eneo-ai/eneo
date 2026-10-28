@@ -135,13 +135,14 @@ export function OrgApiKeysPage() {
       )
   });
   // Keyed by id, so the found key refreshes after an action like any list.
+  const foundId = lookup?.status === "found" ? lookup.id : null;
   const found = useQuery({
-    queryKey: [...ADMIN_API_KEYS_KEY, "key", lookup?.status === "found" ? lookup.id : null],
-    enabled: lookup?.status === "found",
+    queryKey: [...ADMIN_API_KEYS_KEY, "key", foundId],
+    enabled: foundId !== null,
     queryFn: () =>
       unwrap(
         browserApi.GET("/api/v1/admin/api-keys/{id}", {
-          params: { path: { id: lookup?.status === "found" ? lookup.id : "" } }
+          params: { path: { id: foundId ?? "" } }
         })
       )
   });
@@ -181,23 +182,42 @@ export function OrgApiKeysPage() {
     setFormKey((key) => key + 1);
   }
 
-  const looking = lookup !== null;
-  const items: ApiKey[] = looking
-    ? found.data
-      ? [{ ...found.data, search_match_reasons: ["exact_secret"] }]
-      : []
-    : list.items;
-  const total = looking ? items.length : (list.totalCount ?? items.length);
   const count = activeFilterCount(applied, state);
-  const pending = looking ? lookup.status === "pending" || found.isPending : list.isPending;
+  const shown = foundId
+    ? found.data && { filtered: 1, total: 1 }
+    : lookup === null &&
+      list.data && { filtered: list.items.length, total: list.totalCount ?? list.items.length };
+
+  function refresh() {
+    if (lookup?.status === "failed") void apply(applied);
+    else if (foundId) void found.refetch();
+    else if (lookup === null) void list.refetch();
+  }
+
+  const table = (keys: ApiKey[]) =>
+    keys.length === 0 ? (
+      <EmptyState
+        title={t("api_keys_admin_no_keys_found")}
+        description={count > 0 ? t("api_keys_admin_no_keys_match") : undefined}
+      />
+    ) : (
+      <KeyTable
+        keys={keys}
+        labelledBy={headingId}
+        scopeNames={scopeNames}
+        onRotated={showSecret(t("api_keys_rotated_title"))}
+      />
+    );
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <PageHeader title={t("api_keys")} headingId={headingId}>
         <Button
           variant="ghost"
-          aria-busy={list.isFetching || undefined}
-          onClick={() => void (looking ? found.refetch() : list.refetch())}
+          aria-busy={
+            list.isFetching || found.isFetching || lookup?.status === "pending" || undefined
+          }
+          onClick={refresh}
         >
           <RefreshCw className="size-4" /> {t("api_keys_refresh")}
         </Button>
@@ -243,9 +263,9 @@ export function OrgApiKeysPage() {
               </TabsTrigger>
             ))}
           </TabsList>
-          {!pending && (
+          {shown && (
             <p className="text-muted-foreground text-sm">
-              {t("api_keys_admin_showing_keys", { filtered: items.length, total })}
+              {t("api_keys_admin_showing_keys", shown)}
             </p>
           )}
         </div>
@@ -253,34 +273,24 @@ export function OrgApiKeysPage() {
         {/* The keys in the selected state: the state tabs' panel. */}
         <TabsContent ref={panelRef} value={state} className="flex flex-col gap-4">
           <RemovalFocusScope target={panelRef}>
-            {pending ? (
+            {lookup?.status === "pending" ? (
               <LoadingState rows={3} />
             ) : lookup?.status === "failed" ? (
-              <ListError error={lookup.error} />
-            ) : found.isError && looking ? (
-              <ListError
-                error={found.error}
-                isRetrying={found.isFetching}
-                onRetry={() => void found.refetch()}
-              />
-            ) : items.length === 0 ? (
-              <EmptyState
-                title={t("api_keys_admin_no_keys_found")}
-                description={count > 0 ? t("api_keys_admin_no_keys_match") : undefined}
-              />
+              <ListError error={lookup.error} onRetry={() => void apply(applied)} />
+            ) : foundId ? (
+              <QueryStateBoundary query={found} rows={3}>
+                {(key) => table([{ ...key, search_match_reasons: ["exact_secret"] }])}
+              </QueryStateBoundary>
             ) : (
-              <KeyTable
-                keys={items}
-                labelledBy={headingId}
-                scopeNames={scopeNames}
-                onRotated={showSecret(t("api_keys_rotated_title"))}
-              />
+              <QueryStateBoundary query={list} rows={3}>
+                {() => table(list.items)}
+              </QueryStateBoundary>
             )}
           </RemovalFocusScope>
         </TabsContent>
       </Tabs>
 
-      {!looking && (list.hasPreviousPage || list.hasNextPage) && (
+      {lookup === null && (list.hasPreviousPage || list.hasNextPage) && (
         <div className="flex justify-end gap-2">
           <Button
             variant="outline"
@@ -329,6 +339,8 @@ function KeyFilterForm({
   const t = useTranslations();
   const id = useId();
   const [filters, setFilters] = useState(initial);
+  // A space, assistant or app the admin is not a member of is given by id.
+  const [manualScopeId, setManualScopeId] = useState("");
   const update = (patch: Partial<AdminKeyFilters>) =>
     setFilters((current) => ({ ...current, ...patch }));
   const queryClient = useQueryClient();
@@ -337,10 +349,15 @@ function KeyFilterForm({
       search: async (query) => {
         const search = query.trim();
         if (search.length < MIN_SEARCH_LENGTH) return [];
-        const page = await queryClient.query(
-          adminUsersQueryOptions(browserApi, { page: 1, stateFilter: "active", search })
+        // A key's owner or creator may since have been deactivated.
+        const pages = await Promise.all(
+          (["active", "inactive"] as const).map((stateFilter) =>
+            queryClient.query(adminUsersQueryOptions(browserApi, { page: 1, stateFilter, search }))
+          )
         );
-        return page.items.map((user) => ({ id: user.id, label: user.email }));
+        return pages
+          .flatMap((page) => page.items)
+          .map((user) => ({ id: user.id, label: user.email }));
       },
       bootstrap: () => []
     }),
@@ -354,7 +371,7 @@ function KeyFilterForm({
       className="flex flex-col gap-4 rounded-xl border p-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!pending) onApply(filters);
+        if (!pending) onApply({ ...filters, scopeId: manualScopeId.trim() || filters.scopeId });
       }}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -422,9 +439,10 @@ function KeyFilterForm({
           <Label htmlFor={`${id}-scope`}>{t("api_keys_admin_label_scope_type")}</Label>
           <Select
             value={scopeType}
-            onValueChange={(value) =>
-              update({ scopeType: value as ApiKeyScopeType | "all", scopeId: null })
-            }
+            onValueChange={(value) => {
+              setManualScopeId("");
+              update({ scopeType: value as ApiKeyScopeType | "all", scopeId: null });
+            }}
           >
             <SelectTrigger id={`${id}-scope`} className="w-full">
               <SelectValue />
@@ -439,13 +457,29 @@ function KeyFilterForm({
           </Select>
         </div>
         {scopeType !== "all" && scopeType !== "tenant" ? (
-          <ScopeResourcePicker
-            key={scopeType}
-            scopeType={scopeType}
-            value={filters.scopeId}
-            onChange={(scopeId) => update({ scopeId })}
-            label={t("api_keys_admin_label_scope_target")}
-          />
+          <div className="flex flex-col gap-3">
+            <ScopeResourcePicker
+              key={scopeType}
+              scopeType={scopeType}
+              value={filters.scopeId}
+              onChange={(scopeId) => update({ scopeId })}
+              label={t("api_keys_admin_label_scope_target")}
+            />
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${id}-scope-id`}>
+                {t("api_keys_enter_id_manually", {
+                  scopeType: t(`api_keys_scope_${scopeType}`).toLocaleLowerCase()
+                })}
+              </Label>
+              <Input
+                id={`${id}-scope-id`}
+                className="font-mono"
+                value={manualScopeId}
+                placeholder={t("api_keys_enter_uuid")}
+                onChange={(event) => setManualScopeId(event.target.value)}
+              />
+            </div>
+          </div>
         ) : (
           <div className="hidden md:block" />
         )}

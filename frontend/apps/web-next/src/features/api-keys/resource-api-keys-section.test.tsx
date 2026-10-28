@@ -21,6 +21,7 @@ const apiKey = {
 
 const post = vi.hoisted(() => vi.fn());
 const put = vi.hoisted(() => vi.fn());
+const followed = vi.hoisted(() => ({ items: [] as unknown[] }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
@@ -29,7 +30,7 @@ vi.mock("@/lib/api/browser", () => ({
           path === "/api/v1/api-keys"
             ? { items: [apiKey], next_cursor: null }
             : path === "/api/v1/api-keys/notification-subscriptions"
-              ? { items: [] }
+              ? { items: followed.items }
               : {},
         response: new Response("{}")
       }),
@@ -44,6 +45,7 @@ afterEach(() => {
   cleanup();
   post.mockReset();
   put.mockReset();
+  followed.items = [];
 });
 
 describe("ResourceApiKeysSection", () => {
@@ -123,9 +125,9 @@ describe("ResourceApiKeysSection", () => {
   });
 
   it("follows the space's expiry reminders, which then cover each of its keys", async () => {
-    put.mockResolvedValue({
-      data: { items: [{ target_type: "space", target_id: "space-1" }] },
-      response: new Response("{}")
+    put.mockImplementation(() => {
+      followed.items = [{ target_type: "space", target_id: "space-1" }];
+      return Promise.resolve({ data: { items: followed.items }, response: new Response("{}") });
     });
     renderInApp(
       <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />,

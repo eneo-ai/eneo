@@ -190,7 +190,6 @@ export function ResourceApiKeysSection({
                             apiKey={apiKey}
                             mode="user"
                             scopeName={resourceName}
-                            followedViaScope={scopeFollowed && !follows.follows("key", apiKey.id)}
                             onRotated={showSecret(t("api_keys_rotated_title"))}
                           />
                         </TableCell>

@@ -4,17 +4,15 @@ import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-import { invalidateExpiringApiKeys } from "./api-keys";
+import { API_KEY_SUBSCRIPTIONS_KEY, invalidateExpiringApiKeys } from "./api-keys";
 
 export type FollowTargetType = Schema<"ApiKeyNotificationTargetType">;
 type Subscriptions = Schema<"ApiKeyNotificationSubscriptionListResponse">;
 
-export const SUBSCRIPTIONS_KEY = ["api-key-notification-subscriptions"] as const;
-
 /** The keys, assistants, apps and spaces whose expiring keys the user is reminded of. */
 export function apiKeyNotificationSubscriptionsQueryOptions(api: EneoClient) {
   return queryOptions({
-    queryKey: SUBSCRIPTIONS_KEY,
+    queryKey: API_KEY_SUBSCRIPTIONS_KEY,
     queryFn: () => unwrap(api.GET("/api/v1/api-keys/notification-subscriptions")),
     staleTime: 60_000
   });
@@ -60,7 +58,7 @@ export function useNotificationFollows({ enabled = true }: { enabled?: boolean }
           );
     },
     onSuccess: (updated: Subscriptions) => {
-      queryClient.setQueryData(SUBSCRIPTIONS_KEY, updated);
+      queryClient.setQueryData(API_KEY_SUBSCRIPTIONS_KEY, updated);
       void invalidateExpiringApiKeys(queryClient);
     },
     onError: (error) => toastApiError(error, t)
