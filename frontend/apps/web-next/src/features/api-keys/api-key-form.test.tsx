@@ -115,6 +115,24 @@ describe("CreateApiKeyDialog", () => {
     expect(within(dialog).getByText(/203\.0\.113\.5.* är inte tillagd än/)).toBeTruthy();
   });
 
+  it("still stops on typed text after a token is removed or the key type changes", async () => {
+    const { dialog } = await open();
+    fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Integration" } });
+    const ips = within(dialog).getByRole("combobox", { name: /Tillåtna IP-adresser/ });
+    await addToken(ips, "203.0.113.5");
+    fireEvent.change(ips, { target: { value: "198.51.100.2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /203\.0\.113\.5/ }));
+    expect(ips).toHaveProperty("value", "198.51.100.2");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+    expect(api.POST).not.toHaveBeenCalled();
+
+    // Switching the key type clears the field together with its check.
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Publik nyckel" }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Hemlig nyckel" }));
+    const fresh = within(dialog).getByRole("combobox", { name: /Tillåtna IP-adresser/ });
+    expect(fresh).toHaveProperty("value", "");
+  });
+
   it("keeps a one-day policy's expiry within the backend's limit", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-28T09:00:00Z"));

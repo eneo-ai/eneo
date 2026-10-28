@@ -320,6 +320,7 @@ export function ApiKeyForm({
       <Section title={t("api_keys_step_security")}>
         {draft.keyType === "pk_" ? (
           <AllowlistField
+            key="origins"
             field="origins"
             label={t("api_keys_allowed_origins")}
             description={t("api_keys_allowed_origins_desc")}
@@ -333,6 +334,7 @@ export function ApiKeyForm({
           />
         ) : (
           <AllowlistField
+            key="ips"
             field="ips"
             label={t("api_keys_allowed_ips")}
             description={t("api_keys_allowed_ips_desc")}
@@ -627,8 +629,9 @@ function AllowlistField({
         placeholder={placeholder}
         searchSource={source}
         value={tokens}
-        onChange={(items) => {
-          onUnaddedChange("");
+        onChange={(items, change) => {
+          // Adding takes the typed text; removing a token leaves it in the field.
+          if (change.type === "add" || change.type === "create") onUnaddedChange("");
           onChange(items.map((item) => item.id.trim()).filter(Boolean));
         }}
         onChangeQuery={onUnaddedChange}
