@@ -6,7 +6,7 @@ import { FieldProblem, fieldProblemProps } from "@/components/composites/field-p
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
-import { parseRetentionDays, RETENTION_MAX_DAYS } from "@/features/spaces/retention-days";
+import { parseRetentionDays } from "@/features/spaces/retention-days";
 import { useSpace } from "@/features/spaces/use-space";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
@@ -42,9 +42,10 @@ export function SecuritySection({ app }: { app: App }) {
         <div className="flex items-center gap-2">
           <Input
             id="app-retention-days"
-            type="number"
-            min={1}
-            max={RETENTION_MAX_DAYS}
+            // Text, not number: a number input reports a half-typed "1e" as
+            // empty, which would save as "inherit".
+            type="text"
+            inputMode="numeric"
             className="w-32"
             value={days.value}
             placeholder={inherited}
