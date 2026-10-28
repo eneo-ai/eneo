@@ -1,6 +1,6 @@
 "use client";
 
-import { useSelectedLayoutSegments } from "next/navigation";
+import { useSpaceSegments } from "@/lib/navigation";
 import { SpaceHeader } from "./space-header";
 import { spaceRoute } from "./space-sections";
 
@@ -21,7 +21,7 @@ import { spaceRoute } from "./space-sections";
  * `data-space-full-bleed` and the inset goes away.
  */
 export function SpaceFrame({ children }: { children: React.ReactNode }) {
-  const route = spaceRoute(useSelectedLayoutSegments());
+  const route = spaceRoute(useSpaceSegments());
 
   if (route.kind === "chat") {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>;

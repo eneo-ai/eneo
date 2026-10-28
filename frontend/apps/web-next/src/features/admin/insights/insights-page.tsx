@@ -3,7 +3,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";

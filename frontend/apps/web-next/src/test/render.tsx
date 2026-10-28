@@ -1,13 +1,12 @@
 /**
  * Test-only: renders UI inside the app's providers, in Swedish (the default
  * locale), so tests query what users see and hear: next-intl with the real
- * catalog, the Astryx provider (its Swedish strings, next/link), React Query,
+ * catalog, the Astryx provider (its Swedish strings, the app's link), React Query,
  * the Radix tooltip provider, the signed-in app context and the app shell's
  * context. Not imported by app code.
  */
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, renderHook } from "@testing-library/react";
-import * as nextNavigation from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
 import { renderToString } from "react-dom/server";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
@@ -17,6 +16,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { makeQueryClient } from "@/lib/api/query";
 import type { Permission } from "@/lib/auth/permissions";
 import messages from "@/lib/i18n/messages/sv.json";
+import * as appNavigation from "@/lib/navigation";
 import * as navigation from "./navigation";
 
 /**
@@ -95,8 +95,8 @@ export type RenderInAppOptions = {
   /** Default: `noopShell`. */
   shell?: ShellContextValue;
   /**
-   * The route the next/navigation hooks report, e.g. `/admin/users?page=2`.
-   * Needs `vi.mock("next/navigation", () => import("@/test/navigation"))`.
+   * The route the navigation hooks report, e.g. `/admin/users?page=2`.
+   * Needs `vi.mock("@/lib/navigation", () => import("@/test/navigation"))`.
    */
   route?: string;
 };
@@ -110,13 +110,15 @@ function providers({
   if (route !== undefined) {
     let mocked = false;
     try {
-      mocked = nextNavigation.useRouter === navigation.useRouter;
+      // Also true under a next/navigation mock (src/app tests): the app's
+      // module re-exports Next's hooks.
+      mocked = appNavigation.useRouter === navigation.useRouter;
     } catch {
-      // A test's own next/navigation mock without useRouter.
+      // A test's own navigation mock without useRouter.
     }
     if (!mocked) {
       throw new Error(
-        'renderInApp({ route }) needs vi.mock("next/navigation", () => import("@/test/navigation")).'
+        'renderInApp({ route }) needs vi.mock("@/lib/navigation", () => import("@/test/navigation")).'
       );
     }
     navigation.setRoute(route);

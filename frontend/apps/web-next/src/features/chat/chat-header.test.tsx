@@ -9,7 +9,7 @@ import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { ChatHeader } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 

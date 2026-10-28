@@ -11,7 +11,7 @@ import type { SkipReasonCode } from "../skip-reasons";
 import { inPlaceLink } from "./in-place-link";
 import { ProblemsView } from "./problems-view";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 

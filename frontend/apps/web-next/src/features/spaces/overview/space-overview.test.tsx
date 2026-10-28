@@ -21,7 +21,7 @@ import {
 
 const state = vi.hoisted(() => ({ space: null as unknown, progress: [] as unknown[] }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
     space: state.space,

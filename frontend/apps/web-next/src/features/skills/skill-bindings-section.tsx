@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Trash2 } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { SettingsGroup } from "@/components/composites/settings-rows";

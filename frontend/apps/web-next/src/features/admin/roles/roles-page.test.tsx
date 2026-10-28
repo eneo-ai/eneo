@@ -12,7 +12,7 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post, DELETE
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { default_role_id: "default" } })
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"

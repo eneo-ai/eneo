@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELET
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { show_model_pricing: true } })
 }));

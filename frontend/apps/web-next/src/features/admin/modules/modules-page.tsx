@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";

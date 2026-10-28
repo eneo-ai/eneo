@@ -9,7 +9,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { ChevronDown, History, Menu, ShieldCheck, SquarePen } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";

@@ -15,7 +15,7 @@ import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";

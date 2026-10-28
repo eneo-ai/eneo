@@ -18,7 +18,7 @@ vi.mock("@/features/spaces/use-space", () => ({
     can: () => true
   })
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"

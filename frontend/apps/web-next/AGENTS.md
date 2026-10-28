@@ -203,8 +203,8 @@ the default name on a backend name collision (9017).
   `className` wins. The shadcn variables (`--background`, `--primary`, …) point
   at Astryx tokens, so unmigrated screens already use the Eneo look.
 - **Providers**: `src/components/providers/astryx-provider.tsx` mounts the root
-  `Theme`, Astryx's own strings in the active locale and `next/link` for Astryx
-  links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
+  `Theme`, Astryx's own strings in the active locale and the app's link
+  (`@/lib/link`) for Astryx links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
   is fine.
 - **Contexts above the page hold still.** The page is its own Suspense
   boundary and hydrates after the shell. A context provided above it (root
@@ -252,6 +252,9 @@ the default name on a backend name collision (9017).
   `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
   opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
   (`src/components/shell/routes.ts`).
+- **Navigation and links**: app code imports `@/lib/navigation` and
+  `@/lib/link`, never `next/navigation` or `next/link` (lint error; `src/app`
+  excepted until it is ported to the Vite build, which swaps both modules).
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
@@ -480,7 +483,7 @@ production build shows these violations. Never loosen the policy.
     `renderHookInApp` and `renderToHtml` (server render). Build app context with
     `testAppContext({ permissions: ["admin"], settings: { … } })`; don't mock
     `@/components/providers/app-context`.
-  - Navigation: `vi.mock("next/navigation", () => import("@/test/navigation"))`,
+  - Navigation: `vi.mock("@/lib/navigation", () => import("@/test/navigation"))`,
     then the `route` option or `setRoute("/x?tab=y")`.
   - `src/test/setup-dom.ts` fills in what jsdom lacks and behaves like Chromium:
     `setViewport("phone" | "desktop" | {…})` drives `matchMedia`,

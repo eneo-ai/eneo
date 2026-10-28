@@ -4,7 +4,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import { PanelLeft } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { EneoIcon, EneoWordMark } from "./eneo-logo";

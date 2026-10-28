@@ -3,8 +3,8 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import {

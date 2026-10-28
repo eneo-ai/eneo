@@ -46,11 +46,10 @@
     "esbuild": ">0.25.0",
     "prettier": "3.9.4",
     "@xmldom/xmldom": "0.9.12",
-    "postcss": "8.5.28",
+    "postcss": "8.5.31",
     "mermaid": "11.16.1",
     "sharp": "0.35.5",
     "seroval": "1.6.9",
-    "vite": "^6.4.4",
     "@modelcontextprotocol/client": "^2.3.1"
   },
   "workspaces": [
