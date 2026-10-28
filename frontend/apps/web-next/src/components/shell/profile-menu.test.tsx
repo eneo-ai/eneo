@@ -11,18 +11,10 @@ vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: true, hasUnseen: true })
 }));
-const events = vi.hoisted(() => [] as string[]);
-vi.mock("@/lib/session/identity-broadcast", () => ({
-  announceIdentityChange: () => events.push("announce")
-}));
 
 const TRIGGER = "Anna Lind, Sundsvalls kommun: konto och inställningar";
 
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  events.length = 0;
-});
+afterEach(cleanup);
 
 async function openMenu(accessibilityStatement: string | null = null) {
   renderInApp(<ProfileMenu />, {
@@ -60,22 +52,6 @@ describe("ProfileMenu", () => {
     await openMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "Mitt konto" }));
     expect(router.push).toHaveBeenCalledWith("/account");
-  });
-
-  it.each([
-    ["Logga ut", "/logout"],
-    ["Välj en annan organisation", "/login/switch-organisation"]
-  ])("tells the other tabs before %s leaves the session", async (item, href) => {
-    const assign = vi.fn((target: string) => events.push(`assign ${target}`));
-    vi.stubGlobal("location", { ...window.location, assign });
-    renderInApp(<ProfileMenu />, {
-      appContext: testAppContext({ federationStatus: { has_multi_tenant_federation: true } })
-    });
-    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
-
-    fireEvent.click(await screen.findByRole("menuitem", { name: item }));
-
-    expect(events).toEqual(["announce", `assign ${href}`]);
   });
 
   it("links the accessibility statement when one is configured", async () => {

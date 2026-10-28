@@ -31,7 +31,7 @@ async function callback(next: string) {
   );
 }
 
-it("continues a sign-in through the login page, which tells the other tabs", async () => {
+it("continues a sign-in through the login page, which loads it in a new document", async () => {
   const response = await callback("/spaces/list");
 
   expect(response.cookies.get(SESSION_COOKIE)?.value).toBeTruthy();
