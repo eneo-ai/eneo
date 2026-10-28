@@ -20,6 +20,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
@@ -58,13 +59,9 @@ function daysAgo(days: number): Date {
   return date;
 }
 
-/** "25 sep. 2026" for a YYYY-MM-DD string; noon UTC so no time zone moves the day. */
+/** "25 sep. 2026" for a YYYY-MM-DD string. */
 function formatDate(date: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(`${date}T12:00:00Z`));
+  return formatCalendarDate(date, locale, { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** The filters the "Filter" button counts: user, each action and the period (search is visible). */
