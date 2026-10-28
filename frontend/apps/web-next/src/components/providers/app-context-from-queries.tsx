@@ -3,24 +3,28 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { browserApi } from "@/lib/api/browser";
+import { sessionQueries } from "@/lib/api/session";
 import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { AppContextProvider, type AppContextData } from "./app-context";
-import { appContextQueries } from "./app-context-queries";
 
-/** What the deployment configures for the app context (the server's env). */
+/**
+ * What comes with the deployment rather than the session: in Next the server's
+ * env and the backend version it read; runtime config in the Vite app.
+ */
 export type AppContextEnv = {
   showWebSearch: boolean;
   links: AppContextData["links"];
   frontendVersion: string;
+  backendVersion: string;
 };
 
-const queries = appContextQueries(browserApi);
+const session = sessionQueries(browserApi);
 
 /**
- * The signed-in app context from the app-context queries, which the (app)
- * layout has loaded and hydrated: they hold data from the first render, so
- * nothing here suspends. A failed refetch keeps the previous data (a suspense
- * query throws only while it has none).
+ * The signed-in app context from the session queries, which the (app) layout
+ * has loaded and hydrated (loadSession): they hold data from the first
+ * render, so nothing here suspends. A failed refetch keeps the previous data
+ * (a suspense query throws only while it has none).
  */
 export function QueryAppContextProvider({
   env,
@@ -29,13 +33,12 @@ export function QueryAppContextProvider({
   env: AppContextEnv;
   children: React.ReactNode;
 }) {
-  const { data: user } = useSuspenseQuery(queries.me);
-  const { data: tenant } = useSuspenseQuery(queries.tenant);
-  const { data: settings } = useSuspenseQuery(queries.settings);
-  const { data: federationStatus } = useSuspenseQuery(queries.federationStatus);
-  const { data: limits } = useSuspenseQuery(queries.limits);
-  const { data: backendVersion } = useSuspenseQuery(queries.version);
-  const { data: whatsNewState } = useSuspenseQuery(queries.whatsNew);
+  const { data: user } = useSuspenseQuery(session.me);
+  const { data: tenant } = useSuspenseQuery(session.tenant);
+  const { data: settings } = useSuspenseQuery(session.settings);
+  const { data: federationStatus } = useSuspenseQuery(session.federationStatus);
+  const { data: limits } = useSuspenseQuery(session.limits);
+  const { data: whatsNewState } = useSuspenseQuery(session.whatsNew);
 
   // Structural sharing keeps a source's data object when a refetch answers the
   // same, so the value (and every consumer) holds still.
@@ -48,9 +51,9 @@ export function QueryAppContextProvider({
       limits,
       featureFlags: { showWebSearch: env.showWebSearch },
       links: env.links,
-      versions: { frontend: env.frontendVersion, backend: backendVersion }
+      versions: { frontend: env.frontendVersion, backend: env.backendVersion }
     }),
-    [user, tenant, settings, federationStatus, limits, backendVersion, env]
+    [user, tenant, settings, federationStatus, limits, env]
   );
   const whatsNewEnabled = settings.whats_new_enabled !== false;
 

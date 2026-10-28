@@ -103,17 +103,10 @@ export function UploadBlobsDialog({
     queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
     enabled: open && can("admin")
   });
-  // The app context's user is read once on the server; the quota it carries
-  // goes stale with every upload. This query starts from that value and is
-  // refreshed whenever a job finishes (features/jobs/job-invalidation.ts).
-  const { data: me } = useQuery({
-    queryKey: ["users", "me"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/users/me/")),
-    initialData: user,
-    enabled: open
-  });
-  const quotaLimit = me.quota_limit ?? user.quota_limit;
-  const quotaUsed = me.quota_used ?? user.quota_used;
+  // The session's user query refetches whenever a job finishes
+  // (features/jobs/job-invalidation.ts), so the quota stays current.
+  const quotaLimit = user.quota_limit;
+  const quotaUsed = user.quota_used;
 
   const errors = useMemo<ValidationError[]>(() => {
     const found: ValidationError[] = [];

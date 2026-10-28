@@ -4,19 +4,17 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { EneoClient } from "@/lib/api/browser";
-import { EneoApiError } from "@/lib/api/errors";
+import { loadSession, sessionKeys } from "@/lib/api/session";
 import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 import { useAppContext, type AppContextValue } from "./app-context";
 import { QueryAppContextProvider, type AppContextEnv } from "./app-context-from-queries";
-import { appContextKeys, invalidateAppContext, loadAppContext } from "./app-context-queries";
 
 const ME = "/api/v1/users/me/";
 const TENANT = "/api/v1/users/tenant/";
 const SETTINGS = "/api/v1/settings/";
 const FEDERATION = "/api/v1/auth/federation-status";
 const LIMITS = "/api/v1/limits/";
-const VERSION = "/version";
 const WHATS_NEW = "/api/v1/whats-new/state/";
 
 type Reply = { status: number; body: unknown };
@@ -46,7 +44,8 @@ const serverApi = { GET: vi.fn(request) } as unknown as EneoClient;
 const env: AppContextEnv = {
   showWebSearch: true,
   links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
-  frontendVersion: "0.1.0"
+  frontendVersion: "0.1.0",
+  backendVersion: "1.2.3"
 };
 const signedIn = testAppContext();
 
@@ -58,7 +57,6 @@ beforeEach(() => {
     [SETTINGS, ok(signedIn.settings)],
     [FEDERATION, ok(signedIn.federationStatus)],
     [LIMITS, ok(signedIn.limits)],
-    [VERSION, ok({ version: "1.2.3" })],
     [WHATS_NEW, ok({ seen_version: "1.0.0", announced_version: "1.0.0" })]
   ]);
 });
@@ -84,7 +82,7 @@ function Probe() {
 /** What the (app) layout does: load on the server, hydrate, provide. */
 async function load() {
   const server = testQueryClient();
-  await loadAppContext(server, serverApi);
+  await loadSession(server, serverApi);
   return dehydrate(server);
 }
 
@@ -130,7 +128,7 @@ it("server-renders and hydrates the loaded context without a request", async () 
 it("does not refetch when the window regains focus, even once stale", async () => {
   const { queryClient } = await renderApp();
   // Stale, as after a failed refetch: only refetchOnWindowFocus: false holds them.
-  await queryClient.invalidateQueries({ queryKey: appContextKeys.all, refetchType: "none" });
+  await queryClient.invalidateQueries({ refetchType: "none" });
 
   window.dispatchEvent(new Event("focus"));
   document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
@@ -139,25 +137,15 @@ it("does not refetch when the window regains focus, even once stale", async () =
   expect(browserGet).not.toHaveBeenCalled();
 });
 
-it("refetches every source but the backend version on invalidateAppContext", async () => {
-  const { queryClient } = await renderApp();
-  backend.set(TENANT, ok({ ...signedIn.tenant, display_name: "Timrå kommun" }));
-
-  await invalidateAppContext(queryClient);
-
-  expect(requested()).toEqual([ME, TENANT, SETTINGS, FEDERATION, LIMITS, WHATS_NEW].sort());
-  await waitFor(() => expect(screen.getByTestId("tenant").textContent).toBe("Timrå kommun"));
-});
-
 it("keeps the context value when a refetch answers the same, so consumers need not re-render", async () => {
   const { queryClient, rerender } = await renderApp();
   const before = contextValues.at(-1);
 
-  await invalidateAppContext(queryClient);
+  await queryClient.invalidateQueries();
   await settle();
   rerender();
 
-  expect(requested()).toHaveLength(6);
+  expect(requested()).toEqual([ME, TENANT, SETTINGS, FEDERATION, LIMITS, WHATS_NEW].sort());
   expect(contextValues.at(-1)).toBe(before);
 });
 
@@ -179,11 +167,11 @@ it("keeps the previous data and the app mounted when a refetch fails", async () 
   backend.set(TENANT, failure);
   backend.set(WHATS_NEW, failure);
 
-  await invalidateAppContext(queryClient);
+  await queryClient.invalidateQueries();
   await settle();
 
-  expect(queryClient.getQueryState(appContextKeys.tenant)?.status).toBe("error");
-  expect(queryClient.getQueryState(appContextKeys.whatsNew)?.status).toBe("error");
+  expect(queryClient.getQueryState(sessionKeys.tenant)?.status).toBe("error");
+  expect(queryClient.getQueryState(sessionKeys.whatsNew)?.status).toBe("error");
   expect(screen.getByTestId("tenant").textContent).toBe("Sundsvalls kommun");
   // The What's new markers held, so WhatsNewProvider's key did and nothing remounted.
   expect(screen.getByTestId("seen").textContent).toBe("1.0.0");
@@ -195,14 +183,14 @@ it("loads an unavailable What's new state as null: unknown markers, not a first 
 
   const { queryClient } = await renderApp();
 
-  expect(queryClient.getQueryData(appContextKeys.whatsNew)).toBeNull();
+  expect(queryClient.getQueryData(sessionKeys.whatsNew)).toBeNull();
   expect(screen.getByTestId("seen").textContent).toBe("unknown");
 });
 
 it("starts a new user's document with their context, never the previous user's", async () => {
   const { getQueryClient } = await import("@/lib/api/query");
   const previousDocument = getQueryClient();
-  previousDocument.setQueryData(appContextKeys.me, signedIn.user);
+  previousDocument.setQueryData(sessionKeys.me, signedIn.user);
 
   // Logging in loads a new document (ContinueSignedIn): its modules, the browser's
   // query client among them, start over.
@@ -216,10 +204,4 @@ it("starts a new user's document with their context, never the previous user's",
 
   expect(contextValues.length).toBeGreaterThan(0);
   expect(contextValues.every((context) => context.user.username === "Bo Ek")).toBe(true);
-});
-
-it("fails to load when a required source fails", async () => {
-  backend.set(ME, failure);
-
-  await expect(loadAppContext(testQueryClient(), serverApi)).rejects.toBeInstanceOf(EneoApiError);
 });

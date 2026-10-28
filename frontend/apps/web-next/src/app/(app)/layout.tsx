@@ -2,14 +2,16 @@ import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { QueryAppContextProvider } from "@/components/providers/app-context-from-queries";
-import { loadAppContext } from "@/components/providers/app-context-queries";
 import { AppShellFrame } from "@/components/shell/app-shell";
 import {
   isSideNavCollapsed,
   SIDE_NAV_COLLAPSED_COOKIE
 } from "@/components/shell/side-nav-preference";
+import { unwrap } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
+import { loadSession } from "@/lib/api/session";
+import { backendVersionFrom } from "@/lib/api/version";
 import { env } from "@/lib/env";
 import { JobsProvider } from "@/features/jobs/use-jobs";
 import { TourProvider } from "@/features/whats-new/tour-provider";
@@ -36,7 +38,13 @@ export default async function AppLayout({
     (await cookies()).get(SIDE_NAV_COLLAPSED_COOKIE)?.value
   );
   const queryClient = getQueryClient();
-  await loadAppContext(queryClient, eneoApi());
+  const api = eneoApi();
+  // The backend version comes with the deployment, not the session: read here
+  // and passed on as is (runtime config in the Vite app).
+  const [, backendVersion] = await Promise.all([
+    loadSession(queryClient, api),
+    unwrap(api.GET("/version")).then(backendVersionFrom)
+  ]);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
@@ -48,7 +56,8 @@ export default async function AppLayout({
             accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null,
             helpCenter: env.SHOW_HELP_CENTER ? (env.HELP_CENTER_URL ?? null) : null
           },
-          frontendVersion: packageJson.version
+          frontendVersion: packageJson.version,
+          backendVersion
         }}
       >
         <TourProvider>
