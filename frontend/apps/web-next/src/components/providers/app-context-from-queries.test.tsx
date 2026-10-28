@@ -44,7 +44,6 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet, PUT: browse
 const serverApi = { GET: vi.fn(request) } as unknown as EneoClient;
 
 const env: AppContextEnv = {
-  showWebSearch: true,
   links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
   frontendVersion: "0.1.0",
   backendVersion: "1.2.3"
