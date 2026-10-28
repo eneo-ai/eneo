@@ -16,18 +16,19 @@ Most errors answer with a common JSON envelope:
 }
 ```
 
-`message` and `eneo_error_code` are always present in that envelope; `code`,
-`context` and `request_id` are not. Branch on the string `code` where an
-operation documents one, and otherwise on the status code together with the
-numeric `eneo_error_code`, a coarse category kept for older clients. `message`
-is written for people and may be reworded. Quote `request_id`, or `error_id` on
-a `500`, when you contact support.
+`message` is always present in that envelope. `eneo_error_code`, a coarse
+numeric category kept for older clients, is present unless the route refused
+with a plain message and no code; `code`, `context`, `details` and `request_id`
+are optional. Branch on the string `code` where an operation documents one, and
+otherwise on the status code together with `eneo_error_code`. `message` is
+written for people and may be reworded. Quote `request_id`, or `error_id` on a
+`500`, when you contact support.
 
-Some failures answer in another shape, so treat the envelope as the common case
-rather than a guarantee: request validation answers `422` with
-`{"detail": [...]}`; some HTTP errors keep a legacy `{"detail": ...}` whose
-value is a string or an object, such as the report `/api/healthz` returns with
-`503`; and an unexpected `500` answers with `error`, `error_id` and `message`.
+Request validation is the one exception: it answers `422` with
+`{"detail": [...]}`. Other errors also carry a deprecated `detail` with the
+route's raw refusal, a string or an object such as the report `/api/healthz`
+returns with `503`; it is kept for one release, so read the top-level fields.
+An unexpected `500` adds `error` and `error_id`.
 
 ### Errors that no operation lists
 
