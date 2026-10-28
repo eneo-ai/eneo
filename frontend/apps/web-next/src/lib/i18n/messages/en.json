@@ -6800,5 +6800,6 @@
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
+  "usage_cost_rates_error": "Estimated costs could not be loaded"
 }

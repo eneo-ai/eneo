@@ -1624,5 +1624,6 @@
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
+  "usage_cost_rates_error": "Beräknade kostnader kunde inte hämtas"
 }

@@ -19,7 +19,9 @@ function dateInput(date: Date): string {
 
 export function defaultUsageRange(now = new Date()): UsageRange {
   const start = new Date(now);
-  start.setDate(start.getDate() - 30);
+  // UTC arithmetic, like the dates it formats, so the period never depends
+  // on the time zone (a DST change would otherwise shift it).
+  start.setUTCDate(start.getUTCDate() - 30);
   return { from: dateInput(start), to: dateInput(now) };
 }
 
@@ -34,33 +36,140 @@ export function usageRangeFromSearchParams(
   return { from, to };
 }
 
-export function usageRangeQuery(range: UsageRange): { start_date: string; end_date: string } {
-  return {
-    start_date: new Date(`${range.from}T00:00:00`).toISOString(),
-    end_date: new Date(`${range.to}T23:59:59`).toISOString()
-  };
+export function isDefaultUsageRange(
+  range: UsageRange,
+  defaultRange = defaultUsageRange()
+): boolean {
+  return range.from === defaultRange.from && range.to === defaultRange.to;
 }
 
-export function tokenUsageQueryOptions(api: EneoClient) {
+/**
+ * The backend's period for a range, as apps/web sends it: the calendar dates,
+ * with the day after `to` as the end so the last day counts in full. The
+ * dates alone decide the period, so it is the same wherever it is computed
+ * (server prefetch or browser) and a query keyed by the range means one period.
+ */
+export function usageRangeQuery(range: UsageRange): { start_date: string; end_date: string } {
+  const end = new Date(`${range.to}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start_date: range.from, end_date: dateInput(end) };
+}
+
+/** Tenant token usage per model; by default the last 30 days, the page's overview. */
+export function tokenUsageQueryOptions(api: EneoClient, range = defaultUsageRange()) {
   return queryOptions({
-    queryKey: ["admin-token-usage"],
-    queryFn: (): Promise<TokenUsage> => unwrap(api.GET("/api/v1/token-usage/"))
+    queryKey: ["admin-token-usage", range],
+    queryFn: (): Promise<TokenUsage> =>
+      unwrap(api.GET("/api/v1/token-usage/", { params: { query: usageRangeQuery(range) } }))
   });
 }
 
-/** Per-user token usage (backend defaults to the last 30 days). */
-export function userTokenUsageQueryOptions(api: EneoClient, range?: UsageRange) {
+export type UserSortBy = Schema<"UserSortBy">;
+export type SortOrder = "asc" | "desc";
+
+/** One page of the users list, as apps/web asks for it (usage-query.ts). */
+export type UserUsageQuery = {
+  page: number;
+  sortBy: UserSortBy;
+  sortOrder: SortOrder;
+  /** Trimmed; empty means no search. */
+  search: string;
+};
+
+export const USER_USAGE_PAGE_SIZE = 25;
+
+/** Per-user token usage, searched, sorted and paged on the server. */
+export function userTokenUsageQueryOptions(
+  api: EneoClient,
+  range: UsageRange,
+  query: UserUsageQuery
+) {
   return queryOptions({
-    queryKey: ["admin-user-token-usage", range],
+    queryKey: ["admin-user-token-usage", range, query],
     queryFn: (): Promise<UserTokenUsage> =>
       unwrap(
         api.GET("/api/v1/token-usage/users", {
           params: {
-            query: range ? usageRangeQuery(range) : {}
+            query: {
+              ...usageRangeQuery(range),
+              page: query.page,
+              per_page: USER_USAGE_PAGE_SIZE,
+              sort_by: query.sortBy,
+              sort_order: query.sortOrder,
+              search: query.search || undefined
+            }
           }
         })
       )
   });
+}
+
+export const USAGE_TABS = ["tokens", "users", "storage"] as const;
+export type UsageTab = (typeof USAGE_TABS)[number];
+
+/** What the usage page shows; it lives in the URL so a reload or a user's page leads back to it. */
+export type UsageView = UserUsageQuery & { tab: UsageTab; range: UsageRange };
+
+const USER_SORT_FIELDS: UserSortBy[] = [
+  "username",
+  "input_tokens",
+  "output_tokens",
+  "total_tokens",
+  "requests"
+];
+/** The backend rejects longer searches. */
+export const MAX_SEARCH_LENGTH = 200;
+
+/** The view a URL asks for; anything malformed falls back to its default. */
+export function readUsageView(
+  params: Pick<URLSearchParams, "get">,
+  fallbackRange = defaultUsageRange()
+): UsageView {
+  const page = Number(params.get("page") || "1");
+  return {
+    tab: USAGE_TABS.find((tab) => tab === params.get("tab")) ?? "tokens",
+    range: usageRangeFromSearchParams(
+      { from: params.get("from") ?? undefined, to: params.get("to") ?? undefined },
+      fallbackRange
+    ),
+    page: Number.isSafeInteger(page) && page > 0 ? page : 1,
+    sortBy: USER_SORT_FIELDS.find((field) => field === params.get("sortBy")) ?? "total_tokens",
+    sortOrder: params.get("sortOrder") === "asc" ? "asc" : "desc",
+    search: (params.get("userSearch") ?? "").trim().slice(0, MAX_SEARCH_LENGTH)
+  };
+}
+
+/**
+ * The query string (`?…`, or "" when nothing is left) for `view`, written
+ * over `current`: other parameters stay, and defaults are left out.
+ */
+export function usageViewSearch(
+  view: UsageView,
+  current = "",
+  defaultRange = defaultUsageRange()
+): string {
+  const params = new URLSearchParams(current);
+  const isDefaultRange = isDefaultUsageRange(view.range, defaultRange);
+  const entries: [string, string, boolean][] = [
+    ["tab", view.tab, view.tab === "tokens"],
+    ["from", view.range.from, isDefaultRange],
+    ["to", view.range.to, isDefaultRange],
+    ["page", String(view.page), view.page === 1],
+    ["sortBy", view.sortBy, view.sortBy === "total_tokens"],
+    ["sortOrder", view.sortOrder, view.sortOrder === "desc"],
+    ["userSearch", view.search, view.search === ""]
+  ];
+  for (const [key, value, isDefault] of entries) {
+    if (isDefault) params.delete(key);
+    else params.set(key, value);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/** The usage page with the view a user's page was opened from (its URL carries it). */
+export function usageListHref(params: Pick<URLSearchParams, "get">): string {
+  return `/admin/usage${usageViewSearch(readUsageView(params))}`;
 }
 
 export function userTokenUsageSummaryQueryOptions(
@@ -139,17 +248,24 @@ export function userUsageCost(
 
 export type UsageIntensity = "low" | "medium" | "high";
 
+/** Days from the range's start to its end (at least 1), as apps/web scales its thresholds. */
 export function usageRangeDayCount(range: UsageRange): number {
   const start = new Date(`${range.from}T00:00:00`).getTime();
   const end = new Date(`${range.to}T00:00:00`).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end)) return 30;
-  return Math.max(1, Math.round((end - start) / 86_400_000) + 1);
+  return Math.max(1, Math.round((end - start) / 86_400_000));
+}
+
+/** Token totals above which a user's usage is high or medium: 500k and 50k per 30 days. */
+export function usageThresholds(range: UsageRange): { high: number; medium: number } {
+  const scale = usageRangeDayCount(range) / 30;
+  return { high: Math.round(500_000 * scale), medium: Math.round(50_000 * scale) };
 }
 
 export function usageIntensity(totalTokens: number, range: UsageRange): UsageIntensity {
-  const scale = usageRangeDayCount(range) / 30;
-  if (totalTokens > Math.round(500_000 * scale)) return "high";
-  if (totalTokens > Math.round(50_000 * scale)) return "medium";
+  const { high, medium } = usageThresholds(range);
+  if (totalTokens > high) return "high";
+  if (totalTokens > medium) return "medium";
   return "low";
 }
 
