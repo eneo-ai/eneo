@@ -6,7 +6,6 @@ value here is public: links the app renders and the backend version, which
 ``/version`` already publishes.
 """
 
-import logging
 from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter
@@ -18,8 +17,9 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.main.config import Settings, get_settings
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

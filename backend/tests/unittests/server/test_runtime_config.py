@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -9,6 +10,7 @@ from eneo.authentication.endpoint_access import (
     access_for,
 )
 from eneo.main.config import Settings, set_settings
+from eneo.server import runtime_config_router
 from eneo.server.main import get_application
 from eneo.server.runtime_config_router import (
     build_runtime_config,
@@ -25,6 +27,30 @@ LINKS = (
 
 def _settings(base: Settings, **updates: object) -> Settings:
     return Settings.model_validate({**base.model_dump(), **updates})
+
+
+class _Records(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def runtime_log() -> Iterator[list[logging.LogRecord]]:
+    """What the module logger emits at its configured level.
+
+    SimpleLogger does not propagate to the root handler caplog uses, and the
+    level is left as configured so a muted logger fails the test.
+    """
+    handler = _Records()
+    runtime_config_router.logger.addHandler(handler)
+    try:
+        yield handler.records
+    finally:
+        runtime_config_router.logger.removeHandler(handler)
 
 
 def test_defaults(test_settings: Settings):
@@ -155,7 +181,7 @@ async def test_endpoint_is_public_and_not_cached(test_settings: Settings):
 
 
 def test_startup_log_names_unlinked_values_without_values(
-    test_settings: Settings, caplog: pytest.LogCaptureFixture
+    test_settings: Settings, runtime_log: list[logging.LogRecord]
 ):
     settings = _settings(
         test_settings,
@@ -165,14 +191,9 @@ def test_startup_log_names_unlinked_values_without_values(
         mcp_app_content_base_url="ftp://views.example.com/token",
     )
 
-    with caplog.at_level(logging.INFO, logger="eneo.server.runtime_config_router"):
-        log_unlinked_runtime_values(settings)
+    log_unlinked_runtime_values(settings)
 
-    records = {
-        record.levelno: record.getMessage()
-        for record in caplog.records
-        if record.name == "eneo.server.runtime_config_router"
-    }
+    records = {record.levelno: record.getMessage() for record in runtime_log}
     assert set(records) == {logging.INFO, logging.WARNING}
     info, warning = records[logging.INFO], records[logging.WARNING]
     assert "HELP_CENTER_URL" in info
@@ -195,18 +216,15 @@ def test_startup_log_names_unlinked_values_without_values(
 )
 def test_startup_log_runs_only_for_the_browser_platform(
     test_settings: Settings,
-    caplog: pytest.LogCaptureFixture,
+    runtime_log: list[logging.LogRecord],
     flags: dict[str, bool],
     logged: bool,
 ):
     set_settings(_settings(test_settings, **flags))
 
-    with caplog.at_level(logging.INFO, logger="eneo.server.runtime_config_router"):
-        get_application()
+    get_application()
 
-    assert logged == any(
-        record.name == "eneo.server.runtime_config_router" for record in caplog.records
-    )
+    assert logged == bool(runtime_log)
 
 
 def test_endpoint_declared_public():
