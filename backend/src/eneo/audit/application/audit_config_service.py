@@ -3,7 +3,7 @@
 import logging
 from uuid import UUID
 
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
@@ -310,7 +310,9 @@ class AuditConfigService:
 
         for action_value, category in CATEGORY_MAPPINGS.items():
             # Determine if action is enabled using local dict (avoids 65 async calls)
-            if category not in config_dict:
+            if ActionType(action_value) in ALWAYS_AUDITED_ACTIONS:
+                enabled = True
+            elif category not in config_dict:
                 # No config = default enabled
                 enabled = True
             else:
@@ -356,6 +358,10 @@ class AuditConfigService:
         updates_by_category: dict[str, ActionOverrides] = {}
 
         for update in updates:
+            if ActionType(update.action) in ALWAYS_AUDITED_ACTIONS:
+                # Refused, not an error: the old UI disables a category by
+                # sending every action in it.
+                continue
             category = get_category_for_action(update.action)
             if category not in updates_by_category:
                 updates_by_category[category] = {}
