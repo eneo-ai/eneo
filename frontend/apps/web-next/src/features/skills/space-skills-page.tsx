@@ -25,10 +25,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { PageHeader } from "@/components/composites/page-header";
 import { ClientTime } from "@/components/composites/client-time";
+import { ListError } from "@/components/composites/query-state";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
@@ -45,7 +46,7 @@ export function SpaceSkillsPage() {
   const [search, setSearch] = useState("");
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const base = `/spaces/${routeId}/skills`;
   const key = skillQueryKey({ type: "space", spaceId: space.id });
@@ -84,7 +85,7 @@ export function SpaceSkillsPage() {
       setDeleteTarget(null);
       setAnnouncement(t("skills_library_deleted_success"));
     },
-    onError: (cause) => setDeleteError(getErrorMessage(cause, t)),
+    onError: (cause) => setDeleteError(cause),
     focusTarget: headingRef
   });
   const deleting = removeSkill.isPending;
@@ -208,14 +209,11 @@ export function SpaceSkillsPage() {
       {skills.isPending ? (
         <LoadingState rows={3} />
       ) : skills.isError && !skills.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void skills.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ListError
+          error={skills.error}
+          isRetrying={skills.isFetching}
+          onRetry={() => void skills.refetch()}
+        />
       ) : items.length === 0 ? (
         <EmptyState
           icon={<BookOpenCheck />}
@@ -290,11 +288,8 @@ export function SpaceSkillsPage() {
               {t("skills_library_delete_description", { name: deleteTarget?.display_name ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deleteError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("request_failed")}</AlertTitle>
-              <AlertDescription>{deleteError}</AlertDescription>
-            </Alert>
+          {deleteError != null && (
+            <ListError error={deleteError} title={t("skills_library_delete_error")} />
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>

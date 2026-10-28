@@ -20,8 +20,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import {
   isSkillInUse,
   ORGANIZATION_SKILLS_KEY,
@@ -226,14 +227,11 @@ export function OrganizationSkillsPage() {
           {t("loading")}
         </p>
       ) : skills.isError && !skills.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" size="sm" onClick={() => void skills.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ListError
+          error={skills.error}
+          isRetrying={skills.isFetching}
+          onRetry={() => void skills.refetch()}
+        />
       ) : items.length === 0 ? (
         <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
           <BookOpenCheck className="text-muted-foreground size-9" />
@@ -447,7 +445,7 @@ export function SkillRemovalDialog({
   const usageLabel = useUsageLabel();
   const [busy, setBusy] = useState(false);
   const [detachBindings, setDetachBindings] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [serverBlocked, setServerBlocked] = useState<string[]>([]);
   const blockers = skills.filter(
     (skill) => removalBlocked(skill.usage) || serverBlocked.includes(skill.id)
@@ -464,7 +462,7 @@ export function SkillRemovalDialog({
       );
       await onRemoved(result);
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
       if (cause instanceof EneoApiError && cause.code === 9051)
         setServerBlocked(serverBlockingIds(cause.details));
     } finally {
@@ -568,12 +566,7 @@ export function SkillRemovalDialog({
             </AlertDescription>
           </Alert>
         )}
-        {error && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>{t("organization_skills_remove_error")}</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+        {error != null && <ListError error={error} title={t("organization_skills_remove_error")} />}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
           {/* Busy, it stays enabled so it keeps focus; remove() ignores a second press. */}

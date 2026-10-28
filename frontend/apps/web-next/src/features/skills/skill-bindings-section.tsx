@@ -18,8 +18,9 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { useSpace } from "@/features/spaces/use-space";
 import {
@@ -164,7 +165,7 @@ export function SkillBindingsEditor({
     resource === "personal_chat" ? (bindings ?? []) : activeEdit ? editing.draft : loaded;
   const dirty = resource !== "personal_chat" && JSON.stringify(draft) !== JSON.stringify(baseline);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -172,12 +173,12 @@ export function SkillBindingsEditor({
   const [created, setCreated] = useState<SkillCandidate[]>([]);
   const [previewCandidate, setPreviewCandidate] = useState<SkillCandidate | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<unknown>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDirty, setCreateDirty] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState<string | null>(null);
-  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [upgradeError, setUpgradeError] = useState<unknown>(null);
   const [revisionMetadata, setRevisionMetadata] = useState<Preview[]>([]);
 
   function setDraft(next: Binding[] | ((current: Binding[]) => Binding[])) {
@@ -209,7 +210,7 @@ export function SkillBindingsEditor({
         ? null
         : saving
           ? "saving"
-          : saveError
+          : saveError != null
             ? "error"
             : dirty
               ? "dirty"
@@ -259,8 +260,8 @@ export function SkillBindingsEditor({
     setPreviewLoading(true);
     try {
       setPreview(await getSkillPreview(spaceId, skill));
-    } catch {
-      setPreviewError(t("skills_preview_load_error"));
+    } catch (cause) {
+      setPreviewError(cause);
     } finally {
       setPreviewLoading(false);
     }
@@ -298,8 +299,8 @@ export function SkillBindingsEditor({
           revision: String(exact.revisionNumber)
         })
       );
-    } catch {
-      setUpgradeError(t("skills_preview_load_error"));
+    } catch (cause) {
+      setUpgradeError(cause);
     } finally {
       setUpgradeBusy(null);
     }
@@ -326,7 +327,7 @@ export function SkillBindingsEditor({
       setAnnouncement(t("skills_bindings_saved"));
       void queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {
-      setSaveError(getErrorMessage(cause, t));
+      setSaveError(cause);
     } finally {
       setSaving(false);
     }
@@ -367,14 +368,11 @@ export function SkillBindingsEditor({
   if (resource !== "personal_chat" && configuration.isError)
     return (
       <SettingsGroup title={t("skills")}>
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void configuration.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ListError
+          error={configuration.error}
+          isRetrying={configuration.isFetching}
+          onRetry={() => void configuration.refetch()}
+        />
       </SettingsGroup>
     );
 
@@ -441,10 +439,8 @@ export function SkillBindingsEditor({
           </AlertDescription>
         </Alert>
       )}
-      {upgradeError && (
-        <p role="alert" className="text-destructive text-sm">
-          {upgradeError}
-        </p>
+      {upgradeError != null && (
+        <ListError error={upgradeError} title={t("skills_preview_load_error")} />
       )}
       {draft.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("skills_no_bindings")}</p>
@@ -700,10 +696,8 @@ export function SkillBindingsEditor({
           )}
         </div>
       )}
-      {resource !== "personal_chat" && saveError && (
-        <p role="alert" className="text-destructive text-sm">
-          {saveError}
-        </p>
+      {resource !== "personal_chat" && saveError != null && (
+        <ListError error={saveError} title={t("skills_bindings_save_error")} />
       )}
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
@@ -728,10 +722,8 @@ export function SkillBindingsEditor({
           </DialogHeader>
           {previewLoading ? (
             <p>{t("loading")}</p>
-          ) : previewError ? (
-            <p role="alert" className="text-destructive">
-              {previewError}
-            </p>
+          ) : previewError != null ? (
+            <ListError error={previewError} title={t("skills_preview_load_error")} />
           ) : (
             preview && (
               <div className="space-y-3">

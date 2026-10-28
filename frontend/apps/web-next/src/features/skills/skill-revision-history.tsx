@@ -17,7 +17,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import { ListError } from "@/components/composites/query-state";
+import { EneoApiError } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import {
   getSkillRevision,
@@ -80,7 +81,7 @@ export function SkillRevisionHistory({
   const [viewId, setViewId] = useState<string | null>(null);
   const [restoreId, setRestoreId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const key = skillQueryKey(scope);
   const canRestore = allowRestore && !("removed_at" in skill && skill.removed_at);
@@ -123,7 +124,7 @@ export function SkillRevisionHistory({
       );
       if (outcome.created) await queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
       if (cause instanceof EneoApiError && cause.status === 409) {
         await queryClient.invalidateQueries({ queryKey: [...key, skill.id] });
         setRestoreId(null);
@@ -147,14 +148,11 @@ export function SkillRevisionHistory({
       {revisions.isPending ? (
         <p role="status">{t("loading")}</p>
       ) : revisions.isError && !revisions.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void revisions.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ListError
+          error={revisions.error}
+          isRetrying={revisions.isFetching}
+          onRetry={() => void revisions.refetch()}
+        />
       ) : (
         <>
           <div className="divide-y rounded-lg border">
@@ -235,14 +233,12 @@ export function SkillRevisionHistory({
           {preview.isPending && viewId !== skill.current_revision_id ? (
             <p role="status">{t("loading")}</p>
           ) : preview.isError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_preview_error")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" onClick={() => void preview.refetch()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
+            <ListError
+              error={preview.error}
+              title={t("skills_library_preview_error")}
+              isRetrying={preview.isFetching}
+              onRetry={() => void preview.refetch()}
+            />
           ) : revision ? (
             <>
               <RevisionContent revision={revision} current={skill.current_revision} />
@@ -282,12 +278,7 @@ export function SkillRevisionHistory({
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_restore_error")}</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {error != null && <ListError error={error} title={t("skills_library_restore_error")} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={restoring}>{t("cancel")}</AlertDialogCancel>
             {/* Busy, it stays enabled so it keeps focus; restore() ignores a second press. */}

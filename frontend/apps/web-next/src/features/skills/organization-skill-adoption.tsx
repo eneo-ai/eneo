@@ -17,8 +17,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 
@@ -58,7 +59,7 @@ export function OrganizationSkillAdoption({
   const [selected, setSelected] = useState<Resource[]>([]);
   const [action, setAction] = useState<"detach" | "advance" | "personal" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [receipt, setReceipt] = useState("");
   const resourcesHeadingId = useId();
   const path = { skill_id: skill.id };
@@ -235,7 +236,7 @@ export function OrganizationSkillAdoption({
       setAction(null);
       await refresh();
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
     } finally {
       setBusy(false);
     }
@@ -261,15 +262,12 @@ export function OrganizationSkillAdoption({
       {bindings.isPending ? (
         <p role="status">{t("organization_skills_adoption_loading")}</p>
       ) : bindings.isError && !bindings.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("organization_skills_adoption_error_title")}</AlertTitle>
-          <AlertDescription>
-            <p>{t("organization_skills_adoption_error")}</p>
-            <Button variant="outline" className="mt-2" onClick={() => void bindings.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ListError
+          error={bindings.error}
+          title={t("organization_skills_adoption_error_title")}
+          isRetrying={bindings.isFetching}
+          onRetry={() => void bindings.refetch()}
+        />
       ) : (
         <>
           {summary && (
@@ -612,17 +610,15 @@ export function OrganizationSkillAdoption({
               ))}
             </ul>
           )}
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>
-                {t(
-                  action === "detach"
-                    ? "organization_skills_adoption_detach_error"
-                    : "organization_skills_adoption_advance_error"
-                )}
-              </AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          {error != null && (
+            <ListError
+              error={error}
+              title={t(
+                action === "detach"
+                  ? "organization_skills_adoption_detach_error"
+                  : "organization_skills_adoption_advance_error"
+              )}
+            />
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>

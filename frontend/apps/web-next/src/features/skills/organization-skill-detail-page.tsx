@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY, type SkillRemovalResult } from "./organization-skills";
@@ -55,14 +56,11 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
     );
   if (skill.isError)
     return (
-      <Alert variant="destructive" role="alert">
-        <AlertTitle>{t("request_failed")}</AlertTitle>
-        <AlertDescription>
-          <Button variant="outline" onClick={() => void skill.refetch()}>
-            {t("retry")}
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <ListError
+        error={skill.error}
+        isRetrying={skill.isFetching}
+        onRetry={() => void skill.refetch()}
+      />
     );
   const value = skill.data;
 
