@@ -12,6 +12,7 @@ import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
+import { pollWhile } from "@/lib/api/query";
 import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
 import { signedFileUrl } from "@/features/files/signed-file-url";
@@ -217,8 +218,7 @@ export function ResultDetail({
   const live = useJobEventsConnected();
   const { data: run } = useSuspenseQuery({
     ...appRunQueryOptions(browserApi, runId),
-    refetchInterval: (query) =>
-      !live && query.state.data && isRunActive(query.state.data.status) ? RESULT_POLL_MS : false
+    refetchInterval: pollWhile((run) => !live && !!run && isRunActive(run.status), RESULT_POLL_MS)
   });
 
   const complete = !isRunActive(run.status);

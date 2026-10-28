@@ -17,6 +17,7 @@ import {
 import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { toast } from "@/lib/toast";
 import {
   pendingImports,
@@ -178,10 +179,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
     queryFn: listJobs,
-    refetchInterval: (query) =>
-      !live && (Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive))
-        ? FAST_POLL_MS
-        : SLOW_POLL_MS
+    refetchInterval: pollWhile(
+      // TanStack calls this after each fetch, never during render.
+      // eslint-disable-next-line react-hooks/refs, react-hooks/purity
+      (items) => !live && (Date.now() < fastPollUntil.current || !!items?.some(isJobActive)),
+      FAST_POLL_MS,
+      SLOW_POLL_MS
+    )
   });
   useEffect(
     () =>
