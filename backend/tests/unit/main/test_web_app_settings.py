@@ -27,7 +27,6 @@ def test_web_app_settings_default_off():
 
     assert settings.browser_session_enabled is False
     assert settings.web_app_enabled is False
-    assert settings.show_web_search is False
     assert settings.show_help_center is False
 
 
@@ -96,7 +95,7 @@ def test_env_backend_template_lists_web_app_settings():
     names = {"BROWSER_SESSION_ENABLED", "WEB_APP_ENABLED"} | {
         name.upper() for name in LINKS
     }
-    names |= {"SHOW_WEB_SEARCH", "SHOW_HELP_CENTER"}
+    names.add("SHOW_HELP_CENTER")
     for template in (
         REPO_ROOT / "backend/.env.template",
         REPO_ROOT / "docs/deployment/env_backend.template",

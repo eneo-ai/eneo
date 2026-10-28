@@ -2,7 +2,6 @@
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { useLocale, useTranslations } from "next-intl";
@@ -10,23 +9,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
 import { autoAcceptToolsPreference } from "@/features/chat/use-tool-choices";
 import { cn } from "@/lib/utils";
+import { buildAllowAttribute as sdkAllowAttribute } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { McpAppBridge, type McpAppToolResult, type McpAppToolState } from "./bridge";
 import { hostContext } from "./host-context";
 import {
   appViewSubject,
   appViewTitle,
-  buildAllowAttribute,
   hasResult,
   type McpAppCall,
   type McpAppDisplayMode
 } from "./mcp-apps";
-import { useViewLink } from "./use-view-link";
+import {
+  McpAppViewNote,
+  McpAppViewSkeleton,
+  UNSIZED_VIEW_HEIGHT,
+  unsizedHeight
+} from "./mcp-app-placeholder";
+import type { ViewLink, ViewLinkError } from "./use-view-link";
 import { callToolFromView, toolCallOutcome } from "./view-tool-calls";
 
-// A view takes the room it asks for. One shown with the answer being written
-// starts with none, so a view with nothing to show never flickers into the
-// answer; an earlier answer's view holds its place until it loads.
-const UNSIZED_HEIGHT = 320;
+// A view takes the room it asks for; until it says, see `unsizedHeight`.
 const SIZE_WAIT_MS = 1500;
 const ARGUMENTS_PREVIEW_LENGTH = 400;
 
@@ -59,6 +61,17 @@ function useAnchorRect(target: HTMLElement | null): Rect | null {
 type Decision<T> = { payload: T; decide: (allow: boolean) => void };
 
 /**
+ * Map declared spec permissions onto the iframe `allow` attribute. Writing to
+ * the clipboard is the only one granted: camera, microphone and geolocation
+ * would hand a server's HTML the user's device without the user being asked.
+ */
+function buildAllowAttribute(permissions: Record<string, unknown> | undefined): string {
+  return sdkAllowAttribute(
+    permissions && "clipboardWrite" in permissions ? { clipboardWrite: {} } : undefined
+  );
+}
+
+/**
  * An approved interactive view (MCP App) under its answer: the server's HTML
  * in a sandboxed frame on the content origin, bridged with the official SDK.
  * The frame stays mounted in the message for its whole life; when the view is
@@ -68,18 +81,25 @@ type Decision<T> = { payload: T; decide: (allow: boolean) => void };
 export function McpAppFrame({
   call,
   live,
-  sessionId
+  startedLive,
+  sessionId,
+  link,
+  linkError
 }: {
   call: McpAppCall;
   /** The call belongs to the answer being written right now. */
   live: boolean;
+  /** The answer was being written when the view appeared (`McpAppFrames`). */
+  startedLive: boolean;
   sessionId: string | null;
+  /** The view's signed link (`useViewLink`), minted from when the view appeared. */
+  link: ViewLink | null;
+  linkError: ViewLinkError | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const queryClient = useQueryClient();
   const panel = useSidePanel();
-  const { link, error } = useViewLink(call.view.viewId);
   const { resolvedTheme } = useTheme();
 
   const movedToPane = panel?.viewCallId === call.toolCallId;
@@ -90,7 +110,7 @@ export function McpAppFrame({
   const bridgeRef = useRef<McpAppBridge | null>(null);
   const loadedFrame = useRef<HTMLIFrameElement | null>(null);
   const sized = useRef(false);
-  const [frameHeight, setFrameHeight] = useState(live ? 0 : UNSIZED_HEIGHT);
+  const [frameHeight, setFrameHeight] = useState(() => unsizedHeight(startedLive));
   const [enlargeable, setEnlargeable] = useState(false);
   const [leftApprovedView, setLeftApprovedView] = useState(false);
   const [asking, setAsking] = useState<Decision<{ name: string; args: unknown }> | null>(null);
@@ -98,7 +118,7 @@ export function McpAppFrame({
   // Fixed for the frame's lifetime: the attribute only matters before the
   // first load, and Firefox reloads a frame whose `loading` changes to lazy,
   // which would read as the view having navigated away.
-  const [loading] = useState<"eager" | "lazy">(live ? "eager" : "lazy");
+  const [loading] = useState<"eager" | "lazy">(startedLive ? "eager" : "lazy");
 
   // The bridge's callbacks read the newest props and store through this ref,
   // written after every commit.
@@ -286,7 +306,7 @@ export function McpAppFrame({
     bridge.update(tool);
     // A view that never says its size is given room all the same.
     setTimeout(() => {
-      if (!sized.current && bridgeRef.current === bridge) setFrameHeight(UNSIZED_HEIGHT);
+      if (!sized.current && bridgeRef.current === bridge) setFrameHeight(UNSIZED_VIEW_HEIGHT);
     }, SIZE_WAIT_MS);
   };
 
@@ -317,14 +337,7 @@ export function McpAppFrame({
         { position: "absolute" as const, height: 0, overflow: "hidden" }
       : { height: frameHeight + (bordered ? 2 : 0) };
 
-  const note = (text: string) => (
-    <p
-      role="note"
-      className="border-ax-border-strong text-ax-text-secondary rounded-ax-container mt-2 border border-dashed px-3 py-2 text-xs"
-    >
-      {text}
-    </p>
-  );
+  const note = (text: string) => <McpAppViewNote>{text}</McpAppViewNote>;
 
   return (
     <>
@@ -344,23 +357,14 @@ export function McpAppFrame({
       )}
       {leftApprovedView ? (
         note(t("mcp_app_view_left"))
-      ) : error ? (
+      ) : linkError ? (
         note(
-          error.contentOriginMissing
+          linkError.contentOriginMissing
             ? t("mcp_app_view_unavailable")
             : t("mcp_app_view_unavailable_generic")
         )
       ) : !link ? (
-        <div
-          aria-hidden="true"
-          className={cn(
-            "rounded-ax-container mt-2 overflow-hidden",
-            displayMode === "inline" && frameHeight === 0 && "hidden"
-          )}
-          style={displayMode === "inline" ? { height: frameHeight } : undefined}
-        >
-          <Skeleton radius={3} />
-        </div>
+        <McpAppViewSkeleton height={frameHeight} inline={displayMode === "inline"} />
       ) : (
         <iframe
           ref={frameRef}

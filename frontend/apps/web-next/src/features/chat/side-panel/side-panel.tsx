@@ -2,9 +2,23 @@
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { Activity, PanelRightOpen } from "lucide-react";
+import { Activity, FileText, PanelRightOpen } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
+import {
+  Component,
+  lazy,
+  useCallback,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
+import { ListError } from "@/components/composites/query-state";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { findAppCall } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import type { EneoUIMessage } from "@/lib/chat/types";
@@ -12,13 +26,75 @@ import { useResizableSplit } from "@/lib/hooks/use-resizable-split";
 import { cn } from "@/lib/utils";
 import type { DocumentExport } from "./document-export";
 import type { DocumentSaver } from "./document-saver";
-import { FilePanel } from "./file-panel";
 import type { PanelContents } from "./panel-contents";
 import { panelContentsCount } from "./panel-contents";
 import { PanelContentsList, type ActivityEntry } from "./panel-contents-list";
 import { PanelFrame, type PanelMaximise, type PanelSwitcher } from "./panel-frame";
 import type { SidePanelStore } from "./side-panel-store";
 import { ViewPanel } from "./view-panel";
+
+// The file panel carries the document editor (TipTap, ProseMirror, highlighting)
+// and the previews. It loads once the conversation is idle, not with the page.
+let filePanelModule: typeof import("./file-panel") | null = null;
+const loadFilePanel = () => import("./file-panel").then((module) => (filePanelModule = module));
+// React keeps a lazy component's failed load, so a retry needs a new one. Once
+// the code is here (the idle prefetch), the panel resolves at once: a pending
+// load would show the loading frame for React's 300 ms reveal throttle.
+const lazyFilePanel = () =>
+  lazy(() => {
+    if (filePanelModule === null) {
+      return loadFilePanel().then((module) => ({ default: module.FilePanel }));
+    }
+    const ready = { default: filePanelModule.FilePanel };
+    // React's lazy takes any thenable (its types say Promise); one that
+    // resolves synchronously renders without suspending.
+    return {
+      then: (resolve: (value: typeof ready) => void) => resolve(ready)
+    } as unknown as Promise<typeof ready>;
+  });
+
+/**
+ * Marks a loading or failed frame as shown, for as long as it is: it is
+ * swapped for the next one, taking any control the reader had focused with it.
+ */
+function TemporaryFrame({ onShown }: { onShown: (shown: boolean) => void }) {
+  useLayoutEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
+  return null;
+}
+
+/**
+ * Keeps a failed file panel (its code gone after a deploy, a dropped
+ * connection) inside the panel with a retry, so the conversation stays usable.
+ */
+class FilePanelBoundary extends Component<
+  { frame: (body: ReactNode) => ReactNode; onRetry: () => void; children: ReactNode },
+  { failure: { error: unknown } | null }
+> {
+  override state: { failure: { error: unknown } | null } = { failure: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { failure: { error } };
+  }
+
+  override render() {
+    const { failure } = this.state;
+    if (failure === null) return this.props.children;
+    return this.props.frame(
+      <div className="p-4">
+        <ListError
+          error={failure.error}
+          onRetry={() => {
+            this.props.onRetry();
+            this.setState({ failure: null });
+          }}
+        />
+      </div>
+    );
+  }
+}
 
 export const SIDE_PANEL_ID = "chat-side-panel";
 const WIDTH_STORAGE_KEY = "eneo:chat-side-panel-width";
@@ -69,10 +145,36 @@ export function SidePanel({
   const beside = useMediaQuery("(min-width: 1024px)");
   const aside = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const fileArea = useRef<HTMLDivElement>(null);
+  // A loading or failed frame is swapped for the next one, taking any control
+  // the reader had focused with it. Whether the reader's focus is in it is
+  // tracked while it is shown; when it goes with focus in it, focus is rescued
+  // into the file's area, not left on the page.
+  const temporaryFrame = useRef(false);
+  const focusInTemporaryFrame = useRef(false);
+  const rescueFocus = useFocusRescue();
+  const markTemporaryFrame = useCallback(
+    (shown: boolean) => {
+      temporaryFrame.current = shown;
+      if (shown || !focusInTemporaryFrame.current) return;
+      focusInTemporaryFrame.current = false;
+      rescueFocus(() => fileArea.current);
+    },
+    [rescueFocus]
+  );
 
   useEffect(() => {
     panel.setBesideConversation(beside);
   }, [panel, beside]);
+
+  const [FilePanel, setFilePanel] = useState(lazyFilePanel);
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((load: () => void) => setTimeout(load, 1));
+    const cancel = window.cancelIdleCallback ?? clearTimeout;
+    // Only a head start: opening a file loads the panel itself and reports a failure.
+    const handle = idle(() => void loadFilePanel().catch(() => {}));
+    return () => cancel(handle);
+  }, []);
 
   const occupant = panel.occupant;
   const kind = occupant.kind !== "closed" ? occupant.kind : activity ? "activity" : "closed";
@@ -110,6 +212,35 @@ export function SidePanel({
     }
     wasShown.current = shown;
   }, [shown, kind, beside, panel.openedByItself]);
+
+  // Focus is in the temporary frame from when it enters until it moves to
+  // something outside the file's area or the reader presses outside it. A
+  // removed control gives no outside target, so its loss keeps the mark.
+  useEffect(() => {
+    const area = fileArea.current;
+    if (!area) return;
+    const onFocusIn = () => {
+      if (temporaryFrame.current) focusInTemporaryFrame.current = true;
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && !area.contains(event.relatedTarget)) {
+        focusInTemporaryFrame.current = false;
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node && area.contains(event.target))) {
+        focusInTemporaryFrame.current = false;
+      }
+    };
+    area.addEventListener("focusin", onFocusIn);
+    area.addEventListener("focusout", onFocusOut);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      area.removeEventListener("focusin", onFocusIn);
+      area.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [kind, shown, beside]);
 
   const close = () => {
     if (occupant.kind === "view") panel.dismissView();
@@ -170,18 +301,47 @@ export function SidePanel({
 
   const body = (narrow: boolean) => {
     switch (kind) {
-      case "file":
-        return (
-          <FilePanel
-            panel={panel}
-            versionsOf={versionsOf}
-            exportOf={exportOf}
-            saverOf={saverOf}
+      case "file": {
+        // While the panel's code loads or after it failed to: the file's frame,
+        // so the panel can still be closed or switched.
+        const frame = (content: ReactNode) => (
+          <PanelFrame
+            icon={<FileText className="size-4" />}
+            title={panel.file?.name ?? t("conversation_panel_title")}
             switcher={switcher}
             maximise={maximise}
-            narrow={narrow}
-          />
+            onClose={() => panel.close()}
+          >
+            <TemporaryFrame onShown={markTemporaryFrame} />
+            {content}
+          </PanelFrame>
         );
+        return (
+          <div
+            ref={fileArea}
+            tabIndex={-1}
+            className="flex min-h-0 flex-1 flex-col focus-visible:outline-none"
+          >
+            <FilePanelBoundary frame={frame} onRetry={() => setFilePanel(lazyFilePanel)}>
+              <Suspense
+                fallback={frame(
+                  <p className="text-ax-text-secondary p-6 text-sm">{t("file_preview_loading")}</p>
+                )}
+              >
+                <FilePanel
+                  panel={panel}
+                  versionsOf={versionsOf}
+                  exportOf={exportOf}
+                  saverOf={saverOf}
+                  switcher={switcher}
+                  maximise={maximise}
+                  narrow={narrow}
+                />
+              </Suspense>
+            </FilePanelBoundary>
+          </div>
+        );
+      }
       case "view":
         return shownView ? (
           <ViewPanel panel={panel} call={shownView.call} switcher={switcher} maximise={maximise} />

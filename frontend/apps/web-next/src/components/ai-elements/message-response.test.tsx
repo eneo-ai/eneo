@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useMemo } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { resolveInrefs } from "@/lib/chat/inref";
@@ -12,9 +12,12 @@ import {
   remarkCitations
 } from "./citation";
 import { answerHeadingLevel } from "./markdown-components";
+import { katexStore } from "./math";
 import { MessageResponse } from "./message";
 
 afterEach(cleanup);
+// Typeset formulas from the first render; math-load.test.tsx covers KaTeX arriving later.
+beforeAll(() => katexStore.load());
 
 const SOURCES = [
   { title: "Upphandlingspolicy 2024", url: "https://intranat.kommun.se/policy" },
