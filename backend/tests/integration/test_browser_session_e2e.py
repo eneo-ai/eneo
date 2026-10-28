@@ -22,6 +22,8 @@ SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 SESSION_LOGIN = "/api/v1/auth/session/password/"
 TOKEN_LOGIN = "/api/v1/users/login/token/"
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
+TICKETS = "/api/v1/module-auth/tickets/"
+TICKET = {"module_key": "no-such-module", "redirect_uri": "https://m.example/cb"}
 
 
 @pytest.fixture
@@ -38,7 +40,9 @@ def browser_session_on() -> Iterator[Settings]:
         set_settings(original)
 
 
-async def _create_local_user(client, super_api_key: str) -> str:
+async def _create_local_user(
+    client, super_api_key: str, *, must_change_password: bool = False
+) -> str:
     suffix = uuid4().hex[:8]
     tenant = await client.post(
         "/api/v1/sysadmin/tenants/",
@@ -58,6 +62,7 @@ async def _create_local_user(client, super_api_key: str) -> str:
             "username": f"browser-session-{suffix}",
             "tenant_id": tenant.json()["id"],
             "password": PASSWORD,
+            "password_change_required": must_change_password,
         },
         headers={"X-API-Key": super_api_key},
     )
@@ -121,13 +126,15 @@ async def test_session_cookie_signs_the_browser_in_and_out(
     assert cross_site.status_code == 401
     assert GENERATION not in cross_site.headers
 
-    # A Session-only endpoint admits the cookie session: no API key behind it.
-    ticket = await client.post(
-        "/api/v1/module-auth/tickets/",
-        json={"module_key": "no-such-module", "redirect_uri": "https://m.example/cb"},
-        headers=cookie | SAME_ORIGIN,
-    )
-    assert ticket.json().get("code") != "session_auth_required", ticket.text
+    # A Session-only endpoint admits the cookie session (no API key behind it)
+    # and reaches the broker, which knows no such module.
+    ticket = await client.post(TICKETS, json=TICKET, headers=cookie | SAME_ORIGIN)
+    assert ticket.status_code == 404, ticket.text
+    # The broker's NotFoundException, not a routing miss (which has no code).
+    assert ticket.json()["eneo_error_code"] == 9000
+    assert ticket.headers[GENERATION] == generation
+    anonymous = await client.post(TICKETS, json=TICKET, headers=SAME_ORIGIN)
+    assert anonymous.status_code == 401
 
     # A page loaded under another session cannot sign this one out.
     stale = await client.post(
@@ -147,6 +154,35 @@ async def test_session_cookie_signs_the_browser_in_and_out(
     assert signed_out.status_code == 204
     cleared = signed_out.headers.get_list("set-cookie")
     assert cleared[0].startswith(f'{SESSION}=""; HttpOnly; Max-Age=0; Path=/')
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_password_that_must_be_replaced_still_signs_in(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    # As with /users/login/token/: the session exists, but until the password
+    # is replaced only the routes that replacement needs admit it.
+    email = await _create_local_user(
+        client, super_admin_token, must_change_password=True
+    )
+
+    signed_in = await _login(client, SESSION_LOGIN, email, PASSWORD)
+    assert signed_in.status_code == 204, signed_in.text
+    cookie = {"Cookie": f"{SESSION}={_session_token(signed_in)}"}
+
+    me = await client.get("/api/v1/users/me/", headers=cookie | SAME_ORIGIN)
+    assert me.status_code == 200, me.text
+    assert me.json()["password_status"]["change_required"] is True
+    probe = await client.get("/api/v1/auth/session/", headers=cookie | SAME_ORIGIN)
+    assert probe.status_code == 204, probe.text
+    blocked = await client.post(TICKETS, json=TICKET, headers=cookie | SAME_ORIGIN)
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["eneo_error_code"] == 9070
 
 
 @pytest.mark.integration

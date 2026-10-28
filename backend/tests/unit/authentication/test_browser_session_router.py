@@ -16,6 +16,7 @@ from dependency_injector import providers
 from fastapi.testclient import TestClient
 from freezegun import freeze_time
 from httpx import Response
+from starlette.requests import Request
 
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
@@ -230,6 +231,44 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
     [cookie] = set_cookies(response)
     assert cookie.startswith(f"{SESSION}={issued};")
     assert planted not in cookie
+
+
+@pytest.mark.parametrize(
+    ("case", "status"), [("cross-site", 403), ("disabled", 404), ("same-origin", 400)]
+)
+def test_password_session_guards_run_before_the_body_is_read(
+    endpoints: Endpoints,
+    browser_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    status: int,
+):
+    # FastAPI reads a form body before it solves any dependency; a refused
+    # request must not get that far (a malformed body would answer 400 first,
+    # a multipart file part would be spooled to disk).
+    parsed: list[str] = []
+    original_form = Request.form
+
+    def form(request: Request, *args: object, **kwargs: object):
+        parsed.append(request.url.path)
+        return original_form(request, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Request, "form", form)
+    if case == "disabled":
+        set_settings(
+            browser_settings.model_copy(update={"browser_session_enabled": False})
+        )
+    site = {"Sec-Fetch-Site": "cross-site" if case == "cross-site" else "same-origin"}
+
+    response = endpoints.client.post(
+        SESSION_LOGIN,
+        content=b"--x\r\n",
+        headers=site | {"Content-Type": "multipart/form-data"},
+    )
+
+    assert response.status_code == status
+    assert parsed == ([SESSION_LOGIN] if case == "same-origin" else [])
+    endpoints.login.assert_not_awaited()
 
 
 @pytest.mark.parametrize("site", REFUSING_SITES)

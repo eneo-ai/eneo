@@ -16,7 +16,6 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyV2InDB
-from eneo.authentication.browser_session_router import require_browser_session
 from eneo.authentication.endpoint_access import (
     Authentication,
     EndpointAccess,
@@ -122,7 +121,6 @@ def request_operation(
     # Test this optional feature in its enabled state; disabling a feature is
     # an independent 404 gate, not proof that authorization works.
     app.dependency_overrides[check_feature_enabled] = lambda: None
-    app.dependency_overrides[require_browser_session] = lambda: None
 
     source = operation.route.context
     endpoint = source.endpoint
