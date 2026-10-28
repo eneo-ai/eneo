@@ -2,7 +2,6 @@
 
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { Button } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, Download } from "lucide-react";
@@ -13,7 +12,7 @@ import { Streamdown } from "streamdown";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { pollWhile } from "@/lib/api/query";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { ClientTime } from "@/components/composites/client-time";
 import {
   saveBlob,
@@ -38,7 +37,7 @@ function saveText(text: string, fileName: string) {
 
 function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
   const t = useTranslations();
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
   return (
     <div className="flex justify-end gap-1">
       <Button
@@ -52,9 +51,7 @@ function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
             <Copy className="size-4" aria-hidden="true" />
           )
         }
-        onClick={async () => {
-          if (!(await copy(text))) toast.error(t("chat_copy_failed"));
-        }}
+        onClick={() => void copy(text)}
       />
       <Button
         variant="ghost"
