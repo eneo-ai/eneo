@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { fireEvent, screen } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { NonceProvider } from "@/components/providers/nonce";
 import { renderInApp } from "@/test/render";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select";
 
+afterEach(() => vi.unstubAllGlobals());
+
 it("gives every <style> it injects the request's CSP nonce", async () => {
+  vi.stubGlobal("__webpack_nonce__", "test-nonce");
   // Production allows a <style> only with the nonce (src/proxy.ts). An open
   // Select injects two: Radix's viewport scrollbar rule and the page scroll
   // lock (react-remove-scroll).

@@ -1,4 +1,7 @@
 import { config } from "zod";
+import { readCspNonce } from "./lib/csp-nonce";
+
+globalThis.__webpack_nonce__ = readCspNonce();
 
 // Runs in the browser before the app hydrates (Next.js instrumentation-client).
 //

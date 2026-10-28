@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 import { IntlProvider } from "use-intl";
 import { useBoot } from "@/boot-context";
 import { Providers } from "@/components/providers";
+import { ThemeColor } from "@/components/providers/theme-color";
 import { RouteAnnouncer } from "@/components/shell/route-announcer";
 import { Toaster } from "@/components/ui/sonner";
 import { rootHead } from "@/lib/route-head";
@@ -37,6 +38,7 @@ function Root() {
           <Outlet />
         </Providers>
         <Toaster />
+        <ThemeColor />
       </ThemeProvider>
     </IntlProvider>
   );

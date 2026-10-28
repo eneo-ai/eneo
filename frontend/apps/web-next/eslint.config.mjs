@@ -119,7 +119,9 @@ const eslintConfig = defineConfig([
     // reported once; this rule checks the text between tags and the other
     // display props.
     files: ["src/**/*.tsx"],
-    ignores: generatedAndVendored,
+    // The last-resort boundary must render when the intl provider itself fails
+    // (migration task eneo-web-next-vite-ded5.6.2, like app/global-error.tsx).
+    ignores: [...generatedAndVendored, "src/components/shell/root-error-boundary.tsx"],
     rules: {
       "eneo/no-hardcoded-text": [
         "error",

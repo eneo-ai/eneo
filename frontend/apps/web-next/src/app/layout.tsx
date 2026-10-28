@@ -16,7 +16,8 @@ export const metadata: Metadata = {
   // <title>). Area layouts (admin / account / space) carry the area title so
   // their child pages inherit it without per-page boilerplate.
   title: { template: "%s · Eneo", default: "Eneo" },
-  description: "Eneo"
+  description: "Eneo",
+  icons: { icon: "/favicon.ico" }
 };
 
 const surface = surfaceColors();
@@ -63,6 +64,7 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <meta property="csp-nonce" nonce={nonce} />
         {/* The UI font (globals.css "2b. Fonts"): every page needs it before
             first paint. The code and answer fonts load when first used. */}
         <link

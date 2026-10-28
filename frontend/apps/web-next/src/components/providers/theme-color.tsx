@@ -6,7 +6,7 @@ import { surfaceColors } from "@/theme/surface-colors";
 
 /**
  * The browser's status bar and toolbar follow the Tema setting. The viewport
- * (app/layout.tsx) declares the surface colour per colour scheme, which is
+ * metadata declares the surface colour per colour scheme, which is
  * right for "System"; an explicit Ljust or Mörkt sets both tags to that mode.
  * Renders nothing and holds no state, so it changes nothing above the page.
  */

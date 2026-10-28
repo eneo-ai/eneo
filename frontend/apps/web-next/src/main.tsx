@@ -1,30 +1,23 @@
-import { RouterProvider } from "@tanstack/react-router";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { createTranslator } from "use-intl";
-import { BootContext } from "./boot-context";
-import { getQueryClient } from "./lib/api/query";
-import { defaultLocale } from "./lib/i18n/locales";
-import { createAppRouter } from "./router";
+import { config as configureZod } from "zod";
+import { loadMessages, readCspNonce, resolveLocale, showBootError } from "./boot";
+import { loadRuntimeConfig, setRuntimeConfig } from "./lib/runtime-config";
 import "./app/globals.css";
 
-// The Vite build's entry. P4-index-html-boot completes the boot: the locale
-// from <html lang> or the locale cookie, the runtime config loaded beside the
-// catalogue, the CSP nonce, the bilingual boot error and the outermost error
-// boundary.
-const locale = defaultLocale;
+const locale = resolveLocale(document);
+const messages = loadMessages(locale);
+const config = loadRuntimeConfig();
+document.documentElement.lang = locale;
+const nonce = readCspNonce();
+globalThis.__webpack_nonce__ = nonce;
+// Strict CSP forbids eval. Skip Zod's compilation probe before UI schemas run.
+configureZod({ jitless: true });
 
-void import(`./lib/i18n/messages/${locale}.json`).then(({ default: messages }) => {
-  const router = createAppRouter({
-    queryClient: getQueryClient(),
-    t: createTranslator({ locale, messages })
-  });
-
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <BootContext value={{ locale, messages, nonce: undefined }}>
-        <RouterProvider router={router} />
-      </BootContext>
-    </StrictMode>
-  );
-});
+const root = document.getElementById("root")!;
+void Promise.all([messages, config])
+  .then(async ([messages, config]) => {
+    setRuntimeConfig(config);
+    // UI modules may inject styles or parse schemas as soon as they evaluate.
+    const { renderApp } = await import("./render-app");
+    renderApp(root, { locale, messages, nonce });
+  })
+  .catch(() => showBootError(root));
