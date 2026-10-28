@@ -54,9 +54,9 @@ def _same_origin(first: str, second: str) -> bool:
     return origin(first) == origin(second)
 
 
-# Printable ASCII without space, backslash, "?" or "#": a browser reads such a
-# URL as written, while it would encode, trim or reinterpret anything else, and
-# the view links append a path and a query to it.
+# Printable ASCII without space, backslash, "?" or "#": a browser reads the
+# scheme and authority of such a URL as written, while it would encode, trim or
+# reinterpret anything else, and the view links append a path and a query to it.
 _BROWSER_LITERAL_URL = re.compile(r"[!-~]+")
 _HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
 # WHATWG parses a host whose last label is a number (decimal or 0x hex) as IPv4.
@@ -64,14 +64,17 @@ _NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
 
 
 def validate_content_base_url(url: str) -> str:
-    """An absolute http(s) URL, stored the way a browser serializes it.
+    """An absolute http(s) URL whose origin is stored the way a browser serializes it.
 
     The content origin is framed, compared with the Host header and put in a
     CSP, so every reader must agree on it: the host is lowercased, an IPv6
-    address compressed and a default port dropped, and any form a browser
-    would rewrite differently is refused. Non-ASCII hosts are refused rather
-    than IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ
-    (ß). Messages never repeat the URL.
+    address compressed and a default port dropped, and any authority a browser
+    would rewrite differently is refused. The path is kept as written; it is
+    only the prefix of the view links. Non-ASCII hosts are refused rather than
+    IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ (ß).
+    The check guarantees agreement, not reachability: a malformed punycode
+    label fails closed in the browser like any host that does not resolve.
+    Messages never repeat the URL.
     """
     url = url.strip()
     if not _BROWSER_LITERAL_URL.fullmatch(url) or any(c in url for c in "\\?#"):
