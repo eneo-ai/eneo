@@ -3,6 +3,7 @@ import {
   environmentManager,
   QueryClient
 } from "@tanstack/react-query";
+import { isFinalError } from "./errors";
 
 /**
  * TanStack Query setup for the App Router hydration pattern: server
@@ -40,4 +41,21 @@ let browserQueryClient: QueryClient | undefined;
 export function getQueryClient(): QueryClient {
   if (environmentManager.isServer()) return makeQueryClient();
   return (browserQueryClient ??= makeQueryClient());
+}
+
+/**
+ * A data-driven `refetchInterval`: every `activeMs` while `isActive(data)`,
+ * otherwise every `idleMs` (default: not at all), and never after a final
+ * error. The data outlives an error, so without that check a deleted or
+ * forbidden resource that was active would be polled for good.
+ */
+export function pollWhile<TData>(
+  isActive: (data: TData | undefined) => boolean,
+  activeMs: number,
+  idleMs: number | false = false
+) {
+  return (query: { state: { data: TData | undefined; error: unknown } }): number | false => {
+    if (isFinalError(query.state.error)) return false;
+    return isActive(query.state.data) ? activeMs : idleMs;
+  };
 }
