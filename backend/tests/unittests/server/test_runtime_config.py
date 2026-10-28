@@ -214,7 +214,8 @@ def test_startup_log_treats_blank_mcp_base_url_as_unset(
     ("flags", "logged"),
     [
         ({}, False),
-        ({"web_app_enabled": True}, True),
+        # Either flag takes the same branch; the web app flag also needs a build.
+        ({"browser_session_enabled": True}, True),
     ],
 )
 def test_startup_log_runs_only_for_the_browser_platform(

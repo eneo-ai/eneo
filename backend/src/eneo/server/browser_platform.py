@@ -13,10 +13,11 @@ still wrap the whole user stack, so unhandled-exception 500s do not get it.
 from fastapi import FastAPI
 
 from eneo.main.config import get_settings
-from eneo.server.middleware.api_response_headers import ApiResponseHeadersMiddleware
 from eneo.server.middleware.compression import SelectiveGZipMiddleware
+from eneo.server.middleware.response_headers import ResponseHeadersMiddleware
 from eneo.server.runtime_config_router import log_unlinked_runtime_values
 from eneo.server.runtime_config_router import router as runtime_config_router
+from eneo.server.web_app import install_web_app
 
 
 def install_browser_platform(app: FastAPI) -> None:
@@ -25,6 +26,11 @@ def install_browser_platform(app: FastAPI) -> None:
     if settings.browser_session_enabled or settings.web_app_enabled:
         log_unlinked_runtime_values(settings)
 
-    app.add_middleware(ApiResponseHeadersMiddleware, hsts=not settings.is_development)
+    app.add_middleware(
+        ResponseHeadersMiddleware,
+        hsts=not settings.is_development,
+        web_app=settings.web_app_enabled,
+    )
     # Added last, so it is outermost: it compresses the final headers and body.
     app.add_middleware(SelectiveGZipMiddleware)
+    install_web_app(app)

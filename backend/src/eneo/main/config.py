@@ -553,8 +553,8 @@ class Settings(BaseSettings):
     web_app_enabled: bool = Field(
         default=False,
         description=(
-            "Serve the web app from the backend (no consumer until the web app "
-            "serving lands). Migration flag. POST-retire-browser-flags removes it "
+            "Serve the web app build (server/web_app.py) for every path no "
+            "route claims. Migration flag. POST-retire-browser-flags removes it "
             "once the main host is served by the backend."
         ),
     )
