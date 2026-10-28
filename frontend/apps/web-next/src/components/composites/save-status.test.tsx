@@ -435,3 +435,45 @@ it("adopts another editor's change after a revert whose saves both failed", asyn
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(save).toHaveBeenCalledTimes(2);
 });
+
+it("sends a revert whose debounce ends after the earlier save landed but before it renders", async () => {
+  vi.useFakeTimers();
+  try {
+    const { saves, save } = deferredSaves();
+    const { rerender } = renderWithStatus(
+      <ServerBackedProbe server="A" save={save} commitDebounceMs={100} />
+    );
+    const input = screen.getByRole("textbox", { name: "Text field" });
+
+    fireEvent.change(input, { target: { value: "B" } });
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.change(input, { target: { value: "A" } });
+    await act(async () => saves[0]?.done.resolve());
+    act(() => vi.advanceTimersByTime(100));
+    expect(saves.map((entry) => entry.value)).toEqual(["B", "A"]);
+
+    rerender(withStatus(<ServerBackedProbe server="B" save={save} commitDebounceMs={100} />));
+    expect(draftText()).toBe("A");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not retry a failed debounced save on its own", async () => {
+  vi.useFakeTimers();
+  try {
+    const save = vi.fn(() => Promise.reject(new Error("refused")));
+    renderWithStatus(<ServerBackedProbe server="A" save={save} commitDebounceMs={100} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Text field" }), {
+      target: { value: "B" }
+    });
+    await act(async () => vi.advanceTimersByTime(100));
+    await act(async () => vi.advanceTimersByTime(5000));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(draftText()).toBe("B");
+  } finally {
+    vi.useRealTimers();
+  }
+});

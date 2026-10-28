@@ -149,34 +149,43 @@ export function useAutosaveField<T, R = unknown>({
   });
   const timer = useRef<number | undefined>(undefined);
 
-  // The draft differs from what the server will hold next. Measured at the
-  // moment of use, so a revert typed while a save is in flight counts.
-  const unsent = useCallback(() => {
-    const { draft, serverValue, equals } = latest.current;
-    return !equals(draft, inFlight.current ? inFlight.current.value : serverValue);
+  // What the server holds next: the value in flight, else a landed save whose
+  // value has not rendered yet, else the rendered server value.
+  const serverNext = useCallback(() => {
+    const pending = inFlight.current ?? landed.current;
+    return pending ? pending.value : latest.current.serverValue;
   }, []);
 
-  const commit = useCallback(async (override?: T) => {
-    window.clearTimeout(timer.current);
-    const { autosave, draft, serverValue, save, equals, validate, normalize, onSaved } =
-      latest.current;
-    const value = override === undefined ? draft : override;
-    const next = normalize ? normalize(value) : value;
-    if (normalize && !equals(next, value)) setDraft(next);
-    // Compare with what the server will hold: a value already in flight is not
-    // sent again, and returning to the old value during a save is sent.
-    if (equals(next, inFlight.current ? inFlight.current.value : serverValue)) return;
-    if (validate && !validate(next)) return;
-    const flight = { value: next };
-    inFlight.current = flight;
-    await autosave(async () => {
-      const result = await save(next);
-      landed.current = flight;
-      onSaved?.(result);
-      return result;
-    });
-    if (inFlight.current === flight) inFlight.current = null;
-  }, []);
+  // The draft differs from what the server will hold. Measured at the moment
+  // of use, so a revert typed while a save is in flight or landing counts.
+  const unsent = useCallback(
+    () => !latest.current.equals(latest.current.draft, serverNext()),
+    [serverNext]
+  );
+
+  const commit = useCallback(
+    async (override?: T) => {
+      window.clearTimeout(timer.current);
+      const { autosave, draft, save, equals, validate, normalize, onSaved } = latest.current;
+      const value = override === undefined ? draft : override;
+      const next = normalize ? normalize(value) : value;
+      if (normalize && !equals(next, value)) setDraft(next);
+      // Compare with what the server will hold: a value already in flight is not
+      // sent again, and returning to the old value during a save is sent.
+      if (equals(next, serverNext())) return;
+      if (validate && !validate(next)) return;
+      const flight = { value: next };
+      inFlight.current = flight;
+      await autosave(async () => {
+        const result = await save(next);
+        landed.current = flight;
+        onSaved?.(result);
+        return result;
+      });
+      if (inFlight.current === flight) inFlight.current = null;
+    },
+    [serverNext]
+  );
 
   const reset = useCallback(() => setDraft(serverValue), [serverValue]);
 
