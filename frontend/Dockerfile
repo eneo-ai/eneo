@@ -18,6 +18,7 @@ COPY packages/eslint-plugin/package.json packages/eslint-plugin/package.json
 COPY packages/markdown-math/package.json packages/markdown-math/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/whats-new/package.json packages/whats-new/package.json
+COPY packages/widget-loader/package.json packages/widget-loader/package.json
 # The root package.json "patchedDependencies" are applied during install.
 COPY patches ./patches
 # The two workspace prepare hooks need app source. Run them below, after COPY.
@@ -29,6 +30,9 @@ ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 ENV NODE_OPTIONS=--max-old-space-size=8192
 RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
+# The widget loader is served by the app (lib/server/widget-loader.ts reads
+# packages/widget-loader/dist at build time), so it is built first.
+RUN bun run --filter @eneo/widget-loader build
 # This image ships apps/web; web-next has its own Dockerfile and build context.
 RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 
