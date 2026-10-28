@@ -6811,5 +6811,6 @@
   "admin_user_groups_all_assigned": "Användaren är med i alla grupper",
   "admin_user_groups_picker_trigger": "{label}: {group}",
   "admin_user_group_assigned": "Användaren lades till i {name}",
-  "admin_user_group_unassigned": "Användaren togs bort från {name}"
+  "admin_user_group_unassigned": "Användaren togs bort från {name}",
+  "usage_cost_rates_error": "Beräknade kostnader kunde inte hämtas"
 }

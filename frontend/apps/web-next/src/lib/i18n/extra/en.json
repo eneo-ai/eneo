@@ -1635,5 +1635,6 @@
   "admin_user_groups_all_assigned": "The user is in every group",
   "admin_user_groups_picker_trigger": "{label}: {group}",
   "admin_user_group_assigned": "The user was added to {name}",
-  "admin_user_group_unassigned": "The user was removed from {name}"
+  "admin_user_group_unassigned": "The user was removed from {name}",
+  "usage_cost_rates_error": "Estimated costs could not be loaded"
 }
