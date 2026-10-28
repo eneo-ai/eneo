@@ -57462,7 +57462,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Web app runtime config */
       200: {
         headers: {
           [name: string]: unknown;
