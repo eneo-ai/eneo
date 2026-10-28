@@ -19,7 +19,6 @@ from eneo.authentication.auth_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
 
 logger = get_logger(__name__)
@@ -139,13 +138,6 @@ def raise_api_key_http_error(
         detail=detail,
         headers=exc.headers,
     ) from exc
-
-
-def error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
-    return cast(
-        dict[int | str, dict[str, Any]],
-        {code: {"model": GeneralError} for code in codes},
-    )
 
 
 def paginate_keys(
