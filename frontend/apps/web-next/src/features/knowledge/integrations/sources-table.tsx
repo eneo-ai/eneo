@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { matchesSearch } from "@/lib/search";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
 import { SourceStateLabel, SourceUpdated, SyncProgress } from "./source-status";
@@ -323,13 +324,9 @@ export function SourcesList({
   const rows = grouped.flatMap((group) => group.rows);
   useSourceListAnnouncements(progressLoaded ? rows : null);
   const counts = countSourceFilters(rows.map((row) => row.summary));
-  const needle = query.trim().toLocaleLowerCase();
   const isVisible = (row: SourceRow) =>
     matchesSourceFilter(row.summary, filter) &&
-    (needle === "" ||
-      [row.name, ...row.source.items.map((item) => item.name)].some((text) =>
-        text.toLocaleLowerCase().includes(needle)
-      ));
+    matchesSearch([row.name, ...row.source.items.map((item) => item.name)], query);
   const shown = grouped
     .map((group) => ({ ...group, rows: group.rows.filter(isVisible) }))
     .filter((group) => group.heading === null || group.rows.length > 0);

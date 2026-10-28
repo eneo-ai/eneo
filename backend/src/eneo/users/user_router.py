@@ -1,10 +1,9 @@
 import json
-import secrets
 import time
 import traceback
 from typing import Annotated, Optional, Protocol, cast
 from urllib.parse import urlparse
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import aiohttp
 import jwt
@@ -19,12 +18,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    enforce_rate_limit,
-)
 from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
@@ -53,7 +46,14 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
 from eneo.main.logging import get_logger, redact_values
 from eneo.main.models import CursorPaginatedResponse
-from eneo.main.request_context import get_request_context, set_request_context
+from eneo.main.request_context import ensure_correlation_id, get_request_context
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import has_registered_handler
@@ -261,18 +261,10 @@ async def login_with_password(
     Retry-After, 403 account states, 422 form locations, login_unavailable).
     Every password login endpoint calls it."""
 
-    # Logs, the correlation header and support lookups share one id: the
-    # request context's (the trace id when a span is active, otherwise the
-    # caller's legacy header). Generate one only when the middleware had none.
-    correlation_id = cast(
-        str | None, get_request_context().get("correlation_id")
-    ) or secrets.token_hex(8)
-    set_request_context(correlation_id=correlation_id)
-
-    # Capture source IP (proxy-aware)
-    source_ip = request.headers.get(
-        "x-forwarded-for", request.client.host if request.client else None
-    )
+    correlation_id = ensure_correlation_id()
+    # Trusted-proxy-aware, resolved once by RequestContextMiddleware; a raw
+    # X-Forwarded-For is whatever the caller wrote.
+    source_ip = cast(str | None, get_request_context().get("ip_address"))
 
     # The shared request-validation handler owns the public 422 contract.
     # Do not pass credentials into its exception or into structured logs.
@@ -481,7 +473,7 @@ async def login_with_mobilityguard(
     container: Annotated[Container, Depends(get_container())],
 ):
     """OpenID Connect Login (generic OIDC provider)."""
-    correlation_id = str(uuid4())
+    correlation_id = ensure_correlation_id()
     start_time = time.time()
 
     logger.debug(
@@ -1022,16 +1014,9 @@ async def change_current_user_password(
             success=False,
             failure_reason="rate_limit_exceeded",
         )
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many password change attempts. Try again later.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
-        ) from exc
+        raise_rate_limited(
+            exc.result, "Too many password change attempts. Try again later."
+        )
     except RateLimitServiceUnavailableError as exc:
         logger.warning("Password-change rate limiter unavailable", exc_info=True)
         raise HTTPException(

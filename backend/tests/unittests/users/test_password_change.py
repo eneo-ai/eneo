@@ -9,14 +9,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.dialects import postgresql
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.infrastructure.rate_limiting import (
+from eneo.authentication.auth_service import AuthService
+from eneo.authentication.endpoint_access import Authentication, access_for
+from eneo.main.exceptions import AuthenticationException, ErrorCodes
+from eneo.redis.rate_limit import (
     RateLimitExceededError,
     RateLimitResult,
     RateLimitServiceUnavailableError,
 )
-from eneo.authentication.auth_service import AuthService
-from eneo.authentication.endpoint_access import Authentication, access_for
-from eneo.main.exceptions import AuthenticationException, ErrorCodes
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
 from eneo.users import user_router
 from eneo.users.password import (
@@ -351,6 +351,7 @@ async def test_password_route_rate_limits_before_password_verification(monkeypat
         current_count=6,
         max_requests=5,
         window_seconds=15 * 60,
+        retry_after_seconds=412,
     )
     monkeypatch.setattr(
         user_router,
@@ -369,7 +370,9 @@ async def test_password_route_rate_limits_before_password_verification(monkeypat
 
     assert exc_info.value.status_code == 429
     assert exc_info.value.detail["code"] == "rate_limit_exceeded"
-    assert exc_info.value.headers == {"Retry-After": "900"}
+    # The time left in the 15-minute window, not the window itself.
+    assert exc_info.value.headers == {"Retry-After": "412"}
+    assert exc_info.value.detail["retry_after_seconds"] == 412
     service.change_local_password.assert_not_awaited()
     assert (
         audit.log_async.await_args.kwargs["action"] == ActionType.PASSWORD_CHANGE_FAILED

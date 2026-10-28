@@ -286,7 +286,7 @@ class AuditMetadata:
                 method="password",
                 success=False,
                 failure_reason="Invalid password",
-                extra={"ip_address": request.client.host, "attempts": 3}
+                extra={"ip_address": get_request_context()["ip_address"], "attempts": 3}
             )
         """
         metadata: dict[str, Any] = {

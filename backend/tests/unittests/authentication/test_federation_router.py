@@ -5,15 +5,19 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import cast
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.testclient import TestClient
 
 from eneo.authentication import federation_router
 from eneo.authentication.federation_router import CallbackRequest
+from eneo.server.endpoint_routes import endpoint_routes
+from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
@@ -233,7 +237,7 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
 
     with pytest.raises(HTTPException) as exc:
         await federation_router.initiate_auth(
-            tenant="suspended", state=None, container=container
+            response=Response(), tenant="suspended", state=None, container=container
         )
 
     assert exc.value.status_code == 403
@@ -279,6 +283,7 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
     )
 
     response = await federation_router.initiate_auth(
+        response=Response(),
         tenant=tenant.slug,
         state=None,
         redirect_uri_param="https://external.example.com/auth/callback",
@@ -287,6 +292,83 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
 
     query = parse_qs(urlparse(response.authorization_url).query)
     assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
+
+
+def test_initiate_auth_keeps_the_request_correlation_id(monkeypatch):
+    """Without a span the caller's X-Correlation-ID is the request's id: it
+    names the login in the context, the response header and the state."""
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="CorrelatedTenant",
+        display_name="CorrelatedTenant",
+        quota_limit=1024**3,
+        slug="correlated-tenant",
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://canonical.example.com",
+            "redirect_path": "/auth/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    dummy_settings = DummySettings(federation_enabled=True)
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+    monkeypatch.setattr(
+        "eneo.server.middleware.request_context._current_trace_id", lambda: None
+    )
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=None,
+        auth_service=None,
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+    seen: dict[str, object] = {}
+    real_ensure = federation_router.ensure_correlation_id
+
+    def ensure_and_record() -> str:
+        seen["correlation_id"] = real_ensure()
+        return cast(str, seen["correlation_id"])
+
+    monkeypatch.setattr(federation_router, "ensure_correlation_id", ensure_and_record)
+
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+    app.include_router(federation_router.router)
+    route = next(
+        route for route in endpoint_routes(app.routes) if route.path == "/auth/initiate"
+    )
+    assert route.dependant is not None
+    dependency = next(
+        dependency
+        for dependency in route.dependant.dependencies
+        if dependency.name == "container"
+    )
+    app.dependency_overrides[dependency.call] = lambda: container
+
+    response = TestClient(app).get(
+        route.path,
+        params={"tenant": tenant.slug},
+        headers={"X-Correlation-ID": "abc"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["correlation_id"] == "abc"
+    assert response.headers["X-Correlation-ID"] == "abc"
+    state = jwt.decode(
+        response.json()["state"], dummy_settings.jwt_secret, algorithms=["HS256"]
+    )
+    assert state["correlation_id"] == "abc"
 
 
 @pytest.mark.asyncio
@@ -334,6 +416,7 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
     )
 
     response = await federation_router.initiate_auth(
+        response=Response(),
         tenant=None,
         state=None,
         redirect_uri_param="https://external.example.com/auth/callback",
@@ -385,6 +468,7 @@ async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
 
     with pytest.raises(HTTPException) as exc:
         await federation_router.initiate_auth(
+            response=Response(),
             tenant=tenant.slug,
             state=None,
             redirect_uri_param="https://evil.example.com/auth/callback",

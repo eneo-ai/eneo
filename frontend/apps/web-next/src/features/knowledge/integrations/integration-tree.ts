@@ -1,4 +1,5 @@
 import type { IntegrationKnowledge } from "../knowledge";
+import { matchesSearch, searchTerms } from "@/lib/search";
 
 export type IntegrationTreeNode = {
   item: IntegrationKnowledge;
@@ -73,12 +74,11 @@ export function filterIntegrationTree(
   nodes: IntegrationTreeNode[],
   query: string
 ): IntegrationTreeNode[] {
-  const needle = query.trim().toLowerCase();
-  if (needle === "") return nodes;
+  if (searchTerms(query).length === 0) return nodes;
   const result: IntegrationTreeNode[] = [];
   for (const node of nodes) {
-    const children = filterIntegrationTree(node.children, needle);
-    if (node.item.name.toLowerCase().includes(needle) || children.length > 0) {
+    const children = filterIntegrationTree(node.children, query);
+    if (matchesSearch([node.item.name], query) || children.length > 0) {
       result.push({ item: node.item, children });
     }
   }

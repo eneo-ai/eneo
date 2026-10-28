@@ -15,6 +15,7 @@ import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { matchesSearch, searchTerms } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import { historyBucket, type HistoryBucket } from "./format";
 import {
@@ -62,19 +63,16 @@ export function groupSessions<T extends SessionRow>(
 }
 
 /**
- * Conversations whose title contains the query (case-insensitive), over the
- * pages loaded so far; "Visa fler" stays available to search further back.
+ * Conversations whose title contains every word of the query, over the pages
+ * loaded so far; "Visa fler" stays available to search further back.
  */
 export function filterSessions<T extends SessionRow>(
   sessions: T[],
   query: string,
   untitled: string
 ): T[] {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return sessions;
-  return sessions.filter((session) =>
-    (session.name || untitled).toLocaleLowerCase().includes(needle)
-  );
+  if (searchTerms(query).length === 0) return sessions;
+  return sessions.filter((session) => matchesSearch([session.name || untitled], query));
 }
 
 /**

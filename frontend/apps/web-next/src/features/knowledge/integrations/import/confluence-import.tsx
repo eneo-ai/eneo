@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";
@@ -121,9 +122,8 @@ function ConfluenceImportForm({
   });
 
   const spaces = useMemo(() => {
-    const query = search.toLowerCase();
     return (preview.data ?? [])
-      .filter((entry) => entry.name.toLowerCase().includes(query))
+      .filter((entry) => matchesSearch([entry.name], search))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [preview.data, search]);
   const settingsHref = space.personal ? "/account/integrations" : null;

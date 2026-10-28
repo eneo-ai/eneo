@@ -22,6 +22,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
+import { matchesSearch } from "@/lib/search";
 import { useModelTypeLabel } from "./model-type-label";
 import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./models";
 
@@ -35,17 +36,10 @@ function filterHistory(
   rows: ModelMigrationHistory[],
   { search, type, status }: HistoryFilters
 ): ModelMigrationHistory[] {
-  const term = search.trim().toLowerCase();
   return rows.filter((row) => {
     if (type !== "all" && row.model_type !== type) return false;
     if (status !== "all" && row.status !== status) return false;
-    return (
-      !term ||
-      [row.from_model_name, row.to_model_name, row.initiated_by_name]
-        .join(" ")
-        .toLowerCase()
-        .includes(term)
-    );
+    return matchesSearch([row.from_model_name, row.to_model_name, row.initiated_by_name], search);
   });
 }
 

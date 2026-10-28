@@ -13,6 +13,7 @@ import {
   formatCostPerMillionTokens,
   formatCostPerMinute
 } from "@/features/ai-models/format-model-stats";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import { ResourceFilterInput } from "../resource-filter-input";
 
@@ -113,8 +114,7 @@ export function SpaceModelSelect({
   const selectedModels = models.filter((model) => selected.has(model.id));
   const selectedPreview = selectedModels.slice(0, 2);
   const moreSelected = selectedIds.length - selectedPreview.length;
-  const query = search.trim().toLowerCase();
-  const searching = query !== "";
+  const searching = search.trim() !== "";
   const otherProvider = t("space_models_other_provider");
 
   const groups = useMemo(() => {
@@ -130,14 +130,9 @@ export function SpaceModelSelect({
   const visibleGroups = groups
     .map((group) => ({
       ...group,
-      visible:
-        !searching || group.name.toLowerCase().includes(query)
-          ? group.models
-          : group.models.filter(
-              (model) =>
-                label(model).toLowerCase().includes(query) ||
-                (model.provider_type?.toLowerCase().includes(query) ?? false)
-            )
+      visible: matchesSearch([group.name], search)
+        ? group.models
+        : group.models.filter((model) => matchesSearch([label(model), model.provider_type], search))
     }))
     .filter((group) => group.visible.length > 0);
 
