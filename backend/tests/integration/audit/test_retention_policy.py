@@ -52,6 +52,7 @@ async def test_concurrent_first_reads_both_get_the_default_policy(
             second_policy = await asyncio.wait_for(racing, timeout=5)
         finally:
             racing.cancel()
+            await asyncio.gather(racing, return_exceptions=True)
         await second.commit()
 
     assert first_policy.retention_days == second_policy.retention_days == 365
