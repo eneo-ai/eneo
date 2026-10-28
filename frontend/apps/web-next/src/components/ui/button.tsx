@@ -43,13 +43,17 @@ const buttonVariants = cva(
   }
 );
 
+function ignorePress(event: React.MouseEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
   children,
-  onClick,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
@@ -57,8 +61,9 @@ function Button({
   }) {
   const Comp = asChild ? Slot.Root : "button";
   // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms),
-  // and a second press is ignored here, not by every caller: no onClick, and
-  // no implicit form submit.
+  // and a second press is ignored here, not by every caller: stopped in the
+  // capture phase, so no onClick runs (an asChild child's own included) and no
+  // implicit form submit happens.
   const ariaBusy = props["aria-busy"] === true || props["aria-busy"] === "true";
   // The spinner shows sighted users what aria-busy tells assistive tech. Not
   // for icon buttons, whose fixed size has no room for it, nor asChild.
@@ -70,10 +75,8 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }), busy && "cursor-progress")}
-      onClick={
-        ariaBusy ? (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault() : onClick
-      }
       {...props}
+      onClickCapture={ariaBusy ? ignorePress : props.onClickCapture}
     >
       {busy ? (
         <>

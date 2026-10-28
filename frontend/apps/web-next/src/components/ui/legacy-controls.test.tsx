@@ -112,6 +112,24 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it("ignores a press on a busy composed (asChild) button, and passes one through when idle", () => {
+    const onChildClick = vi.fn();
+    const composed = (busy: boolean) => (
+      <Button asChild aria-busy={busy || undefined}>
+        <button type="button" onClick={onChildClick}>
+          Spara
+        </button>
+      </Button>
+    );
+    const { rerender } = render(composed(true));
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(onChildClick).not.toHaveBeenCalled();
+
+    rerender(composed(false));
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(onChildClick).toHaveBeenCalledTimes(1);
+  });
+
   it("does not submit its form while busy", () => {
     const onSubmit = vi.fn((event: React.SubmitEvent) => event.preventDefault());
     render(
