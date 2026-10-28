@@ -1,10 +1,13 @@
 /**
- * URL-scheme allowlists for every `href`/`src` taken from content: Markdown,
- * documents, sources and MCP tool output, which a third-party server may have
- * shaped. React does not block dangerous URL schemes, so `javascript:…` or
+ * URL-scheme allowlists for an `href`/`src` taken from content a third-party
+ * server may have shaped: chat sources and citations, MCP references and
+ * images, links in a .docx preview and image sources in the document editor.
+ * React does not block dangerous URL schemes, so `javascript:…` or
  * `vbscript:…` would otherwise reach the DOM as a live, script-bearing
- * href/src. Ported from the web app's `markdown/sanitizeUrl.ts`; keep the two
- * alike.
+ * href/src. Chat Markdown links and images are still hardened by Streamdown
+ * (components/ai-elements/answer-markdown.ts), and editor links by
+ * `isAllowedHref` (workspace/preview/editor/extensions.ts). Ported from the
+ * web app's `markdown/sanitizeUrl.ts`; keep the two alike.
  */
 
 // Browsers strip ASCII tab/newline/CR from URLs and ignore leading control
