@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { User, KeyRound, Building2, LogOut, Sparkles } from "@lucide/svelte";
+  import User from "@lucide/svelte/icons/user";
+  import KeyRound from "@lucide/svelte/icons/key-round";
+  import Building2 from "@lucide/svelte/icons/building-2";
+  import LogOut from "@lucide/svelte/icons/log-out";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -98,7 +102,7 @@
     {#if $whatsNewEnabled}
       <DropdownMenu.Item>
         {#snippet child({ props })}
-          <a {...props} href={localizeHref("/whats-new")}>
+          <a {...props} href={localizeHref("/news")}>
             <Sparkles />
             {m.whats_new()}
             {#if $hasUnseen}

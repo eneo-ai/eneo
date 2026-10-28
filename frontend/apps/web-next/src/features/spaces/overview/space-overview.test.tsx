@@ -13,12 +13,13 @@ import {
 import {
   makeAssistant,
   makeCollection,
+  makeIntegration,
   makeMember,
   makeSpace,
   makeWebsite
 } from "../testing/space-fixture";
 
-const state = vi.hoisted(() => ({ space: null as unknown }));
+const state = vi.hoisted(() => ({ space: null as unknown, progress: [] as unknown[] }));
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
@@ -31,7 +32,11 @@ vi.mock("@/features/spaces/use-space", () => ({
 }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: () => Promise.resolve({ data: { items: [] }, response: new Response("{}") })
+    GET: (path: string) =>
+      Promise.resolve({
+        data: { items: path.endsWith("/sync-progress/") ? state.progress : [] },
+        response: new Response("{}")
+      })
   }
 }));
 vi.mock("@/features/jobs/use-jobs", () => ({
@@ -40,7 +45,10 @@ vi.mock("@/features/jobs/use-jobs", () => ({
 
 import { SpaceOverview } from "@/app/(app)/spaces/[spaceId]/overview/space-overview.client";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  state.progress = [];
+});
 
 const appContext = testAppContext({
   permissions: ["admin"],
@@ -129,6 +137,34 @@ describe("SpaceOverview", () => {
     expect(within(knowledge).getByRole("link", { name: "Visa alla kunskapskällor" })).toBeTruthy();
 
     await expectNoAxeViolations(container);
+  });
+
+  it("offers no second full sync of a source while one runs", async () => {
+    state.progress = [
+      {
+        integration_knowledge_id: "integration-1",
+        sync_type: "full",
+        phase: "processing",
+        started_at: "2026-10-19T08:00:00Z",
+        updated_at: "2026-10-19T08:01:00Z",
+        total: 12,
+        done: 3,
+        indexed: 3,
+        unchanged: 0,
+        skipped: 0,
+        deleted: 0
+      }
+    ];
+    show(makeSpace({ integrations: [makeIntegration()] }));
+    const knowledge = screen.getByRole("region", { name: "Kunskap" });
+
+    fireEvent.click(
+      within(knowledge).getByRole("button", { name: "Fler åtgärder för Avtalsmallar" })
+    );
+    const busy = await screen.findByRole("menuitem", {
+      name: "En synk är redan köad eller pågår"
+    });
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("uploads to a chosen collection in the same dialog as the collection page", async () => {

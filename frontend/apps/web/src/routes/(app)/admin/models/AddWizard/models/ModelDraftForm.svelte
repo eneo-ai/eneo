@@ -11,7 +11,8 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { LoaderCircle, ListPlus } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import ListPlus from "@lucide/svelte/icons/list-plus";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
@@ -35,6 +36,8 @@
   import {
     MAX_COST_INPUT,
     perMillionFromTokenCost,
+    RERANK_CANDIDATE_FACTOR,
+    RERANK_MAX_CANDIDATES,
     type ModelDraftState,
     type ModelType
   } from "./draft";
@@ -168,7 +171,9 @@
           ? m.model_identifier_placeholder_embedding()
           : modelType === "image"
             ? m.model_identifier_placeholder_image()
-            : m.model_identifier_placeholder_transcription()}
+            : modelType === "rerank"
+              ? m.model_identifier_placeholder_rerank()
+              : m.model_identifier_placeholder_transcription()}
     />
     {#if draft.name.trim() && !isSelfHosted}
       <button
@@ -294,6 +299,39 @@
   </div>
 {/if}
 
+{#if modelType === "rerank"}
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <Field.Field>
+      <Field.Label for="candidate-factor" class="flex items-center gap-1.5">
+        {m.rerank_candidate_factor()}
+        <HelpTooltip text={m.rerank_candidate_factor_help()} />
+      </Field.Label>
+      <Input
+        id="candidate-factor"
+        type="number"
+        step="1"
+        min={RERANK_CANDIDATE_FACTOR.min}
+        max={RERANK_CANDIDATE_FACTOR.max}
+        bind:value={draft.candidateFactorStr}
+      />
+    </Field.Field>
+    <Field.Field>
+      <Field.Label for="max-candidates" class="flex items-center gap-1.5">
+        {m.rerank_max_candidates()}
+        <HelpTooltip text={m.rerank_max_candidates_help()} />
+      </Field.Label>
+      <Input
+        id="max-candidates"
+        type="number"
+        step="1"
+        min={RERANK_MAX_CANDIDATES.min}
+        max={RERANK_MAX_CANDIDATES.max}
+        bind:value={draft.maxCandidatesStr}
+      />
+    </Field.Field>
+  </div>
+{/if}
+
 <Field.Field>
   <Field.Label for="hosting">{m.hosting_region()}</Field.Label>
   <HostingSelect id="hosting" bind:value={draft.hosting} />
@@ -377,7 +415,7 @@
       </Select.Root>
     </Field.Field>
   </div>
-{:else}
+{:else if modelType !== "rerank"}
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
     <Field.Field>
       <Field.Label for="input-cost" class="flex items-center gap-1.5">

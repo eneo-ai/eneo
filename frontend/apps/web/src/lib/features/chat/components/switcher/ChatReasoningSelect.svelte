@@ -40,12 +40,12 @@
         chat.askQuestion.isLoading ||
         chat.settingsResolution?.settings_compatible === false}
       size="sm"
-      class="hover:bg-muted h-8 max-w-40 border-transparent bg-transparent px-2 font-medium shadow-none"
+      class="hover:bg-muted h-8 min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 font-medium shadow-none [&>svg:last-child]:hidden @[26rem]/composer:[&>svg:last-child]:block"
       aria-label={`${m.reasoning_effort()}: ${effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}`}
-      title={m.reasoning_effort_tooltip()}
+      title={`${m.reasoning_effort()}: ${effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}. ${m.reasoning_effort_tooltip()}`}
     >
       <Brain class="size-3.5" aria-hidden="true" />
-      <span class="hidden truncate sm:inline">
+      <span class="hidden truncate @[36rem]/composer:inline">
         {effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}
       </span>
     </Select.Trigger>

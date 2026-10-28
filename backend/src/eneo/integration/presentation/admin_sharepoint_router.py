@@ -1,11 +1,10 @@
-import json
 import secrets
 from datetime import datetime
-from typing import Annotated, Optional, cast
+from typing import TYPE_CHECKING, Annotated, Optional, cast
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from redis.asyncio import Redis
 
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.integration.application.tenant_sharepoint_app_service import (
@@ -15,6 +14,11 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthClientRejectedError,
+    OAuthCodeRejectedError,
+    token_exchange_rejection,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -24,10 +28,12 @@ from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
+from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
 from eneo.integration.presentation.admin_models import (
     ServiceAccountAuthCallback,
     ServiceAccountAuthStart,
     ServiceAccountAuthStartResponse,
+    ServiceAccountReauthStart,
     SharePointSubscriptionPublic,
     SubscriptionRenewalResult,
     TenantAppTestResult,
@@ -37,17 +43,31 @@ from eneo.integration.presentation.admin_models import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
-from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
+from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserInDB
 
+if TYPE_CHECKING:
+    from eneo.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
+
 logger = get_logger(__name__)
 router = APIRouter()
 
-OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
 OAUTH_STATE_PREFIX = "sharepoint:oauth_state:"
+
+
+def _oauth_state_store(container: Container) -> OauthStateStore:
+    # The blob may carry the Entra client secret for the first sign-in, so it
+    # never sits in Redis as plaintext.
+    return OauthStateStore(
+        container.redis_client(),
+        prefix=OAUTH_STATE_PREFIX,
+        encryption_service=container.encryption_service(),
+    )
 
 
 def _require_sharepoint_webhook_client_state() -> str:
@@ -69,6 +89,29 @@ def _require_timestamp(value: datetime | None, field_name: str) -> datetime:
     if value is None:
         raise ValueError(f"{field_name} is missing")
     return value
+
+
+def _to_app_public(
+    app: "TenantSharePointApp", encryption_service: EncryptionService
+) -> TenantSharePointAppPublic:
+    return TenantSharePointAppPublic(
+        id=app.id,
+        tenant_id=app.tenant_id,
+        client_id=app.client_id,
+        client_secret_masked=encryption_service.mask_secret(app.client_secret),
+        tenant_domain=app.tenant_domain,
+        is_active=app.is_active,
+        auth_method=app.auth_method,
+        service_account_email=app.service_account_email,
+        certificate_path=app.certificate_path,
+        auth_status=app.auth_status,
+        last_auth_error=app.last_auth_error,
+        last_auth_error_at=app.last_auth_error_at,
+        last_auth_success_at=app.last_auth_success_at,
+        created_by=app.created_by,
+        created_at=_require_timestamp(app.created_at, "app.created_at"),
+        updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
+    )
 
 
 def _to_subscription_public(
@@ -114,52 +157,6 @@ class _SimpleGraphToken:
         self.base_url = "https://graph.microsoft.com"
 
 
-async def _get_redis_client() -> Redis:
-    settings = get_settings()
-    return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-        build_redis_url(settings),
-        encoding="utf8",
-        decode_responses=True,
-        **build_redis_auth_kwargs(settings),
-    )
-
-
-async def _store_oauth_state(state: str, data: dict[str, str]) -> None:
-    client = await _get_redis_client()
-    try:
-        await client.set(
-            f"{OAUTH_STATE_PREFIX}{state}",
-            json.dumps(data),
-            ex=OAUTH_STATE_TTL_SECONDS,
-        )
-    finally:
-        await client.close()
-
-
-async def _pop_oauth_state(state: str) -> Optional[dict[str, str]]:
-    client = await _get_redis_client()
-    try:
-        key = f"{OAUTH_STATE_PREFIX}{state}"
-        data = await client.getdel(key)
-        if data is not None:
-            return json.loads(data)
-        return None
-    finally:
-        await client.close()
-
-
-def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
-    """Infer OneDrive subscriptions from stored identifiers.
-
-    OneDrive subscriptions store drive_id in both site_id and drive_id fields.
-    """
-    return bool(
-        subscription.site_id
-        and subscription.drive_id
-        and subscription.site_id == subscription.drive_id
-    )
-
-
 async def _get_sharepoint_token_for_user_integration(
     user_integration: UserIntegration,
     container: Container,
@@ -178,23 +175,7 @@ async def _get_sharepoint_token_for_user_integration(
                 f"TenantSharePointApp {user_integration.tenant_app_id} not found"
             )
 
-        if tenant_app.is_service_account():
-            service_account_auth = container.service_account_auth_service()
-            token_result = await service_account_auth.refresh_access_token(tenant_app)
-            new_refresh_token = token_result.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await tenant_app_repo.update(tenant_app)
-            return cast(
-                SharePointTokenProtocol,
-                _SimpleGraphToken(token_result["access_token"]),
-            )
-
-        tenant_app_auth = container.tenant_app_auth_service()
-        access_token = await tenant_app_auth.get_access_token(tenant_app)
+        access_token = await container.org_token_provider().get_access_token(tenant_app)
         return cast(SharePointTokenProtocol, _SimpleGraphToken(access_token))
 
     token = await oauth_token_service.get_oauth_token_by_user_integration(
@@ -377,28 +358,15 @@ async def configure_sharepoint_app(
                     f"Created new person-independent tenant_app integration for tenant {tenant_id}"
                 )
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to configure SharePoint app: {e}")
+    except Exception:
+        logger.error("Failed to configure SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to configure SharePoint app: {str(e)}",
+            detail="Failed to configure SharePoint app",
         )
 
 
@@ -443,26 +411,13 @@ async def get_sharepoint_app(
         if not app:
             return None
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
-    except Exception as e:
-        logger.error(f"Failed to get SharePoint app: {e}")
+    except Exception:
+        logger.error("Failed to get SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get SharePoint app: {str(e)}",
+            detail="Failed to get SharePoint app",
         )
 
 
@@ -471,12 +426,15 @@ async def get_sharepoint_app(
     response_model=TenantAppTestResult,
     summary="Test SharePoint app credentials",
     description=(
-        "Test if the provided SharePoint app credentials are valid by attempting "
-        "to acquire an access token. This does not save the credentials. "
-        "Requires admin role."
+        "With a body: test the given tenant-app credentials by acquiring an access "
+        "token, without saving them. Without a body: do a full token round trip "
+        "with the stored app (client credentials for tenant apps, the refresh "
+        "token for service accounts) and record the outcome as the app's "
+        "credential health. Requires admin role."
     ),
     responses={
         200: {"description": "Test completed (check success field in response)"},
+        400: {"description": "No SharePoint app is configured to test"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -487,10 +445,12 @@ async def get_sharepoint_app(
     reason="Organization administration requires the admin permission.",
 )
 async def test_sharepoint_app_credentials(
-    app_config: Annotated[TenantSharePointAppCreate, Body()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    app_config: Annotated[Optional[TenantSharePointAppCreate], Body()] = None,
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""
+    if app_config is None:
+        return await _test_stored_sharepoint_app(container)
     try:
         user = container.user()
         logger.info(
@@ -531,9 +491,34 @@ async def test_sharepoint_app_credentials(
         logger.error(f"Failed to test SharePoint app credentials: {e}")
         return TenantAppTestResult(
             success=False,
-            error_message=str(e),
+            error_message=user_visible_error(e),
             details=None,
         )
+
+
+async def _test_stored_sharepoint_app(container: Container) -> TenantAppTestResult:
+    user = container.user()
+    tenant_app_service: TenantSharePointAppService = (
+        container.tenant_sharepoint_app_service()
+    )
+    app = await tenant_app_service.get_active_app_for_tenant(user.tenant_id)
+    if app is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SharePoint app is configured for this organization.",
+        )
+    success, error_msg = await container.org_token_provider().test_connection(app)
+    logger.info(
+        "Tested stored SharePoint app %s for tenant %s: %s",
+        app.id,
+        user.tenant_id,
+        "ok" if success else "failed",
+    )
+    return TenantAppTestResult(
+        success=success,
+        error_message=error_msg,
+        details="Token acquired successfully" if success else None,
+    )
 
 
 @router.delete(
@@ -542,15 +527,18 @@ async def test_sharepoint_app_credentials(
     response_model=dict[str, str],
     summary="Permanently delete SharePoint app",
     description=(
-        "Permanently delete the tenant's SharePoint app configuration and all associated data. "
-        "WARNING: This action CANNOT be undone. This will cascade delete:\n"
-        "- All user_integrations using this tenant app (both org and personal)\n"
-        "- All integration_knowledge (imported SharePoint content)\n"
-        "- All info_blobs and embeddings (document data and vectors)\n"
-        "- All sharepoint_subscriptions (webhooks)\n"
-        "- All oauth_tokens for personal SharePoint integrations\n"
-        "- All sync_logs\n\n"
-        "Assistants linked to this knowledge will lose their connections.\n"
+        "Permanently delete the tenant's SharePoint app configuration and the "
+        "organization-wide SharePoint connection that uses it (app or service "
+        "account). WARNING: This action CANNOT be undone. In one request it "
+        "deletes:\n"
+        "- the organization-wide connections of this app\n"
+        "- the SharePoint knowledge imported through them, with its documents, "
+        "embeddings and sync history\n"
+        "- Eneo's records of their change-notification subscriptions\n\n"
+        "Personal SharePoint connections and their imports are kept, but they "
+        "sign in through this app and stop syncing until an app is configured "
+        "again. Subscriptions registered at Microsoft are not removed there; "
+        "they expire on their own. Assistants lose the deleted knowledge. "
         "Requires admin role."
     ),
     responses={
@@ -622,11 +610,11 @@ async def delete_sharepoint_app(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to delete SharePoint app: {e}", exc_info=True)
+    except Exception:
+        logger.error("Failed to delete SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete SharePoint app: {str(e)}",
+            detail="Failed to delete SharePoint app",
         )
 
 
@@ -706,11 +694,11 @@ async def list_sharepoint_subscriptions(
 
         return result
 
-    except Exception as e:
-        logger.error(f"Failed to list SharePoint subscriptions: {e}")
+    except Exception:
+        logger.error("Failed to list SharePoint subscriptions", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list SharePoint subscriptions: {str(e)}",
+            detail="Failed to list SharePoint subscriptions",
         )
 
 
@@ -785,9 +773,15 @@ async def renew_expired_subscriptions(
                         container=container,
                     )
                 except Exception as token_error:
-                    error_msg = f"Failed to resolve token for subscription {sub.id}: {token_error}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
+                    logger.error(
+                        "Failed to resolve token for subscription %s: %s",
+                        sub.id,
+                        token_error,
+                    )
+                    errors.append(
+                        f"Failed to resolve token for subscription {sub.id}: "
+                        f"{user_visible_error(token_error)}"
+                    )
                     failed += 1
                     continue
 
@@ -795,7 +789,7 @@ async def renew_expired_subscriptions(
                 success = await subscription_service.recreate_expired_subscription(
                     subscription=sub,
                     token=token,
-                    is_onedrive=_is_onedrive_subscription(sub),
+                    is_onedrive=sub.is_onedrive,
                 )
 
                 if success:
@@ -809,7 +803,7 @@ async def renew_expired_subscriptions(
                     f"Error recreating subscription {sub.id}: {exc}", exc_info=True
                 )
                 failed += 1
-                errors.append(f"Subscription {sub.id}: {str(exc)}")
+                errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
 
         result = SubscriptionRenewalResult(
             total_subscriptions=len(all_subscriptions),
@@ -826,15 +820,97 @@ async def renew_expired_subscriptions(
 
         return result
 
-    except Exception as e:
-        logger.error(
-            f"Failed to renew expired subscriptions: {e}",
-            exc_info=True,  # This logs the full stack trace
-        )
+    except Exception:
+        logger.error("Failed to renew expired subscriptions", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to renew expired subscriptions: {str(e)}",
+            detail="Failed to renew expired subscriptions",
         )
+
+
+@router.post(
+    "/sharepoint/subscriptions/recreate-all",
+    response_model=SubscriptionRenewalResult,
+    summary="Recreate every SharePoint subscription of the tenant",
+    description=(
+        "Recreate all of the tenant's SharePoint webhook subscriptions in place, "
+        "whether expired or not, so Graph posts to the currently configured "
+        "notification URL. Use it after the public origin changed. Preserves "
+        "all integration relationships. Requires admin role."
+    ),
+    responses={
+        200: {"description": "Recreation completed (check result for details)"},
+        400: {"description": "SharePoint webhooks are not configured"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
+async def recreate_all_subscriptions(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> SubscriptionRenewalResult:
+    user = container.user()
+    subscription_repo = container.sharepoint_subscription_repo()
+    subscription_service = container.sharepoint_subscription_service()
+    user_integration_repo = container.user_integration_repo()
+
+    try:
+        subscription_service.require_webhook_configuration()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
+    logger.info(
+        f"Admin {user.id} initiated recreation of {len(subscriptions)} subscriptions "
+        f"for tenant {user.tenant_id}"
+    )
+
+    recreated = 0
+    failed = 0
+    errors: list[str] = []
+    for sub in subscriptions:
+        try:
+            user_integration = await user_integration_repo.one_or_none(
+                id=sub.user_integration_id
+            )
+            if (
+                user_integration is None
+                or user_integration.tenant_integration.tenant_id != user.tenant_id
+            ):
+                raise ValueError(
+                    f"User integration {sub.user_integration_id} not found"
+                )
+            token = await _get_sharepoint_token_for_user_integration(
+                user_integration=user_integration, container=container
+            )
+            if await subscription_service.recreate_expired_subscription(
+                subscription=sub,
+                token=token,
+                is_onedrive=sub.is_onedrive,
+            ):
+                recreated += 1
+            else:
+                raise RuntimeError("Graph did not accept the new subscription")
+        except Exception as exc:
+            logger.error(
+                f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+            )
+            failed += 1
+            errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
+
+    return SubscriptionRenewalResult(
+        total_subscriptions=len(subscriptions),
+        expired_count=sum(1 for sub in subscriptions if sub.is_expired()),
+        recreated=recreated,
+        failed=failed,
+        errors=errors,
+    )
 
 
 @router.post(
@@ -913,14 +989,14 @@ async def recreate_subscription(
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to get access token: {token_error}",
+                detail=f"Failed to get access token: {user_visible_error(token_error)}",
             )
 
         # Recreate subscription
         success = await subscription_service.recreate_expired_subscription(
             subscription=subscription,
             token=token,
-            is_onedrive=_is_onedrive_subscription(subscription),
+            is_onedrive=subscription.is_onedrive,
         )
 
         if not success:
@@ -949,14 +1025,13 @@ async def recreate_subscription(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.error(
-            f"Failed to recreate subscription {subscription_id}: {e}",
-            exc_info=True,  # This logs the full stack trace
+            "Failed to recreate subscription %s", subscription_id, exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recreate subscription: {str(e)}",
+            detail="Failed to recreate subscription",
         )
 
 
@@ -1005,7 +1080,7 @@ async def start_service_account_auth(
         state = secrets.token_urlsafe(32)
 
         # Store state with credentials in Redis for callback verification
-        await _store_oauth_state(
+        await _oauth_state_store(container).store(
             state,
             {
                 "client_id": app_config.client_id,
@@ -1039,12 +1114,84 @@ async def start_service_account_auth(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to start service account OAuth: {e}")
+    except Exception:
+        logger.error("Failed to start service account OAuth", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start service account OAuth: {str(e)}",
+            detail="Failed to start service account OAuth",
         )
+
+
+@router.post(
+    "/sharepoint/service-account/auth/reauth",
+    response_model=ServiceAccountAuthStartResponse,
+    summary="Restart the service account sign-in with the stored app credentials",
+    description=(
+        "Start a new Microsoft sign-in for the already configured service "
+        "account, reusing the stored client ID, secret and tenant domain. Use it "
+        "when the refresh token has expired or been revoked, or when the service "
+        "account password changed. Imported knowledge is kept. Requires admin role."
+    ),
+    responses={
+        200: {"description": "OAuth authorization URL generated"},
+        400: {"description": "No service account is configured"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
+async def restart_service_account_auth(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    body: Annotated[Optional[ServiceAccountReauthStart], Body()] = None,
+) -> ServiceAccountAuthStartResponse:
+    user = container.user()
+    _require_sharepoint_webhook_client_state()
+    try:
+        redirect_uri = get_settings().integration_callback_uri(
+            body.redirect_uri if body else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tenant_app_service: TenantSharePointAppService = (
+        container.tenant_sharepoint_app_service()
+    )
+    app = await tenant_app_service.get_active_app_for_tenant(user.tenant_id)
+    if app is None or not app.is_service_account():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active service account is configured for this organization.",
+        )
+
+    state = secrets.token_urlsafe(32)
+    # The callback reloads the stored app, so the secret never leaves the database.
+    await _oauth_state_store(container).store(
+        state,
+        {
+            "reauth": "1",
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+            "redirect_uri": redirect_uri,
+        },
+    )
+    auth_result = ServiceAccountAuthService().gen_auth_url(
+        state=state,
+        client_id=app.client_id,
+        client_secret=app.client_secret,
+        tenant_domain=app.tenant_domain,
+        redirect_uri=redirect_uri,
+    )
+    logger.info(
+        f"Restarted service account OAuth flow for tenant {user.tenant_id} "
+        f"by user {user.id}"
+    )
+    return ServiceAccountAuthStartResponse(
+        auth_url=auth_result["auth_url"], state=state
+    )
 
 
 @router.post(
@@ -1059,7 +1206,12 @@ async def start_service_account_auth(
     ),
     responses={
         201: {"description": "Service account successfully configured"},
-        400: {"description": "Invalid state or auth code"},
+        400: {
+            "description": "Invalid state or auth code; `code` is "
+            "`oauth_code_rejected` when Microsoft refuses the code (start the "
+            "sign-in again) and `oauth_client_rejected` when it refuses the "
+            "app's client ID or secret"
+        },
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -1078,47 +1230,71 @@ async def service_account_auth_callback(
         user = container.user()
         _require_sharepoint_webhook_client_state()
 
-        # Verify state (atomically retrieve and delete from Redis)
-        stored_state = await _pop_oauth_state(callback.state)
-        if stored_state is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired OAuth state. Please restart the authentication flow.",
-            )
-
-        # Verify tenant matches
-        if stored_state["tenant_id"] != str(user.tenant_id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state was initiated by a different tenant",
-            )
-
-        if stored_state.get("user_id") != str(user.id):
-            raise HTTPException(
-                status_code=400, detail="OAuth state belongs to another user"
-            )
-
-        # Exchange auth code for tokens
-        service_account_auth_service = ServiceAccountAuthService()
-        token_result = await service_account_auth_service.exchange_token(
-            auth_code=callback.auth_code,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
-            redirect_uri=stored_state.get("redirect_uri"),
+        encryption_service: EncryptionService = container.encryption_service()
+        state_store = _oauth_state_store(container)
+        expired = HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OAuth state. Please restart the authentication flow.",
         )
+        # The binding is checked before the state is spent, so another admin
+        # cannot burn it.
+        stored_state = await state_store.peek(callback.state)
+        if stored_state is None:
+            await state_store.pop(callback.state)
+            raise expired
 
-        # Configure service account
+        if stored_state.get("tenant_id") != str(user.tenant_id) or stored_state.get(
+            "user_id"
+        ) != str(user.id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state was initiated by a different user or tenant",
+            )
+        stored_state = await state_store.pop(callback.state)
+        if stored_state is None:
+            raise expired
+
         tenant_app_service: TenantSharePointAppService = (
             container.tenant_sharepoint_app_service()
         )
-        encryption_service: EncryptionService = container.encryption_service()
+
+        if stored_state.get("reauth"):
+            stored_app = await tenant_app_service.get_active_app_for_tenant(
+                user.tenant_id
+            )
+            if stored_app is None or not stored_app.is_service_account():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active service account is configured for this organization.",
+                )
+            client_id = stored_app.client_id
+            client_secret = stored_app.client_secret
+            tenant_domain = stored_app.tenant_domain
+        else:
+            client_id = stored_state["client_id"]
+            client_secret = stored_state["client_secret"]
+            tenant_domain = stored_state["tenant_domain"]
+
+        service_account_auth_service = ServiceAccountAuthService()
+        try:
+            token_result = await service_account_auth_service.exchange_token(
+                auth_code=callback.auth_code,
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_domain=tenant_domain,
+                redirect_uri=stored_state.get("redirect_uri"),
+            )
+        except httpx.HTTPStatusError as exc:
+            rejection = token_exchange_rejection(exc)
+            if rejection is None:
+                raise
+            raise rejection from exc
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_domain=tenant_domain,
             refresh_token=token_result.refresh_token,
             service_account_email=token_result.email or "unknown",
             created_by=user.id,
@@ -1206,26 +1382,13 @@ async def service_account_auth_callback(
             f"({token_result.email}) by user {user.id}"
         )
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
-    except HTTPException:
+    except (HTTPException, OAuthCodeRejectedError, OAuthClientRejectedError):
         raise
-    except Exception as e:
-        logger.error(f"Failed to complete service account OAuth: {e}", exc_info=True)
+    except Exception:
+        logger.error("Failed to complete service account OAuth", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to complete service account OAuth: {str(e)}",
+            detail="Failed to complete service account OAuth",
         )

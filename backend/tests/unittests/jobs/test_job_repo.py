@@ -31,3 +31,28 @@ async def test_mark_stale_jobs_failed_targets_queued_and_in_progress():
     assert "in progress" in sql
     assert "queued" in sql
     assert "failed" in sql  # sets status to FAILED
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_jobs_failed_skips_rows_a_running_job_holds():
+    """A running sync holds its job row; waiting for it would block the reaper's
+    worker slot until the sync commits."""
+    captured: dict[str, object] = {}
+
+    async def fake_execute(stmt):
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.all.return_value = []
+        return result
+
+    session = AsyncMock()
+    session.execute = fake_execute
+
+    await JobRepository(session=session).mark_stale_jobs_failed(
+        tasks=["sync_sharepoint_delta"], stale_before=datetime.now(timezone.utc)
+    )
+
+    from sqlalchemy.dialects import postgresql
+
+    sql = str(captured["stmt"].compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE SKIP LOCKED" in sql

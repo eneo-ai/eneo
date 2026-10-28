@@ -41,6 +41,7 @@ describe("Assistant edit loader", () => {
         },
         eneo: {
           documentTemplates: { listAvailable: vi.fn().mockResolvedValue({ items: [] }) },
+          models: { list: vi.fn().mockResolvedValue({ rerankModels: [] }) },
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "assistant-1" }),
             listMCPServers: vi.fn().mockResolvedValue({ items: [] })
@@ -89,6 +90,7 @@ describe("Assistant edit loader", () => {
         },
         eneo: {
           documentTemplates: { listAvailable: vi.fn().mockResolvedValue({ items: [] }) },
+          models: { list: vi.fn().mockResolvedValue({ rerankModels: [] }) },
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
             listMCPServers: vi.fn().mockResolvedValue({ items: [] })
@@ -147,6 +149,7 @@ describe("Assistant edit loader", () => {
         },
         eneo: {
           documentTemplates: { listAvailable: vi.fn().mockResolvedValue({ items: [] }) },
+          models: { list: vi.fn().mockResolvedValue({ rerankModels: [] }) },
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
             listMCPServers: vi.fn().mockResolvedValue({ items: [] })

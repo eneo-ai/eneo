@@ -1,6 +1,12 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { Cloud, Earth, Info, LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
+  import Cloud from "@lucide/svelte/icons/cloud";
+  import Earth from "@lucide/svelte/icons/earth";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Search from "@lucide/svelte/icons/search";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
@@ -18,8 +24,10 @@
   } from "./fixtureMode";
   import {
     createSharePointTreeNode,
+    flattenVisibleSharePointTree,
     isSharePointItemCovered,
     normalizeSharePointTreeQuery,
+    resolveSharePointTreeKey,
     type SharePointFilterColumn,
     type SharePointTreeItem,
     type SharePointTreeNode
@@ -94,6 +102,10 @@
   let rootItems = $state<SharePointTreeNode[]>([]);
   let rootLoading = $state(false);
   let rootLoadError = $state(false);
+  let rootTruncated = $state(false);
+  let treeElement = $state<HTMLUListElement | null>(null);
+  // Roving tabindex: one tree item is tabbable, the last one a person focused.
+  let focusedKey = $state<string | null>(null);
   // Library columns a person can filter on without typing, from the root listing.
   let columns = $state<SharePointFilterColumn[]>([]);
   let search = $state("");
@@ -217,6 +229,54 @@
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys));
   let siteRootSelected = $derived(selectedItemKeySet.has(siteRootSelectionKey));
   let siteRootIndeterminate = $derived(!siteRootSelected && selectedPaths.length > 0);
+  let visibleRows = $derived(
+    flattenVisibleSharePointTree(rootItems, selectedItemKeySet, siteRootSelected)
+  );
+  let activeKey = $derived(
+    visibleRows.some((row) => row.key === focusedKey) ? focusedKey : (visibleRows[0]?.key ?? null)
+  );
+
+  function focusTreeKey(key: string) {
+    focusedKey = key;
+    void tick().then(() => {
+      treeElement?.querySelector<HTMLElement>(`[data-tree-key="${CSS.escape(key)}"]`)?.focus();
+    });
+  }
+
+  // focusin bubbles through nested treeitems, so the key is read from the
+  // focused element rather than from each item's own handler.
+  function handleTreeFocusIn(event: FocusEvent) {
+    const target = event.target as HTMLElement | null;
+    const key = target?.closest<HTMLElement>("[data-tree-key]")?.dataset.treeKey;
+    if (key) focusedKey = key;
+  }
+
+  function handleTreeKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    const item = target?.closest<HTMLElement>("[data-tree-key]");
+    const key = item?.dataset.treeKey;
+    if (!item || !key) return;
+    // A pointer can focus the inner checkbox or expand button; their own
+    // Space/Enter behaviour stays theirs, only the arrows are taken over.
+    if (target !== item && (event.key === " " || event.key === "Enter")) return;
+    const action = resolveSharePointTreeKey(visibleRows, key, event.key);
+    if (!action) return;
+    event.preventDefault();
+    switch (action.type) {
+      case "focus":
+        focusTreeKey(action.key);
+        break;
+      case "expand":
+        if (!action.node.expanded) toggleNodeExpanded(action.node);
+        break;
+      case "collapse":
+        if (action.node.expanded) toggleNodeExpanded(action.node);
+        break;
+      case "toggleSelect":
+        onToggleSelect(action.node);
+        break;
+    }
+  }
 
   function currentTreeSource(): TreeSource {
     return { userIntegrationId, spaceId, siteId, driveId, fixtureScenario };
@@ -226,7 +286,11 @@
     source: TreeSource,
     folderId?: string,
     folderPath?: string
-  ): Promise<{ items: SharePointTreeNode[]; columns: SharePointFilterColumn[] }> {
+  ): Promise<{
+    items: SharePointTreeNode[];
+    columns: SharePointFilterColumn[];
+    truncated: boolean;
+  }> {
     const queryParams: {
       space_id: string;
       site_id?: string;
@@ -260,16 +324,10 @@
         .map(normalizeTreeItem)
         .filter((item): item is SharePointTreeItem => item !== null)
         .map(createSharePointTreeNode),
-      columns: response.columns ?? []
+      columns: response.columns ?? [],
+      // Set by the API when a folder listing hit its cap.
+      truncated: "truncated" in response && response.truncated === true
     };
-  }
-
-  async function fetchTreeItems(
-    source: TreeSource,
-    folderId?: string,
-    folderPath?: string
-  ): Promise<SharePointTreeNode[]> {
-    return (await fetchTree(source, folderId, folderPath)).items;
   }
 
   async function loadRoot(source: TreeSource) {
@@ -277,12 +335,14 @@
     rootItems = [];
     rootLoading = true;
     rootLoadError = false;
+    rootTruncated = false;
 
     try {
       const tree = await fetchTree(source);
       if (generation !== treeGeneration) return;
       rootItems = tree.items;
       columns = tree.columns;
+      rootTruncated = tree.truncated;
     } catch (error) {
       if (generation !== treeGeneration) return;
       rootLoadError = true;
@@ -298,9 +358,10 @@
     node.loadError = false;
 
     try {
-      const children = await fetchTreeItems(currentTreeSource(), node.id, node.path);
+      const tree = await fetchTree(currentTreeSource(), node.id, node.path);
       if (generation !== treeGeneration) return;
-      node.children = children;
+      node.children = tree.items;
+      node.childrenTruncated = tree.truncated;
     } catch (error) {
       if (generation !== treeGeneration) return;
       node.children = null;
@@ -339,6 +400,7 @@
       rootItems = [];
       rootLoading = false;
       rootLoadError = false;
+      rootTruncated = false;
     }
   });
 </script>
@@ -429,7 +491,7 @@
           class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
           role="status"
         >
-          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
           {m.sharepoint_loading_content()}
         </div>
       {:else if rootLoadError}
@@ -468,20 +530,32 @@
             {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
           </label>
         </div>
-
-        <ul role="tree" aria-label={siteName} class="flex flex-col">
+        <ul
+          role="tree"
+          aria-label={siteName}
+          class="flex flex-col"
+          bind:this={treeElement}
+          onkeydown={handleTreeKeydown}
+          onfocusin={handleTreeFocusIn}
+        >
           {#each rootItems as item (buildSharePointSelectionKey(item))}
             <SharePointFolderTreeNode
               node={item}
               {selectedItemKeySet}
               {selectedPaths}
               ancestorSelected={siteRootSelected}
+              {activeKey}
               {onToggleSelect}
               onToggleExpanded={toggleNodeExpanded}
               onRetryLoad={retryNodeLoad}
             />
           {/each}
         </ul>
+        {#if rootTruncated}
+          <p class="text-muted-foreground px-4 py-3 text-xs" role="status">
+            {m.sharepoint_tree_truncated()}
+          </p>
+        {/if}
       {/if}
     </div>
   {/if}

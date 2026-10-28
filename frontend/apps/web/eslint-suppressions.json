@@ -289,19 +289,9 @@
       "count": 1
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/knowledge/integrations/IntegrationSyncStatusCell.svelte": {
-    "eneo/no-raw-color": {
-      "count": 4
-    }
-  },
   "src/routes/(app)/spaces/[spaceId]/settings/SelectMCPServers.svelte": {
     "eneo/no-raw-color": {
       "count": 6
-    }
-  },
-  "src/routes/integrations/callback/token/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 12
     }
   }
 }

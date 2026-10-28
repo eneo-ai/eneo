@@ -7,7 +7,9 @@
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowRight, CircleCheck, Info } from "@lucide/svelte";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Info from "@lucide/svelte/icons/info";
 
   let { data } = $props();
 

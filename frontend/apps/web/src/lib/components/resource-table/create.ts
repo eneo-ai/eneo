@@ -1,7 +1,5 @@
 /*
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import { getContext, setContext } from "svelte";
@@ -78,10 +76,15 @@ export const PRIMARY_COLUMN_ID = "table-primary-key";
 export const ACTION_COLUMN_ID = "table-action-key";
 export const CARD_COLUMN_ID = "table-card-key";
 
-export interface CreateTableOptions {
+export interface CreateTableOptions<Resource = never> {
   disableClientFilter?: boolean;
   /** Keep the filter input but leave filtering to the server; watch `filterValue` to search. */
   serverSideFilter?: boolean;
+  /**
+   * A stable id per resource. Rows are keyed by it, so a row's open dialog stays
+   * with its resource when filtering or sorting moves it; the default is the index.
+   */
+  getRowId?: (item: Resource, index: number) => string;
 }
 
 type SortOrder = "asc" | "desc";
@@ -138,7 +141,7 @@ function textFilter(value: unknown, filterValue: string) {
 export function createWithResource<Resource extends Record<string, unknown>>(
   data: Resource[],
   pageSize = 999999,
-  options: CreateTableOptions = {}
+  options: CreateTableOptions<Resource> = {}
 ) {
   const resourceStore = writable(data);
   const table = createWithStore(resourceStore, pageSize, options);
@@ -153,7 +156,7 @@ export function createWithResource<Resource extends Record<string, unknown>>(
 export function createWithStore<Resource extends Record<string, unknown>>(
   data: Readable<Resource[]>,
   pageSize = 999999,
-  options: CreateTableOptions = {}
+  options: CreateTableOptions<Resource> = {}
 ) {
   function column<Key extends keyof Resource>(
     options: ColumnBase<Resource, Resource[Key]> & { accessor: Key }
@@ -268,7 +271,7 @@ function createViewModel<Resource extends Record<string, unknown>>(
   data: Readable<Resource[]>,
   columns: ResourceColumn<Resource>[],
   initialPageSize: number,
-  options: CreateTableOptions
+  options: CreateTableOptions<Resource>
 ): ResourceTableViewModel<Resource> {
   const sortKeys = writable<{ id: string; order: SortOrder }[]>([]);
   const filterValue = writable("");
@@ -294,6 +297,7 @@ function createViewModel<Resource extends Record<string, unknown>>(
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     manualFiltering: !clientFilter,
+    getRowId: options.getRowId,
     globalFilterFn: (row, columnId, filter: string) => {
       const getFilterValue = metaById.get(columnId)?.filter?.getFilterValue;
       const value = row.getValue(columnId);

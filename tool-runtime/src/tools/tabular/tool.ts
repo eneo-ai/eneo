@@ -14,7 +14,9 @@ import {
 import { SheetCache } from "./cache";
 import {
   fetchReference,
-  fileReference,
+  requireExtension,
+  TABULAR_EXTENSIONS,
+  tabularReference,
   type FileReference,
 } from "../files/reference";
 import type { TabularConfig } from "./config";
@@ -58,7 +60,7 @@ const NO_ROWS_MATCHED =
 
 export { exportFilename };
 
-const fileRef = fileReference;
+const fileRef = tabularReference;
 const sheetName = z
   .string()
   .max(200)
@@ -104,6 +106,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     ref: FileReference & { sheet?: string; source_rows?: number[] },
     ctx: CallContext,
   ) {
+    requireExtension(ref, TABULAR_EXTENSIONS, "inspect_table and query_table");
     const { bytes, contentType, isXlsx } = await fetchReference(ref, ctx, {
       allowedFileOrigins: deps.allowedFileOrigins,
       maxBytes: deps.config.max_upload_bytes,
@@ -173,6 +176,13 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     extras: z.infer<typeof extraFiles>,
     ctx: CallContext,
   ) {
+    // Every file is checked before any is downloaded, so one call reports the wrong one.
+    for (const ref of [main, ...(extras ?? [])])
+      requireExtension(
+        ref,
+        TABULAR_EXTENSIONS,
+        "inspect_table and query_table",
+      );
     const aliases = new Set<string>();
     for (const extra of extras ?? []) {
       if (aliases.has(extra.alias))
@@ -312,6 +322,12 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       readOnly: true,
       async execute(raw, ctx) {
         const args = inspectInput.parse(raw);
+        for (const ref of args.files)
+          requireExtension(
+            ref,
+            TABULAR_EXTENSIONS,
+            "inspect_table and query_table",
+          );
         const files = [];
         for (const ref of args.files) {
           const loaded = await load(ref, ctx);

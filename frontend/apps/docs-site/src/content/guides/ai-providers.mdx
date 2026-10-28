@@ -54,14 +54,14 @@ For Azure OpenAI the model name in the route is the **deployment name**, not the
 
 Eneo uses LiteLLM's built-in model registry to determine which providers and models are available. This means:
 
-1. **If a provider exists in LiteLLM** — it shows up automatically in Eneo's Admin UI when adding models. No code changes needed.
+1. **If LiteLLM can route a provider** — it shows up automatically in Eneo's Admin UI when adding models. No code changes needed. LiteLLM's price list also groups some models under names that are not provider types, such as `bedrock_converse` or `vertex_ai-language-models`. Those models are listed under the provider that serves them (`bedrock`, `vertex_ai`), or left out when LiteLLM names none. Provider types that need an interactive sign-in in a browser (`github_copilot`, `chatgpt`) are not offered. Creating a provider of a type LiteLLM cannot route, or of one of those sign-in types, fails with a validation error; existing providers of such a type can still be edited and deactivated.
 
 2. **If a provider is missing from LiteLLM** — you can still connect it using any provider type that speaks the OpenAI protocol. For example, use **`hosted_vllm`**, **`openai`**, or **`ollama`** and point it at your endpoint. The only requirement is that the server exposes an OpenAI-compatible API (`/v1/chat/completions`, `/v1/embeddings`).
 
 3. **Want a provider to appear with its own name and model list?** Send a PR to the [LiteLLM project](https://github.com/BerriAI/litellm) to add it to their model registry. Once merged, it will automatically appear in Eneo with its models listed.
 
 <Callout type="info">
-  The Admin UI fetches capabilities from LiteLLM's model registry on load, including supported models, context windows, and feature flags (vision, tool use, reasoning). This data is always up to date with your installed LiteLLM version.
+  The Admin UI fetches capabilities from LiteLLM's model registry on load, including supported models, context windows, and feature flags (vision, tool use, reasoning). The backend Docker image sets `LITELLM_LOCAL_MODEL_COST_MAP=True`, so this is the catalog bundled with the installed LiteLLM version: it changes when Eneo upgrades LiteLLM, and the backend does not download it from GitHub at startup. Set the same variable if you run the backend outside the image.
 </Callout>
 
 ---
@@ -93,6 +93,23 @@ A stored API key is only ever sent to the endpoint it was entered for. When you 
 ### Step 3: Enable Models for Users
 
 Once a provider is configured and models are added, tenant admins can enable specific models for their organization through the Models page.
+
+---
+
+## Rerank models
+
+A rerank model reorders the knowledge an assistant retrieves, so the most relevant passages come first regardless of their length. Add one under **Admin** → **Models** → **Rerank models** on a provider that serves reranking, for example Cohere, Azure AI or a self-hosted vLLM or Infinity server. Enter the model identifier without a provider prefix (`cohere-rerank-v4.0-fast`, not `azure_ai/cohere-rerank-v4.0-fast`). Space owners then choose it per assistant under **Material handling** → **Result ranking**; only models the space's security classification allows are offered.
+
+Each rerank model has two settings:
+
+| Setting                        | Default | Allowed | Effect                                                                                                       |
+| ------------------------------ | ------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Candidates per requested chunk | 5       | 1–20    | How many candidates are scored for each chunk the assistant asks for. Matters when few chunks are requested. |
+| Maximum candidates per search  | 100     | 1–1000  | How many search hits are sorted in one search.                                                               |
+
+An assistant gets at least as many chunks as it would without a reranker. When it asks for more than the maximum, as assistants with large context windows do, the sorted chunks come first and the rest follow unsorted, in vector search order. Raise the maximum if more of their context should be sorted.
+
+The defaults were measured on one municipality's public and internal web content with 200-token chunks; a higher maximum gave the same ranking. Other material, chunk sizes or rerankers may need other values. A higher maximum can find relevant text further down but makes every search slower and, for providers that charge per search, more expensive. The backend log line `Reranked search` shows the time spent per step and the number of sorted (`candidates`) and `unsorted` chunks.
 
 ---
 

@@ -7,6 +7,7 @@
   import type { GroupSparse } from "@eneo/eneo-js";
   import { IconCollections } from "@eneo/icons/collections";
   import { m } from "$lib/paraglide/messages";
+  import { embeddingModelGroupTitle } from "$lib/features/ai-models/modelLabels";
 
   const {
     state: { currentSpace }
@@ -32,9 +33,6 @@
       (curr, idx, models) => idx === models.findIndex((other) => other.id === curr.id)
     );
     return models;
-  });
-  const disabledModelInUse = derived(embeddingModels, ($embeddingModels) => {
-    return [...$embeddingModels].findIndex((model) => model.inSpace === false) > -1;
   });
 
   const table = Table.createWithStore(collections);
@@ -85,16 +83,10 @@
   resourceName={m.resource_collections()}
   emptyMessage={m.there_are_currently_no_collections_configured()}
 >
-  {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
-    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-      <Table.Group
-        title={embeddingModel.inSpace
-          ? embeddingModel.name
-          : embeddingModel.name + ` (${m.disabled()})`}
-        filterFn={createModelFilter(embeddingModel)}
-      ></Table.Group>
-    {/each}
-  {:else}
-    <Table.Group></Table.Group>
-  {/if}
+  {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+    <Table.Group
+      title={embeddingModelGroupTitle(embeddingModel, embeddingModel.inSpace)}
+      filterFn={createModelFilter(embeddingModel)}
+    ></Table.Group>
+  {/each}
 </Table.Root>

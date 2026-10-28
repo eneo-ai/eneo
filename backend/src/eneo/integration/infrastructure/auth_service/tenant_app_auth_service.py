@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -5,19 +6,36 @@ from typing import Optional
 import httpx
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    loggable_token_reason,
+    summarize_token_endpoint_error,
+)
+from eneo.observability.error_text import user_visible_error
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_AUTH_TIMEOUT = 30.0
 
 
+def credentials_fingerprint(app: TenantSharePointApp) -> str:
+    """Identifies the credential set a token was minted with, never the secret."""
+    material = "\x00".join((app.tenant_domain, app.client_id, app.client_secret))
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
 class TenantAppToken:
     """Token obtained via client credentials flow (application permissions)."""
 
-    def __init__(self, access_token: str, expires_at: datetime) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        expires_at: datetime,
+        credentials_fingerprint: str = "",
+    ) -> None:
         super().__init__()
         self.access_token = access_token
         self.expires_at = expires_at
+        self.credentials_fingerprint = credentials_fingerprint
 
     def is_expired(self) -> bool:
         """Check if token has expired."""
@@ -58,10 +76,17 @@ class TenantAppAuthService:
             httpx.HTTPStatusError: If token acquisition fails
         """
         cache_key = str(app.id)
+        fingerprint = credentials_fingerprint(app)
 
+        # The cache is per process, so a reconfigured secret cannot be cleared
+        # from every API and worker process; a token minted with other
+        # credentials is simply never a hit.
         if not force_refresh and cache_key in self._token_cache:
             cached_token = self._token_cache[cache_key]
-            if not cached_token.is_expiring_soon():
+            if (
+                cached_token.credentials_fingerprint == fingerprint
+                and not cached_token.is_expiring_soon()
+            ):
                 logger.debug(f"Using cached token for app {app.id}")
                 return cached_token.access_token
 
@@ -117,15 +142,22 @@ class TenantAppAuthService:
                     )
 
                     return TenantAppToken(
-                        access_token=access_token, expires_at=expires_at
+                        access_token=access_token,
+                        expires_at=expires_at,
+                        credentials_fingerprint=credentials_fingerprint(app),
                     )
                 else:
-                    logger.error(
-                        f"Failed to acquire token for app {app.id}: "
-                        f"status={response.status_code}, body={response.text}"
-                    )
                     response.raise_for_status()
 
+            except httpx.HTTPStatusError as e:
+                # The body carries Microsoft's trace and correlation ids and
+                # can echo request parameters; the summary names the reason.
+                logger.error(
+                    "Failed to acquire token for app %s: %s",
+                    app.id,
+                    loggable_token_reason(e),
+                )
+                raise
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error acquiring token for app {app.id}: {e}")
                 raise
@@ -146,28 +178,15 @@ class TenantAppAuthService:
             logger.info(f"Credentials test successful for app {app.id}")
             return (True, None)
         except httpx.HTTPStatusError as e:
-            # Extract user-friendly error from Microsoft response
-            try:
-                error_body = e.response.json()
-                error_desc = error_body.get("error_description", "")
-                # Strip trace/correlation IDs from the description
-                if error_desc:
-                    # Microsoft error_description format: "AADSTS...: Human message. Trace ID: ... Timestamp: ..."
-                    error_msg = (
-                        error_desc.split("\r\n")[0].split(" Trace ID:")[0].strip()
-                    )
-                else:
-                    error_msg = error_body.get(
-                        "error", f"HTTP {e.response.status_code}"
-                    )
-            except Exception:
-                error_msg = f"HTTP {e.response.status_code}"
-            logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
-            return (False, error_msg)
+            logger.error(
+                "Credentials test failed for app %s: %s",
+                app.id,
+                loggable_token_reason(e),
+            )
+            return (False, summarize_token_endpoint_error(e))
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
-            return (False, error_msg)
+            logger.error(f"Credentials test failed for app {app.id}: {e}")
+            return (False, user_visible_error(e))
 
     def clear_cache(self, app_id: str) -> None:
         """Clear cached token for an app."""

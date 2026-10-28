@@ -20,6 +20,7 @@ from eneo.object_content.content import (
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
 )
+from eneo.observability.error_text import user_visible_error
 
 
 class Task(str, Enum):
@@ -39,6 +40,12 @@ class Task(str, Enum):
 
 
 KNOWLEDGE_TASKS = (Task.UPLOAD_FILE, Task.TRANSCRIPTION)
+# Their failure text is shown to the person who started the sync.
+INTEGRATION_SYNC_TASKS = (
+    Task.PULL_CONFLUENCE_CONTENT,
+    Task.PULL_SHAREPOINT_CONTENT,
+    Task.SYNC_SHAREPOINT_DELTA,
+)
 
 
 class JobFailureCode(StrEnum):
@@ -149,4 +156,10 @@ class JobPublic(JobBase, InDB):
             self.task in KNOWLEDGE_TASKS or self.task == Task.CRAWL
         ):
             self.result_location = None
+        elif (
+            self.status == Status.FAILED
+            and self.task in INTEGRATION_SYNC_TASKS
+            and self.result_location is not None
+        ):
+            self.result_location = user_visible_error(self.result_location)
         return self

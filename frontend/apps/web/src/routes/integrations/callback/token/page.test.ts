@@ -46,6 +46,9 @@ async function mountCallback(browser: ReturnType<typeof callbackBrowser>) {
       "$lib/paraglide/messages": {
         m: { integration_callback_oauth_state_mismatch: () => "OAuth state mismatch" }
       },
+      "$lib/features/integrations/sharepoint/serviceAccountAuth": {
+        SHAREPOINT_SERVICE_ACCOUNT_OAUTH_KEY: SERVICE_ACCOUNT_STORAGE_KEY
+      },
       // Used only in the markup today, so TypeScript elides them. Stubbed so
       // moving them into the script does not break this test unexpectedly.
       "$app/navigation": { goto: async () => undefined },

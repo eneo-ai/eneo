@@ -114,6 +114,8 @@ Failed attempts are limited to 5 per login name within 10 minutes. Each `401` re
 
 The `429` response also carries a `Retry-After` header. The limit applies to password login only; API keys and OIDC sign-in are unaffected.
 
+Malformed login input returns `422` with the validation fields `loc`, `type` and a static `msg`; `loc` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "login_unavailable"` and a generic message. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
+
 Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
@@ -465,6 +467,32 @@ store raw option dictionaries, which are validated when an application is
 instantiated. Legacy data and direct SQL/import writes therefore need inspection;
 an invalid row alone does not establish which path wrote it. Avoid raw SQL updates
 that bypass the validated repair path.
+
+## Icons
+
+Assistants, apps, spaces and group chats show an uploaded icon through their
+`icon_id`. Upload the image with `POST /api/v1/icons/`, then set the returned id
+with the resource's own update endpoint. Icon ids are public:
+`GET /api/v1/icons/{id}/` needs no authentication, so an id proves nothing about
+who may change the icon. A resource therefore accepts a new `icon_id` only for
+an icon the caller uploaded in their own tenant; any other id returns `400` with
+`eneo_error_code` `9076`.
+Sending the resource's current `icon_id` again is always accepted. An icon whose
+uploader is not recorded (icons from before object-content storage, or of a
+removed user) keeps showing where it is but cannot be attached anywhere new.
+Service API keys have no user, so they cannot upload (`403`) or attach icons;
+use a user account or a user-owned key.
+
+`DELETE /api/v1/icons/{id}/` deletes an icon only when no assistant, app, space
+or group chat shows it. An icon that is still shown returns `409` with
+`eneo_error_code` `9075`: clear `icon_id` on the resource first, which runs that
+resource's own permission check. An icon of another tenant returns `400`.
+
+A resource releases its icon itself: replacing or clearing `icon_id`, or
+deleting the resource, deletes the previous icon when nothing else shows it.
+Deleting a space does the same for the icons of its assistants, apps and group
+chats. A client therefore only calls `DELETE` for an icon it uploaded but never
+attached.
 
 ## Related pages
 

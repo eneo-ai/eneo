@@ -17,6 +17,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -28,7 +29,9 @@
   } from "../formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+
+  export let model: AnyModel;
   /** Tighter padding for table cells; default is comfortable for detail panes. */
   export let dense: boolean = false;
 
@@ -42,9 +45,7 @@
     | { kind: "per_minute"; value: string | null; raw: CostFieldValue }
     | { kind: "per_image"; value: string | null; raw: CostFieldValue };
 
-  function pricingFor(
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel
-  ): Pricing {
+  function pricingFor(model: AnyModel): Pricing {
     if ("cost_per_image" in model) {
       return {
         kind: "per_image",

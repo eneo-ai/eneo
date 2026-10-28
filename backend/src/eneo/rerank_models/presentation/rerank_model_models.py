@@ -34,6 +34,8 @@ class RerankModelPublic(BaseModel):
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
     deprecation_date: Optional[str] = None
+    candidate_factor: int
+    max_candidates: int
 
     @classmethod
     def from_domain(cls, model: RerankModel):
@@ -64,7 +66,13 @@ class RerankModelPublic(BaseModel):
             provider_name=model.provider_name,
             provider_type=model.provider_type,
             deprecation_date=model.litellm_deprecation_date,
+            candidate_factor=model.candidate_factor,
+            max_candidates=model.max_candidates,
         )
+
+
+class RerankModelSecurityStatus(RerankModelPublic):
+    meets_security_classification: Optional[bool] = None
 
 
 class RerankModelUpdate(BaseModel):

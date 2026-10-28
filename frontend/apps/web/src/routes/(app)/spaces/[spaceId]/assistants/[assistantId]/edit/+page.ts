@@ -18,7 +18,8 @@ export const load = async (event) => {
     promptGuideAvailability,
     skills,
     skillConfiguration,
-    documentTemplates
+    documentTemplates,
+    models
   ] = await Promise.all([
     eneo.assistants.get({ id: event.params.assistantId }),
     eneo.assistants.listMCPServers({ id: event.params.assistantId }),
@@ -43,7 +44,10 @@ export const load = async (event) => {
         })
       : Promise.resolve({ bindings: [], runtime: null }),
     // The organisation's document templates, for the file-creation capability's choice.
-    eneo.documentTemplates.listAvailable().catch(() => ({ items: [] }))
+    eneo.documentTemplates.listAvailable().catch(() => ({ items: [] })),
+    // Rerank models carry their security status for this space, so the
+    // material settings can offer only the ones the space allows.
+    eneo.models.list({ space: currentSpace })
   ]);
 
   // Help assistants are edited in the admin UI, not in a space. If someone
@@ -60,6 +64,7 @@ export const load = async (event) => {
     skillBindings: skillConfiguration.bindings,
     skillRuntime: skillConfiguration.runtime,
     supportsDirectSkills,
-    documentTemplates: documentTemplates.items
+    documentTemplates: documentTemplates.items,
+    rerankModels: models.rerankModels ?? []
   };
 };

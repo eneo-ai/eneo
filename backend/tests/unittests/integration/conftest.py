@@ -32,6 +32,7 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from eneo.spaces.api.space_router import router as space_router
 from eneo.spaces.space import Space
 from eneo.users.user import UserInDB
 
@@ -42,8 +43,9 @@ def authenticated_integration_app() -> Callable[[Container], FastAPI]:
         app = FastAPI()
         app.include_router(auth_router, prefix="/integrations/auth")
         app.include_router(router, prefix="/integrations")
+        app.include_router(space_router, prefix="/spaces")
         add_exception_handlers(app)
-        for route in (*auth_router.routes, *router.routes):
+        for route in (*auth_router.routes, *router.routes, *space_router.routes):
             if isinstance(route, APIRoute):
                 for dependency in route.dependant.dependencies:
                     if (

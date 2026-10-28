@@ -5,6 +5,7 @@ import sys
 from types import ModuleType
 from uuid import uuid4
 
+from eneo.integration.domain.task_params import SharepointContentTaskParam
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import KnowledgeOriginalAdmission, UploadInfoBlob
@@ -89,3 +90,27 @@ def test_job_deserializer_remaps_pre_rename_package_payloads() -> None:
     decoded_params = args[0]
     assert isinstance(decoded_params, UploadInfoBlob)
     assert decoded_params.__class__.__module__ == "eneo.jobs.task_models"
+
+
+def test_sync_jobs_queued_before_the_params_moved_still_load() -> None:
+    """Sync task parameters were pickled from the integration presentation
+    models before they moved to the domain; a job queued then must load."""
+    params = SharepointContentTaskParam(
+        user_id=uuid4(),
+        id=uuid4(),
+        integration_knowledge_id=uuid4(),
+        site_id="contoso.sharepoint.com,site,web",
+    )
+    current_module = SharepointContentTaskParam.__module__
+    try:
+        SharepointContentTaskParam.__module__ = "eneo.integration.presentation.models"
+        encoded = pickle.dumps(
+            {"t": 1, "f": Task.PULL_SHAREPOINT_CONTENT, "a": (params,)}
+        )
+    finally:
+        SharepointContentTaskParam.__module__ = current_module
+    assert b"eneo.integration.presentation.models" in encoded
+
+    decoded = deserialize_job(encoded)
+
+    assert decoded["a"] == (params,)

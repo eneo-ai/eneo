@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
@@ -16,6 +14,7 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import { CAPABILITIES, getCapability, hasBuiltinProvider } from "$lib/features/mcp/capabilities";
+  import { sendsCredentialOverPlainHttp } from "$lib/features/mcp/credentialTransport";
   import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
   import { resolve } from "$app/paths";
   import { untrack, tick } from "svelte";
@@ -183,6 +182,12 @@
   const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
   // A bundled tool runtime server: its connection comes from the deployment.
   const isBundled = $derived(http_auth_type === "bundled");
+  // Shown before submit; the backend refuses the same combination. A built-in
+  // provider's URL is never submitted (the backend sets its own endpoint), so a
+  // URL left over from the external source must not block saving it.
+  const credentialOverPlainHttp = $derived(
+    !isBuiltin && sendsCredentialOverPlainHttp(http_auth_type, http_url)
+  );
   const submitLabel = $derived(
     !isEditMode && isBuiltin && activateOnSave
       ? m.tools_save_activate()
@@ -848,11 +853,14 @@
                       bind:value={http_url}
                       required
                       aria-required="true"
-                      aria-describedby="url-hint"
+                      aria-invalid={credentialOverPlainHttp}
+                      aria-describedby={credentialOverPlainHttp
+                        ? "url-hint mcp-url-https-error"
+                        : "url-hint"}
                       placeholder={m.mcp_url_placeholder()}
                       class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
                     />
-                    {#if http_url}
+                    {#if http_url && !credentialOverPlainHttp}
                       <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
                         <span
                           class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
@@ -876,6 +884,11 @@
                     {/if}
                   </div>
                   <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
+                  {#if credentialOverPlainHttp}
+                    <Field.Error id="mcp-url-https-error" class="mt-1.5 text-xs">
+                      {m.mcp_credential_requires_https()}
+                    </Field.Error>
+                  {/if}
                 </div>
               </fieldset>
 
@@ -1170,6 +1183,7 @@
           disabled={submitting ||
             !name ||
             (!isBuiltin && !http_url) ||
+            credentialOverPlainHttp ||
             builtinIncomplete ||
             audienceIncomplete ||
             (http_auth_type === "api_key_header" &&

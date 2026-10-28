@@ -136,7 +136,47 @@ class TestDeltaExpansion:
             include=True,
             responses=[
                 _bad_request(),
-                {"value": [], "@odata.deltaLink": "x/delta?token=t1"},
+                {"value": [{"id": "1"}], "@odata.deltaLink": "x/delta?token=t1"},
+            ],
+        )
+
+        changes, token = await client.get_delta_changes("d1", "start")
+
+        assert ([c["id"] for c in changes], token) == (["1"], "t1")
+        assert _urls(client) == [
+            f"v1.0/drives/d1/root/delta?token=start&{EXPAND}",
+            "v1.0/drives/d1/root/delta?token=start",
+        ]
+
+
+class TestDeltaBaseline:
+    async def test_the_baseline_is_asked_for_without_listing_the_drive(self):
+        client = _client(
+            include=True,
+            responses=[
+                {
+                    "value": [],
+                    "@odata.deltaLink": (
+                        "https://graph.microsoft.com/v1.0/drives/d1/root/delta"
+                        "?token=now"
+                    ),
+                }
+            ],
+        )
+
+        token = await client.initialize_delta_token("d1")
+
+        assert token == "now"
+        assert _urls(client) == ["v1.0/drives/d1/root/delta?token=latest"]
+        assert client.list_item_fields_enabled
+
+    async def test_a_drive_that_rejects_latest_is_listed_for_its_baseline(self):
+        client = _client(
+            include=True,
+            responses=[
+                _bad_request(),
+                {"value": [{"id": "1"}], "@odata.nextLink": "x/delta?token=p2"},
+                {"value": [{"id": "2"}], "@odata.deltaLink": "x/delta?token=t1"},
             ],
         )
 
@@ -144,9 +184,40 @@ class TestDeltaExpansion:
 
         assert token == "t1"
         assert _urls(client) == [
-            f"v1.0/drives/d1/root/delta?{EXPAND}",
+            "v1.0/drives/d1/root/delta?token=latest",
             "v1.0/drives/d1/root/delta",
+            "x/delta?token=p2",
         ]
+        assert client.list_item_fields_enabled
+
+
+class TestDeltaTokenEncoding:
+    async def test_a_plus_in_the_token_survives_the_round_trip(self):
+        client = _client(
+            include=False,
+            responses=[
+                {
+                    "value": [],
+                    "@odata.deltaLink": (
+                        "https://graph.microsoft.com/v1.0/drives/d1/root/delta"
+                        "?token=ab%2Bcd%3D"
+                    ),
+                },
+                {
+                    "value": [],
+                    "@odata.deltaLink": (
+                        "https://graph.microsoft.com/v1.0/drives/d1/root/delta"
+                        "?token=next"
+                    ),
+                },
+            ],
+        )
+
+        token = await client.initialize_delta_token("d1")
+        assert token == "ab+cd="
+        await client.get_delta_changes("d1", token)
+
+        assert _urls(client)[1] == "v1.0/drives/d1/root/delta?token=ab%2Bcd%3D"
 
 
 class TestListColumns:
@@ -260,3 +331,66 @@ class TestAcceptedPaging:
 
         assert rows == [] and truncated is True
         assert client.client.get.await_count == 4  # 4 x 500 reaches the 2000-row budget
+
+
+class TestListFolderChildren:
+    async def test_stops_at_the_cap_and_reports_more(self):
+        client = _client(
+            include=False,
+            responses=[
+                {
+                    "value": [{"id": "1"}, {"id": "2"}],
+                    "@odata.nextLink": "https://g/next",
+                },
+                {"value": [{"id": "3"}]},
+            ],
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="root", max_items=2
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is True
+        assert len(_urls(client)) == 1
+
+    async def test_exactly_the_cap_on_the_last_page_is_not_truncated(self):
+        client = _client(
+            include=False, responses=[{"value": [{"id": "1"}, {"id": "2"}]}]
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="root", max_items=2
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is False
+
+    async def test_follows_pages_under_the_cap_without_truncating(self):
+        client = _client(
+            include=False,
+            responses=[
+                {"value": [{"id": "1"}], "@odata.nextLink": "https://g/next"},
+                {"value": [{"id": "2"}]},
+            ],
+        )
+
+        items, truncated = await client.list_folder_children(
+            site_id="s1", drive_id="d1", folder_id="f1", max_items=10
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is False
+        assert _urls(client)[0].startswith("v1.0/sites/s1/drives/d1/items/f1/children")
+
+    async def test_retries_without_the_expansion_when_graph_rejects_it(self):
+        client = _client(
+            include=True, responses=[_bad_request(), {"value": [{"id": "1"}]}]
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="f1", max_items=10
+        )
+
+        assert [item["id"] for item in items] == ["1"]
+        assert EXPAND in _urls(client)[0] and EXPAND not in _urls(client)[1]

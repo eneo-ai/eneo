@@ -78,6 +78,30 @@ async def test_markers_reject_malformed_versions(api_client, bearer_token):
 
 
 @pytest.mark.integration
+async def test_rc_markers_survive_stale_clients_and_advance_to_final(
+    api_client, bearer_token, monkeypatch
+):
+    from eneo.main.config import get_settings
+
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    for version in ("2.3.0-rc.1", "2.3.0-rc.2", "2.3.0"):
+        monkeypatch.setattr(get_settings(), "app_version", version)
+        for marker in ("seen", "announced"):
+            path = f"/api/v1/whats-new/{marker}/"
+            current = await api_client.put(
+                path, headers=headers, json={"version": version}
+            )
+            assert current.status_code == 200
+            assert current.json()[f"{marker}_version"] == version
+            # RC0 used the final content id. It must not poison later RC progress.
+            stale = await api_client.put(
+                path, headers=headers, json={"version": "2.3.0"}
+            )
+            assert stale.status_code == 200
+            assert stale.json()[f"{marker}_version"] == version
+
+
+@pytest.mark.integration
 async def test_markers_are_session_only(api_client, admin_user_api_key):
     headers = {"X-API-Key": admin_user_api_key.key}
 

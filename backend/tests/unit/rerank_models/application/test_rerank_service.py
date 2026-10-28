@@ -172,3 +172,93 @@ class TestSpecForDefault:
 
         assert spec is None
         assert logger.warning.call_count == 1
+
+
+class TestSpecForModel:
+    async def test_no_choice_means_no_spec(self):
+        service = _service([])
+
+        assert await service.spec_for_model(None, "q", None) is None
+        service.rerank_model_repo.one_or_none.assert_not_called()
+
+    async def test_a_model_that_is_gone_or_disabled_means_no_spec_logged_once(self):
+        service = _service([])
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=None)
+        model_id = uuid4()
+
+        with patch.object(service_module, "logger") as logger:
+            first = await service.spec_for_model(model_id, "q", None)
+            second = await service.spec_for_model(model_id, "q", None)
+
+        assert first is None and second is None
+        assert logger.warning.call_count == 1
+
+    async def test_builds_a_spec_for_the_chosen_model(self):
+        model = _model()
+        service = _service([])
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=model)
+
+        with (
+            patch.object(
+                service_module,
+                "load_active_litellm_provider",
+                AsyncMock(return_value=_provider()),
+            ),
+            patch.object(
+                service_module, "build_litellm_provider_kwargs", return_value={}
+            ),
+        ):
+            spec = await service.spec_for_model(model.id, "the question", None)
+
+        assert spec is not None
+        assert spec.query == "the question"
+        assert spec.model_name == model.name
+        service.rerank_model_repo.one_or_none.assert_awaited_once_with(model.id)
+
+    async def test_the_spec_takes_factor_and_cap_from_the_model(self):
+        model = _model(candidate_factor=2, max_candidates=30)
+        service = _service([])
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=model)
+
+        with (
+            patch.object(
+                service_module,
+                "load_active_litellm_provider",
+                AsyncMock(return_value=_provider()),
+            ),
+            patch.object(
+                service_module, "build_litellm_provider_kwargs", return_value={}
+            ),
+        ):
+            spec = await service.spec_for_model(model.id, "q", None)
+
+        assert spec is not None
+        assert spec.candidate_factor == 2
+        assert spec.max_candidates == 30
+        assert spec.candidate_count(10) == 20
+        assert spec.candidate_count(80) == 30
+
+
+class TestSelectable:
+    async def test_missing_or_disabled_is_not_selectable(self):
+        service = _service([])
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=None)
+        assert await service.selectable(uuid4(), None) is False
+
+        service.rerank_model_repo.one_or_none = AsyncMock(
+            return_value=_model(can_access=False)
+        )
+        assert await service.selectable(uuid4(), None) is False
+
+    async def test_classification_gate(self):
+        model = _model(security_classification=MagicMock(security_level=1))
+        service = _service([], security_enabled=True)
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=model)
+        too_high = MagicMock()
+        too_high.is_greater_than.return_value = True
+        fine = MagicMock()
+        fine.is_greater_than.return_value = False
+
+        assert await service.selectable(model.id, too_high) is False
+        assert await service.selectable(model.id, fine) is True
+        assert await service.selectable(model.id, None) is True

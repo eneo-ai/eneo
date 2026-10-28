@@ -2,6 +2,7 @@
 /** @typedef {import('../types/resources').EmbeddingModel} EmbeddingModel */
 /** @typedef {import('../types/resources').TranscriptionModel} TranscriptionModel */
 /** @typedef {import('../types/resources').ImageModel} ImageModel */
+/** @typedef {import('../types/resources').RerankModel} RerankModel */
 /** @typedef {import('../client/client').EneoError} EneoError */
 
 /**
@@ -27,18 +28,26 @@ export function initModels(client) {
         completionModels: res.completion_models,
         embeddingModels: res.embedding_models,
         transcriptionModels: res.transcription_models,
-        imageModels: res.image_models
+        imageModels: res.image_models,
+        rerankModels: res.rerank_models
       };
     },
 
     /**
-     * Update either an existing Completion, Embedding, Transcription or Image Model, only one can be processed at any time
-     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/image-models/{id}/">}} T
+     * Update either an existing Completion, Embedding, Transcription, Image or Rerank Model, only one can be processed at any time
+     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel: {id:string}, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/image-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/rerank-models/{id}/">}} T
      * @param {T} params
-     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : T extends { transcriptionModel: { id: string } } ? TranscriptionModel : ImageModel>}
+     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : T extends { transcriptionModel: { id: string } } ? TranscriptionModel : T extends { imageModel: { id: string } } ? ImageModel : RerankModel>}
      * @throws {EneoError}
      * */
-    update: async ({ completionModel, embeddingModel, transcriptionModel, imageModel, update }) => {
+    update: async ({
+      completionModel,
+      embeddingModel,
+      transcriptionModel,
+      imageModel,
+      rerankModel,
+      update
+    }) => {
       if (completionModel) {
         const { id } = completionModel;
         const res = await client.fetch("/api/v1/completion-models/{id}/", {
@@ -66,9 +75,18 @@ export function initModels(client) {
         });
         /** @ts-expect-error Jsdoc can't properly infer return type */
         return res;
-      } else {
+      } else if (imageModel) {
         const { id } = imageModel;
         const res = await client.fetch("/api/v1/image-models/{id}/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": update }
+        });
+        /** @ts-expect-error Jsdoc can't properly infer return type */
+        return res;
+      } else {
+        const { id } = rerankModel;
+        const res = await client.fetch("/api/v1/rerank-models/{id}/", {
           method: "post",
           params: { path: { id } },
           requestBody: { "application/json": update }

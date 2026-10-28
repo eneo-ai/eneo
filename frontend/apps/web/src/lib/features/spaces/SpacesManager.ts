@@ -1,7 +1,5 @@
 /*
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import { goto } from "$app/navigation";
@@ -46,9 +44,15 @@ function SpacesManager(data: SpacesManagerParams) {
   );
 
   // Function definitions --------------------------------------------------------
+  let navigationVersion = 0;
+  let refreshSequence = 0;
+  let spaceUpdates = 0;
+  const refreshVersions = { applications: 0, knowledge: 0 };
+
   /** Will update the current space if a new space is passed in via page data */
   function watchPageData(data: { currentSpace: Space }) {
     if (data.currentSpace.id !== get(currentSpace).id) {
+      navigationVersion += 1;
       currentSpace.set(data.currentSpace);
     }
   }
@@ -64,28 +68,49 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  async function refreshCurrentSpace(type?: "applications" | "knowledge") {
-    let $currentSpace = get(currentSpace);
+  /** Re-reads the current space, or one part of it; false when the request failed. */
+  async function refreshCurrentSpace(type?: "applications" | "knowledge"): Promise<boolean> {
+    const requestedSpace = get(currentSpace);
+    const navigation = navigationVersion;
+    const request = ++refreshSequence;
+    const updates = spaceUpdates;
+    if (type) refreshVersions[type] = request;
+    else {
+      refreshVersions.applications = request;
+      refreshVersions.knowledge = request;
+    }
+    const isCurrent = () =>
+      navigation === navigationVersion &&
+      requestedSpace.id === get(currentSpace).id &&
+      (type
+        ? refreshVersions[type] === request
+        : updates === spaceUpdates &&
+          Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
         switch (type) {
           case "applications": {
-            const applications = await eneo.spaces.listApplications($currentSpace);
-            $currentSpace = { ...$currentSpace, applications };
+            const applications = await eneo.spaces.listApplications(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, applications }));
             break;
           }
           case "knowledge": {
-            const knowledge = await eneo.spaces.listKnowledge($currentSpace);
-            $currentSpace = { ...$currentSpace, knowledge };
+            const knowledge = await eneo.spaces.listKnowledge(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, knowledge }));
             break;
           }
         }
       } else {
-        $currentSpace = await eneo.spaces.get($currentSpace);
+        const space = await eneo.spaces.get(requestedSpace);
+        if (!isCurrent()) return false;
+        currentSpace.set(space);
       }
-      currentSpace.set($currentSpace);
+      return true;
     } catch (e) {
       console.error("Error updating current space", e);
+      return false;
     }
   }
 
@@ -95,6 +120,7 @@ function SpacesManager(data: SpacesManagerParams) {
     space?: { id: string } | undefined
   ) {
     const { id } = space ?? get(currentSpace);
+    const navigation = navigationVersion;
     try {
       const updatedSpace = await eneo.spaces.update({ space: { id }, update });
       userSpaces.update((spaces) => {
@@ -104,8 +130,11 @@ function SpacesManager(data: SpacesManagerParams) {
         }
         return spaces;
       });
-      // Only update current if no other space was given
-      if (space === undefined) {
+      // The mutation still updates the list, but a late response cannot replace
+      // the space reached since it began, including navigation back to this id.
+      if (space === undefined && navigation === navigationVersion && id === get(currentSpace).id) {
+        // A full re-read still in flight began before this and must not put the old space back.
+        spaceUpdates++;
         currentSpace.set(updatedSpace);
       }
       return updatedSpace;

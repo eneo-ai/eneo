@@ -19,6 +19,9 @@ from eneo.image_models.presentation.image_model_models import (
     ImageModelSecurityStatus,
 )
 from eneo.main.container.container import Container
+from eneo.rerank_models.presentation.rerank_model_models import (
+    RerankModelSecurityStatus,
+)
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.transcription_models.presentation.transcription_model_models import (
@@ -54,6 +57,7 @@ async def get_models(
     transcription_model_crud_service = container.transcription_model_crud_service()
     embedding_model_crud_service = container.embedding_model_crud_service()
     image_model_crud_service = container.image_model_crud_service()
+    rerank_model_crud_service = container.rerank_model_crud_service()
     user = container.user()
     space_service = container.space_service()
     space = None
@@ -64,6 +68,7 @@ async def get_models(
     tms = await transcription_model_crud_service.get_transcription_models()
     ems = await embedding_model_crud_service.get_embedding_models()
     ims = await image_model_crud_service.get_image_models()
+    rms = await rerank_model_crud_service.get_rerank_models()
 
     completion_models: list[CompletionModelSecurityStatus] = []
     for cm in cms:
@@ -135,9 +140,27 @@ async def get_models(
                 image_model_public.meets_security_classification = None
         image_models.append(image_model_public)
 
+    rerank_models: list[RerankModelSecurityStatus] = []
+    for rm in rms:
+        rerank_model_public = RerankModelSecurityStatus.from_domain(rm)
+        if space:
+            if user.tenant.security_enabled:
+                if space.security_classification is None:
+                    rerank_model_public.meets_security_classification = True
+                else:
+                    rerank_model_public.meets_security_classification = (
+                        not space.security_classification.is_greater_than(
+                            rm.security_classification
+                        )
+                    )
+            else:
+                rerank_model_public.meets_security_classification = None
+        rerank_models.append(rerank_model_public)
+
     return ModelsPresentation(
         completion_models=completion_models,
         embedding_models=embedding_models,
         transcription_models=transcription_models,
         image_models=image_models,
+        rerank_models=rerank_models,
     )

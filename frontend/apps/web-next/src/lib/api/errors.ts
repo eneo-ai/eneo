@@ -156,6 +156,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9059: "eneo_error_9059", // PASSWORD_POLICY_VIOLATION
   9060: "eneo_error_9060", // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
   9061: "eneo_error_9061", // CURRENT_PASSWORD_INCORRECT
+  9070: "eneo_error_9070", // PASSWORD_CHANGE_REQUIRED
   // Model & provider issues
   9002: "eneo_error_9002", // UNSUPPORTED_MODEL
   9020: "eneo_error_9020", // NO_MODEL_SELECTED
@@ -176,6 +177,9 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Model lifecycle
   9039: "eneo_error_9039", // MODEL_IN_USE
+  // Icons
+  9075: "eneo_error_9075", // ICON_IN_USE
+  9076: "eneo_error_9076", // ICON_NOT_ATTACHABLE
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle
@@ -193,9 +197,32 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
  * backend error → backend's (English) message; anything else → generic
  * "request failed" fallback.
  */
+/**
+ * An integration refusal names its cause in the payload's `code`. A Microsoft
+ * error code (AADSTS…) in the backend's message is kept: an administrator looks
+ * it up.
+ */
+const INTEGRATION_FAILURE_MESSAGES: Record<string, (t: (key: string) => string) => string> = {
+  sharepoint_credentials_invalid: (t) => t("integration_error_credentials_invalid"),
+  oauth_code_rejected: (t) => t("integration_error_oauth_code_rejected"),
+  oauth_client_rejected: (t) => t("integration_error_oauth_client_rejected"),
+  integration_knowledge_syncing: (t) => t("integration_error_syncing")
+};
+const AADSTS_CODE = /\bAADSTS\d+\b/;
+
+function getIntegrationFailureMessage(
+  error: EneoApiError,
+  t: (key: string) => string
+): string | null {
+  const describe = error.reason ? INTEGRATION_FAILURE_MESSAGES[error.reason] : undefined;
+  if (!describe) return null;
+  const microsoft = AADSTS_CODE.exec(error.message)?.[0];
+  return microsoft ? `${describe(t)} (${microsoft})` : describe(t);
+}
+
 export function getErrorMessage(error: unknown, t: (key: string) => string): string {
   if (error instanceof EneoApiError) {
-    const message = getErrorMessageForCode(error.code, t);
+    const message = getIntegrationFailureMessage(error, t) ?? getErrorMessageForCode(error.code, t);
     if (message) return message;
     if (error.message) return error.message;
   }

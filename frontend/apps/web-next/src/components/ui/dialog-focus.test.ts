@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-import { fireEvent } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { returnTarget, trackFocus } from "./dialog-focus";
+import { fireEvent, renderHook } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { returnTarget, trackFocus, useReturnFocus } from "./dialog-focus";
+
+const notifyFocusLost = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/focus-rescue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/focus-rescue")>()),
+  notifyFocusLost
+}));
 
 beforeAll(trackFocus);
 afterEach(() => {
   document.body.innerHTML = "";
+  notifyFocusLost.mockClear();
 });
 
 function html(markup: string) {
@@ -75,5 +82,78 @@ describe("returnTarget", () => {
     byId("edit").focus();
     byId("edit").blur();
     expect(returnTarget()).toBeNull();
+  });
+});
+
+describe("useReturnFocus", () => {
+  const noTrigger = { current: null };
+
+  /** A dialog opened from the Edit button, as Astryx opens it: focus moves inside. */
+  function openFromEdit() {
+    html(
+      `<button id="edit">Redigera</button><dialog id="dialog"><button id="inside">Stäng</button></dialog>`
+    );
+    byId("edit").focus();
+    const hook = renderHook(({ open }) => useReturnFocus(open, noTrigger), {
+      initialProps: { open: true }
+    });
+    const dialog = byId("dialog") as HTMLDialogElement;
+    dialog.showModal();
+    expect(document.activeElement).toBe(byId("inside"));
+    return { hook, dialog };
+  }
+
+  it("does not report when the dialog returned focus itself", () => {
+    const { hook, dialog } = openFromEdit();
+    dialog.close();
+    byId("edit").focus();
+
+    hook.rerender({ open: false });
+
+    expect(document.activeElement).toBe(byId("edit"));
+    expect(notifyFocusLost).not.toHaveBeenCalled();
+  });
+
+  it("returns focus to the opener and does not report when that worked", () => {
+    const { hook, dialog } = openFromEdit();
+    dialog.close();
+
+    hook.rerender({ open: false });
+
+    expect(document.activeElement).toBe(byId("edit"));
+    expect(notifyFocusLost).not.toHaveBeenCalled();
+  });
+
+  it("reports once when the opener is gone and focus stays lost", () => {
+    const { hook, dialog } = openFromEdit();
+    byId("edit").remove();
+    dialog.close();
+
+    hook.rerender({ open: false });
+
+    expect(notifyFocusLost).toHaveBeenCalledTimes(1);
+    hook.unmount();
+    expect(notifyFocusLost).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports once when the dialog unmounts while open and the opener is gone", () => {
+    const { hook, dialog } = openFromEdit();
+    byId("edit").remove();
+    dialog.remove();
+    expect(document.activeElement).toBe(document.body);
+
+    hook.unmount();
+
+    expect(notifyFocusLost).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns focus to the opener when the dialog unmounts while open", () => {
+    const { hook, dialog } = openFromEdit();
+    dialog.remove();
+
+    hook.unmount();
+
+    expect(document.activeElement).toBe(byId("edit"));
+    expect(notifyFocusLost).not.toHaveBeenCalled();
   });
 });

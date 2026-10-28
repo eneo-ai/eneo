@@ -27,6 +27,8 @@ class SharePointSubscriptionMapper(
             "last_renewal_failed_at": entity.last_renewal_failed_at,
             "last_renewal_error": entity.last_renewal_error,
             "last_webhook_received_at": entity.last_webhook_received_at,
+            "notification_url": entity.notification_url,
+            "lifecycle_notification_url": entity.lifecycle_notification_url,
         }
         # Only include timestamps if they're set (not None)
         # This allows database defaults to apply for new entities
@@ -51,6 +53,8 @@ class SharePointSubscriptionMapper(
             last_renewal_failed_at=db_model.last_renewal_failed_at,
             last_renewal_error=db_model.last_renewal_error,
             last_webhook_received_at=db_model.last_webhook_received_at,
+            notification_url=db_model.notification_url,
+            lifecycle_notification_url=db_model.lifecycle_notification_url,
             created_at=db_model.created_at,
             updated_at=db_model.updated_at,
         )

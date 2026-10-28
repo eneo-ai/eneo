@@ -894,6 +894,8 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"metadata_json": {}},
         {"icon_id": uuid4()},
         {"skill_binding_intents": []},
+        {"rerank_model_id": uuid4()},
+        {"rerank_model_id": None},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(
@@ -1231,3 +1233,54 @@ async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup)
     await setup.service._attach_history_derivatives(session=session)
 
     assert question.files == [pdf, derived]
+
+
+async def test_update_rejects_a_rerank_model_the_space_may_not_use(setup: Setup):
+    space = MagicMock()
+    space.security_classification = MagicMock(name="classification")
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+    setup.service.rerank_service = AsyncMock()
+    setup.service.rerank_service.selectable.return_value = False
+    chosen = uuid4()
+
+    with pytest.raises(
+        BadRequestException, match="rerank model is not available in the space"
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, rerank_model_id=chosen
+        )
+
+    setup.service.rerank_service.selectable.assert_awaited_once_with(
+        chosen, space.security_classification
+    )
+
+
+async def test_update_persists_an_allowed_rerank_model(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+    setup.service.rerank_service.selectable.return_value = True
+    chosen = uuid4()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, rerank_model_id=chosen)
+
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert update.rerank_model_id == chosen
+
+
+async def test_update_clears_the_rerank_model_without_asking_the_service(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, rerank_model_id=None)
+
+    setup.service.rerank_service.selectable.assert_not_awaited()
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert update.rerank_model_id is None
+
+
+async def test_partial_update_leaves_the_rerank_model_alone(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service.rerank_service.selectable.assert_not_awaited()
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert "rerank_model_id" not in update.scalar_values()

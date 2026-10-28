@@ -7,13 +7,22 @@ from uuid import uuid4
 import pytest
 
 from eneo.info_blobs.info_blob import SourceMetadataEntry
-from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_results as sync_results,
+)
+from eneo.integration.infrastructure.content_service.parsing import sanitize_text_for_db
+from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
-    sanitize_text_for_db,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_index import (
+    SharePointIndex,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
     SharePointColumnCatalog,
     source_metadata_fingerprint,
+)
+from eneo.integration.infrastructure.content_service.utils import (
+    ExtractionResult,
 )
 
 COLUMNS = [{"name": "Dokumenttyp", "displayName": "Dokumenttyp", "choice": {}}]
@@ -45,16 +54,15 @@ def integration_knowledge():
 @pytest.fixture
 def deps(user):
     return {
-        "job_service": AsyncMock(),
         "oauth_token_repo": AsyncMock(),
-        "user_integration_repo": AsyncMock(),
         "user": user,
         "info_blob_service": AsyncMock(),
         "integration_knowledge_repo": AsyncMock(),
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
-        "tenant_app_auth_service": AsyncMock(),
+        "org_token_provider": AsyncMock(),
+        "change_key_service": AsyncMock(),
     }
 
 
@@ -74,9 +82,9 @@ class TestColumnCatalog:
     async def test_is_read_once_per_drive(self, service):
         client = _graph_client()
 
-        first = await service._column_catalog(client, "d1")
-        second = await service._column_catalog(client, "d1")
-        await service._column_catalog(client, "d2")
+        first = await service._index._column_catalog(client, "d1")
+        second = await service._index._column_catalog(client, "d1")
+        await service._index._column_catalog(client, "d2")
 
         assert first is second
         assert list(first.columns) == ["Dokumenttyp"]
@@ -86,8 +94,8 @@ class TestColumnCatalog:
         client = _graph_client()
         client.get_list_columns = AsyncMock(side_effect=RuntimeError("403"))
 
-        catalog = await service._column_catalog(client, "d1")
-        again = await service._column_catalog(client, "d1")
+        catalog = await service._index._column_catalog(client, "d1")
+        again = await service._index._column_catalog(client, "d1")
 
         assert catalog is None and again is None
         assert client.get_list_columns.await_count == 1
@@ -95,49 +103,61 @@ class TestColumnCatalog:
     async def test_skipped_without_drive_or_when_expansion_is_off(self, service):
         client = _graph_client(enabled=False)
 
-        assert await service._column_catalog(client, None) is None
-        assert await service._column_catalog(client, "d1") is None
+        assert await service._index._column_catalog(client, None) is None
+        assert await service._index._column_catalog(client, "d1") is None
         client.get_list_columns.assert_not_awaited()
 
     async def test_successfully_read_empty_catalog_is_not_unavailable(self, service):
-        catalog = await service._column_catalog(_graph_client(columns=[]), "d1")
+        catalog = await service._index._column_catalog(_graph_client(columns=[]), "d1")
         assert catalog is not None and catalog.is_empty
 
 
 class TestSourceMetadataFor:
     async def test_extracts_entries_from_the_item(self, service):
-        entries = await service._source_metadata_for(_graph_client(), "d1", ITEM)
+        entries = await service._index.source_metadata_for(_graph_client(), "d1", ITEM)
         assert entries == ENTRIES
 
     async def test_extraction_errors_leave_metadata_unread(self, service, monkeypatch):
-        service._column_catalogs["d1"] = SharePointColumnCatalog.from_graph(COLUMNS)
+        service._index._column_catalogs["d1"] = SharePointColumnCatalog.from_graph(
+            COLUMNS
+        )
 
         def explode(item, catalog):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(
             "eneo.integration.infrastructure.content_service."
-            "sharepoint_content_service.extract_source_metadata",
+            "sharepoint_index.extract_source_metadata",
             explode,
         )
 
-        assert await service._source_metadata_for(_graph_client(), "d1", ITEM) is None
+        assert (
+            await service._index.source_metadata_for(_graph_client(), "d1", ITEM)
+            is None
+        )
 
     @pytest.mark.parametrize(
         "item", [{"id": "i1"}, {"listItem": {}}, {"listItem": {"fields": None}}]
     )
     async def test_missing_fields_leave_metadata_unread(self, service, item):
-        assert await service._source_metadata_for(_graph_client(), "d1", item) is None
+        assert (
+            await service._index.source_metadata_for(_graph_client(), "d1", item)
+            is None
+        )
 
     async def test_successfully_read_empty_fields_clear_properties(self, service):
         item = {"id": "i1", "listItem": {"fields": {}}}
-        assert await service._source_metadata_for(_graph_client(), "d1", item) == []
+        assert (
+            await service._index.source_metadata_for(_graph_client(), "d1", item) == []
+        )
 
     async def test_successfully_read_no_admitted_columns_clears_properties(
         self, service
     ):
         assert (
-            await service._source_metadata_for(_graph_client(columns=[]), "d1", ITEM)
+            await service._index.source_metadata_for(
+                _graph_client(columns=[]), "d1", ITEM
+            )
             == []
         )
 
@@ -146,7 +166,7 @@ class TestHashAndChangeKey:
     def test_hash_without_metadata_matches_the_legacy_digest(self):
         text = "Hello"
         assert (
-            SharePointContentService._content_hash(text, [], title="Doc")
+            SharePointIndex._content_hash(text, [], title="Doc")
             == hashlib.sha256(text.encode("utf-8")).digest()
         )
 
@@ -157,54 +177,37 @@ class TestHashAndChangeKey:
                 name="Dokumenttyp", label="Dokumenttyp", value="Policy", kind="choice"
             )
         ]
-        plain = SharePointContentService._content_hash(text, [], title="Doc")
-        with_meta = SharePointContentService._content_hash(text, ENTRIES, title="Doc")
+        plain = SharePointIndex._content_hash(text, [], title="Doc")
+        with_meta = SharePointIndex._content_hash(text, ENTRIES, title="Doc")
 
         assert with_meta != plain
-        assert with_meta == SharePointContentService._content_hash(
+        assert with_meta == SharePointIndex._content_hash(
             text, list(ENTRIES), title="Doc"
         )
-        assert with_meta != SharePointContentService._content_hash(
-            text, other, title="Doc"
-        )
+        assert with_meta != SharePointIndex._content_hash(text, other, title="Doc")
 
     def test_change_key_folds_in_the_metadata_fingerprint(self):
-        assert (
-            SharePointContentService._change_key_with_metadata("ctag", [], title="Doc")
-            == "ctag"
+        assert SharePointIndex.change_key("ctag", [], title="Doc") == "ctag"
+        assert SharePointIndex.change_key(None, ENTRIES, title="Doc") is None
+        assert SharePointIndex.change_key("ctag", ENTRIES, title="Doc") == (
+            f"ctag#{source_metadata_fingerprint(ENTRIES, title='Doc')}"
         )
-        assert (
-            SharePointContentService._change_key_with_metadata(
-                None, ENTRIES, title="Doc"
-            )
-            is None
-        )
-        assert SharePointContentService._change_key_with_metadata(
-            "ctag", ENTRIES, title="Doc"
-        ) == (f"ctag#{source_metadata_fingerprint(ENTRIES, title='Doc')}")
 
     def test_unread_metadata_does_not_skip_a_delta_as_a_duplicate(self):
-        assert (
-            SharePointContentService._change_key_with_metadata(
-                "ctag", None, title="Doc"
-            )
-            is None
-        )
+        assert SharePointIndex.change_key("ctag", None, title="Doc") is None
 
     def test_rename_changes_both_the_hash_and_the_delta_key(self):
-        assert SharePointContentService._content_hash(
+        assert SharePointIndex._content_hash(
             "Body", ENTRIES, title="Doc"
-        ) != SharePointContentService._content_hash("Body", ENTRIES, title="Renamed")
-        assert SharePointContentService._change_key_with_metadata(
+        ) != SharePointIndex._content_hash("Body", ENTRIES, title="Renamed")
+        assert SharePointIndex.change_key(
             "ctag", ENTRIES, title="Doc"
-        ) != SharePointContentService._change_key_with_metadata(
-            "ctag", ENTRIES, title="Renamed"
-        )
+        ) != SharePointIndex.change_key("ctag", ENTRIES, title="Renamed")
 
     def test_rename_without_properties_keeps_the_legacy_hash(self):
-        assert SharePointContentService._content_hash(
+        assert SharePointIndex._content_hash(
             "Body", [], title="Doc"
-        ) == SharePointContentService._content_hash("Body", [], title="Renamed")
+        ) == SharePointIndex._content_hash("Body", [], title="Renamed")
 
 
 def _existing(content_hash: bytes, source_metadata):
@@ -231,18 +234,19 @@ class TestProcessInfoBlob:
         publish = AsyncMock(return_value=published)
         deps["info_blob_service"].publish_info_blob_without_validation = publish
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
         info_blob_add = publish.await_args.args[0]
         assert info_blob_add.source_metadata == ENTRIES
-        assert info_blob_add.content_hash == SharePointContentService._content_hash(
+        assert info_blob_add.content_hash == SharePointIndex._content_hash(
             sanitize_text_for_db("Body"), ENTRIES, title="Doc"
         )
 
@@ -261,12 +265,13 @@ class TestProcessInfoBlob:
         publish = AsyncMock(return_value=published)
         deps["info_blob_service"].publish_info_blob_without_validation = publish
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -275,7 +280,7 @@ class TestProcessInfoBlob:
     async def test_unchanged_text_and_metadata_skip_republish(
         self, service, deps, integration_knowledge
     ):
-        same_hash = SharePointContentService._content_hash(
+        same_hash = SharePointIndex._content_hash(
             sanitize_text_for_db("Body"), ENTRIES, title="Doc"
         )
         repo = deps["info_blob_service"].repo
@@ -286,12 +291,13 @@ class TestProcessInfoBlob:
         publish = AsyncMock()
         deps["info_blob_service"].publish_info_blob_without_validation = publish
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=list(ENTRIES),
         )
 
@@ -307,20 +313,21 @@ class TestProcessInfoBlob:
         if unavailable == "columns":
             client.get_list_columns.side_effect = RuntimeError("403")
         item = {"id": "i1"} if unavailable == "fields" else ITEM
-        metadata = await service._source_metadata_for(client, "d1", item)
+        metadata = await service._index.source_metadata_for(client, "d1", item)
         repo = deps["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge.return_value = _existing(
-            SharePointContentService._content_hash("Body", ENTRIES, title="Doc"),
+            SharePointIndex._content_hash("Body", ENTRIES, title="Doc"),
             ENTRIES,
         )
         publish = deps["info_blob_service"].publish_info_blob_without_validation
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text=body,
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=metadata,
         )
 
@@ -336,16 +343,17 @@ class TestProcessInfoBlob:
     ):
         repo = deps["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge.return_value = _existing(
-            SharePointContentService._content_hash("Body", ENTRIES, title="Doc"),
+            SharePointIndex._content_hash("Body", ENTRIES, title="Doc"),
             ENTRIES,
         )
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=[],
         )
 
@@ -361,12 +369,13 @@ class TestProcessInfoBlob:
         repo = deps["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge.return_value = None
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=None,
         )
 
@@ -381,16 +390,17 @@ class TestProcessInfoBlob:
     ):
         repo = deps["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge.return_value = _existing(
-            SharePointContentService._content_hash("Body", ENTRIES, title="Doc"),
+            SharePointIndex._content_hash("Body", ENTRIES, title="Doc"),
             ENTRIES,
         )
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Renamed",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -406,12 +416,13 @@ class TestProcessInfoBlob:
             hashlib.sha256(b"Body").digest(), None
         )
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Renamed",
             text="Body",
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=sync_results.initialize_stats(),
             source_metadata=[],
         )
 
@@ -438,15 +449,12 @@ class TestDeltaMetadata:
         )
         deps["oauth_token_repo"].one.return_value = token
         deps["session"].sync_session = None
-        old_key = service._change_key_with_metadata(
-            "same-ctag", ENTRIES, title="Doc.docx"
-        )
-        service.change_key_service = AsyncMock()
-        service.change_key_service.should_process.side_effect = (
+        old_key = service._index.change_key("same-ctag", ENTRIES, title="Doc.docx")
+        service._index.change_key_service.should_process.side_effect = (
             lambda **kwargs: kwargs["change_key"] != old_key
         )
         existing = _existing(
-            service._content_hash("Body", ENTRIES, title="Doc.docx"), ENTRIES
+            service._index._content_hash("Body", ENTRIES, title="Doc.docx"), ENTRIES
         )
         existing.title = "Doc.docx"
         deps[
@@ -472,7 +480,9 @@ class TestDeltaMetadata:
                 "new-token",
             )
         )
-        client.get_file_content_by_id = AsyncMock(return_value=("Body", None))
+        client.get_file_extraction_by_id = AsyncMock(
+            return_value=ExtractionResult.ok("Body")
+        )
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
 
@@ -494,7 +504,7 @@ class TestDeltaMetadata:
             assert publish.await_args.args[0].source_metadata == ENTRIES
         else:
             publish.assert_not_awaited()
-        assert client.get_file_content_by_id.await_count == int(
+        assert client.get_file_extraction_by_id.await_count == int(
             not metadata_available or title == "Renamed.docx"
         )
         assert integration_knowledge.delta_token == "new-token"

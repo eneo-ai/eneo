@@ -29,7 +29,8 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
@@ -430,6 +431,22 @@
         is_active: true,
         description: model.description ?? null,
         cost_per_minute: model.costPerMinute ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
+      });
+    }
+    if (modelType === "rerank") {
+      return eneo.tenantModels.createRerank({
+        provider_id: providerId,
+        name: model.name,
+        display_name: model.displayName,
+        family: model.family ?? "openai",
+        hosting: model.hosting ?? "swe",
+        is_active: true,
+        description: model.description ?? null,
+        candidate_factor: model.candidateFactor,
+        max_candidates: model.maxCandidates,
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null

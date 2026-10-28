@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -369,3 +370,37 @@ async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["prompt_files"] == [stored_attachment, runtime_attachment_image]
     assert assistant_with_model.attachments == [stored_attachment]
+
+
+@pytest.mark.asyncio
+async def test_ask_hands_the_rerank_spec_to_retrieval(assistant_with_model):
+    embedding_model = MagicMock(id=1)
+    assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock()
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+    spec = object()
+
+    await assistant_with_model.ask(
+        question="test",
+        references_service=references_service,
+        completion_service=completion_service,
+        version=2,
+        rerank=spec,
+    )
+
+    assert references_service.get_references.call_args.kwargs["rerank"] is spec
+
+
+def test_update_sets_and_clears_the_rerank_model(assistant_with_model):
+    chosen = uuid4()
+
+    assistant_with_model.update(rerank_model_id=chosen)
+    assert assistant_with_model.rerank_model_id == chosen
+
+    assistant_with_model.update(name="renamed")
+    assert assistant_with_model.rerank_model_id == chosen
+
+    assistant_with_model.update(rerank_model_id=None)
+    assert assistant_with_model.rerank_model_id is None

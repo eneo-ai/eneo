@@ -1,14 +1,14 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { EllipsisVertical, Undo, Trash2 } from "@lucide/svelte";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import Undo from "@lucide/svelte/icons/undo";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
   import TemplateRestoreDialog from "$lib/features/templates/components/admin/TemplateRestoreDialog.svelte";

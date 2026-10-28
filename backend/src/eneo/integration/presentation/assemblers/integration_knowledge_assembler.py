@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
-from eneo.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelPublicLegacy,
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
 )
 from eneo.integration.presentation.models import (
     IntegrationKnowledgeMetaData,
@@ -21,9 +21,7 @@ class IntegrationKnowledgeAssembler:
         cls,
         item: "IntegrationKnowledge",
     ) -> IntegrationKnowledgePublic:
-        embedding_model = EmbeddingModelPublicLegacy.model_validate(
-            item.embedding_model
-        )
+        embedding_model = EmbeddingModelPublic.from_domain(item.embedding_model)
         integration_type = (
             item.user_integration.tenant_integration.integration.integration_type
         )
@@ -44,7 +42,7 @@ class IntegrationKnowledgeAssembler:
             id=item.id,
             name=item.name,
             original_name=getattr(item, "original_name", None),
-            url=item.url or "",
+            url=item.url,
             tenant_id=item.tenant_id,
             space_id=item.space_id,
             user_integration_id=item.user_integration.id,
@@ -61,8 +59,12 @@ class IntegrationKnowledgeAssembler:
             wrapper_name=getattr(item, "wrapper_name", None),
             metadata=IntegrationKnowledgeMetaData(
                 size=item.size,
+                document_count=getattr(item, "document_count", 0),
                 last_sync_summary=getattr(item, "last_sync_summary", None),
                 last_synced_at=getattr(item, "last_synced_at", None),
+                last_sync_status=getattr(item, "last_sync_status", "never"),
+                last_sync_error=getattr(item, "last_sync_error", None),
+                last_sync_attempted_at=getattr(item, "last_sync_attempted_at", None),
                 sharepoint_subscription_expires_at=sharepoint_subscription_expires_at,
             ),
             integration_type=integration_type,

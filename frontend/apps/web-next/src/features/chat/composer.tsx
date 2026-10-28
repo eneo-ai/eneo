@@ -29,6 +29,7 @@ import {
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
+import { tableQuoteSummary } from "./side-panel/question-quote";
 import type { useAttachments } from "./use-attachments";
 
 type Attachments = ReturnType<typeof useAttachments>;
@@ -246,6 +247,8 @@ export type ComposerQuote = {
 /** The quote waiting in the composer's drawer, with where it is from and a way to drop it. */
 function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
   const t = useTranslations();
+  // No room for a quoted table itself here: its columns and size stand in.
+  const table = tableQuoteSummary(quote.text);
   return (
     <div
       role="group"
@@ -254,7 +257,20 @@ function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
     >
       <TextQuote aria-hidden="true" className="text-ax-text-secondary mt-0.5 size-4 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="line-clamp-3 text-[13.5px] leading-snug whitespace-pre-wrap">{quote.text}</p>
+        {table ? (
+          <>
+            <p className="truncate text-[13.5px] leading-snug">{table.columns.join(" · ")}</p>
+            <p className="text-ax-text-secondary text-xs">
+              {table.rows === 1
+                ? t("file_quote_table_row")
+                : t("file_quote_table_rows", { count: table.rows })}
+            </p>
+          </>
+        ) : (
+          <p className="line-clamp-3 text-[13.5px] leading-snug whitespace-pre-wrap">
+            {quote.text}
+          </p>
+        )}
         <p className="text-ax-text-secondary truncate text-xs">{quote.source}</p>
       </div>
       <button

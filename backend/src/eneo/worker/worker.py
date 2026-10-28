@@ -21,6 +21,7 @@ from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
+from eneo.observability.error_text import user_visible_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
 from eneo.worker.task_manager import TaskManager, WorkerConfig
@@ -406,30 +407,62 @@ class Worker:
                     f"Executing {func.__name__} with context {ctx} and params {params}"
                 )
 
-                async with sessionmanager.session() as session, session.begin():
-                    user_id = params.user_id if with_user else None
-                    container = await self._create_container(session, user_id=user_id)
+                job_id = _job_id_from_ctx(ctx)
+                assert job_id is not None
+                user_id = params.user_id if with_user else None
 
-                    job_id = _job_id_from_ctx(ctx)
-                    assert job_id is not None
-                    task_manager = container.task_manager(
-                        job_id=job_id,
-                        resource_id=params.id,
-                        channel_type=channel_type,
-                    )
-                    optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
-
-                    async with task_manager.set_status_on_exception():
-                        task_manager.result_location = await func(
-                            params, container=container, **optional_kwargs
+                try:
+                    async with sessionmanager.session() as session, session.begin():
+                        container = await self._create_container(
+                            session, user_id=user_id
+                        )
+                        task_manager = container.task_manager(
+                            job_id=job_id,
+                            resource_id=params.id,
+                            channel_type=channel_type,
+                        )
+                        optional_kwargs = self._get_kwargs(
+                            func, task_manager=task_manager
                         )
 
-                    return task_manager.successful()
+                        async with task_manager.set_status_on_exception():
+                            task_manager.result_location = await func(
+                                params, container=container, **optional_kwargs
+                            )
+
+                        success = task_manager.successful()
+                except Exception as exc:
+                    # Task errors are already turned into a FAILED job inside the
+                    # transaction; what reaches here is the commit itself failing
+                    # (e.g. a before_commit guard such as the storage quota), which
+                    # rolled that status back together with the work.
+                    await self._fail_job_after_commit_error(job_id, user_id, exc)
+                    raise
+
+                return success
 
             self.functions.append(_traced_job("job", wrapper))
             return wrapper
 
         return decorator
+
+    async def _fail_job_after_commit_error(
+        self, job_id: UUID, user_id: UUID | None, exc: BaseException
+    ) -> None:
+        """Record the failure in a fresh session so the job is not left pending
+        until the reaper finds it."""
+        # JobPublic serves the result of a failed integration task as its
+        # failure message; a commit error carries SQL with bound values.
+        message = user_visible_error(exc)
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                container = await self._create_container(session, user_id=user_id)
+                await container.job_service().fail_job(job_id, message)
+        except Exception:
+            logger.exception(
+                "Could not record job failure after a commit error",
+                extra={"job_id": str(job_id)},
+            )
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
         """Register a cron job.

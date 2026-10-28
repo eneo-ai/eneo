@@ -1,6 +1,10 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { writable } from "svelte/store";
-  import { Info, EllipsisVertical, RefreshCw, Trash2, Webhook } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { Page, Settings } from "$lib/components/layout";
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";
@@ -10,11 +14,14 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { TenantIntegration } from "@eneo/eneo-js";
+  import type { TenantIntegration, components } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
+  import SharePointAuthHealth from "$lib/features/integrations/sharepoint/SharePointAuthHealth.svelte";
+  import SharePointConnectionHealth from "$lib/features/integrations/sharepoint/SharePointConnectionHealth.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
+  import { SharePointSubscriptionList } from "$lib/features/integrations/sharepoint/SharePointSubscriptionList.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
 
   const { data }: PageProps = $props();
@@ -28,16 +35,22 @@
   let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured" | "error">(
     "loading"
   );
+  let sharePointConfig = $state<components["schemas"]["TenantSharePointAppPublic"] | null>(null);
   let showWebhookManagement = $state(false);
+  const subscriptionList = new SharePointSubscriptionList(untrack(() => data.eneo));
 
   const loadSharePointStatus = createAsyncState(async () => {
-    sharePointConfigStatus = "loading";
+    // A reload keeps the configured view mounted, so open panels and a test result survive it.
+    // Untracked: the effects that call this must not rerun when it stores the config.
+    if (!untrack(() => sharePointConfig)) sharePointConfigStatus = "loading";
     try {
       const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"
       });
+      sharePointConfig = config ?? null;
       sharePointConfigStatus = config ? "configured" : "not_configured";
     } catch {
+      sharePointConfig = null;
       sharePointConfigStatus = "error";
     }
   });
@@ -78,11 +91,11 @@
         >
           <IntegrationGrid>
             {#each tenantIntegrations as integration (integration.integration_id)}
-              <IntegrationCard {integration}>
+              <IntegrationCard {integration} tour="admin-integrations">
                 {#snippet action()}
                   <div class="flex flex-col gap-2">
                     {#if isSharePoint(integration)}
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
                         {#if sharePointConfigStatus === "loading"}
                           <Badge variant="secondary">{m.integration_status_loading()}</Badge>
                         {:else if sharePointConfigStatus === "configured"}
@@ -91,6 +104,9 @@
                           >
                             {m.integration_status_configured()}
                           </Badge>
+                          {#if sharePointConfig}
+                            <SharePointAuthHealth config={sharePointConfig} variant="badge" />
+                          {/if}
                         {:else if sharePointConfigStatus === "error"}
                           <Badge variant="destructive">{m.integration_status_error()}</Badge>
                           <Button
@@ -106,10 +122,10 @@
                         {/if}
                       </div>
 
-                      <div class="flex items-center gap-2">
+                      <div class="flex min-w-0 items-center gap-2">
                         <Button
                           variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
-                          class="flex-1"
+                          class="min-w-0 flex-1 truncate"
                           disabled={sharePointConfigStatus === "loading"}
                           onclick={() => ($showSharePointConfigDialog = true)}
                         >
@@ -133,13 +149,6 @@
                               {/snippet}
                             </DropdownMenu.Trigger>
                             <DropdownMenu.Content align="end">
-                              <DropdownMenu.Item
-                                onclick={() => (showWebhookManagement = !showWebhookManagement)}
-                              >
-                                <Webhook aria-hidden="true" />
-                                {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}
-                              </DropdownMenu.Item>
-                              <DropdownMenu.Separator />
                               <DropdownMenu.Item
                                 variant="destructive"
                                 onclick={() => ($showDeleteAppDialog = true)}
@@ -172,13 +181,30 @@
               </IntegrationCard>
             {/each}
           </IntegrationGrid>
-
-          {#if showWebhookManagement && sharePointConfigStatus === "configured"}
-            <div class="border-border bg-background mt-6 rounded-lg border p-6">
-              <SharePointSubscriptions eneo={data.eneo} />
-            </div>
-          {/if}
         </Settings.Row>
+
+        {#if sharePointConfigStatus === "configured" && sharePointConfig}
+          <Settings.Row
+            fullWidth
+            title={m.sharepoint_health_row_title()}
+            description={m.sharepoint_health_row_description()}
+          >
+            <SharePointConnectionHealth
+              eneo={data.eneo}
+              config={sharePointConfig}
+              {subscriptionList}
+              subscriptionsOpen={showWebhookManagement}
+              onEdit={() => ($showSharePointConfigDialog = true)}
+              onToggleSubscriptions={() => (showWebhookManagement = !showWebhookManagement)}
+              onConfigChanged={() => loadSharePointStatus()}
+            />
+            {#if showWebhookManagement}
+              <div class="border-default mt-4 rounded-lg border p-6">
+                <SharePointSubscriptions eneo={data.eneo} {subscriptionList} />
+              </div>
+            {/if}
+          </Settings.Row>
+        {/if}
 
         <Settings.Row
           fullWidth

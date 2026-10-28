@@ -10,6 +10,7 @@ import type {
   CompletionModel,
   EmbeddingModel,
   ImageModel,
+  RerankModel,
   SecurityClassification,
   TranscriptionModel
 } from "@eneo/eneo-js";
@@ -22,8 +23,9 @@ import {
   type ImageSize
 } from "$lib/features/ai-models/imageModelOptions";
 
-export type ModelType = "completion" | "embedding" | "transcription" | "image";
-export type AnyCatalogModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+export type ModelType = "completion" | "embedding" | "transcription" | "image" | "rerank";
+export type AnyCatalogModel =
+  CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
 
 export interface ModelDraftState {
   name: string;
@@ -49,7 +51,27 @@ export interface ModelDraftState {
   /** Request defaults the image tool uses when the assistant does not ask. */
   defaultSize: ImageSize;
   defaultQuality: ImageQuality;
+  /** Rerank models only: candidates scored per requested chunk, and at most per search. */
+  candidateFactorStr: string;
+  maxCandidatesStr: string;
   securityClassification: SecurityClassification | null;
+}
+
+/** Defaults and allowed ranges; the backend and the database enforce the same. */
+export const RERANK_CANDIDATE_FACTOR = { default: 5, min: 1, max: 20 } as const;
+export const RERANK_MAX_CANDIDATES = { default: 100, min: 1, max: 1000 } as const;
+
+// `bind:value` on a number input stores a number despite the string type.
+function wholeNumberIn(value: string | number, range: { min: number; max: number }): boolean {
+  const n = Number(value);
+  return String(value).trim() !== "" && Number.isInteger(n) && n >= range.min && n <= range.max;
+}
+
+export function hasValidRerankCandidateSettings(draft: ModelDraftState): boolean {
+  return (
+    wholeNumberIn(draft.candidateFactorStr, RERANK_CANDIDATE_FACTOR) &&
+    wholeNumberIn(draft.maxCandidatesStr, RERANK_MAX_CANDIDATES)
+  );
 }
 
 export function createEmptyDraft(modelType: ModelType, providerType: string): ModelDraftState {
@@ -72,6 +94,8 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
+    candidateFactorStr: String(RERANK_CANDIDATE_FACTOR.default),
+    maxCandidatesStr: String(RERANK_MAX_CANDIDATES.default),
     securityClassification: null
   };
 }
@@ -152,6 +176,7 @@ export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean 
  */
 export function isDraftComplete(draft: ModelDraftState, modelType: ModelType): boolean {
   if (draft.name.trim() === "" || draft.displayName.trim() === "") return false;
+  if (modelType === "rerank") return hasValidRerankCandidateSettings(draft);
   if (modelType !== "completion") return true;
   return hasValidCompletionTokenBudgets(draft);
 }
@@ -198,6 +223,8 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     costPerImage: rawCostToNumber(draft.costPerImageStr),
     defaultSize: draft.defaultSize,
     defaultQuality: draft.defaultQuality,
+    candidateFactor: Number(draft.candidateFactorStr),
+    maxCandidates: Number(draft.maxCandidatesStr),
     securityClassification: draft.securityClassification
   };
 }
@@ -253,6 +280,8 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
+    candidateFactorStr: String(RERANK_CANDIDATE_FACTOR.default),
+    maxCandidatesStr: String(RERANK_MAX_CANDIDATES.default),
     securityClassification: model.security_classification ?? null
   };
 
@@ -275,6 +304,9 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     base.costPerImageStr = costToString(model.cost_per_image);
     base.defaultSize = isImageSize(model.default_size) ? model.default_size : "auto";
     base.defaultQuality = isImageQuality(model.default_quality) ? model.default_quality : "auto";
+  } else if (modelType === "rerank" && "max_candidates" in model) {
+    base.candidateFactorStr = String(model.candidate_factor);
+    base.maxCandidatesStr = String(model.max_candidates);
   }
 
   return base;
@@ -304,7 +336,7 @@ export function applyCatalogModelToDraft(
     if (info.cost_per_minute != null) next.costPerMinuteStr = String(info.cost_per_minute);
   } else if (modelType === "image") {
     if (info.cost_per_image != null) next.costPerImageStr = String(info.cost_per_image);
-  } else {
+  } else if (modelType !== "rerank") {
     if (info.input_cost_per_token != null) {
       next.inputCostPerTokenStr = perMillionFromTokenCost(info.input_cost_per_token);
     }

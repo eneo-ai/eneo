@@ -22,7 +22,8 @@ const MODE_MAP: Record<ModelType, string> = {
   completion: "completion",
   embedding: "embedding",
   transcription: "transcription",
-  image: "image"
+  image: "image",
+  rerank: "rerank"
 };
 
 export interface LoadResult {
@@ -38,7 +39,7 @@ export async function loadLiveModels(
   try {
     const result = (await eneo.modelProviders.listModels({
       id: providerId,
-      mode: MODE_MAP[modelType] as "completion" | "embedding" | "transcription" | "image"
+      mode: MODE_MAP[modelType] as "completion" | "embedding" | "transcription" | "image" | "rerank"
     })) as unknown as Record<string, unknown>[];
 
     if (!Array.isArray(result)) {

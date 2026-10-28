@@ -336,7 +336,8 @@ value and a comment.
     | `DEFAULT_TENANT_QUOTA_LIMIT` | `10737418240` | Storage quota for the initial tenant (bytes) |
     | `DEFAULT_USER_NAME` | `ExampleUser` | Name for the initial admin user |
     | `DEFAULT_USER_EMAIL` | `user@example.com` | Email for the initial admin user |
-    | `DEFAULT_USER_PASSWORD` | `ChangeMePassword1!` | Password for the initial admin user (change after first login) |
+    | `DEFAULT_USER_PASSWORD` | `ChangeMePassword1!` | Password for the initial admin user, at least 12 characters (`db-init` stops with an error otherwise). It is a one-time password: the account must choose its own at its first sign-in |
+    | `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` | `true` | Set to `false` only for test stacks where the seeded password must stay usable |
     | `USING_ACCESS_MANAGEMENT` | `true` | Mounts the roles API used by **Admin → Users** |
 
     **OIDC Authentication (Enterprise SSO):**
@@ -914,6 +915,51 @@ key or a tenant ID. The container side is covered in
 | 502 Bad Gateway                      | Domain not replaced in docker-compose.yml               | Replace `your-domain.com` in all 4 locations                                                                                          |
 | SCIM provisioning returns 404        | Reverse proxy does not forward `/scim`                  | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements))                                        |
 
+### Database Shared Memory Errors
+
+**Symptom:** some requests fail with HTTP 500, and the database log shows
+`could not resize shared memory segment ... No space left on device`. The disk
+is not full: PostgreSQL ran out of `/dev/shm`, a small memory area inside the
+container. Docker and Podman limit it to 64 MB unless the service sets
+`shm_size`.
+
+PostgreSQL uses it for queries it runs in parallel, and each database
+connection that has run such a query keeps a small part of it for as long as
+the connection lives. With many pooled connections and large queries, 64 MB is
+too little.
+
+**Fix:** set `shm_size: 1gb` on the `db` service, as the reference
+`docker-compose.yml` does, and recreate the container:
+
+```bash
+docker compose up -d db
+```
+
+The value is an upper limit, not memory reserved up front. Recreating the
+container briefly interrupts Eneo; the data stays in its volume. Set
+`stop_grace_period: 2m` on the service too, as the reference file does: with
+the default 10 seconds, a busy database can be killed before its shutdown
+checkpoint finishes and then needs crash recovery when it starts.
+
+**Until you can recreate the container**, stop PostgreSQL from running queries
+in parallel. This takes effect without a restart and makes large queries
+slower:
+
+```bash
+docker compose exec db psql -U postgres -d eneo -c "ALTER SYSTEM SET max_parallel_workers_per_gather = 0;"
+docker compose exec db psql -U postgres -d eneo -c "SELECT pg_reload_conf();"
+```
+
+If the errors continue, restart the backend so that its database connections
+reconnect with the new setting.
+
+Undo it after raising `shm_size`:
+
+```bash
+docker compose exec db psql -U postgres -d eneo -c "ALTER SYSTEM RESET max_parallel_workers_per_gather;"
+docker compose exec db psql -U postgres -d eneo -c "SELECT pg_reload_conf();"
+```
+
 ### Debug Mode
 
 Enable detailed logging for troubleshooting:
@@ -1197,6 +1243,19 @@ Do not edit the ledger or remove the database trigger. Existing legacy content
 remains readable while the worker waits or is stopped. See [Upgrade File & Icon
 Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
 duration, state queries, pause behavior, rollback, and cleanup.
+
+### Release search data from earlier versions
+
+Upgrading from 2.2 or from 2.3.0-rc.3 or earlier: those releases kept the
+chunks and embeddings of every replaced document version. They count toward
+the storage quota and are never searched. Once the new version runs, remove
+them once with
+[Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+Eneo stays available while it runs, and it can be stopped and run again.
+
+If you maintain your own Compose file, also give the `db` service
+`shm_size: 1gb` and `stop_grace_period: 2m`, as the reference file does; see
+[Database Shared Memory Errors](#database-shared-memory-errors).
 
 ### Clean up old images
 

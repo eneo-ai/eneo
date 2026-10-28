@@ -76,6 +76,9 @@ from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
+from eneo.integration.infrastructure.repo_impl.document_counts import (
+    active_document_counts,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -188,6 +191,16 @@ INTEGRATION_KNOWLEDGE_SOURCE = KnowledgeSource(
     IntegrationKnowledgesSpaces,
     IntegrationKnowledgesSpaces.integration_knowledge_id.expression,
 )
+
+
+# id, tenant_id, user_id, tenant_space_id: what access facts need of a space.
+_SpaceRow = tuple[UUID, UUID, UUID | None, UUID | None]
+
+
+def _select_space_rows() -> sa.Select[_SpaceRow]:
+    return sa.select(
+        Spaces.id, Spaces.tenant_id, Spaces.user_id, Spaces.tenant_space_id
+    )
 
 
 def knowledge_source_for(info_blob: "InfoBlobInDB") -> tuple[KnowledgeSource, UUID]:
@@ -1105,7 +1118,9 @@ class SpaceRepository:
 
         return apps_db
 
-    async def _get_from_query(self, query: sa.Select[tuple[Spaces]]) -> Space | None:
+    async def _get_from_query(
+        self, query: sa.Select[tuple[Spaces]], *, with_document_counts: bool = False
+    ) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1115,7 +1130,7 @@ class SpaceRepository:
         collections = await self._get_collections(space_ids)
         websites = await self._get_websites(space_ids)
         integration_knowledge_union = await self._get_integration_knowledge_union(
-            space_ids
+            space_ids, with_document_counts=with_document_counts
         )
 
         completion_models = await self.completion_model_repo.all(with_deprecated=True)
@@ -1336,7 +1351,7 @@ class SpaceRepository:
     async def one_or_none(self, id: UUID) -> Optional[Space]:
         query = self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
 
-        return await self._get_from_query(query)
+        return await self._get_from_query(query, with_document_counts=True)
 
     async def one(self, id: UUID) -> Space:
         space = await self.one_or_none(id=id)
@@ -1510,7 +1525,7 @@ class SpaceRepository:
             sa.select(Spaces).where(Spaces.user_id == user_id)
         )
 
-        return await self._get_from_query(query)
+        return await self._get_from_query(query, with_document_counts=True)
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
         query = self._in_caller_tenant(
@@ -1711,74 +1726,162 @@ class SpaceRepository:
 
         return space
 
-    async def get_website_access_facts(self, website_id: UUID) -> SpaceAccessFacts:
-        """Load only this caller's facts for website access, not the space aggregate."""
-        space = await self.session.scalar(
-            sa.select(Spaces)
-            .join(WebsitesTable, WebsitesTable.space_id == Spaces.id)
-            .where(WebsitesTable.id == website_id)
-            .where(WebsitesTable.tenant_id == self.user.tenant_id)
-            .where(Spaces.tenant_id == self.user.tenant_id)
-        )
-        if space is None:
-            raise NotFoundException("Website not found")
+    async def _caller_access_facts(
+        self, spaces: Sequence[_SpaceRow]
+    ) -> dict[UUID, SpaceAccessFacts]:
+        """This caller's access facts for each space, not the space aggregate.
+
+        Only the caller's own membership, their groups' memberships and the
+        resource an assistant- or app-scoped key covers are read, so the facts
+        answer this caller's checks and nobody else's. The default assistant is
+        left out: no check these facts serve uses its identity.
+        """
+        if not spaces:
+            return {}
+        space_ids = [space_id for space_id, _, _, _ in spaces]
+        members: dict[UUID, dict[UUID, SpaceRoleFact]] = {}
+        groups: dict[UUID, dict[UUID, SpaceRoleFact]] = {}
+        assistant_ids: dict[UUID | None, set[UUID]] = {}
+        app_ids: dict[UUID, set[UUID]] = {}
 
         member_rows = await self.session.execute(
-            sa.select(SpacesUsers.user_id, SpacesUsers.role)
+            sa.select(SpacesUsers.space_id, SpacesUsers.user_id, SpacesUsers.role)
             .join(Users, Users.id == SpacesUsers.user_id)
             .where(
-                SpacesUsers.space_id == space.id,
+                SpacesUsers.space_id.in_(space_ids),
                 SpacesUsers.user_id == self.user.id,
                 Users.deleted_at.is_(None),
             )
         )
-        group_rows = await self.session.execute(
-            sa.select(SpacesUserGroups.user_group_id, SpacesUserGroups.role)
-            .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
-            .where(SpacesUserGroups.space_id == space.id)
-            .where(SpacesUserGroups.user_group_id.in_(self.user.user_groups_ids))
-            .where(
-                sa.or_(
-                    UserGroups.state.is_(None),
-                    UserGroups.state != UserGroupState.DELETED.value,
+        for space_id, user_id, role in member_rows.tuples():
+            members.setdefault(space_id, {})[user_id] = SpaceRoleFact(
+                id=user_id, role=role
+            )
+        if self.user.user_groups_ids:
+            group_rows = await self.session.execute(
+                sa.select(
+                    SpacesUserGroups.space_id,
+                    SpacesUserGroups.user_group_id,
+                    SpacesUserGroups.role,
+                )
+                .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
+                .where(
+                    SpacesUserGroups.space_id.in_(space_ids),
+                    SpacesUserGroups.user_group_id.in_(self.user.user_groups_ids),
+                    UserGroups.tenant_id == self.user.tenant_id,
+                    sa.or_(
+                        UserGroups.state.is_(None),
+                        UserGroups.state != UserGroupState.DELETED.value,
+                    ),
                 )
             )
-        )
-        assistant_ids: Sequence[UUID] = ()
-        app_ids: Sequence[UUID] = ()
+            for space_id, group_id, role in group_rows.tuples():
+                groups.setdefault(space_id, {})[group_id] = SpaceRoleFact(
+                    id=group_id, role=role
+                )
+
         key = self.user.active_api_key
         if key is not None and key.scope_type == ApiKeyScopeType.ASSISTANT:
-            assistant_ids = (
-                await self.session.scalars(
-                    sa.select(Assistants.id).where(
-                        Assistants.space_id == space.id,
-                        Assistants.id == key.scope_id,
-                        Assistants.is_default.is_(False),
-                    )
+            rows = await self.session.execute(
+                sa.select(Assistants.space_id, Assistants.id).where(
+                    Assistants.space_id.in_(space_ids),
+                    Assistants.id == key.scope_id,
+                    Assistants.is_default.is_(False),
                 )
-            ).all()
+            )
+            for space_id, assistant_id in rows.tuples():
+                assistant_ids.setdefault(space_id, set()).add(assistant_id)
         elif key is not None and key.scope_type == ApiKeyScopeType.APP:
-            app_ids = (
-                await self.session.scalars(
-                    sa.select(Apps.id).where(
-                        Apps.space_id == space.id, Apps.id == key.scope_id
+            rows = await self.session.execute(
+                sa.select(Apps.space_id, Apps.id).where(
+                    Apps.space_id.in_(space_ids), Apps.id == key.scope_id
+                )
+            )
+            for space_id, app_id in rows.tuples():
+                app_ids.setdefault(space_id, set()).add(app_id)
+
+        return {
+            space_id: SpaceAccessFacts(
+                id=space_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                tenant_space_id=tenant_space_id,
+                members=members.get(space_id, {}),
+                group_members=groups.get(space_id, {}),
+                default_assistant_id=None,
+                assistant_ids=frozenset(assistant_ids.get(space_id, ())),
+                app_ids=frozenset(app_ids.get(space_id, ())),
+            )
+            for space_id, tenant_id, user_id, tenant_space_id in spaces
+        }
+
+    async def get_space_access_facts(self, space_id: UUID) -> SpaceAccessFacts:
+        """This caller's facts for a space of their tenant, not the space aggregate.
+
+        Only the caller's own membership, their groups' memberships and the
+        assistant or app their key is scoped to are filled in. Other members,
+        other assistants and apps, and the default assistant are left out, so
+        the facts serve this caller's checks only: never member management or
+        checks on the default assistant, which need the space itself.
+        """
+        space = (
+            (
+                await self.session.execute(
+                    _select_space_rows().where(
+                        Spaces.id == space_id, Spaces.tenant_id == self.user.tenant_id
                     )
                 )
-            ).all()
-        return SpaceAccessFacts(
-            id=space.id,
-            tenant_id=space.tenant_id,
-            user_id=space.user_id,
-            tenant_space_id=space.tenant_space_id,
-            members={id: SpaceRoleFact(id=id, role=role) for id, role in member_rows},
-            group_members={
-                id: SpaceRoleFact(id=id, role=role) for id, role in group_rows
-            },
-            # Website access never uses the default assistant's identity.
-            default_assistant_id=None,
-            assistant_ids=frozenset(assistant_ids),
-            app_ids=frozenset(app_ids),
+            )
+            .tuples()
+            .one_or_none()
         )
+        if space is None:
+            raise NotFoundException()
+        return (await self._caller_access_facts([space]))[space_id]
+
+    async def get_spaces_access_facts(
+        self, space_ids: Sequence[UUID]
+    ) -> dict[UUID, SpaceAccessFacts]:
+        """This caller's facts for each space; other tenants' spaces are left out.
+
+        As ``get_space_access_facts``: only the caller's own membership and key
+        scope, never other members or the default assistant.
+        """
+        if not space_ids:
+            return {}
+        spaces = (
+            (
+                await self.session.execute(
+                    _select_space_rows().where(
+                        Spaces.id.in_(space_ids),
+                        Spaces.tenant_id == self.user.tenant_id,
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        return await self._caller_access_facts(spaces)
+
+    async def get_website_access_facts(self, website_id: UUID) -> SpaceAccessFacts:
+        """Load only this caller's facts for website access, not the space aggregate."""
+        space = (
+            (
+                await self.session.execute(
+                    _select_space_rows()
+                    .join(WebsitesTable, WebsitesTable.space_id == Spaces.id)
+                    .where(WebsitesTable.id == website_id)
+                    .where(WebsitesTable.tenant_id == self.user.tenant_id)
+                    .where(Spaces.tenant_id == self.user.tenant_id)
+                )
+            )
+            .tuples()
+            .one_or_none()
+        )
+        if space is None:
+            raise NotFoundException("Website not found")
+        space_id = space[0]
+        return (await self._caller_access_facts([space]))[space_id]
 
     async def get_space_by_website(self, website_id: UUID) -> Space:
         query = self._in_caller_tenant(
@@ -1826,9 +1929,16 @@ class SpaceRepository:
             )
 
     async def _get_integration_knowledge_union(
-        self, space_ids: list[UUID]
+        self, space_ids: list[UUID], *, with_document_counts: bool = False
     ) -> list[IntegrationKnowledge]:
-        """Integration knowledge owned by the spaces or distributed to them."""
+        """Integration knowledge owned by the spaces or distributed to them.
+
+        ``document_count`` is a COUNT over info_blobs per item, so it is only
+        attached for lookups whose knowledge list is served to the UI (``one``,
+        ``one_or_none``, ``get_personal_space``, ``get_space_by_name_and_tenant``
+        for the organization space). Assistant, app, session and other
+        resource lookups on the chat path leave it unset.
+        """
         ik = IntegrationKnowledge
 
         stmt = (
@@ -1844,7 +1954,31 @@ class SpaceRepository:
             .order_by(ik.created_at)
         )
         rows = await self.session.execute(stmt)
-        return list(rows.scalars().all())
+        records = list(rows.scalars().all())
+        if with_document_counts:
+            counts = await active_document_counts(
+                self.session, [record.id for record in records]
+            )
+            for record in records:
+                setattr(record, "document_count", counts.get(record.id, 0))
+        return records
+
+    async def get_visible_integration_knowledge_ids(
+        self, space_id: UUID, tenant_space_id: UUID | None
+    ) -> list[UUID]:
+        """Ids of the integration knowledge a space shows, as the loader sees it."""
+        ik = IntegrationKnowledge
+        ids = await self.session.scalars(
+            sa.select(ik.id)
+            .where(
+                INTEGRATION_KNOWLEDGE_SOURCE.visible_to(
+                    effective_space_ids_for(space_id, tenant_space_id)
+                ),
+                ik.tenant_id == self.user.tenant_id,
+            )
+            .order_by(ik.created_at)
+        )
+        return list(ids.all())
 
     async def get_space_by_name_and_tenant(
         self, name: str, tenant_id: UUID
@@ -1855,7 +1989,7 @@ class SpaceRepository:
             Spaces.user_id.is_(None),
             Spaces.tenant_space_id.is_(None),
         )
-        return await self._get_from_query(q)
+        return await self._get_from_query(q, with_document_counts=True)
 
     async def create_org_space_for_tenant(
         self, name: str, description: str, tenant_id: UUID

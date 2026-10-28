@@ -6,19 +6,18 @@
     type CompletionModel,
     type EmbeddingModel,
     type ImageModel,
+    type RerankModel,
     type TranscriptionModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import {
-    Pencil,
-    Trash2,
-    TriangleAlert,
-    LoaderCircle,
-    ArrowRight,
-    Ellipsis
-  } from "@lucide/svelte";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 
@@ -33,8 +32,9 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
 
   export let model: AnyModel;
   export let type: ModelTypeKey;
@@ -92,6 +92,8 @@
         await eneo.tenantModels.deleteEmbedding({ id: model.id });
       } else if (type === "imageModel") {
         await eneo.tenantModels.deleteImage({ id: model.id });
+      } else if (type === "rerankModel") {
+        await eneo.tenantModels.deleteRerank({ id: model.id });
       } else {
         await eneo.tenantModels.deleteTranscription({ id: model.id });
       }

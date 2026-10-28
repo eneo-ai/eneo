@@ -1,80 +1,151 @@
 <script lang="ts">
+  import { onMount, tick, untrack } from "svelte";
+  import { writable } from "svelte/store";
+  import type { CrawlRun } from "@eneo/eneo-js";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { afterNavigate } from "$app/navigation";
+  import { page } from "$app/state";
   import { Page } from "$lib/components/layout";
+  import { selectPageTab } from "$lib/components/layout/Page/ctx";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { PAGINATION } from "$lib/core/constants";
   import { toastError } from "$lib/core/errors";
-  import CrawlRunsTable from "./CrawlRunsTable.svelte";
-  import { onMount } from "svelte";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import BlobTable from "../../collections/[collectionId]/BlobTable.svelte";
-  import CrawlLimitations from "./CrawlLimitations.svelte";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
-  import CrawlCreateRun from "./CrawlCreateRun.svelte";
-  import { m } from "$lib/paraglide/messages";
+  import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
+  import SourceStat from "$lib/features/knowledge/components/SourceStat.svelte";
+  import SourceStats from "$lib/features/knowledge/components/SourceStats.svelte";
   import {
     hasCrawlIssues,
-    isCompletedWithMissingResources,
-    isActiveCrawlRun
+    isActiveCrawlRun,
+    isCompletedWithMissingResources
   } from "$lib/features/knowledge/crawlRunState";
-  import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
-  import type { CrawlResourceFailure, CrawlRun, WebsiteInfoBlobPage } from "@eneo/eneo-js";
-  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
-  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { m } from "$lib/paraglide/messages";
+  import CrawlCreateRun from "./CrawlCreateRun.svelte";
+  import CrawlLimitations from "./CrawlLimitations.svelte";
+  import CrawlRunActivity from "./CrawlRunActivity.svelte";
+  import WebsiteContent from "./WebsiteContent.svelte";
+  import { readContentFilters } from "./websiteContentFilters";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
+  import type { PageData } from "./$types";
 
-  export let data;
+  let { data }: { data: PageData } = $props();
 
   const eneo = getEneo();
-  let startDialogOpen = false;
-  let selectedRun: CrawlRun | null = null;
-  let initialKind: CrawlResourceFailure["kind"] | null = null;
-  let detailsOpen = false;
-  $: latestCompletedRun = crawlRuns.find((run) => !isActiveCrawlRun(run));
-  $: onrerun =
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
+  const tabs = writable<string>();
+
+  let startDialogOpen = $state(false);
+  // null follows the latest completed crawl. A chosen older run is kept as an object:
+  // replacing the history with its first page must not swap the run shown.
+  let selectedProblemRun = $state.raw<CrawlRun | null>(null);
+  let problemHeading = $state<HTMLHeadingElement | undefined>();
+
+  // Server data seeds the local copies; the effects below follow later server data.
+  // svelte-ignore state_referenced_locally
+  let crawlRuns = $state.raw(data.crawlRuns);
+  // svelte-ignore state_referenced_locally
+  let nextCrawlRunCursor = $state.raw(data.nextCrawlRunCursor);
+  // svelte-ignore state_referenced_locally
+  let totalCrawlRunCount = $state(data.totalCrawlRunCount);
+  // svelte-ignore state_referenced_locally
+  let infoBlobPage = $state.raw(data.infoBlobPage);
+  // svelte-ignore state_referenced_locally
+  let initialContent = $state.raw(data.initialContent ?? null);
+  // The crawl whose indexed snapshot Content shows; only a new one reloads it.
+  let contentRunId = $state(
+    untrack(() => data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id)
+  );
+  // Shallow URL updates never reach page.url, and invalidate() reloads against the
+  // last navigation's URL. The page therefore owns the selection; navigations replace it.
+  let contentFilters = $state(readContentFilters(page.url.searchParams));
+  afterNavigate(({ to }) => {
+    if (to) contentFilters = readContentFilters(to.url.searchParams);
+  });
+  let loadingMoreCrawlRuns = $state(false);
+  // Request bookkeeping, never rendered.
+  let crawlRunPageGeneration = 0;
+  let pollingCrawlRuns = false;
+  let historyRunId = untrack(() => data.crawlRuns[0]?.id);
+  let problemWebsiteId = untrack(() => data.website.id);
+  let seededContent = untrack(() => data.initialContent ?? null);
+
+  // Server data changes with the route and with invalidate() after starting or
+  // stopping a crawl; polling results are kept otherwise.
+  $effect(() => {
+    const serverRuns = data.crawlRuns;
+    const serverCursor = data.nextCrawlRunCursor;
+    const serverTotal = data.totalCrawlRunCount;
+    const websiteId = data.website.id;
+    untrack(() => {
+      crawlRuns = serverRuns;
+      nextCrawlRunCursor = serverCursor;
+      totalCrawlRunCount = serverTotal;
+      crawlRunPageGeneration += 1;
+      loadingMoreCrawlRuns = false;
+      historyRunId = serverRuns[0]?.id;
+      if (websiteId !== problemWebsiteId) {
+        problemWebsiteId = websiteId;
+        selectedProblemRun = null;
+      }
+    });
+  });
+  $effect(() => {
+    const serverPage = data.infoBlobPage;
+    const serverContent = data.initialContent ?? null;
+    const serverRuns = data.crawlRuns;
+    untrack(() => {
+      infoBlobPage = serverPage;
+      // Content clears it once shown; only a new server load provides another.
+      if (serverContent !== seededContent) {
+        seededContent = serverContent;
+        initialContent = serverContent;
+      }
+      contentRunId = serverRuns.find((run) => !isActiveCrawlRun(run))?.id;
+    });
+  });
+
+  const completedRuns = $derived(crawlRuns.filter((run) => !isActiveCrawlRun(run)));
+  const latestCompletedRun = $derived<CrawlRun | undefined>(completedRuns[0]);
+  const problemRun = $derived(
+    selectedProblemRun
+      ? (completedRuns.find((run) => run.id === selectedProblemRun?.id) ?? selectedProblemRun)
+      : latestCompletedRun
+  );
+  const problemRunChoices = $derived(
+    problemRun && !completedRuns.some((run) => run.id === problemRun.id)
+      ? [...completedRuns, problemRun]
+      : completedRuns
+  );
+  // History may contain an older last-known active state while its refresh fails.
+  const latestKnownRun = $derived<CrawlRun | undefined>(crawlRuns[0]);
+  const activeRun = $derived(
+    latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined
+  );
+  const onrerun = $derived(
     !data.readonly && !activeRun
       ? () => {
           startDialogOpen = true;
         }
-      : undefined;
+      : undefined
+  );
 
-  function showContentFailures(kind: CrawlResourceFailure["kind"] | null) {
-    selectedRun = latestCompletedRun ?? null;
-    initialKind = kind;
-    detailsOpen = true;
+  function selectProblemRun(run: CrawlRun | undefined) {
+    selectedProblemRun = !run || run.id === latestCompletedRun?.id ? null : run;
   }
 
-  let serverCrawlRuns = data.crawlRuns;
-  let crawlRuns = data.crawlRuns;
-  let nextCrawlRunCursor = data.nextCrawlRunCursor;
-  let totalCrawlRunCount = data.totalCrawlRunCount;
-  let crawlRunPageGeneration = 0;
-  let loadingMoreCrawlRuns = false;
-  let serverInfoBlobPage = data.infoBlobPage;
-  let infoBlobs = [...data.infoBlobPage.items];
-  let nextInfoBlobCursor = data.infoBlobPage.next_cursor ?? null;
-  let totalInfoBlobCount = data.infoBlobPage.total_count;
-  let infoBlobPageGeneration = 0;
-  let loadingMoreInfoBlobs = false;
-  let pollingCrawlRuns = false;
-  let historyRunId = data.crawlRuns[0]?.id;
-  let contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
-
-  $: if (data.crawlRuns !== serverCrawlRuns) {
-    serverCrawlRuns = data.crawlRuns;
-    crawlRuns = data.crawlRuns;
-    nextCrawlRunCursor = data.nextCrawlRunCursor;
-    totalCrawlRunCount = data.totalCrawlRunCount;
-    crawlRunPageGeneration += 1;
-    loadingMoreCrawlRuns = false;
-    historyRunId = data.crawlRuns[0]?.id;
-  }
-
-  $: if (data.infoBlobPage !== serverInfoBlobPage) {
-    serverInfoBlobPage = data.infoBlobPage;
-    replaceInfoBlobPage(data.infoBlobPage);
-    contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
+  async function showProblems(run: CrawlRun) {
+    selectProblemRun(run);
+    selectPageTab(tabs, "problems");
+    await tick();
+    problemHeading?.focus();
   }
 
   onMount(() => {
@@ -99,13 +170,14 @@
           result.latestRun.id !== contentRunId
         ) {
           try {
-            const infoBlobPage = await eneo.websites.indexedBlobs.listPage({
+            const refreshedPage = await eneo.websites.indexedBlobs.listPage({
               id: websiteId,
               limit: PAGINATION.PAGE_SIZE
             });
             if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns)
               return;
-            replaceInfoBlobPage(infoBlobPage);
+            infoBlobPage = refreshedPage;
+            initialContent = null;
             contentRunId = result.latestRun.id;
           } catch {
             // Keep old content and retry, independently of the history refresh.
@@ -138,19 +210,10 @@
 
     return () => {
       mounted = false;
-      infoBlobPageGeneration += 1;
       crawlRunPageGeneration += 1;
       clearInterval(interval);
     };
   });
-
-  const {
-    state: { currentSpace }
-  } = getSpacesManager();
-
-  // History may contain an older last-known active state while its refresh fails.
-  $: latestKnownRun = crawlRuns[0];
-  $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
 
   async function loadMoreCrawlRuns() {
     if (nextCrawlRunCursor === null || loadingMoreCrawlRuns) return;
@@ -177,45 +240,6 @@
       if (generation === crawlRunPageGeneration) loadingMoreCrawlRuns = false;
     }
   }
-
-  function replaceInfoBlobPage(page: WebsiteInfoBlobPage) {
-    infoBlobPageGeneration += 1;
-    loadingMoreInfoBlobs = false;
-    infoBlobs = [...page.items];
-    nextInfoBlobCursor = page.next_cursor ?? null;
-    totalInfoBlobCount = page.total_count;
-  }
-
-  async function loadMoreInfoBlobs() {
-    if (nextInfoBlobCursor === null || loadingMoreInfoBlobs) return;
-
-    const generation = infoBlobPageGeneration;
-    const cursor = nextInfoBlobCursor;
-    const websiteId = data.website.id;
-    loadingMoreInfoBlobs = true;
-    try {
-      const page = await eneo.websites.indexedBlobs.listPage({
-        id: websiteId,
-        limit: PAGINATION.PAGE_SIZE,
-        cursor
-      });
-      if (
-        generation !== infoBlobPageGeneration ||
-        websiteId !== data.website.id ||
-        cursor !== nextInfoBlobCursor
-      )
-        return;
-      infoBlobs = [...infoBlobs, ...page.items];
-      nextInfoBlobCursor = page.next_cursor ?? null;
-      totalInfoBlobCount = page.total_count;
-    } catch (error) {
-      if (generation === infoBlobPageGeneration && websiteId === data.website.id) {
-        toastError(error, m.website_indexed_content_load_more_failed());
-      }
-    } finally {
-      if (generation === infoBlobPageGeneration) loadingMoreInfoBlobs = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -226,7 +250,7 @@
   >
 </svelte:head>
 
-<Page.Root>
+<Page.Root tabController={tabs}>
   <Page.Header>
     <Page.Title
       parent={{
@@ -237,8 +261,9 @@
       title={formatWebsiteName(data.website)}
     ></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="crawls">{m.crawls()}</Page.TabTrigger>
-      <Page.TabTrigger tab="blobs">{m.indexed_content()}</Page.TabTrigger>
+      <Page.TabTrigger tab="blobs">{m.source_tab_content()}</Page.TabTrigger>
+      <Page.TabTrigger tab="problems">{m.source_tab_problems()}</Page.TabTrigger>
+      <Page.TabTrigger tab="crawls">{m.source_tab_activity()}</Page.TabTrigger>
     </Page.Tabbar>
     {#if !data.readonly}
       <CrawlCreateRun
@@ -250,11 +275,79 @@
     {/if}
   </Page.Header>
   <Page.Main>
+    <div class="pt-4 pr-4">
+      <SourceStats columns={3}>
+        <SourceStat label={m.website_source_latest_crawl()} tone="text">
+          {#if latestKnownRun}
+            <CrawlRunStatus run={latestKnownRun} />
+          {:else}
+            <span class="text-secondary font-normal">{m.this_website_not_crawled_before()}</span>
+          {/if}
+        </SourceStat>
+        <SourceStat label={m.indexed_content()}>{infoBlobPage.total_count}</SourceStat>
+        <SourceStat label={m.website_source_latest_completed()} tone="text">
+          {latestCompletedRun
+            ? formatDateTime(latestCompletedRun.finished_at ?? latestCompletedRun.created_at)
+            : "–"}
+        </SourceStat>
+      </SourceStats>
+    </div>
+    <Page.Tab id="problems">
+      {#if $tabs === "problems"}
+        <div class="w-full py-5 pr-4">
+          {#if problemRun}
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h2 bind:this={problemHeading} tabindex="-1" class="text-base font-semibold">
+                {problemRun.id === latestCompletedRun?.id
+                  ? m.website_source_latest_completed()
+                  : m.website_source_previous_crawl()}
+              </h2>
+              {#if problemRunChoices.length > 1}
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <label for="problem-crawl">{m.website_source_choose_crawl()}</label>
+                  <select
+                    id="problem-crawl"
+                    class="border-default bg-primary rounded-md border px-2 py-1.5"
+                    value={problemRun.id}
+                    onchange={(event) => {
+                      const id = event.currentTarget.value;
+                      selectProblemRun(problemRunChoices.find((run) => run.id === id));
+                    }}
+                  >
+                    {#each problemRunChoices as run (run.id)}
+                      <option value={run.id}>{formatDateTime(run.created_at)}</option>
+                    {/each}
+                  </select>
+                </div>
+              {/if}
+            </div>
+            <p class="text-secondary mb-5 text-sm">
+              {m.website_source_problems_description({
+                date: formatDateTime(problemRun.created_at)
+              })}
+            </p>
+            {#key problemRun.id}
+              <CrawlRunDetailsContent run={problemRun} open grouped />
+            {/key}
+            {#if onrerun}
+              <div class="border-default mt-4 border-t pt-3">
+                <p class="text-secondary mb-2 text-xs">{m.crawl_retry_whole_website_help()}</p>
+                <Button variant="outline" onclick={onrerun}>
+                  {m.crawl_retry_whole_website()}
+                </Button>
+              </div>
+            {/if}
+          {:else}
+            <p class="text-secondary py-6 text-sm">{m.website_source_no_completed()}</p>
+          {/if}
+        </div>
+      {/if}
+    </Page.Tab>
     <Page.Tab id="crawls">
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
       {/if}
-      <CrawlRunsTable runs={crawlRuns} {onrerun} />
+      <CrawlRunActivity runs={crawlRuns} onshowProblems={showProblems} />
       {#if nextCrawlRunCursor !== null}
         <div class="mt-4 flex justify-center">
           <Button
@@ -281,11 +374,12 @@
         <CrawlLimitations></CrawlLimitations>
       {/if}
       {#if latestCompletedRun && hasCrawlIssues(latestCompletedRun)}
+        {@const latest = latestCompletedRun}
         <div
           class="border-default mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4"
         >
           <div class="flex min-w-0 items-start gap-3">
-            {#if isCompletedWithMissingResources(latestCompletedRun)}
+            {#if isCompletedWithMissingResources(latest)}
               <Info class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
             {:else}
               <TriangleAlert
@@ -295,50 +389,30 @@
             {/if}
             <div>
               <h2 class="text-sm font-semibold">
-                {isCompletedWithMissingResources(latestCompletedRun)
+                {isCompletedWithMissingResources(latest)
                   ? m.crawl_content_has_missing()
                   : m.crawl_content_has_failures()}
               </h2>
               <p class="text-secondary mt-1 max-w-prose text-sm">
-                {m.crawl_content_failure_description({
-                  date: formatDateTime(latestCompletedRun.created_at)
-                })}
+                {m.crawl_content_failure_description({ date: formatDateTime(latest.created_at) })}
               </p>
             </div>
           </div>
-          <CrawlFailureActions run={latestCompletedRun} onselect={showContentFailures} />
-        </div>
-      {/if}
-      <BlobTable
-        blobs={infoBlobs}
-        canEdit={false}
-        resourceName={m.website_indexed_content_resource()}
-        emptyMessage={m.website_no_indexed_content()}
-      ></BlobTable>
-      {#if nextInfoBlobCursor !== null}
-        <div class="mt-4 flex justify-center">
-          <Button
-            variant="outline"
-            disabled={loadingMoreInfoBlobs}
-            aria-busy={loadingMoreInfoBlobs}
-            onclick={loadMoreInfoBlobs}
-          >
-            {#if loadingMoreInfoBlobs}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
-              {m.loading_more()}
-            {:else}
-              {m.website_indexed_content_load_more({
-                current: infoBlobs.length,
-                total: totalInfoBlobCount
-              })}
-            {/if}
+          <Button variant="outline" size="sm" onclick={() => showProblems(latest)}>
+            {m.website_source_see_problems()}
           </Button>
         </div>
+      {/if}
+      {#if $tabs === "blobs"}
+        <WebsiteContent
+          websiteId={data.website.id}
+          initialPage={infoBlobPage}
+          revision={contentRunId}
+          bind:prefix={contentFilters.prefix}
+          bind:query={contentFilters.q}
+          bind:initialContent
+        />
       {/if}
     </Page.Tab>
   </Page.Main>
 </Page.Root>
-
-{#if selectedRun}
-  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} {onrerun} />
-{/if}

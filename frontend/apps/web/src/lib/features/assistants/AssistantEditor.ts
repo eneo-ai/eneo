@@ -34,7 +34,8 @@ function initAssistantEditor(data: {
       knowledge_mode: "inject" as Assistant["knowledge_mode"],
       enabled_capabilities: [],
       document_template: { mode: "default", template_id: null } as Assistant["document_template"],
-      mcp_tools: []
+      mcp_tools: [],
+      rerank_model_id: null as string | null
     },
     updateResource: async (resource, changes) => {
       const assistantUpdate = changes as AssistantUpdate;
@@ -63,7 +64,8 @@ function initAssistantEditor(data: {
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
       skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],
       attachments: ["id", "inline_text"],
-      data_retention_days: true
+      data_retention_days: true,
+      rerank_model_id: true
     } as Record<string, unknown>,
     manageAttachements: "attachments"
   });

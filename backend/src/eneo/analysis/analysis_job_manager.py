@@ -1,5 +1,3 @@
-# MIT License
-
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 

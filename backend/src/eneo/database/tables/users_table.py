@@ -36,6 +36,14 @@ class Users(BasePublic):
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()
     credential_version: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    # Local password lifecycle (eneo.users.password). NULL changed_at means no
+    # local password was ever written; the lifecycle migration stamps the rest.
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    password_change_required: Mapped[bool] = mapped_column(
+        nullable=False, server_default=false()
+    )
     is_active: Mapped[bool] = mapped_column(server_default="True")
     state: Mapped[str] = mapped_column()
     used_tokens: Mapped[int] = mapped_column(default=0)

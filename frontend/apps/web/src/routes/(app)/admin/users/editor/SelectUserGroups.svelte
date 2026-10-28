@@ -1,13 +1,11 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import type { UserGroup } from "@eneo/eneo-js";
-  import { ChevronDown } from "@lucide/svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { Button } from "$lib/components/ui/button";
   import * as Command from "$lib/components/ui/command";
   import * as Popover from "$lib/components/ui/popover";

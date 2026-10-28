@@ -1,5 +1,3 @@
-# MIT License
-
 import contextlib
 import tempfile
 from pathlib import Path

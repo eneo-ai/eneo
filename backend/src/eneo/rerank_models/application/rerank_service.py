@@ -64,6 +64,52 @@ class RerankService:
             ),
             None,
         )
+        return await self._spec_for(model, query, security_classification)
+
+    async def spec_for_model(
+        self,
+        model_id: UUID | None,
+        query: str,
+        security_classification: Optional["SecurityClassification"],
+    ) -> RerankSpec | None:
+        """The assistant's chosen reranker as a spec, or ``None`` when none is
+        chosen, it no longer exists or is disabled, or the space's
+        classification is above its."""
+        if model_id is None:
+            return None
+        model = await self.rerank_model_repo.one_or_none(model_id)
+        if model is None or not model.can_access:
+            if model_id not in _refusals_logged:
+                _refusals_logged.add(model_id)
+                logger.warning(
+                    "Rerank model %s is no longer available; searching without it",
+                    model_id,
+                )
+            return None
+        return await self._spec_for(model, query, security_classification)
+
+    async def selectable(
+        self,
+        model_id: UUID,
+        security_classification: Optional["SecurityClassification"],
+    ) -> bool:
+        """Whether an assistant in a space with this classification may choose
+        the model: it exists, is enabled, and meets the classification."""
+        model = await self.rerank_model_repo.one_or_none(model_id)
+        if model is None or not model.can_access:
+            return False
+        if not self.user.tenant.security_enabled or security_classification is None:
+            return True
+        return not security_classification.is_greater_than(
+            model.security_classification
+        )
+
+    async def _spec_for(
+        self,
+        model: "RerankModel | None",
+        query: str,
+        security_classification: Optional["SecurityClassification"],
+    ) -> RerankSpec | None:
         if model is None:
             return None
         if not self._allowed(model, security_classification):
@@ -84,7 +130,13 @@ class RerankService:
                 exc,
             )
             return None
-        return RerankSpec(reranker=reranker, query=query, model_name=model.name)
+        return RerankSpec(
+            reranker=reranker,
+            query=query,
+            model_name=model.name,
+            candidate_factor=model.candidate_factor,
+            max_candidates=model.max_candidates,
+        )
 
     def _allowed(
         self,

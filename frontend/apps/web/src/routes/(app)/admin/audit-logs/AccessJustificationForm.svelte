@@ -3,7 +3,8 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as m from "$lib/paraglide/messages";
-  import { Shield, ArrowRight } from "@lucide/svelte";
+  import Shield from "@lucide/svelte/icons/shield";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import { slide, fade, fly } from "svelte/transition";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";

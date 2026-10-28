@@ -121,6 +121,8 @@ services:
       DEFAULT_USER_NAME: E2EUser
       DEFAULT_USER_EMAIL: e2e@example.com
       DEFAULT_USER_PASSWORD: E2ePassword123!
+      # The suite signs in with the seed on every run; keep it usable.
+      DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"
     command:
       # Non-login shell + explicit venv on PATH: a login shell (-l) sources
       # /etc/profile, which resets PATH and drops /app/.venv/bin.

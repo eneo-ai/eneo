@@ -3,7 +3,7 @@ title: Release notes
 description: What changed for users in each Eneo release.
 ---
 
-import ReleaseNotes from '@/components/ReleaseNotes'
+import ReleaseNotes from "@/components/ReleaseNotes";
 
 # Release notes
 
@@ -11,5 +11,32 @@ What has changed for the people who use Eneo, newest release first. The same
 notes appear inside the app under **What's new** in the account menu. Notes
 for developers and operators — dependency bumps, migrations, deployment
 changes — live in the [GitHub releases](https://github.com/eneo-ai/eneo/releases).
+
+In the standard Eneo app, each release candidate announces its news once per
+user unless you request a reminder: seeing RC0 does not dismiss RC1 or the final
+release. Candidates share the release's notes rather than adding duplicate entries here. Opening the
+What's new page marks that installed version as read; dismissing the popup
+alone does not mark it as read.
+
+The app shows news according to your actual permissions, including the counts,
+area filters and guided tour links. Administrator access does not automatically
+include news about every feature. General news remains available to everyone.
+Releases with no visible entries do not appear in the release picker or trigger
+an announcement; the unread indicator only counts releases with visible news.
+The documentation below always shows the complete release history.
+
+Choose **Later** to see the announcement again on your first visit
+after 24 hours, unless you have already opened the news. The reminder is saved
+for your account in the current browser. Choose **Not interested** to dismiss this version;
+the next version can still announce its news. Escape also dismisses the dialog.
+Opening the news cancels its reminder; a reminder never delays a newer version.
+In development, **Reset and reload** clears both the browser's current reminder
+and the server's seen/announced markers so the announcement can appear immediately.
+
+In the app, **What's new** shares the account sidebar with **My account**,
+**Integrations** and **API keys**. Select **What's new** there to browse releases.
+The page is available at `/news`; older `/whats-new` links redirect there.
+The notes use the available width beside the sidebar. On smaller screens, open
+the **Account and settings** menu button to switch between these pages.
 
 <ReleaseNotes />

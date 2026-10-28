@@ -1,6 +1,7 @@
 import type { IntegrationData } from "../IntegrationData";
 import confluenceImgUrl from "./confluence.png";
 import ConfluenceImportDialog from "./ConfluenceImportDialog.svelte";
+import { m } from "$lib/paraglide/messages";
 
 export const ConfluenceIntegrationData: IntegrationData = {
   logo: confluenceImgUrl,
@@ -8,5 +9,5 @@ export const ConfluenceIntegrationData: IntegrationData = {
   displayName: "Confluence",
   importHint: "Import a Confluence space into your knowledge",
   ImportDialog: ConfluenceImportDialog,
-  previewLinkLabel: "Open in Confluence"
+  previewLinkLabel: m.open_in_confluence
 };

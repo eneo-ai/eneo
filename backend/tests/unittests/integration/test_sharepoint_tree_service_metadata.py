@@ -29,7 +29,7 @@ def _client(*, columns, items, enabled=True):
     client = MagicMock()
     client.list_item_fields_enabled = enabled
     client.get_list_columns = AsyncMock(return_value=columns)
-    client.get_folder_items = AsyncMock(return_value=items)
+    client.list_folder_children = AsyncMock(return_value=(items, False))
     client.get_default_drive_id = AsyncMock(return_value="d1")
     context = MagicMock()
     context.__aenter__ = AsyncMock(return_value=client)
@@ -102,3 +102,18 @@ async def test_unreadable_columns_leave_the_tree_without_properties():
         )
 
     assert result["items"][0]["source_metadata"] == []
+
+
+async def test_a_folder_over_the_cap_is_reported_as_truncated():
+    client, context = _client(columns=[], items=[{"id": "i1", "name": "a", "file": {}}])
+    client.list_folder_children = AsyncMock(
+        return_value=([{"id": "i1", "name": "a", "file": {}}], True)
+    )
+
+    with patch(CLIENT_PATCH, return_value=context):
+        result = await SharePointTreeService(max_items=1).get_folder_tree(
+            token=_token(), site_id="s1", folder_id="f1"
+        )
+
+    assert result["truncated"] is True
+    assert client.list_folder_children.await_args.kwargs["max_items"] == 1

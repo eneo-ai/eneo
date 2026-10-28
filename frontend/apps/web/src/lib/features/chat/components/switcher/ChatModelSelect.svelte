@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     AI Elements-style model selector for the chat input toolbar: a command
     palette grouped by model vendor with provider logos and text search.
     Policy-filtered models, a locked label when the policy pins a single model,
@@ -17,7 +15,8 @@
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
   import { m } from "$lib/paraglide/messages";
-  import { Lock } from "@lucide/svelte";
+  import Cpu from "@lucide/svelte/icons/cpu";
+  import Lock from "@lucide/svelte/icons/lock";
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
   const chat = getChatService();
@@ -82,15 +81,25 @@
 
 {#if lockedModel && !savedModelUnavailable}
   <div
-    class="text-muted-foreground flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm"
-    title={m.governance_locked_by_admin()}
+    class="text-muted-foreground flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm @[36rem]/composer:gap-1.5 @[36rem]/composer:px-2.5"
+    title={`${lockedModel.nickname} · ${m.governance_locked_by_admin()}`}
   >
-    <Lock class="size-3.5" aria-hidden="true" />
-    <span class="text-foreground max-w-[10rem] truncate font-medium">{lockedModel.nickname}</span>
+    <Lock class="size-3.5 shrink-0" aria-hidden="true" />
+    <span
+      class="text-foreground sr-only font-medium @[26rem]/composer:not-sr-only @[26rem]/composer:max-w-[10rem] @[26rem]/composer:truncate"
+      >{lockedModel.nickname}</span
+    >
   </div>
 {:else if visibleModels.length === 0 || (visibleModels.length === 1 && !savedModelUnavailable)}
-  <div class="rounded-lg px-2.5 py-1.5 text-sm" title={m.choose_a_completion_model()}>
-    <span class="max-w-[12rem] truncate font-medium">{selectedLabel}</span>
+  <div
+    class="flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm @[36rem]/composer:px-2.5"
+    title={selectedLabel}
+  >
+    <Cpu class="size-3.5 shrink-0 @[26rem]/composer:hidden" aria-hidden="true" />
+    <span
+      class="sr-only font-medium @[26rem]/composer:not-sr-only @[26rem]/composer:max-w-[12rem] @[26rem]/composer:truncate"
+      >{selectedLabel}</span
+    >
   </div>
 {:else}
   <ModelSelector.Root bind:open={selectorOpen}>
@@ -99,12 +108,18 @@
         !chat.settings ||
         chat.askQuestion.isLoading ||
         chat.settingsResolution?.settings_compatible === false}
-      aria-label={m.choose_a_completion_model()}
+      class="min-w-0 gap-1 px-2 @[36rem]/composer:gap-1.5 @[36rem]/composer:px-2.5 [&>svg:last-child]:hidden @[26rem]/composer:[&>svg:last-child]:block"
+      aria-label={`${m.choose_a_completion_model()}: ${selectedLabel}`}
+      title={selectedLabel}
     >
       {#if selectedModel}
         <ModelSelector.Logo provider={selectedModel.org ?? selectedModel.provider_type} />
+      {:else}
+        <Cpu class="size-4 shrink-0" aria-hidden="true" />
       {/if}
-      <ModelSelector.Name>{selectedLabel}</ModelSelector.Name>
+      <ModelSelector.Name class="hidden @[26rem]/composer:inline"
+        >{selectedLabel}</ModelSelector.Name
+      >
     </ModelSelector.Trigger>
     <ModelSelector.Content
       class="w-auto max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0 shadow-lg"

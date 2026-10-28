@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import aiohttp
@@ -11,6 +12,7 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
+    SharePointSubscriptionExists,
     SharePointSubscriptionRepository,
 )
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
@@ -19,11 +21,48 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
-from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 logger = get_logger(__name__)
+
+RECREATE_FAILED_MESSAGE = (
+    "Microsoft Graph did not accept a replacement subscription; "
+    "the existing one was kept"
+)
+
+
+def normalize_notification_url(url: str) -> str:
+    """The form two spellings of one webhook URL share.
+
+    Scheme and host are case-insensitive and a trailing slash does not change
+    which route Eneo serves, so neither may count as drift; path case and the
+    query string do.
+    """
+    parts = urlsplit(url.strip())
+    path = parts.path.rstrip("/")
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+    )
+
+
+def lifecycle_notification_url_for(
+    notification_url: Optional[str], configured: Optional[str]
+) -> Optional[str]:
+    """Where Graph posts lifecycle events: the configured URL, else the
+    notification URL itself. None without a notification URL.
+
+    Graph validates this URL when it creates a subscription. The notification
+    URL is already known to reach Eneo, so defaulting to it cannot break
+    subscriptions behind a proxy that forwards only that path; the webhook
+    tells lifecycle events from changes by their ``lifecycleEvent`` field.
+    """
+    if not notification_url:
+        return None
+    if configured and configured.strip():
+        return configured.strip()
+    return notification_url
 
 
 def _resource_label(site_id: Optional[str], drive_id: Optional[str] = None) -> str:
@@ -45,17 +84,19 @@ class SharePointSubscriptionService:
     def __init__(
         self,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
-        oauth_token_service: OauthTokenService,
     ) -> None:
         super().__init__()
         self.subscription_repo = sharepoint_subscription_repo
-        self.oauth_token_service = oauth_token_service
         settings = get_settings()
         self.notification_url = settings.sharepoint_webhook_notification_url
         if not self.notification_url and settings.public_origin:
             self.notification_url = (
                 f"{settings.public_origin}/api/v1/integrations/sharepoint/webhook/"
             )
+        self.lifecycle_notification_url = lifecycle_notification_url_for(
+            self.notification_url,
+            settings.sharepoint_webhook_lifecycle_notification_url,
+        )
         self.client_state = (
             settings.sharepoint_webhook_client_state.strip()
             if settings.sharepoint_webhook_client_state
@@ -73,6 +114,37 @@ class SharePointSubscriptionService:
             )
         return self.client_state
 
+    def require_webhook_configuration(self) -> None:
+        """Raise ``ValueError`` naming what a Graph subscription cannot be created without."""
+        if not self.notification_url:
+            raise ValueError(
+                "Set PUBLIC_ORIGIN or SHAREPOINT_WEBHOOK_NOTIFICATION_URL "
+                "before creating SharePoint webhook subscriptions."
+            )
+        self._require_client_state()
+
+    def notification_url_drifted(self, subscription: SharePointSubscription) -> bool:
+        """True when Graph still posts to a URL this deployment no longer serves."""
+        return bool(
+            self.notification_url
+            and subscription.notification_url is not None
+            and normalize_notification_url(subscription.notification_url)
+            != normalize_notification_url(self.notification_url)
+        )
+
+    def lifecycle_url_missing(self, subscription: SharePointSubscription) -> bool:
+        """True when Graph does not post this subscription's lifecycle events here.
+
+        Graph takes ``lifecycleNotificationUrl`` only when a subscription is
+        created, so such a subscription is recreated rather than renewed.
+        """
+        if not self.lifecycle_notification_url:
+            return False
+        stored = subscription.lifecycle_notification_url
+        return stored is None or normalize_notification_url(
+            stored
+        ) != normalize_notification_url(self.lifecycle_notification_url)
+
     async def ensure_subscription_for_site(
         self,
         user_integration_id: UUID,
@@ -87,6 +159,10 @@ class SharePointSubscriptionService:
 
         This is the main entry point for integration creation - replaces the old
         per-integration subscription logic.
+
+        The subscription row is written in a transaction of its own, committed
+        before this returns, so Graph and the row agree whatever becomes of
+        the caller's transaction. The caller must hold no lock on the row.
 
         Args:
             user_integration_id: User integration that owns this subscription
@@ -104,8 +180,28 @@ class SharePointSubscriptionService:
             )
             return None
 
-        # Check if subscription already exists for this user+site/drive
-        existing = await self.subscription_repo.get_by_user_and_site(
+        # Imports and syncs of several folders on one site arrive together
+        # ("Resync all" sends a few at once). Each would find the same missing,
+        # expired or drifted subscription and create one at Graph, and all but
+        # the last written would be left there unused. The pair is therefore
+        # locked, in a transaction of its own that ends here: held until the
+        # caller's transaction ended, it would also wait on whatever that
+        # transaction waits for (a running sync's row), and a batch over two
+        # sites could deadlock with another taking them in the other order.
+        async with self.subscription_repo.own_transaction() as repo:
+            return await self._ensure(
+                repo, user_integration_id, site_id, token, is_onedrive
+            )
+
+    async def _ensure(
+        self,
+        repo: SharePointSubscriptionRepository,
+        user_integration_id: UUID,
+        site_id: str,
+        token: SharePointTokenProtocol,
+        is_onedrive: bool,
+    ) -> Optional[SharePointSubscription]:
+        existing = await repo.lock_user_site(
             user_integration_id=user_integration_id, site_id=site_id
         )
 
@@ -121,6 +217,7 @@ class SharePointSubscriptionService:
                     subscription=existing,
                     token=token,
                     is_onedrive=is_onedrive,
+                    repo=repo,
                 )
                 if success:
                     logger.info(
@@ -133,12 +230,23 @@ class SharePointSubscriptionService:
                         f"returning expired subscription (webhooks will not work until recreated)"
                     )
                     return existing  # Return expired subscription - better than None
-            else:
-                logger.info(
-                    f"Reusing existing subscription {existing.subscription_id} "
-                    f"for user_integration={user_integration_id}, {_resource_label(site_id)}"
+            if self.notification_url_drifted(existing):
+                logger.warning(
+                    f"Subscription {existing.subscription_id} for {_resource_label(site_id)} "
+                    f"posts to {existing.notification_url}; recreating for {self.notification_url}"
+                )
+                await self.recreate_expired_subscription(
+                    subscription=existing,
+                    token=token,
+                    is_onedrive=is_onedrive,
+                    repo=repo,
                 )
                 return existing
+            logger.info(
+                f"Reusing existing subscription {existing.subscription_id} "
+                f"for user_integration={user_integration_id}, {_resource_label(site_id)}"
+            )
+            return existing
 
         # Create new subscription
         resource_type = "OneDrive" if is_onedrive else "site"
@@ -181,9 +289,27 @@ class SharePointSubscriptionService:
             subscription_id=subscription_id,
             drive_id=drive_id,
             expires_at=expiration,
+            notification_url=self.notification_url,
+            lifecycle_notification_url=self.lifecycle_notification_url,
         )
 
-        saved = await self.subscription_repo.add(subscription)
+        try:
+            saved = await repo.add(subscription)
+        except SharePointSubscriptionExists:
+            # Lost the race with a concurrent import of the same site: keep the
+            # row that won and drop the Graph subscription we just registered,
+            # or Graph would post every change twice.
+            winner = await repo.get_by_user_and_site(
+                user_integration_id=user_integration_id, site_id=site_id
+            )
+            logger.info(
+                f"Subscription for {_resource_label(site_id)} was created concurrently; "
+                f"deleting duplicate Graph subscription {subscription_id}"
+            )
+            await self._delete_graph_subscription(
+                subscription_id=subscription_id, token=token
+            )
+            return winner
         logger.info(
             f"Created and saved subscription {subscription_id} for {_resource_label(site_id, drive_id)} "
             f"(expires {expiration.isoformat()})"
@@ -196,6 +322,7 @@ class SharePointSubscriptionService:
         subscription: SharePointSubscription,
         token: SharePointTokenProtocol,
         is_onedrive: bool = False,
+        repo: Optional[SharePointSubscriptionRepository] = None,
     ) -> bool:
         """Recreate an expired subscription in-place.
 
@@ -214,20 +341,19 @@ class SharePointSubscriptionService:
         Returns:
             True if recreation successful, False otherwise
         """
+        self.require_webhook_configuration()
+        repo = repo or self.subscription_repo
         logger.info(
             f"Recreating expired subscription {subscription.subscription_id} "
             f"for {_resource_label(subscription.site_id, subscription.drive_id)}"
         )
         old_subscription_id = subscription.subscription_id
 
-        # Step 1: Try to delete old subscription from Microsoft Graph (may already be gone)
-        await self._delete_graph_subscription(
-            subscription_id=subscription.subscription_id, token=token
-        )
-        # Note: We don't check the result - expired subscriptions may already be
-        # deleted by Microsoft Graph automatically
-
-        # Step 2: Create new subscription in Microsoft Graph
+        # Graph allows two subscriptions on one resource, so the replacement is
+        # created while the old one still stands. A failed create (the new
+        # origin not yet serving TLS, Graph refusing the validation handshake)
+        # then leaves Graph and the row as they were; a row left with a deleted
+        # id would not be looked at again until its stored expiry.
         new_subscription_id = await self._create_graph_subscription(
             token=token,
             site_id=subscription.site_id if not is_onedrive else None,
@@ -236,18 +362,44 @@ class SharePointSubscriptionService:
 
         if not new_subscription_id:
             logger.error(
-                f"Failed to create new subscription for expired subscription {subscription.id}"
+                f"Failed to create a replacement for subscription {subscription.id}; "
+                f"keeping {old_subscription_id[:20]}..."
             )
+            subscription.mark_renewal_failure(
+                user_visible_error(RECREATE_FAILED_MESSAGE)
+            )
+            try:
+                await repo.update(subscription)
+            except Exception as exc:
+                logger.warning(
+                    "Could not record the failed recreation of subscription %s (%s)",
+                    subscription.id,
+                    type(exc).__name__,
+                )
             return False
 
-        # Step 3: Update existing DB record with new subscription_id and expiration
         new_expiration = datetime.now(timezone.utc) + timedelta(
             minutes=self.subscription_lifetime_minutes
         )
         subscription.subscription_id = new_subscription_id
         subscription.expires_at = new_expiration
+        subscription.notification_url = self.notification_url
+        subscription.lifecycle_notification_url = self.lifecycle_notification_url
         subscription.mark_renewal_success()
-        await self.subscription_repo.update(subscription)
+        # The row is written before the old subscription is deleted: a failed
+        # write must not leave the row pointing at a subscription Graph no
+        # longer has. The old one may already be gone; a delete that fails
+        # leaves an orphan that expires at Graph on its own.
+        await repo.update(subscription)
+        if not await self._delete_graph_subscription(
+            subscription_id=old_subscription_id, token=token
+        ):
+            logger.warning(
+                "Replaced subscription %s but could not delete the old Graph "
+                "subscription %s; it expires at Graph on its own",
+                subscription.id,
+                old_subscription_id[:20],
+            )
 
         logger.info(
             f"Successfully recreated subscription {subscription.id}: "
@@ -274,6 +426,35 @@ class SharePointSubscriptionService:
         Returns:
             True if renewal successful, False otherwise
         """
+        if self.notification_url_drifted(subscription):
+            # Graph cannot be told a new notificationUrl on renewal; only a
+            # fresh subscription carries it.
+            logger.warning(
+                f"Subscription {subscription.subscription_id} posts to "
+                f"{subscription.notification_url}; recreating for {self.notification_url}"
+            )
+            return await self.recreate_expired_subscription(
+                subscription=subscription,
+                token=token,
+                is_onedrive=subscription.is_onedrive,
+            )
+        if self.lifecycle_url_missing(subscription):
+            logger.info(
+                f"Subscription {subscription.subscription_id} has no lifecycle "
+                f"notification URL; recreating it for {self.lifecycle_notification_url}"
+            )
+            if await self.recreate_expired_subscription(
+                subscription=subscription,
+                token=token,
+                is_onedrive=subscription.is_onedrive,
+            ):
+                return True
+            # Renewed in place it keeps working, only without lifecycle events.
+            logger.warning(
+                f"Could not recreate subscription {subscription.subscription_id} "
+                "with a lifecycle notification URL; renewing it as it is"
+            )
+
         new_expiration = datetime.now(timezone.utc) + timedelta(
             minutes=self.subscription_lifetime_minutes
         )
@@ -319,16 +500,11 @@ class SharePointSubscriptionService:
                             f"(404 response). Automatically recreating to recover from potential DB rollback "
                             f"or sync issue for {_resource_label(subscription.site_id, subscription.drive_id)}"
                         )
-                        is_onedrive = (
-                            bool(subscription.site_id)
-                            and bool(subscription.drive_id)
-                            and subscription.site_id == subscription.drive_id
-                        )
                         # Recreate subscription in-place (preserves all FK relationships)
                         return await self.recreate_expired_subscription(
                             subscription=subscription,
                             token=token,
-                            is_onedrive=is_onedrive,
+                            is_onedrive=subscription.is_onedrive,
                         )
                     else:
                         error_text = await response.text()
@@ -456,6 +632,10 @@ class SharePointSubscriptionService:
             "expirationDateTime": expiration.isoformat().replace("+00:00", "Z"),
             "clientState": self._require_client_state(),
         }
+        if self.lifecycle_notification_url:
+            # Graph validates this URL like the notification URL, and only
+            # accepts it here: a renewal cannot add it later.
+            payload["lifecycleNotificationUrl"] = self.lifecycle_notification_url
 
         try:
             # Use IPv4-only connector to avoid IPv6 issues
@@ -547,6 +727,34 @@ class SharePointSubscriptionService:
                 f"Error deleting subscription {subscription_id}: {exc}", exc_info=True
             )
             return False
+
+    async def delete_subscription_if_unused_detached(
+        self,
+        subscription_id: UUID,
+        token: SharePointTokenProtocol,
+    ) -> None:
+        """``delete_subscription_if_unused`` on a session of its own.
+
+        For work scheduled past the end of a request, whose session is closed
+        by the time this runs.
+        """
+        from eneo.database.database import sessionmanager
+        from eneo.integration.infrastructure.mappers.sharepoint_subscription_mapper import (
+            SharePointSubscriptionMapper,
+        )
+        from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
+            SharePointSubscriptionRepositoryImpl,
+        )
+
+        async with sessionmanager.session() as session, session.begin():
+            detached = SharePointSubscriptionService(
+                sharepoint_subscription_repo=SharePointSubscriptionRepositoryImpl(
+                    session=session, mapper=SharePointSubscriptionMapper()
+                ),
+            )
+            await detached.delete_subscription_if_unused(
+                subscription_id=subscription_id, token=token
+            )
 
     async def _resolve_drive_id(
         self,

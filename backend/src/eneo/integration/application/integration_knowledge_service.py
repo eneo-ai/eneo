@@ -1,24 +1,27 @@
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, Protocol, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.integration.domain.entities.integration_knowledge import (
+    KNOWLEDGE_NAME_LENGTH_REASON,
+    KNOWLEDGE_NAME_MAX_LENGTH,
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
+from eneo.integration.domain.task_params import (
+    ConfluenceContentTaskParam,
+    SharepointContentTaskParam,
+)
+from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
-from eneo.integration.presentation.models import (
-    ConfluenceContentTaskParam,
-    IntegrationType,
-    SharepointContentTaskParam,
-)
+from eneo.integration.infrastructure.detached_tasks import run_after_commit
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
     BadRequestException,
@@ -26,11 +29,13 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.embedding_models.domain.embedding_model_repo import (
         EmbeddingModelRepository,
     )
@@ -40,11 +45,16 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
+    from eneo.integration.domain.entities.user_integration import UserIntegration
     from eneo.integration.domain.repositories.integration_knowledge_repo import (
+        IntegrationKnowledgeLocation,
         IntegrationKnowledgeRepository,
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
+    )
+    from eneo.integration.infrastructure.auth_service.org_token_provider import (
+        OrgTokenProvider,
     )
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
@@ -56,6 +66,7 @@ if TYPE_CHECKING:
         SharePointSubscriptionService,
     )
     from eneo.jobs.job_service import JobService
+    from eneo.jobs.task_models import TaskParams
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.users.user import UserInDB
@@ -82,6 +93,49 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
+
+
+class SpaceItem(NamedTuple):
+    """An item as its space showed it before a change, with that space."""
+
+    space: "Space"
+    knowledge: IntegrationKnowledge
+
+
+@dataclass(frozen=True)
+class _ImportContext:
+    """What every item of one import shares, resolved before anything is written."""
+
+    space_id: UUID
+    space: "Space"
+    user_integration: "UserIntegration"
+    embedding_model: "EmbeddingModel"
+    token: "SimpleToken | OauthToken"
+    token_id: UUID | None
+    tenant_app_id: UUID | None
+
+
+@dataclass(frozen=True)
+class _PendingDispatch:
+    """A queued job row whose hand-over to the worker waits for the commit."""
+
+    task: Task
+    job_id: UUID
+    params: "TaskParams"
+
+
+def _failed_batch_item(
+    index: int, item: BatchIntegrationKnowledgeCreateItem, error: str
+) -> BatchIntegrationKnowledgeCreateResult:
+    return BatchIntegrationKnowledgeCreateResult(
+        index=index,
+        name=item["name"],
+        status="failed",
+        knowledge=None,
+        integration_knowledge_id=None,
+        job=None,
+        error=error,
+    )
 
 
 class SubscriptionCleanupInfo(TypedDict):
@@ -131,6 +185,7 @@ class IntegrationKnowledgeService:
         sharepoint_subscription_service: "SharePointSubscriptionService",
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
+        org_token_provider: "OrgTokenProvider",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
     ) -> None:
         super().__init__()
@@ -148,6 +203,7 @@ class IntegrationKnowledgeService:
         )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+        self.org_token_provider = org_token_provider
 
     async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
         """Sync history follows knowledge read access, not connection ownership."""
@@ -166,28 +222,50 @@ class IntegrationKnowledgeService:
                 return
         raise NotFoundException("Integration knowledge not found")
 
+    async def get_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> IntegrationKnowledgeLocation:
+        """Where an item seen from a space keeps its documents, for anyone who
+        may read the space's integrations."""
+        await self.require_readable_knowledge(space_id, integration_knowledge_id)
+        return await self.integration_knowledge_repo.get_location(
+            integration_knowledge_id
+        )
+
+    async def require_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> None:
+        """Raise unless the caller may read the space's integrations (403) and
+        the space shows the item (404, as for an unknown space).
+
+        Membership is checked before the item is looked up so a non-member
+        cannot probe which items a space holds.
+        """
+        if integration_knowledge_id not in await self.list_readable_knowledge_ids(
+            space_id
+        ):
+            raise NotFoundException()
+
+    async def list_readable_knowledge_ids(self, space_id: UUID) -> list[UUID]:
+        """Ids of the items a space shows, for anyone who may read its integrations.
+
+        Reads the caller's access facts and the ids only: the source pages
+        poll this and ask once per folder, and the space aggregate loads
+        every member, assistant and source of the space.
+        """
+        facts = await self.space_repo.get_space_access_facts(space_id)
+        actor = self.actor_manager.get_space_actor(facts)
+        if not (actor.can_read_space() and actor.can_read_integrations()):
+            raise UnauthorizedException()
+        return await self.space_repo.get_visible_integration_knowledge_ids(
+            space_id, facts.tenant_space_id
+        )
+
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"
     ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
-        if tenant_app.is_service_account():
-            if not self.service_account_auth_service:
-                raise BadRequestException("ServiceAccountAuthService not configured")
-
-            token_data = await self.service_account_auth_service.refresh_access_token(
-                tenant_app
-            )
-            access_token = token_data["access_token"]
-            new_refresh_token = token_data.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await self.tenant_sharepoint_app_repo.update(tenant_app)
-            return access_token
-
-        return await self.tenant_app_auth_service.get_access_token(tenant_app)
+        return await self.org_token_provider.get_access_token(tenant_app)
 
     async def create_space_integration_knowledge(
         self,
@@ -204,6 +282,36 @@ class IntegrationKnowledgeService:
         wrapper_id: UUID | None = None,
         wrapper_name: str | None = None,
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
+        context = await self._prepare_import(
+            user_integration_id=user_integration_id,
+            embedding_model_id=embedding_model_id,
+            space_id=space_id,
+        )
+        knowledge, job, dispatch = await self._import(
+            context,
+            name=name,
+            key=key,
+            url=url,
+            folder_id=folder_id,
+            folder_path=folder_path,
+            selected_item_type=selected_item_type,
+            resource_type=resource_type,
+            wrapper_id=wrapper_id,
+            wrapper_name=wrapper_name,
+        )
+        await self.job_service.dispatch_after_commit(
+            dispatch.task, dispatch.job_id, dispatch.params
+        )
+        return knowledge, job
+
+    async def _prepare_import(
+        self,
+        *,
+        user_integration_id: UUID,
+        embedding_model_id: UUID,
+        space_id: UUID,
+    ) -> _ImportContext:
+        """Everything an import needs that can fail, checked before any write."""
         space = await self.space_repo.one(id=space_id)
 
         connection = await self.user_integration_service.get_authorized_integration(
@@ -214,133 +322,188 @@ class IntegrationKnowledgeService:
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
             raise BadRequestException("No valid embedding model")
 
-        if not key:
-            raise BadRequestException("Integration key is required")
+        if user_integration.integration_type not in ("sharepoint", "confluence"):
+            raise BadRequestException("Unknown integration type")
 
         embedding_model = await self.embedding_model_repo.one(
             model_id=embedding_model_id
         )
 
-        if user_integration.integration_type == "sharepoint":
-            if resource_type == "onedrive":
-                site_id_value = None
-                drive_id_value = key
-            else:
-                site_id_value = key
-                drive_id_value = None
-        else:
-            site_id_value = None
-            drive_id_value = None
-
-        obj = IntegrationKnowledge(
-            name=name,
-            original_name=name,  # Store original name at creation time
-            space_id=space_id,
-            embedding_model=embedding_model,
-            user_integration=user_integration,
-            tenant_id=self.user.tenant_id,
-            url=url,
-            site_id=site_id_value,
-            drive_id=drive_id_value,
-            resource_type=resource_type,
-            folder_id=folder_id,
-            folder_path=folder_path,
-            selected_item_type=selected_item_type,
-            wrapper_id=wrapper_id,
-            wrapper_name=wrapper_name,
+        if connection.tenant_app is not None:
+            access_token = await self._get_tenant_app_access_token(
+                connection.tenant_app
+            )
+            return _ImportContext(
+                space_id=space_id,
+                space=space,
+                user_integration=user_integration,
+                embedding_model=embedding_model,
+                token=SimpleToken(access_token=access_token),
+                token_id=None,
+                tenant_app_id=connection.tenant_app.id,
+            )
+        oauth_token = await self.oauth_token_repo.one(
+            user_integration_id=user_integration_id
         )
-        knowledge = await self.integration_knowledge_repo.add(obj=obj)
+        if (
+            user_integration.integration_type == "confluence"
+            and not oauth_token.token_type.is_confluence
+        ):
+            raise BadRequestException("Expected a Confluence token")
+        return _ImportContext(
+            space_id=space_id,
+            space=space,
+            user_integration=user_integration,
+            embedding_model=embedding_model,
+            token=oauth_token,
+            token_id=oauth_token.id,
+            tenant_app_id=None,
+        )
+
+    async def _import(
+        self,
+        context: _ImportContext,
+        *,
+        name: str,
+        key: str | None,
+        url: str,
+        folder_id: str | None,
+        folder_path: str | None,
+        selected_item_type: str | None,
+        resource_type: str,
+        wrapper_id: UUID | None,
+        wrapper_name: str | None,
+    ) -> tuple[IntegrationKnowledge, "JobInDb", _PendingDispatch]:
+        """Write one item and its first sync's job row.
+
+        The job is not handed to the worker here: the caller dispatches it
+        once the item's writes are kept (``JobService.dispatch_after_commit``),
+        so an item rolled back later never leaves the worker a job.
+        """
+        if not key:
+            raise BadRequestException("Integration key is required")
+        name = name.strip()
+        if not name or len(name) > KNOWLEDGE_NAME_MAX_LENGTH:
+            raise BadRequestException(KNOWLEDGE_NAME_LENGTH_REASON)
+
+        space = context.space
+        user_integration = context.user_integration
+        user_integration_id = user_integration.id
+        is_sharepoint = user_integration.integration_type == "sharepoint"
+        if is_sharepoint and resource_type == "onedrive":
+            site_id_value, drive_id_value = None, key
+        elif is_sharepoint:
+            site_id_value, drive_id_value = key, None
+        else:
+            site_id_value, drive_id_value = None, None
+
+        knowledge = await self.integration_knowledge_repo.add(
+            obj=IntegrationKnowledge(
+                name=name,
+                original_name=name,
+                space_id=context.space_id,
+                embedding_model=context.embedding_model,
+                user_integration=user_integration,
+                tenant_id=self.user.tenant_id,
+                url=url,
+                site_id=site_id_value,
+                drive_id=drive_id_value,
+                resource_type=resource_type,
+                folder_id=folder_id,
+                folder_path=folder_path,
+                selected_item_type=selected_item_type,
+                wrapper_id=wrapper_id,
+                wrapper_name=wrapper_name,
+            )
+        )
 
         await self._distribute_knowledge_if_org_space(knowledge, space)
 
-        if connection.tenant_app is not None:
-            tenant_app = connection.tenant_app
-            access_token = await self._get_tenant_app_access_token(tenant_app)
-            token = SimpleToken(access_token=access_token)
-            token_id = None
-            tenant_app_id = tenant_app.id
-        else:
-            oauth_token = await self.oauth_token_repo.one(
-                user_integration_id=user_integration_id
-            )
-            token = oauth_token
-            token_id = oauth_token.id
-            tenant_app_id = None
-
-        if isinstance(token, OauthToken) and token.token_type.is_confluence:
-            if token_id is None:
+        if not is_sharepoint:
+            if context.token_id is None:
                 raise BadRequestException("Confluence token ID is required")
-            job = await self.job_service.queue_job(
-                task=Task.PULL_CONFLUENCE_CONTENT,
-                name=name,
-                task_params=ConfluenceContentTaskParam(
-                    user_id=self.user.id,
-                    id=user_integration_id,
-                    token_id=token_id,
-                    space_key=key,
-                    integration_knowledge_id=knowledge.id,
-                ),
+            task = Task.PULL_CONFLUENCE_CONTENT
+            params: TaskParams = ConfluenceContentTaskParam(
+                user_id=self.user.id,
+                id=user_integration_id,
+                token_id=context.token_id,
+                space_key=key,
+                integration_knowledge_id=knowledge.id,
             )
-        elif user_integration.integration_type == "sharepoint":
-            job = await self.job_service.queue_job(
-                task=Task.PULL_SHAREPOINT_CONTENT,
-                name=name,
-                task_params=SharepointContentTaskParam(
-                    user_id=self.user.id,
-                    id=user_integration_id,
-                    token_id=token_id,
-                    tenant_app_id=tenant_app_id,
-                    integration_knowledge_id=knowledge.id,
-                    site_id=site_id_value,
-                    drive_id=drive_id_value,
-                    folder_id=folder_id,
-                    folder_path=folder_path,
-                    resource_type=resource_type,
-                ),
+        else:
+            task = Task.PULL_SHAREPOINT_CONTENT
+            params = SharepointContentTaskParam(
+                user_id=self.user.id,
+                id=user_integration_id,
+                token_id=context.token_id,
+                tenant_app_id=context.tenant_app_id,
+                integration_knowledge_id=knowledge.id,
+                site_id=site_id_value,
+                drive_id=drive_id_value,
+                folder_id=folder_id,
+                folder_path=folder_path,
+                resource_type=resource_type,
             )
-            # Register webhook subscription for change notifications
-            is_onedrive = resource_type == "onedrive"
-            logger.info(
-                "Ensuring %s subscription for knowledge %s (%s=%s)",
-                "drive-level" if is_onedrive else "site-level",
-                knowledge.id,
-                "drive" if is_onedrive else "site",
-                key[:30],
+        job = await self.job_service.queue_job(
+            task=task, name=name, task_params=params, enqueue=False
+        )
+        if is_sharepoint:
+            await self._link_subscription_on_import(
+                context, knowledge, key=key, is_onedrive=resource_type == "onedrive"
             )
-            try:
-                sharepoint_token = _as_sharepoint_token(token)
+        return knowledge, job, _PendingDispatch(task, job.id, params)
+
+    async def _link_subscription_on_import(
+        self,
+        context: _ImportContext,
+        knowledge: IntegrationKnowledge,
+        *,
+        key: str,
+        is_onedrive: bool,
+    ) -> None:
+        """Register the change-notification subscription; a failure only logs.
+
+        A savepoint keeps a failed statement from aborting the transaction the
+        item was written in.
+        """
+        logger.info(
+            "Ensuring %s subscription for knowledge %s (%s=%s)",
+            "drive-level" if is_onedrive else "site-level",
+            knowledge.id,
+            "drive" if is_onedrive else "site",
+            key[:30],
+        )
+        try:
+            async with self.space_repo.session.begin_nested():
                 subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                    user_integration_id=user_integration_id,
+                    user_integration_id=context.user_integration.id,
                     site_id=key,
-                    token=sharepoint_token,
+                    token=_as_sharepoint_token(context.token),
                     is_onedrive=is_onedrive,
                 )
-                if subscription:
-                    knowledge.sharepoint_subscription_id = subscription.id
-                    knowledge = await self.integration_knowledge_repo.update(knowledge)
-                    logger.info(
-                        "Successfully linked knowledge %s to subscription %s",
-                        knowledge.id,
-                        subscription.subscription_id,
-                    )
-                else:
+                if not subscription:
                     logger.warning(
                         "Could not create/reuse subscription for %s %s (webhook URL may not be configured)",
                         "drive" if is_onedrive else "site",
                         key[:30],
                     )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to ensure subscription for knowledge %s: %s",
-                    knowledge.id,
-                    exc,
-                    exc_info=True,
+                    return
+                await self.integration_knowledge_repo.link_subscription(
+                    knowledge.id, subscription.id
                 )
-        else:
-            raise BadRequestException("Unknown integration type")
-
-        # Return both knowledge and job for frontend to track progress
-        return knowledge, job
+                knowledge.sharepoint_subscription_id = subscription.id
+                logger.info(
+                    "Successfully linked knowledge %s to subscription %s",
+                    knowledge.id,
+                    subscription.subscription_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to ensure subscription for knowledge %s: %s",
+                knowledge.id,
+                exc,
+                exc_info=True,
+            )
 
     async def create_space_integration_knowledge_batch(
         self,
@@ -350,45 +513,42 @@ class IntegrationKnowledgeService:
         items: list[BatchIntegrationKnowledgeCreateItem],
         wrapper_name: str | None = None,
     ) -> list[BatchIntegrationKnowledgeCreateResult]:
-        """Create multiple integration knowledge rows in one request.
+        """Create several items in one request; a failed item leaves nothing behind.
 
-        This reuses the existing single-item flow to keep auth/sync/subscription
-        behavior aligned with the rest of the SharePoint pipeline.
+        Access, the embedding model and the token are checked once, before any
+        write; when that fails, the request fails with that error and nothing
+        is written. Each item is then written in its own savepoint, so an item
+        that fails part-way is rolled back alone, and its job is dispatched
+        only after its savepoint is released.
         """
-        results: list[BatchIntegrationKnowledgeCreateResult] = []
         normalized_wrapper_name = (
             wrapper_name.strip() if wrapper_name and wrapper_name.strip() else None
         )
         batch_wrapper_id = uuid4() if len(items) > 1 else None
         batch_wrapper_name = normalized_wrapper_name if batch_wrapper_id else None
 
+        context = await self._prepare_import(
+            user_integration_id=user_integration_id,
+            embedding_model_id=embedding_model_id,
+            space_id=space_id,
+        )
+
+        results: list[BatchIntegrationKnowledgeCreateResult] = []
         for index, item in enumerate(items):
             try:
-                knowledge, job = await self.create_space_integration_knowledge(
-                    user_integration_id=user_integration_id,
-                    name=item["name"],
-                    embedding_model_id=embedding_model_id,
-                    space_id=space_id,
-                    key=item.get("key"),
-                    url=item["url"],
-                    folder_id=item.get("folder_id"),
-                    folder_path=item.get("folder_path"),
-                    selected_item_type=item.get("selected_item_type"),
-                    resource_type=item.get("resource_type") or "site",
-                    wrapper_id=batch_wrapper_id,
-                    wrapper_name=batch_wrapper_name,
-                )
-                results.append(
-                    BatchIntegrationKnowledgeCreateResult(
-                        index=index,
+                async with self.space_repo.session.begin_nested():
+                    knowledge, job, dispatch = await self._import(
+                        context,
                         name=item["name"],
-                        status="created",
-                        knowledge=knowledge,
-                        integration_knowledge_id=knowledge.id,
-                        job=job,
-                        error=None,
+                        key=item.get("key"),
+                        url=item["url"],
+                        folder_id=item.get("folder_id"),
+                        folder_path=item.get("folder_path"),
+                        selected_item_type=item.get("selected_item_type"),
+                        resource_type=item.get("resource_type") or "site",
+                        wrapper_id=batch_wrapper_id,
+                        wrapper_name=batch_wrapper_name,
                     )
-                )
             except Exception as exc:
                 logger.warning(
                     "Failed to create integration knowledge batch item at index %s: %s",
@@ -396,17 +556,22 @@ class IntegrationKnowledgeService:
                     exc,
                     exc_info=True,
                 )
-                results.append(
-                    BatchIntegrationKnowledgeCreateResult(
-                        index=index,
-                        name=item["name"],
-                        status="failed",
-                        knowledge=None,
-                        integration_knowledge_id=None,
-                        job=None,
-                        error=str(exc),
-                    )
+                results.append(_failed_batch_item(index, item, user_visible_error(exc)))
+                continue
+            await self.job_service.dispatch_after_commit(
+                dispatch.task, dispatch.job_id, dispatch.params
+            )
+            results.append(
+                BatchIntegrationKnowledgeCreateResult(
+                    index=index,
+                    name=item["name"],
+                    status="created",
+                    knowledge=knowledge,
+                    integration_knowledge_id=knowledge.id,
+                    job=job,
+                    error=None,
                 )
+            )
 
         return results
 
@@ -466,23 +631,35 @@ class IntegrationKnowledgeService:
         self,
         space_id: "UUID",
         integration_knowledge_id: "UUID",
+    ) -> SpaceItem:
+        """Remove an item from the space it was created in; returns what was
+        removed, for the audit log."""
+        space = await self.space_repo.one(id=space_id)
+
+        # Membership is checked before the item is looked up so a non-member
+        # cannot probe which items a space holds.
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_delete_integrations():
+            raise UnauthorizedException(
+                "User does not have permission to remove integration knowledge "
+                "from this space"
+            )
+
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+        await self._remove_from_space(space, knowledge)
+        return SpaceItem(space, knowledge)
+
+    async def _remove_from_space(
+        self, space: "Space", knowledge: IntegrationKnowledge
     ) -> None:
+        """Delete ``knowledge`` as seen from ``space``; the caller checked delete access."""
         import sqlalchemy as sa
 
         from eneo.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
-
-        space = await self.space_repo.one(id=space_id)
-
-        knowledge = space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
-        )
-
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_delete_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if knowledge.user_integration.auth_type == "tenant_app":
@@ -548,61 +725,42 @@ class IntegrationKnowledgeService:
         # Delete from database FIRST (within transaction)
         await self.integration_knowledge_repo.remove(id=knowledge.id)
 
-        # Cleanup Microsoft Graph subscription AFTER the database transaction completes
-        # Using fire-and-forget to avoid blocking the HTTP response
+        # The Graph call runs after this transaction commits, on a session of
+        # its own: the request session is closed by then, and the reference
+        # count must see the deleted row. A failure here is retried by the
+        # daily orphan cleanup job.
         if subscription_cleanup_info:
-            asyncio.create_task(
-                self._cleanup_subscription_async(
-                    subscription_id=subscription_cleanup_info["subscription_id"],
-                    token=_as_sharepoint_token(subscription_cleanup_info["token"]),
-                )
-            )
-
-    async def _cleanup_subscription_async(
-        self,
-        subscription_id: UUID,
-        token: SharePointTokenProtocol,
-    ) -> None:
-        """Clean up Microsoft Graph subscription asynchronously.
-
-        This runs as a fire-and-forget task AFTER the database transaction
-        has completed. This prevents HTTP calls to Microsoft Graph from
-        blocking the database connection pool.
-        """
-        try:
-            await self.sharepoint_subscription_service.delete_subscription_if_unused(
-                subscription_id=subscription_id,
-                token=token,
-            )
-            logger.info(
-                "Cleaned up subscription %s (if no longer referenced)",
-                subscription_id,
-            )
-        except Exception as exc:
-            # Log but don't raise - this is fire-and-forget
-            # The subscription will be cleaned up by the orphan cleanup cron job if needed
-            logger.warning(
-                "Failed to cleanup subscription %s: %s "
-                "(will be retried by daily orphan cleanup cron job at 02:00 UTC)",
-                subscription_id,
-                exc,
-                exc_info=True,
+            cleanup_subscription_id = subscription_cleanup_info["subscription_id"]
+            cleanup_token = _as_sharepoint_token(subscription_cleanup_info["token"])
+            run_after_commit(
+                self.space_repo.session,
+                lambda: self.sharepoint_subscription_service.delete_subscription_if_unused_detached(
+                    subscription_id=cleanup_subscription_id,
+                    token=cleanup_token,
+                ),
             )
 
     async def trigger_full_sync(
         self,
         space_id: UUID,
         integration_knowledge_id: UUID,
-    ) -> "JobInDb":
-        """Trigger a full resync for an existing SharePoint integration knowledge."""
+    ) -> tuple["JobInDb", SpaceItem]:
+        """Trigger a full resync for an existing SharePoint integration knowledge.
+
+        Returns the job and the item synced, for the audit log.
+        """
         space = await self.space_repo.one(id=space_id)
+        # Membership before the item, as for a removal.
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integrations():
+            raise UnauthorizedException(
+                "User does not have permission to sync integration knowledge in "
+                "this space"
+            )
+
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_integrations():
-            raise UnauthorizedException()
 
         if knowledge.space_id != space.id:
             raise UnauthorizedException(
@@ -653,26 +811,31 @@ class IntegrationKnowledgeService:
         )
 
         if subscription_resource_id:
+            # A savepoint keeps a failed statement here from aborting the
+            # transaction the job is queued in.
             try:
-                sharepoint_token = _as_sharepoint_token(subscription_token)
-                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                    user_integration_id=user_integration.id,
-                    site_id=subscription_resource_id,
-                    token=sharepoint_token,
-                    is_onedrive=is_onedrive,
-                )
-                subscription_db_id = (
-                    getattr(subscription, "id", None) if subscription else None
-                )
-                existing_subscription_db_id = getattr(
-                    knowledge, "sharepoint_subscription_id", None
-                )
-                if (
-                    subscription_db_id
-                    and existing_subscription_db_id != subscription_db_id
-                ):
-                    knowledge.sharepoint_subscription_id = subscription_db_id
-                    await self.integration_knowledge_repo.update(knowledge)
+                async with self.space_repo.session.begin_nested():
+                    sharepoint_token = _as_sharepoint_token(subscription_token)
+                    subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                        user_integration_id=user_integration.id,
+                        site_id=subscription_resource_id,
+                        token=sharepoint_token,
+                        is_onedrive=is_onedrive,
+                    )
+                    subscription_db_id = (
+                        getattr(subscription, "id", None) if subscription else None
+                    )
+                    existing_subscription_db_id = getattr(
+                        knowledge, "sharepoint_subscription_id", None
+                    )
+                    if (
+                        subscription_db_id
+                        and existing_subscription_db_id != subscription_db_id
+                    ):
+                        await self.integration_knowledge_repo.link_subscription(
+                            knowledge.id, subscription_db_id
+                        )
+                        knowledge.sharepoint_subscription_id = subscription_db_id
             except Exception as exc:
                 logger.warning(
                     "Failed to ensure SharePoint subscription during full sync "
@@ -704,9 +867,10 @@ class IntegrationKnowledgeService:
                 folder_path=knowledge.folder_path,
                 resource_type=resource_type,
             ),
+            after_commit=True,
         )
 
-        return job
+        return job, SpaceItem(space, knowledge)
 
     async def update_knowledge_name(
         self,
@@ -716,14 +880,13 @@ class IntegrationKnowledgeService:
     ) -> IntegrationKnowledge:
         """Update the name of an integration knowledge item."""
         space = await self.space_repo.one(id=space_id)
-        # Verify the knowledge exists in this space (for permission check)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integrations():
+            raise UnauthorizedException()
+
         space_knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_edit_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if space_knowledge.user_integration.auth_type == "tenant_app":
@@ -740,12 +903,12 @@ class IntegrationKnowledgeService:
                 "This knowledge belongs to another space and must be renamed from there."
             )
 
-        # Fetch from repo to get the full entity with created_at for update
+        await self.integration_knowledge_repo.rename(integration_knowledge_id, name)
         knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        knowledge.name = name
-        return await self.integration_knowledge_repo.update(knowledge)
+        await self.integration_knowledge_repo.attach_document_counts([knowledge])
+        return knowledge
 
     async def _get_owned_wrapper_knowledge(
         self,
@@ -801,13 +964,14 @@ class IntegrationKnowledgeService:
                     "Please contact your administrator."
                 )
 
-        updated_items: list[IntegrationKnowledge] = []
-        for item in owned_items:
-            knowledge = await self.integration_knowledge_repo.one(id=item.id)
-            knowledge.wrapper_name = normalized_name
-            updated_items.append(
-                await self.integration_knowledge_repo.update(knowledge)
-            )
+        ids = [item.id for item in owned_items]
+        await self.integration_knowledge_repo.rename_wrapper(ids, normalized_name)
+        by_id = {
+            item.id: item
+            for item in await self.integration_knowledge_repo.get_by_ids(ids)
+        }
+        updated_items = [by_id[id] for id in ids if id in by_id]
+        await self.integration_knowledge_repo.attach_document_counts(updated_items)
 
         return updated_items
 
@@ -836,7 +1000,4 @@ class IntegrationKnowledgeService:
                 )
 
         for item in list(owned_items):
-            await self.remove_knowledge(
-                space_id=space_id,
-                integration_knowledge_id=item.id,
-            )
+            await self._remove_from_space(space, item)

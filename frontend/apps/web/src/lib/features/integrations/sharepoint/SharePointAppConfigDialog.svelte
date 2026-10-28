@@ -2,13 +2,11 @@
   import { onMount, untrack } from "svelte";
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
-  import {
-    TriangleAlert,
-    CircleCheck,
-    FlaskConical,
-    LoaderCircle,
-    RefreshCw
-  } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -22,7 +20,10 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import SharePointAuthHealth from "./SharePointAuthHealth.svelte";
   import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
+  import { classifyMicrosoftAuthError, getMicrosoftAuthGuidanceText } from "./microsoftAuthErrors";
+  import { followServiceAccountSignIn } from "./serviceAccountAuth";
   import {
     createSharePointSetupFixtureConfig,
     isSharePointSetupFixtureScenario,
@@ -72,6 +73,13 @@
   let credentialsComplete = $derived(
     clientId.trim().length > 0 && clientSecret.trim().length > 0 && tenantDomain.trim().length > 0
   );
+  let isServiceAccountConfig = $derived(existingConfig?.auth_method === "service_account");
+  let testFailureText = $derived(
+    testResult && !testResult.success
+      ? [testResult.error_message, testResult.details].filter(Boolean).join(" ")
+      : ""
+  );
+  let testFailureGuidance = $derived(classifyMicrosoftAuthError(testFailureText));
 
   function getSetupScenarioLabel(scenario: SharePointSetupFixtureScenario): string {
     switch (scenario) {
@@ -126,13 +134,17 @@
     }
 
     try {
-      const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "get" });
-      if (data) applyExistingConfig(data);
+      await refreshStoredConfig();
     } catch (error) {
       configLoadFailed = true;
       toastError(error, m.sharepoint_config_load_error());
     }
   });
+
+  async function refreshStoredConfig() {
+    const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "get" });
+    if (data) applyExistingConfig(data);
+  }
 
   function buildCredentialsPayload(): TenantSharePointAppCreate {
     return {
@@ -156,13 +168,51 @@
     }
 
     try {
-      testResult = await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
-        method: "post",
-        requestBody: { "application/json": buildCredentialsPayload() }
-      });
+      testResult =
+        await eneo.integrations.admin.sharepoint.testTenantAppCredentials(
+          buildCredentialsPayload()
+        );
     } catch (error) {
       toastError(error);
       testResult = { success: false, error_message: getErrorMessage(error) };
+    }
+  });
+
+  const testStoredConnection = createAsyncState(async () => {
+    if (!existingConfig) return;
+    testResult = null;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay();
+      const failed = activeFixtureScenario === "connection_error";
+      testResult = failed
+        ? fixtureConnectionFailure()
+        : { success: true, details: m.sharepoint_setup_fixture_test_success_details() };
+      existingConfig = {
+        ...existingConfig,
+        auth_status: failed ? "error" : "ok",
+        last_auth_error: failed ? SHAREPOINT_SETUP_FIXTURE_TEST_ERROR : null,
+        last_auth_error_at: failed ? new Date().toISOString() : null,
+        last_auth_success_at: failed
+          ? existingConfig.last_auth_success_at
+          : new Date().toISOString()
+      };
+      return;
+    }
+
+    try {
+      testResult = await eneo.integrations.admin.sharepoint.testStoredConnection();
+    } catch (error) {
+      toastError(error);
+      testResult = { success: false, error_message: getErrorMessage(error) };
+      return;
+    }
+
+    // The backend records the outcome as credential health; reload so the badge reflects it.
+    try {
+      await refreshStoredConfig();
+    } catch (error) {
+      toastError(error, m.sharepoint_config_load_error());
     }
   });
 
@@ -265,11 +315,31 @@
         }
       );
 
-      sessionStorage.setItem(
-        "sharepoint_service_account_oauth",
-        JSON.stringify({ state: result.state })
+      followServiceAccountSignIn(result);
+    } catch (error) {
+      toastError(error);
+    }
+  });
+
+  const reauthServiceAccount = createAsyncState(async () => {
+    if (!existingConfig) return;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay(700);
+      existingConfig = {
+        ...existingConfig,
+        auth_status: "ok",
+        last_auth_error: null,
+        last_auth_success_at: new Date().toISOString()
+      };
+      toast.success(m.sharepoint_fixture_simulated_saved());
+      return;
+    }
+
+    try {
+      followServiceAccountSignIn(
+        await eneo.integrations.admin.sharepoint.restartServiceAccountAuth()
       );
-      window.location.href = result.auth_url;
     } catch (error) {
       toastError(error);
     }
@@ -291,6 +361,40 @@
     }
   });
 </script>
+
+{#snippet testResultAlert(successTitle: string)}
+  {#if testResult}
+    {#if testResult.success}
+      <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
+        <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
+        <Alert.Title>{successTitle}</Alert.Title>
+        {#if testResult.details}
+          <Alert.Description>{testResult.details}</Alert.Description>
+        {/if}
+      </Alert.Root>
+    {:else}
+      <Alert.Root variant="destructive" role="alert">
+        <TriangleAlert aria-hidden="true" />
+        <Alert.Title>{m.connection_failed()}</Alert.Title>
+        {#if testFailureText}
+          <Alert.Description>
+            {#if testFailureGuidance}
+              <p>{getMicrosoftAuthGuidanceText(testFailureGuidance)}</p>
+              <details class="mt-1">
+                <summary class="cursor-pointer text-xs hover:underline">
+                  {m.sharepoint_auth_error_details()}
+                </summary>
+                <p class="mt-1 text-xs break-words">{testFailureText}</p>
+              </details>
+            {:else}
+              <p class="break-words">{testFailureText}</p>
+            {/if}
+          </Alert.Description>
+        {/if}
+      </Alert.Root>
+    {/if}
+  {/if}
+{/snippet}
 
 <Dialog.Root bind:open={dialogOpen}>
   <Dialog.Content
@@ -333,7 +437,7 @@
           class="text-muted-foreground flex items-center justify-center gap-2 py-10"
           role="status"
         >
-          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
           {m.loading_configuration()}
         </div>
       {:else if configLoadFailed}
@@ -381,8 +485,37 @@
                   <Badge variant="destructive">{m.inactive()}</Badge>
                 {/if}
               </dd>
+              <dt class="text-muted-foreground">{m.sharepoint_credentials()}</dt>
+              <dd>
+                <SharePointAuthHealth config={existingConfig} />
+              </dd>
             </dl>
+            <div
+              class="border-border mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={testStoredConnection.isLoading}
+                aria-describedby="sharepoint-stored-test-description"
+                onclick={testStoredConnection}
+              >
+                {#if testStoredConnection.isLoading}
+                  <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
+                {/if}
+                {testStoredConnection.isLoading ? m.testing() : m.test_connection()}
+              </Button>
+              <p id="sharepoint-stored-test-description" class="text-muted-foreground text-xs">
+                {m.sharepoint_stored_connection_description()}
+              </p>
+            </div>
           </div>
+
+          {@render testResultAlert(m.sharepoint_stored_connection_ok())}
+
+          {#if isServiceAccountConfig}
+            <p class="text-muted-foreground text-sm">{m.sharepoint_reauth_description()}</p>
+          {/if}
 
           {#if isUpdatingSecret}
             <Field.Field>
@@ -499,28 +632,7 @@
             </Field.Description>
           </Field.Field>
 
-          {#if testResult}
-            {#if testResult.success}
-              <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
-                <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
-                <Alert.Title>{m.connection_successful()}</Alert.Title>
-                {#if testResult.details}
-                  <Alert.Description>{testResult.details}</Alert.Description>
-                {/if}
-              </Alert.Root>
-            {:else}
-              <Alert.Root variant="destructive" role="alert">
-                <TriangleAlert aria-hidden="true" />
-                <Alert.Title>{m.connection_failed()}</Alert.Title>
-                {#if testResult.error_message || testResult.details}
-                  <Alert.Description>
-                    {testResult.error_message ?? ""}
-                    {testResult.details ?? ""}
-                  </Alert.Description>
-                {/if}
-              </Alert.Root>
-            {/if}
-          {/if}
+          {@render testResultAlert(m.connection_successful())}
         </div>
       {/if}
     </div>
@@ -549,11 +661,26 @@
           onclick={updateSecret}
         >
           {#if updateSecret.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {updateSecret.isLoading ? m.saving() : m.save()}
         </Button>
       {:else if existingConfig}
+        {#if isServiceAccountConfig}
+          <Button
+            variant="outline"
+            class="w-full sm:w-auto"
+            disabled={reauthServiceAccount.isLoading}
+            onclick={reauthServiceAccount}
+          >
+            {#if reauthServiceAccount.isLoading}
+              <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
+            {/if}
+            {reauthServiceAccount.isLoading
+              ? m.redirecting()
+              : m.sharepoint_reauth_with_microsoft()}
+          </Button>
+        {/if}
         <Button
           variant="outline"
           class="w-full sm:w-auto"
@@ -570,21 +697,29 @@
         <Button
           variant="outline"
           class="w-full sm:w-auto"
-          disabled={testCredentials.isLoading || !credentialsComplete}
-          onclick={testCredentials}
+          disabled={!credentialsComplete}
+          aria-disabled={testCredentials.isLoading}
+          aria-busy={testCredentials.isLoading}
+          onclick={() => {
+            if (!testCredentials.isLoading) void testCredentials();
+          }}
         >
           {#if testCredentials.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {testCredentials.isLoading ? m.testing() : m.test_connection()}
         </Button>
         <Button
           class="w-full sm:w-auto"
-          disabled={saveConfig.isLoading || !credentialsComplete}
-          onclick={saveConfig}
+          disabled={!credentialsComplete}
+          aria-disabled={saveConfig.isLoading}
+          aria-busy={saveConfig.isLoading}
+          onclick={() => {
+            if (!saveConfig.isLoading) void saveConfig();
+          }}
         >
           {#if saveConfig.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}
@@ -599,11 +734,15 @@
       {:else}
         <Button
           class="w-full sm:w-auto"
-          disabled={startServiceAccountOAuth.isLoading || !credentialsComplete}
-          onclick={startServiceAccountOAuth}
+          disabled={!credentialsComplete}
+          aria-disabled={startServiceAccountOAuth.isLoading}
+          aria-busy={startServiceAccountOAuth.isLoading}
+          onclick={() => {
+            if (!startServiceAccountOAuth.isLoading) void startServiceAccountOAuth();
+          }}
         >
           {#if startServiceAccountOAuth.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}

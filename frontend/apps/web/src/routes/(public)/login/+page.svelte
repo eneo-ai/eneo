@@ -7,7 +7,7 @@
   import { prefersReducedMotion } from "svelte/motion";
   import { fade } from "svelte/transition";
   import { SvelteURLSearchParams } from "svelte/reactivity";
-  import { ArrowLeft } from "@lucide/svelte";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import { Button } from "$lib/components/ui/button";
   import * as Field from "$lib/components/ui/field";
   import { Input } from "$lib/components/ui/input";
@@ -538,6 +538,8 @@
             <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
               {#if loginFailureReason === "unavailable"}
                 <p>{m.login_unavailable()}</p>
+              {:else if loginFailureReason === "deactivated"}
+                <p>{m.login_account_deactivated()}</p>
               {:else if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
                 <p>{m.login_too_many_attempts({ minutes: loginRetryAfterMinutes })}</p>
               {:else}

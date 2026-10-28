@@ -88,6 +88,20 @@ const presentation = {
       // The built-in image generation runs on it: it cannot be deleted.
       used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
     }
+  ],
+  rerank_models: [
+    {
+      id: "r1",
+      name: "Qwen/Qwen3-Reranker-4B",
+      nickname: "Qwen Reranker",
+      is_deprecated: false,
+      is_org_enabled: true,
+      is_org_default: false,
+      provider_id: "p-vllm",
+      security_classification: null,
+      candidate_factor: 5,
+      max_candidates: 100
+    }
   ]
 } as unknown as ModelsPresentation;
 
@@ -235,7 +249,7 @@ describe("ModelsPage", () => {
   it("filters by type with counts and announces the result", async () => {
     renderPage();
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
-    expect(within(types).getByRole("radio", { name: "Alla (4)" })).toBeTruthy();
+    expect(within(types).getByRole("radio", { name: "Alla (5)" })).toBeTruthy();
     expect(within(types).getByRole("radio", { name: "Chatt (2)" })).toBeTruthy();
 
     fireEvent.click(within(types).getByRole("radio", { name: "Inbäddning (1)" }));
@@ -282,6 +296,56 @@ describe("ModelsPage", () => {
       expect(api.POST).toHaveBeenCalledWith("/api/v1/image-models/{id}/", {
         params: { path: { id: "i1" } },
         body: { is_org_enabled: false }
+      })
+    );
+  });
+
+  it("lists a rerank model under its provider with its type and no price", async () => {
+    renderPage();
+    const vllm = screen.getByRole("region", { name: "vLLM" });
+    expect(within(vllm).getByText("Qwen Reranker")).toBeTruthy();
+    expect(within(vllm).getByRole("cell", { name: "Rerankning" })).toBeTruthy();
+
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    fireEvent.click(within(types).getByRole("radio", { name: "Rerankning (1)" }));
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "vLLM" })).queryByText("Multilingual E5 Large")
+    ).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("makes a rerank model the default and disables it through its own endpoint", async () => {
+    renderPage();
+    const menu = openRowMenu("Qwen Reranker");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ange som standardmodell" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/rerank-models/{id}/", {
+        params: { path: { id: "r1" } },
+        body: { is_org_default: true }
+      })
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Aktivera Qwen Reranker" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/rerank-models/{id}/", {
+        params: { path: { id: "r1" } },
+        body: { is_org_enabled: false }
+      })
+    );
+  });
+
+  it("deletes a rerank model through the rerank endpoint", async () => {
+    renderPage();
+    api.DELETE.mockImplementation(() => ok({}));
+    const menu = openRowMenu("Qwen Reranker");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort modell" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        params: { path: { model_id: "r1" } }
       })
     );
   });
@@ -480,9 +544,7 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(screen.queryByText("Claude 3.7 Sonnet")).toBeNull());
     expect(trigger.isConnected).toBe(false);
     // The focused row is gone: focus moves to the tab panel, not <body>.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("deletes a provider without models after confirmation and keeps focus on the page", async () => {
@@ -510,9 +572,7 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "OpenAI" })).toBeNull());
     expect(toast.success).toHaveBeenCalledWith("OpenAI togs bort");
     // The card and its menu are gone: focus moves to the tab panel, not <body>.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("says at the delete action, and when it is chosen, why a provider with models stays", async () => {

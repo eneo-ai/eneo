@@ -222,15 +222,28 @@ class JobRepository:
         ``stale_before`` (the threshold must exceed the longest legitimate run/queue
         wait so live or merely-slow jobs are never killed).
 
+        Rows another transaction has locked are skipped, not waited for: a task
+        that runs in one transaction holds its job row from the IN_PROGRESS
+        write until it commits, so a locked row is a job that is still running,
+        and waiting for it would hold this worker slot for the rest of that run.
+
         Returns the ids of the jobs that were failed.
         """
         from eneo.main.models import Status
 
+        active = (Status.IN_PROGRESS.value, Status.QUEUED.value)
+        candidates = (
+            sa.select(Jobs.id)
+            .where(Jobs.task.in_(tasks))
+            .where(Jobs.status.in_(active))
+            .where(Jobs.updated_at < stale_before)
+            .with_for_update(skip_locked=True)
+            .cte("stale_jobs")
+        )
         stmt = (
             sa.update(Jobs)
-            .where(Jobs.task.in_(tasks))
-            .where(Jobs.status.in_([Status.IN_PROGRESS.value, Status.QUEUED.value]))
-            .where(Jobs.updated_at < stale_before)
+            .where(Jobs.id.in_(sa.select(candidates.c.id)))
+            .where(Jobs.status.in_(active))
             .values(
                 status=Status.FAILED.value,
                 finished_at=sa.func.now(),

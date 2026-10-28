@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
@@ -11,7 +9,9 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { CircleAlert, Info, Sparkles } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Info from "@lucide/svelte/icons/info";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type PromptOption = {

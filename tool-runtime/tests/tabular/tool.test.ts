@@ -188,14 +188,28 @@ describe("file references", () => {
     expect(downloads.calls).toEqual([]);
   });
 
-  test("rejects unsupported file types before downloading", async () => {
+  test("a file of another kind is refused before downloading, with the way to read it", async () => {
     const { tool, downloads } = setup("types");
+    for (const filename of ["a.json", "Analys av risker.md"])
+      await expect(
+        tool("inspect_table").execute(
+          { files: [{ url: url(FILE_A), filename }] },
+          alice,
+        ),
+      ).rejects.toMatchObject({
+        code: "UNSUPPORTED_FILE",
+        message: expect.stringContaining("read it with the file reading tool"),
+      });
     await expect(
-      tool("inspect_table").execute(
-        { files: [{ url: url(FILE_A), filename: "a.json" }] },
+      tool("query_table").execute(
+        {
+          file: { url: url(FILE_A), filename: "a.csv" },
+          files: [{ url: url(FILE_B), filename: "b.docx", alias: "b" }],
+          sql: "SELECT * FROM t",
+        },
         alice,
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
     expect(downloads.calls).toEqual([]);
   });
 });

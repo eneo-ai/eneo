@@ -1,11 +1,13 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, List, TypeVar
+from typing import Any, List, Literal, TypeVar
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
-from sqlalchemy.orm import defer, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, defer, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.affected_rows import affected_row_count
@@ -17,6 +19,8 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_navigation_path,
+    website_path_below,
     website_source_url_equals,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -64,6 +68,33 @@ class InfoBlobPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplacedPage:
+    """A page of replaced versions in id order, and which still hold chunks."""
+
+    last_id: UUID | None
+    versions_read: int
+    with_search_data: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplacedBatch:
+    last_scanned_id: UUID | None
+    versions_read: int
+    released_versions: int
+    released_bytes: int
+    skipped_busy: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveUpload:
+    """The active version an upload to a collection would refresh or replace."""
+
+    info_blob_id: UUID
+    embedding_model_id: UUID | None
+    original_sha256: bytes | None
+
+
+@dataclass(frozen=True, slots=True)
 class InfoBlobListing:
     """One document's identity, without its text.
 
@@ -86,6 +117,126 @@ class WebsiteInfoBlobPage:
     items: list[InfoBlobInDBNoText]
     total_count: int
     next_cursor: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolder:
+    """A URL prefix, not a page-to-document ownership relationship."""
+
+    path: str
+    count: int
+    has_children: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolderPage:
+    items: list[WebsiteContentFolder]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrationDocumentsPage:
+    items: list[InfoBlobInDBNoText]
+    total_count: int
+    total_size: int
+
+
+IntegrationDocumentSort = Literal["name", "path", "size", "updated_at"]
+_Column = ColumnElement[Any] | InstrumentedAttribute[Any]
+_LIKE_ESCAPE = "\\"
+
+
+def _like_literal(needle: str) -> str:
+    return (
+        needle.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+
+
+def _contains(column: _Column, needle: str) -> ColumnElement[bool]:
+    return column.ilike(f"%{_like_literal(needle)}%", escape=_LIKE_ESCAPE)
+
+
+def _starts_with(column: _Column, prefix: str) -> ColumnElement[bool]:
+    return column.ilike(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE)
+
+
+# Every property value except booleans'. In lax mode ``value[*]`` yields a
+# plain value as well as each entry of a multi-value list. An entry without a
+# kind is kept: ``@.kind == "boolean"`` is false when the key is missing.
+_SEARCHABLE_PROPERTY_VALUES_PATH = '$[*] ? (!(@.kind == "boolean")).value[*]'
+
+
+def _property_value_matches(q: str) -> ColumnElement[bool]:
+    """``q`` in a value of the document's ``source_metadata``.
+
+    Only values are searched: every document of a library shares the same
+    property names and labels, so matching those would match them all.
+    Booleans are left out as well: they are stored as "true" and "false" but
+    shown as yes and no, so "true" would match every document of a library
+    with a yes/no column. A date-only value is shown as the date part of its
+    stored ISO form, so it matches as shown.
+    """
+    values = sa.func.jsonb_array_elements_text(
+        sa.func.jsonb_path_query_array(
+            InfoBlobs.source_metadata,
+            sa.literal_column(f"'{_SEARCHABLE_PROPERTY_VALUES_PATH}'"),
+        )
+    ).column_valued("value", joins_implicitly=True)
+    return sa.exists().where(_contains(values, q))
+
+
+def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    """``q`` in the title, or in the URL below the item's own URL.
+
+    Document URLs are percent-encoded, so the encoded form of ``q`` is tried
+    as well. Only the part after ``url_anchor`` (the item's site, library or
+    folder URL) is searched, so a site named KS does not match every document
+    under /sites/KS. Items without a stored URL fall back to the whole URL, as
+    do documents whose URL no longer starts with the anchor: a sync refreshes
+    document URLs after the selected folder was renamed, but not the item's
+    own URL, and cutting the old anchor's width out of a shorter URL would
+    hide part of a nested folder name.
+    """
+    path: _Column = InfoBlobs.url
+    if url_anchor:
+        path = sa.case(
+            (
+                _starts_with(InfoBlobs.url, url_anchor),
+                sa.func.substring(InfoBlobs.url, len(url_anchor) + 1),
+            ),
+            else_=InfoBlobs.url,
+        )
+    return _title_or_url_matches(q, path)
+
+
+def _title_or_url_matches(
+    q: str, path: _Column | ColumnElement[str]
+) -> ColumnElement[bool]:
+    """``q`` in the title, or in ``path``: the searchable part of the URL."""
+    needles = [q]
+    if (encoded := quote(q, safe="/")) != q:
+        needles.append(encoded)
+    return sa.or_(
+        _contains(InfoBlobs.title, q), *(_contains(path, needle) for needle in needles)
+    )
+
+
+def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    return sa.or_(_title_or_path_matches(q, url_anchor), _property_value_matches(q))
+
+
+def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_Column]:
+    if sort == "name":
+        return [InfoBlobs.title]
+    if sort == "size":
+        return [InfoBlobs.size]
+    if sort == "updated_at":
+        return [InfoBlobs.updated_at]
+    # The URL without its file name orders documents by folder; within one
+    # item every URL shares the same prefix, so this equals their relative path.
+    return [sa.func.regexp_replace(InfoBlobs.url, "/[^/]*$", ""), InfoBlobs.title]
 
 
 class InfoBlobRepository:
@@ -182,6 +333,26 @@ class InfoBlobRepository:
         *,
         original_sha256: bytes | None = None,
     ) -> None:
+        """Serialize publishers of one identity until the transaction ends.
+
+        Without it two transactions that both find no active version insert
+        two. A sync publishes a whole library in one transaction, and an
+        advisory lock per document would stay held until it commits and fill
+        the shared lock table; an integration knowledge's publications lock its
+        row instead, whose lock lives in the tuple and which the sync already
+        holds from recording its start.
+        """
+        if (
+            info_blob.group_id is None
+            and info_blob.website_id is None
+            and info_blob.integration_knowledge_id is not None
+        ):
+            await self.session.execute(
+                sa.select(IntegrationKnowledge.id)
+                .where(IntegrationKnowledge.id == info_blob.integration_knowledge_id)
+                .with_for_update(key_share=True)
+            )
+            return
         identities = {
             identity
             for identity in (
@@ -334,17 +505,17 @@ class InfoBlobRepository:
             original=await self.get_original(published.id),
         )
 
-    async def has_matching_active_upload_original(
+    async def find_active_upload(
         self,
         *,
         group_id: UUID,
         title: str,
-        embedding_model_id: UUID,
         original_sha256: bytes,
-    ) -> bool:
+    ) -> ActiveUpload | None:
         rows = (
             await self.session.execute(
                 sa.select(
+                    InfoBlobs.id,
                     InfoBlobs.embedding_model_id,
                     ObjectContents.sha256,
                 )
@@ -374,11 +545,12 @@ class InfoBlobRepository:
                 "Knowledge publication identity is ambiguous"
             )
         if not rows:
-            return False
+            return None
         row = rows[0]
-        return (
-            row.embedding_model_id == embedding_model_id
-            and row.sha256 == original_sha256
+        return ActiveUpload(
+            info_blob_id=row.id,
+            embedding_model_id=row.embedding_model_id,
+            original_sha256=row.sha256,
         )
 
     async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:
@@ -546,16 +718,12 @@ class InfoBlobRepository:
         record = await self.delegate.update(info_blob)
         return InfoBlobInDB.model_validate(record)
 
-    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
+    @staticmethod
+    def _stored_size() -> ColumnElement[int]:
+        """Bytes a version retains: its text, its chunks and its original."""
         chunks_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobChunks.size), 0))
-            .where(InfoBlobChunks.info_blob_id == info_blob_id)
-            .scalar_subquery()
-        )
-
-        text_size_subquery = (
-            sa.select(sa.func.coalesce(sa.func.octet_length(InfoBlobs.text), 0))
-            .where(InfoBlobs.id == info_blob_id)
+            .where(InfoBlobChunks.info_blob_id == InfoBlobs.id)
             .scalar_subquery()
         )
         original_size_subquery = (
@@ -565,20 +733,147 @@ class InfoBlobRepository:
                 ObjectContents,
                 ObjectContents.id == InfoBlobContentReferences.content_id,
             )
-            .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
+            .where(InfoBlobContentReferences.info_blob_id == InfoBlobs.id)
             .scalar_subquery()
         )
+        return sa.func.coalesce(
+            chunks_size_subquery
+            + sa.func.coalesce(sa.func.octet_length(InfoBlobs.text), 0)
+            + sa.func.coalesce(original_size_subquery, 0),
+            0,
+        )
 
+    async def releasable_search_bytes(
+        self, info_blob_ids: Sequence[UUID]
+    ) -> dict[UUID, int]:
+        """Chunk bytes that replacing these versions releases, per owner."""
+        if not info_blob_ids:
+            return {}
+        rows = await self.session.execute(
+            sa.select(InfoBlobs.user_id, sa.func.sum(InfoBlobChunks.size))
+            .select_from(InfoBlobs)
+            .join(InfoBlobChunks, InfoBlobChunks.info_blob_id == InfoBlobs.id)
+            .where(InfoBlobs.id.in_(info_blob_ids))
+            .group_by(InfoBlobs.user_id)
+        )
+        return {user_id: int(size) for user_id, size in rows.tuples()}
+
+    async def release_replaced_search_data(
+        self, info_blob_ids: Sequence[UUID]
+    ) -> dict[UUID, int]:
+        """Delete replaced versions' chunks and shrink their size to match.
+
+        Only the active version of a source is searched, so a replaced version
+        needs its text, metadata and original for citations but not its chunks.
+        Active and missing versions are left untouched. Parent rows are locked
+        before their chunks, the same order as deleting a source family.
+        Returns the released bytes per owner.
+        """
+        if not info_blob_ids:
+            return {}
+        replaced = (
+            await self.session.scalars(
+                sa.select(InfoBlobs.id)
+                .where(
+                    InfoBlobs.id.in_(info_blob_ids),
+                    InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
+                )
+                .order_by(InfoBlobs.id)
+                .with_for_update()
+            )
+        ).all()
+        if not replaced:
+            return {}
+        released = await self.releasable_search_bytes(replaced)
+        await self.session.execute(
+            sa.delete(InfoBlobChunks).where(InfoBlobChunks.info_blob_id.in_(replaced))
+        )
+        await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(InfoBlobs.id.in_(replaced))
+            .values(size=self._stored_size())
+        )
+        return released
+
+    async def scan_replaced_page(
+        self, *, after: UUID | None, limit: int
+    ) -> ReplacedPage:
+        """Read the next `limit` versions of any state after `after`, in id order.
+
+        One page reads at most `limit` rows through the primary key, however
+        few of them are replaced versions; `versions_read` counts the replaced
+        ones and `with_search_data` those of them that still hold chunks.
+        """
+        replaced = InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value
+        holds_chunks = sa.case(
+            (
+                replaced,
+                sa.exists().where(InfoBlobChunks.info_blob_id == InfoBlobs.id),
+            ),
+            else_=sa.false(),
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(InfoBlobs.id, replaced, holds_chunks)
+                .where(InfoBlobs.id > after if after is not None else sa.true())
+                .order_by(InfoBlobs.id)
+                .limit(limit)
+            )
+        ).all()
+        if not rows:
+            return ReplacedPage(None, 0, [])
+        return ReplacedPage(
+            last_id=rows[-1][0],
+            versions_read=sum(1 for _, is_replaced, _ in rows if is_replaced),
+            with_search_data=[id_ for id_, _, holding in rows if holding],
+        )
+
+    async def release_next_replaced_batch(
+        self, *, after: UUID | None, limit: int
+    ) -> ReplacedBatch:
+        """Release the replaced versions in the next page after `after`.
+
+        Versions another transaction holds, for example one deleting their
+        source, are skipped rather than waited for.
+        """
+        page = await self.scan_replaced_page(after=after, limit=limit)
+        if page.last_id is None:
+            return ReplacedBatch(None, 0, 0, 0, 0)
+        if not page.with_search_data:
+            return ReplacedBatch(page.last_id, page.versions_read, 0, 0, 0)
+        available = (
+            await self.session.scalars(
+                sa.select(InfoBlobs.id)
+                .where(
+                    InfoBlobs.id.in_(page.with_search_data),
+                    InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
+                )
+                .order_by(InfoBlobs.id)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        # Holding the parent locks, recheck which versions still have chunks:
+        # a concurrent run may have released some since they were found.
+        holding = (
+            await self.session.scalars(
+                sa.select(InfoBlobChunks.info_blob_id)
+                .where(InfoBlobChunks.info_blob_id.in_(available))
+                .distinct()
+            )
+        ).all()
+        released = await self.release_replaced_search_data(holding)
+        return ReplacedBatch(
+            last_scanned_id=page.last_id,
+            versions_read=page.versions_read,
+            released_versions=len(holding),
+            released_bytes=sum(released.values()),
+            skipped_busy=len(page.with_search_data) - len(available),
+        )
+
+    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
         stmt = (
             sa.update(InfoBlobs)
-            .values(
-                size=sa.func.coalesce(
-                    chunks_size_subquery
-                    + text_size_subquery
-                    + sa.func.coalesce(original_size_subquery, 0),
-                    0,
-                )
-            )
+            .values(size=self._stored_size())
             .where(InfoBlobs.id == info_blob_id)
             .returning(InfoBlobs)
         )
@@ -789,6 +1084,36 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
+    async def refresh_sharepoint_citation(
+        self,
+        *,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+        title: str,
+        url: str,
+    ) -> bool:
+        """Point the active version at the item's current name and address.
+
+        Neither is embedded for a document without source properties, and a
+        document with them re-embeds on a rename anyway (its title is in the
+        header), so nothing else needs to change. True when a row changed.
+        """
+        updated = await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(
+                InfoBlobs.sharepoint_item_id == sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                active_info_blob_version(),
+                sa.or_(
+                    InfoBlobs.title.is_distinct_from(title),
+                    InfoBlobs.url.is_distinct_from(url),
+                ),
+            )
+            .values(title=title, url=url)
+            .execution_options(synchronize_session=False)
+        )
+        return affected_row_count(updated) > 0
+
     async def get_by_sharepoint_item_and_integration_knowledge(
         self,
         sharepoint_item_id: str,
@@ -839,11 +1164,20 @@ class InfoBlobRepository:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
-        conditions = (
+        conditions = [
             InfoBlobs.website_id == website_id,
             active_info_blob_version(),
-        )
+        ]
+        if q.strip():
+            conditions.append(
+                _title_or_url_matches(q.strip(), self._website_search_path(prefix))
+            )
+        if prefix:
+            # URL paths are case sensitive; the range compares them byte by byte.
+            conditions.append(website_path_below(prefix))
         total_count = await self.session.scalar(
             sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
         )
@@ -869,6 +1203,80 @@ class InfoBlobRepository:
             items=items,
             total_count=total_count or 0,
             next_cursor=items[-1].id if has_more else None,
+        )
+
+    @staticmethod
+    def _website_search_path(prefix: str) -> ColumnElement[str]:
+        """The URL below the selected directory, or below the origin.
+
+        The scheme and host are never searched, so the website's own name does
+        not match every resource. Mirrors ``url_anchor`` for integrations.
+        """
+        url = website_navigation_path()
+        if prefix:
+            return sa.func.substr(url, len(prefix) + 1)
+        return sa.func.regexp_replace(url, r"^https?://[^/]+", "")
+
+    async def get_website_folders(
+        self,
+        website_id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        """List one level across the entire active index, with bounded output.
+
+        Below a directory, ``ix_info_blobs_active_website_path`` limits the
+        grouping to that directory's rows. The website level groups every
+        active row of the website, so its cost grows with the website's size,
+        not with the page returned.
+        """
+        url = website_navigation_path()
+        conditions = [
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
+            url.op("~")(r"^https?://[^/]+"),
+        ]
+        if prefix:
+            remainder = sa.func.substr(url, len(prefix) + 1)
+            conditions.extend(
+                [
+                    website_path_below(prefix),
+                    sa.func.strpos(remainder, "/") > 0,
+                    sa.func.split_part(remainder, "/", 1) != "",
+                ]
+            )
+            path = sa.literal(prefix) + sa.func.split_part(remainder, "/", 1) + "/"
+            tail = sa.func.substr(remainder, sa.func.strpos(remainder, "/") + 1)
+        else:
+            origin = sa.func.substring(url, r"^https?://[^/]+")
+            path = origin + "/"
+            tail = sa.func.substr(url, sa.func.length(origin) + 2)
+
+        groups = (
+            sa.select(
+                path.label("path"),
+                sa.func.count().label("item_count"),
+                sa.func.bool_or(sa.func.strpos(tail, "/") > 1).label("has_children"),
+            )
+            .where(*conditions)
+            .group_by(path)
+            .subquery()
+        )
+        query = sa.select(groups).order_by(groups.c.path).limit(limit + 1)
+        if cursor is not None:
+            query = query.where(groups.c.path > cursor)
+        rows = (await self.session.execute(query)).all()
+        items = [
+            WebsiteContentFolder(
+                path=row.path, count=row.item_count, has_children=row.has_children
+            )
+            for row in rows[:limit]
+        ]
+        return WebsiteContentFolderPage(
+            items=items,
+            next_cursor=items[-1].path if len(rows) > limit else None,
         )
 
     @staticmethod
@@ -969,6 +1377,57 @@ class InfoBlobRepository:
         )
 
         return await self.session.scalar(stmt)
+
+    async def get_integration_knowledge_page(
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        q: str | None = None,
+        url_anchor: str | None = None,
+        sort: IntegrationDocumentSort = "path",
+        descending: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> IntegrationDocumentsPage:
+        """Active documents of one item, filtered on title, path or a property
+        value, as one page.
+
+        ``url_anchor`` is the item's own URL without a trailing slash; the
+        search covers the URL part after it.
+        """
+        conditions: list[ColumnElement[bool]] = [
+            InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+            active_info_blob_version(),
+        ]
+        if q:
+            conditions.append(_document_matches(q, url_anchor))
+        totals = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(), sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0)
+                )
+                .select_from(InfoBlobs)
+                .where(*conditions)
+            )
+        ).one()
+        ordering = [
+            (key.desc() if descending else key.asc()).nulls_last()
+            for key in _document_sort_keys(sort)
+        ]
+        query = (
+            sa.select(InfoBlobs)
+            .where(*conditions)
+            .order_by(*ordering, InfoBlobs.id.asc())
+            .options(defer(InfoBlobs.text))
+            .limit(limit)
+            .offset(offset)
+        )
+        records = await self.session.scalars(query)
+        return IntegrationDocumentsPage(
+            items=[InfoBlobInDBNoText.model_validate(record) for record in records],
+            total_count=int(totals[0] or 0),
+            total_size=int(totals[1] or 0),
+        )
 
     async def get_by_filter_integration_knowledge(
         self, integration_knowledge_id: UUID

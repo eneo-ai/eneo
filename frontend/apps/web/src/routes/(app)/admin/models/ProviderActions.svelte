@@ -15,30 +15,31 @@
     EmbeddingModel,
     ModelProviderPublic,
     TranscriptionModel,
-    ImageModel
+    ImageModel,
+    RerankModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
-  import {
-    Pencil,
-    Trash2,
-    TriangleAlert,
-    LoaderCircle,
-    Box,
-    Sparkles,
-    AudioLines,
-    Image,
-    Ellipsis,
-    Check
-  } from "@lucide/svelte";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Box from "@lucide/svelte/icons/box";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import AudioLines from "@lucide/svelte/icons/audio-lines";
+  import Image from "@lucide/svelte/icons/image";
+  import ListOrdered from "@lucide/svelte/icons/list-ordered";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import Check from "@lucide/svelte/icons/check";
   import { m } from "$lib/paraglide/messages";
 
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  type ModelKind = "completion" | "embedding" | "transcription" | "image";
-  type ProviderModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelKind = "completion" | "embedding" | "transcription" | "image" | "rerank";
+  type ProviderModel =
+    CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
 
   type BlockingModel = {
     id: string;
@@ -111,7 +112,8 @@
           m.transcription_model(),
           AudioLines
         ),
-        ...tagModels(models.imageModels, "image", m.image_model(), Image)
+        ...tagModels(models.imageModels, "image", m.image_model(), Image),
+        ...tagModels(models.rerankModels ?? [], "rerank", m.rerank_model(), ListOrdered)
       ].sort((a, b) => a.name.localeCompare(b.name));
       modelsLoaded = true;
     } catch (e: unknown) {

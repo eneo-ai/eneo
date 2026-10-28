@@ -242,6 +242,7 @@ if TYPE_CHECKING:
         IntegrationKnowledgeRepository,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.rerank_models.application.rerank_service import RerankService
     from eneo.sessions.conversation_settings import ConversationSettingsState
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
@@ -257,6 +258,34 @@ logger = get_logger(__name__)
 class AssistantCompletionFileInputs:
     completion_message_files: list[File]
     completion_prompt_files: list[File]
+
+
+@dataclass(frozen=True)
+class _PreparedAssistantTurn:
+    """Request-local authorization and configuration, before history writes.
+
+    Only AssistantService creates and consumes this value. It is neither a
+    persisted authorization grant nor safe to reuse in a later request.
+    """
+
+    active_assistant: Assistant
+    assistant_to_ask: Assistant
+    space: "Space"
+    files: list["File"]
+    cleaned_question: str
+    effective_completion_model: "CompletionModel"
+    completion_model_override: "CompletionModel | None"
+    model_kwargs_override: ModelKwargs | None
+    mcp_servers_override: list["MCPServer"]
+    capability_mcp_servers: list["MCPServer"]
+    prompt_override: str | None
+    skill_plan: SkillTurnPlan
+    skill_runtime: "SkillActivationRuntime"
+    skill_composition: SkillComposition
+    skill_activation: SkillActivationEvidenceV1
+    model_route: str
+    initial_skill_context_tokens: int
+    is_personal_default: bool
 
 
 @dataclass(frozen=True)
@@ -373,6 +402,7 @@ class AssistantService:
         skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
+        rerank_service: "RerankService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -400,6 +430,7 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+        self.rerank_service = rerank_service
 
     async def _with_builtin_provider_token(
         self, server: "MCPServer", *, assistant_id: UUID
@@ -1579,6 +1610,7 @@ class AssistantService:
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         skill_binding_intents: list[SkillBindingIntent] | None = None,
         document_template: "DocumentTemplateChoice | None" = None,
+        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1614,6 +1646,7 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        previous_icon_id = assistant.icon_id
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -1674,6 +1707,7 @@ class AssistantService:
                 data_retention_days,
                 metadata_json,
                 icon_id,
+                rerank_model_id,
             )
         )
         if (
@@ -1692,6 +1726,12 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if is_personal_default and reasoning_effort_only_update:
@@ -1749,6 +1789,14 @@ class AssistantService:
                     "The completion model is not enabled in the space."
                 )
             completion_model = space.get_completion_model(completion_model_id)
+
+        if is_provided(rerank_model_id) and rerank_model_id is not None:
+            if self.rerank_service is None or not await self.rerank_service.selectable(
+                rerank_model_id, space.security_classification
+            ):
+                raise BadRequestException(
+                    "The rerank model is not available in the space."
+                )
 
         if completion_model_kwargs is not None:
             kwargs_model = completion_model
@@ -1984,6 +2032,7 @@ class AssistantService:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            rerank_model_id=rerank_model_id,
         )
 
         knowledge_changing = (
@@ -2075,10 +2124,12 @@ class AssistantService:
                 data_retention_days=data_retention_days,
                 metadata_json=metadata_json,
                 icon_id=icon_id,
+                rerank_model_id=rerank_model_id,
                 prompt=prompt_obj,
                 document_template=document_template,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
@@ -2390,7 +2441,6 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
-        icon_id = assistant.icon_id
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
@@ -2409,10 +2459,10 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        await self.repo.delete(assistant_id, space.id)
+        icon_id = await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -3159,22 +3209,18 @@ class AssistantService:
                     f"Embedding Model {item.embedding_model.name} is not in space."
                 )
 
-    async def ask(
+    async def _prepare_turn(
         self,
         question: str,
-        assistant_id: "UUID",
-        group_chat_id: Optional["UUID"] = None,
-        session_id: "UUID | None" = None,
-        file_ids: list["UUID"] | None = None,
-        stream: bool = False,
-        tool_assistant_id: Optional["UUID"] = None,
-        version: int = 1,
-        assistant_selector_tokens: int = 0,
-        require_tool_approval: bool = False,
-        disabled_mcp_server_ids: list["UUID"] | None = None,
+        assistant_id: UUID,
+        file_ids: list[UUID] | None = None,
+        tool_assistant_id: UUID | None = None,
+        disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
         conversation_settings: "ConversationSettingsState | None" = None,
-    ):
+        group_chat_id: UUID | None = None,
+    ) -> _PreparedAssistantTurn:
+        """Resolve the ordinary ask policy without creating conversation rows."""
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
         # and ``POST /assistants/{id}/sessions/{session_id}/`` flow through
@@ -3245,13 +3291,6 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant_to_ask
         )
-        if conversation_settings is None and session_id is not None:
-            existing = await self.session_service.get_session_by_uuid(
-                id=session_id,
-                assistant_id=assistant_id if group_chat_id is None else None,
-                group_chat_id=group_chat_id,
-            )
-            conversation_settings = existing.settings
         if conversation_settings is not None:
             conversation_settings.require_supported()
         choices = conversation_settings.settings if conversation_settings else None
@@ -3263,9 +3302,6 @@ class AssistantService:
             else None
         )
         if choices:
-            require_tool_approval = (
-                require_tool_approval or choices.require_tool_approval
-            )
             disabled_mcp_server_ids = list(
                 set(disabled_mcp_server_ids or [])
                 | set(
@@ -3286,8 +3322,6 @@ class AssistantService:
                     )
                 )
             )
-        if require_tool_approval and not stream:
-            raise BadRequestException("Tool approval requires streaming.")
         if completion_model_id is not None:
             completion_model_override = self.resolve_personal_chat_model_override(
                 space=space,
@@ -3489,6 +3523,261 @@ class AssistantService:
             ),
         )
 
+        return _PreparedAssistantTurn(
+            active_assistant=active_assistant,
+            assistant_to_ask=assistant_to_ask,
+            space=space,
+            files=files,
+            cleaned_question=cleaned_question,
+            effective_completion_model=effective_completion_model,
+            completion_model_override=completion_model_override,
+            model_kwargs_override=model_kwargs_override,
+            mcp_servers_override=mcp_servers_override,
+            capability_mcp_servers=capability_mcp_servers,
+            prompt_override=prompt_override,
+            skill_plan=skill_plan,
+            skill_runtime=skill_runtime,
+            skill_composition=skill_composition,
+            skill_activation=skill_activation,
+            model_route=model_route,
+            initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
+            is_personal_default=is_personal_default,
+        )
+
+    async def _execute_turn(
+        self,
+        prepared: _PreparedAssistantTurn,
+        session: "SessionInDB",
+        completion_file_inputs: AssistantCompletionFileInputs,
+        *,
+        stream: bool,
+        version: int,
+        require_tool_approval: bool,
+    ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
+        """Run the existing assistant engine; the caller owns response persistence."""
+        mcp_servers_override = prepared.mcp_servers_override
+        capability_mcp_servers = prepared.capability_mcp_servers
+
+        # Internal (loopback) MCP servers are scoped by one short-lived token
+        # per completion, minted only when some server actually attaches.
+        scoped_token: str | None = None
+
+        # The files server points spreadsheets at the table tools when the
+        # file-analysis provider is attached to this turn.
+        table_tools_attached = any(
+            server.purpose == "file_analysis" for server in capability_mcp_servers
+        )
+
+        def mint_scoped_token() -> str:
+            nonlocal scoped_token
+            if scoped_token is None:
+                scoped_token = self.auth_service.create_scoped_mcp_token(
+                    self.user,
+                    assistant_id=prepared.assistant_to_ask.id,
+                    table_tools=table_tools_attached,
+                )
+            return scoped_token
+
+        history_files = [
+            file
+            for _question in session.questions
+            for file in [*_question.files, *_question.generated_files]
+        ]
+        # Persistent attachments marked "open with tool" are URL-only, so the
+        # files server must attach for them exactly as for URL-only uploads.
+        url_only_attachment_ids = prepared.assistant_to_ask.url_only_attachment_ids(
+            prepared.effective_completion_model
+        )
+        url_only_attachments = [
+            file
+            for file in prepared.assistant_to_ask.attachments
+            if file.id in url_only_attachment_ids
+        ]
+        referenceable_files = [*prepared.files, *history_files, *url_only_attachments]
+        internal_mcp = resolve_internal_mcp_availability(
+            assistant=prepared.assistant_to_ask,
+            completion_model=prepared.effective_completion_model,
+            conversation_files=referenceable_files,
+        )
+
+        # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
+        # search tool covers this assistant's knowledge. Models without tool
+        # calling never get a server and fall back to legacy
+        # retrieve-and-inject inside Assistant.ask.
+        knowledge_mcp_server = None
+        if internal_mcp.knowledge:
+            knowledge_mcp_server = await build_knowledge_mcp_server(
+                token=mint_scoped_token(),
+                tenant_id=self.user.tenant_id,
+                source_labels=prepared.assistant_to_ask.knowledge_source_labels(),
+            )
+
+        # Referenced attachments: whenever signed reference URLs render in the
+        # prompt, attach the loopback files server so the model always has at
+        # least one tool that can read them (URL-only files depend on it; for
+        # inlined files it still pages into text the window truncated).
+        # External servers coexist; tool descriptions steer the choice.
+        files_mcp_server = None
+        if internal_mcp.files:
+            seen_labels: set[str] = set()
+            attachment_labels: list[str] = []
+            for file in referenceable_files:
+                if file.id not in internal_mcp.referenced_file_ids:
+                    continue
+                if file.name in seen_labels:
+                    continue
+                seen_labels.add(file.name)
+                attachment_labels.append(file.name)
+            files_mcp_server = await build_files_mcp_server(
+                token=mint_scoped_token(),
+                tenant_id=self.user.tenant_id,
+                attachment_labels=attachment_labels,
+                table_tools=table_tools_attached,
+            )
+            logger.info(
+                "[FILES] assistant=%s files tool attached "
+                "(%d referenced attachments, %d url-only)",
+                prepared.assistant_to_ask.id,
+                len(internal_mcp.referenced_file_ids),
+                len(internal_mcp.url_only_file_ids),
+            )
+        logger.info(
+            "[RAG] assistant=%s knowledge_mode=%s "
+            "collections=%d websites=%d integrations=%d "
+            "model_supports_tools=%s -> %s",
+            prepared.assistant_to_ask.id,
+            prepared.assistant_to_ask.knowledge_mode.value,
+            len(prepared.assistant_to_ask.collections),
+            len(prepared.assistant_to_ask.websites),
+            len(prepared.assistant_to_ask.integration_knowledge_list),
+            prepared.effective_completion_model.supports_tool_calling,
+            "knowledge tool attached"
+            if knowledge_mcp_server is not None
+            else (
+                "legacy inject retrieval"
+                if prepared.assistant_to_ask.has_knowledge()
+                else "no knowledge"
+            ),
+        )
+
+        # Servers built into Eneo expose the running runtime's tool catalog,
+        # not the snapshot the admin last synced; the admin's per-tool
+        # decisions are kept. Other servers pass through untouched.
+        if any(
+            is_bundled_server(getattr(server, "http_auth_type", None))
+            for server in mcp_servers_override
+        ):
+            mcp_servers_override = [
+                await with_live_bundled_tools(server, self._catalog_audit)
+                for server in mcp_servers_override
+            ]
+        capability_mcp_servers = [
+            await with_live_bundled_tools(server, self._catalog_audit)
+            for server in capability_mcp_servers
+        ]
+        # The organisation's document template reaches the file-creation
+        # provider as a signed link minted for this turn.
+        document_template = None
+        db_session = getattr(self.repo, "session", None)
+        if db_session is not None and any(
+            server.purpose == "file_creation" for server in capability_mcp_servers
+        ):
+            from eneo.document_templates.service import resolve_document_template
+
+            document_template = await resolve_document_template(
+                db_session,
+                tenant_id=self.user.tenant_id,
+                assistant_id=prepared.assistant_to_ask.id,
+                choice=prepared.assistant_to_ask.document_template,
+            )
+
+        # The assistant's reranker, checked against the space at ask time. The
+        # personal assistant is governed and has no choice yet (#1035, B4).
+        rerank = None
+        if self.rerank_service is not None and not prepared.is_personal_default:
+            rerank = await self.rerank_service.spec_for_model(
+                prepared.assistant_to_ask.rerank_model_id,
+                query=prepared.cleaned_question,
+                security_classification=prepared.space.security_classification,
+            )
+
+        response, datastore_result = await prepared.assistant_to_ask.ask(
+            question=prepared.cleaned_question,
+            completion_service=self.completion_service,
+            references_service=self.references_service,
+            rerank=rerank,
+            session=session,
+            files=completion_file_inputs.completion_message_files,
+            stream=stream,
+            version=version,
+            capability_mcp_servers=capability_mcp_servers,
+            document_template=document_template,
+            require_tool_approval=require_tool_approval,
+            completion_model_override=prepared.completion_model_override,
+            model_kwargs_override=prepared.model_kwargs_override,
+            mcp_servers_override=mcp_servers_override,
+            prompt_override=prepared.prompt_override,
+            completion_prompt_files=completion_file_inputs.completion_prompt_files,
+            skill_runtime=prepared.skill_runtime,
+            knowledge_mcp_server=knowledge_mcp_server,
+            internal_mcp_servers=(
+                [files_mcp_server] if files_mcp_server is not None else []
+            ),
+        )
+
+        return response, datastore_result
+
+    async def ask(
+        self,
+        question: str,
+        assistant_id: "UUID",
+        group_chat_id: Optional["UUID"] = None,
+        session_id: "UUID | None" = None,
+        file_ids: list["UUID"] | None = None,
+        stream: bool = False,
+        tool_assistant_id: Optional["UUID"] = None,
+        version: int = 1,
+        assistant_selector_tokens: int = 0,
+        require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
+        conversation_settings: "ConversationSettingsState | None" = None,
+    ):
+        if conversation_settings is None and session_id is not None:
+            existing = await self.session_service.get_session_by_uuid(
+                id=session_id,
+                assistant_id=assistant_id if group_chat_id is None else None,
+                group_chat_id=group_chat_id,
+            )
+            conversation_settings = existing.settings
+        if conversation_settings is not None:
+            conversation_settings.require_supported()
+            require_tool_approval = (
+                require_tool_approval
+                or conversation_settings.settings.require_tool_approval
+            )
+        if require_tool_approval and not stream:
+            raise BadRequestException("Tool approval requires streaming.")
+        prepared = await self._prepare_turn(
+            question=question,
+            assistant_id=assistant_id,
+            file_ids=file_ids,
+            tool_assistant_id=tool_assistant_id,
+            disabled_mcp_server_ids=disabled_mcp_server_ids,
+            disabled_capabilities=disabled_capabilities,
+            conversation_settings=conversation_settings,
+            group_chat_id=group_chat_id,
+        )
+        active_assistant = prepared.active_assistant
+        assistant_to_ask = prepared.assistant_to_ask
+        files = prepared.files
+        effective_completion_model = prepared.effective_completion_model
+        skill_plan = prepared.skill_plan
+        skill_runtime = prepared.skill_runtime
+        skill_composition = prepared.skill_composition
+        skill_activation = prepared.skill_activation
+        model_route = prepared.model_route
+
         question_id: UUID | None = None
         question_created_at: datetime | None = None
         is_new_session = session_id is None
@@ -3577,161 +3866,16 @@ class AssistantService:
             )
         assert question_id is not None
 
-        # Internal (loopback) MCP servers are scoped by one short-lived token
-        # per completion, minted only when some server actually attaches.
-        scoped_token: str | None = None
-
-        # The files server points spreadsheets at the table tools when the
-        # file-analysis provider is attached to this turn.
-        table_tools_attached = any(
-            server.purpose == "file_analysis" for server in capability_mcp_servers
-        )
-
-        def mint_scoped_token() -> str:
-            nonlocal scoped_token
-            if scoped_token is None:
-                scoped_token = self.auth_service.create_scoped_mcp_token(
-                    self.user,
-                    assistant_id=assistant_to_ask.id,
-                    table_tools=table_tools_attached,
-                )
-            return scoped_token
-
-        history_files = [
-            file
-            for _question in session.questions
-            for file in [*_question.files, *_question.generated_files]
-        ]
-        # Persistent attachments marked "open with tool" are URL-only, so the
-        # files server must attach for them exactly as for URL-only uploads.
-        url_only_attachment_ids = assistant_to_ask.url_only_attachment_ids(
-            effective_completion_model
-        )
-        url_only_attachments = [
-            file
-            for file in assistant_to_ask.attachments
-            if file.id in url_only_attachment_ids
-        ]
-        referenceable_files = [*files, *history_files, *url_only_attachments]
-        internal_mcp = resolve_internal_mcp_availability(
-            assistant=assistant_to_ask,
-            completion_model=effective_completion_model,
-            conversation_files=referenceable_files,
-        )
-
-        # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
-        # search tool covers this assistant's knowledge. Models without tool
-        # calling never get a server and fall back to legacy
-        # retrieve-and-inject inside Assistant.ask.
-        knowledge_mcp_server = None
-        if internal_mcp.knowledge:
-            knowledge_mcp_server = await build_knowledge_mcp_server(
-                token=mint_scoped_token(),
-                tenant_id=self.user.tenant_id,
-                source_labels=assistant_to_ask.knowledge_source_labels(),
-            )
-
-        # Referenced attachments: whenever signed reference URLs render in the
-        # prompt, attach the loopback files server so the model always has at
-        # least one tool that can read them (URL-only files depend on it; for
-        # inlined files it still pages into text the window truncated).
-        # External servers coexist; tool descriptions steer the choice.
-        files_mcp_server = None
-        if internal_mcp.files:
-            seen_labels: set[str] = set()
-            attachment_labels: list[str] = []
-            for file in referenceable_files:
-                if file.id not in internal_mcp.referenced_file_ids:
-                    continue
-                if file.name in seen_labels:
-                    continue
-                seen_labels.add(file.name)
-                attachment_labels.append(file.name)
-            files_mcp_server = await build_files_mcp_server(
-                token=mint_scoped_token(),
-                tenant_id=self.user.tenant_id,
-                attachment_labels=attachment_labels,
-                table_tools=table_tools_attached,
-            )
-            logger.info(
-                "[FILES] assistant=%s files tool attached "
-                "(%d referenced attachments, %d url-only)",
-                assistant_to_ask.id,
-                len(internal_mcp.referenced_file_ids),
-                len(internal_mcp.url_only_file_ids),
-            )
-        logger.info(
-            "[RAG] assistant=%s knowledge_mode=%s "
-            "collections=%d websites=%d integrations=%d "
-            "model_supports_tools=%s -> %s",
-            assistant_to_ask.id,
-            assistant_to_ask.knowledge_mode.value,
-            len(assistant_to_ask.collections),
-            len(assistant_to_ask.websites),
-            len(assistant_to_ask.integration_knowledge_list),
-            effective_completion_model.supports_tool_calling,
-            "knowledge tool attached"
-            if knowledge_mcp_server is not None
-            else (
-                "legacy inject retrieval"
-                if assistant_to_ask.has_knowledge()
-                else "no knowledge"
-            ),
-        )
-
-        # Servers built into Eneo expose the running runtime's tool catalog,
-        # not the snapshot the admin last synced; the admin's per-tool
-        # decisions are kept. Other servers pass through untouched.
-        if any(
-            is_bundled_server(getattr(server, "http_auth_type", None))
-            for server in mcp_servers_override
-        ):
-            mcp_servers_override = [
-                await with_live_bundled_tools(server, self._catalog_audit)
-                for server in mcp_servers_override
-            ]
-        capability_mcp_servers = [
-            await with_live_bundled_tools(server, self._catalog_audit)
-            for server in capability_mcp_servers
-        ]
-        # The organisation's document template reaches the file-creation
-        # provider as a signed link minted for this turn.
-        document_template = None
-        db_session = getattr(self.repo, "session", None)
-        if db_session is not None and any(
-            server.purpose == "file_creation" for server in capability_mcp_servers
-        ):
-            from eneo.document_templates.service import resolve_document_template
-
-            document_template = await resolve_document_template(
-                db_session,
-                tenant_id=self.user.tenant_id,
-                assistant_id=assistant_to_ask.id,
-                choice=assistant_to_ask.document_template,
-            )
-
+        # Tool/loopback setup inside _execute_turn fails here too; before the
+        # model call the Skill snapshot is unchanged, so only the re-raise applies.
         try:
-            response, datastore_result = await assistant_to_ask.ask(
-                question=cleaned_question,
-                completion_service=self.completion_service,
-                references_service=self.references_service,
-                session=session,
-                files=completion_file_inputs.completion_message_files,
+            response, datastore_result = await self._execute_turn(
+                prepared,
+                session,
+                completion_file_inputs,
                 stream=stream,
                 version=version,
-                capability_mcp_servers=capability_mcp_servers,
-                document_template=document_template,
                 require_tool_approval=require_tool_approval,
-                completion_model_override=completion_model_override,
-                model_kwargs_override=model_kwargs_override,
-                mcp_servers_override=mcp_servers_override,
-                prompt_override=prompt_override,
-                completion_prompt_files=completion_file_inputs.completion_prompt_files,
-                skill_runtime=skill_runtime,
-                knowledge_mcp_server=knowledge_mcp_server,
-                internal_mcp_servers=(
-                    [files_mcp_server] if files_mcp_server is not None else []
-                ),
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()
@@ -3773,7 +3917,7 @@ class AssistantService:
             skill_plan=skill_plan,
             skill_runtime=skill_runtime,
             selected_model_route=model_route,
-            initial_skill_context_tokens=(initial_skill_snapshot.measurement.tokens),
+            initial_skill_context_tokens=prepared.initial_skill_context_tokens,
             version=version,
             assistant_selector_tokens=assistant_selector_tokens,
         )

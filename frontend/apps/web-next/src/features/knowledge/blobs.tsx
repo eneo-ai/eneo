@@ -25,6 +25,7 @@ import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
@@ -68,11 +69,14 @@ function useInvalidateBlobs() {
 export function BlobPreviewDialog({
   blob,
   open,
-  onOpenChange
+  onOpenChange,
+  properties = []
 }: {
-  blob: InfoBlob;
+  blob: { id: string; metadata: { title?: string | null } };
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The document's source properties (SharePoint columns), shown above its text. */
+  properties?: readonly SourceMetadataEntry[];
 }) {
   const t = useTranslations();
   const { data, isPending, isError, error, isFetching, refetch } = useQuery({
@@ -93,6 +97,7 @@ export function BlobPreviewDialog({
         <DialogHeader>
           <DialogTitle>{blob.metadata.title ?? blob.id}</DialogTitle>
         </DialogHeader>
+        <SourceMetadataList entries={properties} />
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
           {isPending ? (
             <LoadingState variant="text" rows={4} />

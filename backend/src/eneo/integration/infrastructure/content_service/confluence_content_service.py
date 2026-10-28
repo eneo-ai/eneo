@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -7,6 +8,9 @@ from eneo.info_blobs.info_blob import InfoBlobAdd
 from eneo.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from eneo.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
+)
+from eneo.integration.infrastructure.content_service.sync_state import (
+    SyncStateRecorder,
 )
 from eneo.main.logging import get_logger
 
@@ -50,6 +54,7 @@ class ConfluenceContentService:
         self.info_blob_service = info_blob_service
         self.integration_knowledge_repo = integration_knowledge_repo
         self.oauth_token_service = oauth_token_service
+        self._sync_state = SyncStateRecorder(integration_knowledge_repo)
 
     async def pull_content(
         self,
@@ -57,6 +62,37 @@ class ConfluenceContentService:
         space_key: str,
         integration_knowledge_id: UUID,
     ):
+        started_at = datetime.now(timezone.utc)
+        try:
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            await self._sync_state.started(integration_knowledge, started_at)
+            await self._pull_content(
+                token_id=token_id,
+                space_key=space_key,
+                integration_knowledge_id=integration_knowledge_id,
+            )
+            await self._sync_state.succeeded(
+                integration_knowledge, datetime.now(timezone.utc)
+            )
+        except Exception as e:
+            await self._sync_state.failed(
+                integration_knowledge_id,
+                e,
+                sync_type="full",
+                started_at=started_at,
+                metadata={"trigger": "manual"},
+            )
+            logger.error(f"Error in Confluence pull_content: {e}", exc_info=True)
+            raise
+
+    async def _pull_content(
+        self,
+        token_id: UUID,
+        space_key: str,
+        integration_knowledge_id: UUID,
+    ) -> None:
         token = self._require_confluence_token(
             await self.oauth_token_repo.one(id=token_id)
         )
@@ -150,7 +186,9 @@ class ConfluenceContentService:
                 integration_knowledge_id
             )
         )
-        await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        await self.integration_knowledge_repo.update_sync_state(
+            integration_knowledge_id, size=integration_knowledge.size
+        )
 
     @staticmethod
     def _require_confluence_token(token: OauthToken) -> ConfluenceToken:

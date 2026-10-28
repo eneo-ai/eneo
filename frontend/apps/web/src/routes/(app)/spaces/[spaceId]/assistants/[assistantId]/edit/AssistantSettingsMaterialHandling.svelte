@@ -1,23 +1,38 @@
 <!--
-    When the assistant searches its knowledge sources, and how documents that
-    users attach in chat are read.
+    When the assistant searches its knowledge sources, how the results are
+    ordered, and how documents that users attach in chat are read.
 -->
 <script lang="ts">
+  import type { components } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { getAssistantEditor } from "$lib/features/assistants/AssistantEditor";
   import { m } from "$lib/paraglide/messages";
 
+  type RerankModel = components["schemas"]["RerankModelSecurityStatus"];
   type Props = {
     fileReferencesEnabled: boolean;
     modelSupportsTools: boolean;
+    rerankModels?: RerankModel[];
   };
-  let { fileReferencesEnabled, modelSupportsTools }: Props = $props();
+  let { fileReferencesEnabled, modelSupportsTools, rerankModels = [] }: Props = $props();
   const uid = $props.id();
   const {
-    state: { update, currentChanges }
+    state: { resource, update, currentChanges }
   } = getAssistantEditor();
+
+  // The backend refuses any other choice, so only these are offered.
+  const selectableRerankModels = $derived(
+    rerankModels.filter(
+      (model) => model.can_access && model.meets_security_classification !== false
+    )
+  );
+  const selectedRerankModel = $derived(
+    selectableRerankModels.find((model) => model.id === $update.rerank_model_id)
+  );
+  const NO_RERANKER = "none";
 </script>
 
 <div class="space-y-6">
@@ -53,6 +68,40 @@
       <p class="text-warning-stronger mt-2 text-sm">{m.material_knowledge_model_fallback()}</p>
     {/if}
   </Settings.Row>
+
+  <!-- Kept while a saved choice exists, so clearing a stale one stays visible until saved. -->
+  {#if selectableRerankModels.length > 0 || $update.rerank_model_id || $resource.rerank_model_id}
+    <Settings.Row
+      fullWidth
+      title={m.material_reranker()}
+      description={m.material_reranker_description()}
+      hasChanges={$currentChanges.diff.rerank_model_id !== undefined}
+      let:aria
+    >
+      <!-- A stale choice keeps its own value, so picking "none" is a real change. -->
+      <Select.Root
+        type="single"
+        value={$update.rerank_model_id ?? NO_RERANKER}
+        onValueChange={(v) => ($update.rerank_model_id = v === NO_RERANKER ? null : v)}
+      >
+        <Select.Trigger class="w-full" {...aria}>
+          {selectedRerankModel?.nickname ??
+            ($update.rerank_model_id ? m.material_reranker_missing() : m.material_reranker_none())}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value={NO_RERANKER} label={m.material_reranker_none()}>
+            {m.material_reranker_none()}
+          </Select.Item>
+          {#each selectableRerankModels as model (model.id)}
+            <Select.Item value={model.id} label={model.nickname}>{model.nickname}</Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+      {#if $update.rerank_model_id && !selectedRerankModel}
+        <p class="text-warning-stronger mt-2 text-sm">{m.material_reranker_unavailable()}</p>
+      {/if}
+    </Settings.Row>
+  {/if}
 
   <Settings.Row
     fullWidth

@@ -30,7 +30,7 @@ import { QueryStateBoundary } from "@/components/composites/query-state";
 import { returnTarget } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -216,6 +216,7 @@ export function PromptLibraryPage() {
   // goes back when the last dialog closes and the dialogs could not return
   // it themselves (edit handed over to the history, whose opener is gone).
   const opener = useRef<HTMLElement | null>(null);
+  const rescue = useFocusRescue();
 
   const filtered = useMemo(() => filterEntries(entries, search), [entries, search]);
   const flowEntry = flow && "id" in flow ? (entries.find((e) => e.id === flow.id) ?? null) : null;
@@ -227,7 +228,7 @@ export function PromptLibraryPage() {
 
   function end() {
     setFlow(null);
-    rescueFocus(opener.current?.isConnected ? opener.current : headingRef.current);
+    rescue(opener.current?.isConnected ? opener.current : headingRef.current);
     opener.current = null;
   }
 

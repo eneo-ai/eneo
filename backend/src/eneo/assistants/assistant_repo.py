@@ -589,6 +589,7 @@ class AssistantRepository:
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
+                rerank_model_id=assistant.rerank_model_id,
             )
             .returning(Assistants.id)
         )
@@ -1050,12 +1051,15 @@ class AssistantRepository:
                         )
                     )
 
-    async def delete(self, assistant_id: UUID, space_id: UUID) -> None:
-        await self.session.execute(
-            sa.delete(Assistants).where(
+    async def delete(self, assistant_id: UUID, space_id: UUID) -> UUID | None:
+        """Delete the assistant; returns the icon the deleted row showed."""
+        return await self.session.scalar(
+            sa.delete(Assistants)
+            .where(
                 Assistants.id == assistant_id,
                 Assistants.space_id == space_id,
             )
+            .returning(Assistants.icon_id)
         )
 
     async def move(

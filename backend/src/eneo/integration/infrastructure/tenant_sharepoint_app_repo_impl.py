@@ -92,6 +92,4 @@ class TenantSharePointAppRepositoryImpl(
             .values(is_active=False)
         )
         result = await self.session.execute(stmt)
-        await self.session.commit()
-
         return affected_row_count(result) > 0

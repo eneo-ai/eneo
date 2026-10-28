@@ -5,9 +5,11 @@ permissions (like user OAuth) but with a dedicated service account.
 This provides granular access control without person-dependency.
 """
 
+import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -15,6 +17,12 @@ import httpx
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
     DEFAULT_AUTH_TIMEOUT,
     TokenResponse,
+)
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    loggable_token_reason,
+)
+from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
+    TenantAppToken,
 )
 from eneo.main.config import get_settings
 
@@ -24,6 +32,21 @@ if TYPE_CHECKING:
     )
 
 logger = getLogger(__name__)
+
+_DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3600
+
+
+def _credentials_fingerprint(app: "TenantSharePointApp") -> str:
+    """Identifies the app credentials and the signed-in account, never the secret."""
+    material = "\x00".join(
+        (
+            app.tenant_domain,
+            app.client_id,
+            app.client_secret,
+            app.service_account_email or "",
+        )
+    )
+    return hashlib.sha256(material.encode()).hexdigest()
 
 
 @dataclass
@@ -63,6 +86,7 @@ class ServiceAccountAuthService:
     def __init__(self) -> None:
         super().__init__()
         self.default_scopes = self.DEFAULT_SCOPES
+        self._token_cache: dict[str, TenantAppToken] = {}
 
     def _build_credentials(
         self,
@@ -193,8 +217,14 @@ class ServiceAccountAuthService:
             )
 
             if response.status_code != 200:
-                logger.error(f"Token exchange failed: {response.text}")
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    logger.error(
+                        "Service account token exchange failed: %s",
+                        loggable_token_reason(exc),
+                    )
+                    raise
 
             token_data = response.json()
 
@@ -231,14 +261,18 @@ class ServiceAccountAuthService:
     async def refresh_access_token(
         self,
         tenant_app: "TenantSharePointApp",
+        *,
+        force_refresh: bool = False,
     ) -> TokenResponse:
-        """Refresh access token using stored refresh token.
+        """An access token for the service account, refreshed when needed.
 
-        Args:
-            tenant_app: TenantSharePointApp with service account configuration
-
-        Returns:
-            TokenResponse with new access_token and potentially new refresh_token
+        Microsoft rotates the refresh token on every refresh, so refreshing on
+        each acquisition would rotate it for every page browsed, sync run and
+        subscription renewed. A token minted earlier in this process is reused
+        until it is about to expire; such a response carries no refresh_token,
+        so callers persist a rotation only when one happened. The cache is per
+        process and keyed by a credential fingerprint, so a reconfigured secret
+        or another signed-in account is never a hit.
 
         Raises:
             ValueError: If tenant_app is not configured for service account
@@ -247,12 +281,36 @@ class ServiceAccountAuthService:
             raise ValueError(
                 f"TenantSharePointApp {tenant_app.id} is not configured for service account"
             )
-
         if not tenant_app.service_account_refresh_token:
             raise ValueError(
                 f"TenantSharePointApp {tenant_app.id} has no service account refresh token"
             )
 
+        cache_key = str(tenant_app.id)
+        fingerprint = _credentials_fingerprint(tenant_app)
+        cached = self._token_cache.get(cache_key)
+        if (
+            not force_refresh
+            and cached is not None
+            and cached.credentials_fingerprint == fingerprint
+            and not cached.is_expiring_soon()
+        ):
+            return cast(TokenResponse, {"access_token": cached.access_token})
+
+        token_data = await self._refresh(tenant_app)
+        try:
+            lifetime = int(token_data.get("expires_in") or 0)
+        except (TypeError, ValueError):
+            lifetime = 0
+        self._token_cache[cache_key] = TenantAppToken(
+            access_token=token_data["access_token"],
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(seconds=lifetime or _DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS),
+            credentials_fingerprint=fingerprint,
+        )
+        return token_data
+
+    async def _refresh(self, tenant_app: "TenantSharePointApp") -> TokenResponse:
         # Refresh token flow doesn't require redirect_uri
         creds = self._build_credentials_from_app(tenant_app, include_redirect_uri=False)
         token_endpoint = f"{creds.authority}/oauth2/v2.0/token"
@@ -275,11 +333,15 @@ class ServiceAccountAuthService:
             )
 
             if response.status_code != 200:
-                logger.error(
-                    f"Service account token refresh failed for tenant {tenant_app.tenant_id}: "
-                    f"{response.text}"
-                )
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    logger.error(
+                        "Service account token refresh failed for tenant %s: %s",
+                        tenant_app.tenant_id,
+                        loggable_token_reason(exc),
+                    )
+                    raise
 
             token_data = response.json()
             logger.debug(
@@ -287,25 +349,3 @@ class ServiceAccountAuthService:
             )
 
             return token_data
-
-    async def test_refresh_token(
-        self,
-        tenant_app: "TenantSharePointApp",
-    ) -> tuple[bool, Optional[str]]:
-        """Test if the service account refresh token is valid.
-
-        Args:
-            tenant_app: TenantSharePointApp with service account configuration
-
-        Returns:
-            Tuple of (success, error_message)
-        """
-        try:
-            await self.refresh_access_token(tenant_app)
-            return True, None
-        except httpx.HTTPStatusError as e:
-            return False, f"HTTP {e.response.status_code}: {e.response.text}"
-        except ValueError as e:
-            return False, str(e)
-        except Exception as e:
-            return False, f"Unexpected error: {str(e)}"

@@ -13,7 +13,7 @@ def _make_server() -> MCPServer:
         id=uuid4(),
         tenant_id=uuid4(),
         name="Provider",
-        http_url="http://provider.example/mcp",
+        http_url="https://provider.example/mcp",
     )
 
 
@@ -127,6 +127,7 @@ async def test_existing_bundled_registration_forwards_only_opaque_identity(monke
     assert headers["X-Eneo-Tenant-Id"] == identity["X-Eneo-Tenant-Id"]
     assert "X-Eneo-User-Email" not in headers
     server.http_auth_type = "bearer"
+    server.http_url = "https://provider.example/mcp"
     headers = await MCPClient(
         server, None, identity_headers=identity
     )._build_auth_headers()

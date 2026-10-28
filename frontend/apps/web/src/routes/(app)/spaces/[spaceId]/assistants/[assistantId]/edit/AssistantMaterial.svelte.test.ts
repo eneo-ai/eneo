@@ -1,17 +1,39 @@
-import type { Assistant, Eneo } from "@eneo/eneo-js";
+import type { Assistant, Eneo, components } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import AssistantMaterialTestHost from "./AssistantMaterialTestHost.svelte";
 
-function setup(options: { referenceAvailable?: boolean; fileReferencesEnabled?: boolean } = {}) {
+type RerankModel = components["schemas"]["RerankModelSecurityStatus"];
+
+function rerankModel(overrides: Partial<RerankModel> = {}): RerankModel {
+  return {
+    id: "reranker",
+    name: "rerank-v3.5",
+    nickname: "Rerank 3.5",
+    is_deprecated: false,
+    can_access: true,
+    meets_security_classification: true,
+    ...overrides
+  } as RerankModel;
+}
+
+function setup(
+  options: {
+    referenceAvailable?: boolean;
+    fileReferencesEnabled?: boolean;
+    rerankModelId?: string | null;
+    rerankModels?: RerankModel[];
+  } = {}
+) {
   const assistant = {
     id: "assistant",
     name: "Material test",
     prompt: { text: "", description: "" },
     inline_file_text: true,
     knowledge_mode: "inject",
+    rerank_model_id: options.rerankModelId ?? null,
     allowed_attachments: {
       accepted_file_types: [{ mimetype: "text/plain", size_limit: 1000000, extensions: [".txt"] }],
       limit: { max_files: 10, max_size: 1000000 }
@@ -62,7 +84,8 @@ function setup(options: { referenceAvailable?: boolean; fileReferencesEnabled?: 
   const screen = render(AssistantMaterialTestHost, {
     assistant,
     eneo,
-    fileReferencesEnabled: options.fileReferencesEnabled ?? true
+    fileReferencesEnabled: options.fileReferencesEnabled ?? true,
+    rerankModels: options.rerankModels ?? []
   });
   const state = () => JSON.parse(screen.container.querySelector("output")!.textContent!);
   return { screen, state, update, deleteFile };
@@ -177,6 +200,73 @@ describe("Assistant material editor", () => {
       })
     );
     expect(state().dirty).toBe(false);
+  });
+
+  it("offers the space's rerank models and saves the choice as the model id", async () => {
+    const { state, update } = setup({
+      rerankModels: [
+        rerankModel(),
+        rerankModel({
+          id: "too-high",
+          nickname: "Classified",
+          meets_security_classification: false
+        }),
+        rerankModel({ id: "disabled", nickname: "Disabled", can_access: false })
+      ]
+    });
+    await page.getByRole("button", { name: m.material_reranker(), exact: false }).click();
+    await expect
+      .element(page.getByRole("option", { name: "Classified", exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("option", { name: "Disabled", exact: true }))
+      .not.toBeInTheDocument();
+    await page.getByRole("option", { name: "Rerank 3.5", exact: true }).click();
+    expect(state()).toMatchObject({ rerank_model_id: "reranker", dirty: true });
+    await page.getByRole("button", { name: m.save_changes(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(update).toHaveBeenCalledWith({
+        assistant: expect.objectContaining({ id: "assistant" }),
+        update: { rerank_model_id: "reranker" }
+      })
+    );
+    await page.getByRole("button", { name: m.material_reranker(), exact: false }).click();
+    await page.getByRole("option", { name: m.material_reranker_none(), exact: true }).click();
+    await page.getByRole("button", { name: m.save_changes(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith({
+        assistant: expect.objectContaining({ id: "assistant" }),
+        update: { rerank_model_id: null }
+      })
+    );
+  });
+
+  it("hides the reranker choice when the space has none, but warns about a stale choice", async () => {
+    const { screen } = setup();
+    expect(screen.container.textContent).not.toContain(m.material_reranker());
+    screen.unmount();
+    const stale = setup({ rerankModelId: "gone" });
+    await expect
+      .element(page.getByText(m.material_reranker_unavailable(), { exact: true }))
+      .toBeVisible();
+    const trigger = page.getByRole("button", { name: m.material_reranker(), exact: false });
+    await expect.element(trigger).toHaveTextContent(m.material_reranker_missing());
+    await trigger.click();
+    await page.getByRole("option", { name: m.material_reranker_none(), exact: true }).click();
+    expect(stale.state()).toMatchObject({ rerank_model_id: null, dirty: true });
+    await expect
+      .element(page.getByText(m.material_reranker_unavailable(), { exact: true }))
+      .not.toBeInTheDocument();
+    // The row stays until the cleared choice is saved, then there is nothing left to choose.
+    await expect.element(trigger).toHaveTextContent(m.material_reranker_none());
+    await page.getByRole("button", { name: m.save_changes(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(stale.update).toHaveBeenCalledWith({
+        assistant: expect.objectContaining({ id: "assistant" }),
+        update: { rerank_model_id: null }
+      })
+    );
+    await expect.element(trigger).not.toBeInTheDocument();
   });
 
   it("shows effective model fallback while retaining the on-demand file preference", async () => {

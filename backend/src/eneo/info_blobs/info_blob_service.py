@@ -22,6 +22,7 @@ from eneo.info_blobs.info_blob import (
 from eneo.info_blobs.info_blob_repo import (
     InfoBlobPublication,
     InfoBlobRepository,
+    WebsiteContentFolderPage,
     WebsiteInfoBlobPage,
 )
 from eneo.main.exceptions import (
@@ -203,16 +204,27 @@ class InfoBlobService:
 
         This is deliberately weaker than the final transactional check. An
         identical retained original bypasses it so exact refreshes and repairs
-        remain possible at full quota; final publication stays authoritative.
+        remain possible at full quota. Otherwise the upload is credited with
+        the search data of the version it would replace; final publication
+        stays authoritative.
         """
-        matching_original = await self.repo.has_matching_active_upload_original(
+        active = await self.repo.find_active_upload(
             group_id=group_id,
             title=title,
-            embedding_model_id=embedding_model_id,
             original_sha256=original.captured.sha256,
         )
-        if not matching_original:
+        if active is None:
             await self.quota_service.ensure_capacity(original.captured.size_bytes)
+            return
+        if (
+            active.embedding_model_id == embedding_model_id
+            and active.original_sha256 == original.captured.sha256
+        ):
+            return
+        await self.quota_service.ensure_capacity(
+            original.captured.size_bytes,
+            released=await self.repo.releasable_search_bytes([active.info_blob_id]),
+        )
 
     async def precheck_knowledge_publication_capacity(
         self,
@@ -239,8 +251,14 @@ class InfoBlobService:
             )
             if match.same_searchable_content and match.same_original:
                 return
+            replaced = match.publication.info_blob if match.publication else None
             await self.quota_service.ensure_capacity(
-                original.captured.size_bytes + len(text_bytes)
+                original.captured.size_bytes + len(text_bytes),
+                released=(
+                    await self.repo.releasable_search_bytes([replaced.id])
+                    if replaced is not None
+                    else None
+                ),
             )
 
     async def _lock_publication_match(
@@ -464,7 +482,14 @@ class InfoBlobService:
                     "The active knowledge version changed during publish"
                 )
 
-            size_of_text = await self.quota_service.add_text(info_blob.text)
+            releasable = (
+                await self.repo.releasable_search_bytes([active.id])
+                if active is not None
+                else {}
+            )
+            size_of_text = await self.quota_service.add_text(
+                info_blob.text, released=releasable
+            )
             info_blob.size = size_of_text
             published = await self.repo.add(info_blob, source_id=source_id)
             await self.datastore.add(
@@ -478,6 +503,8 @@ class InfoBlobService:
                     content_id=prepared.id,
                     original_filename=original.original_filename,
                 )
+            if active is not None:
+                await self.repo.release_replaced_search_data([active.id])
             updated = await self.update_info_blob_size(published.id)
             await self.quota_service.ensure_capacity(0)
 
@@ -618,17 +645,34 @@ class InfoBlobService:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
         await self._authorize_website_info_blobs(id)
         page = await self.repo.get_by_website_page(
             website_id=id,
             limit=limit,
             cursor=cursor,
+            q=q,
+            prefix=prefix,
         )
         return WebsiteInfoBlobPage(
             items=await self._project_original_availability(page.items),
             total_count=page.total_count,
             next_cursor=page.next_cursor,
+        )
+
+    async def get_website_folders(
+        self,
+        id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        await self._authorize_website_info_blobs(id)
+        return await self.repo.get_website_folders(
+            website_id=id, prefix=prefix, cursor=cursor, limit=limit
         )
 
     async def delete(self, id: UUID):

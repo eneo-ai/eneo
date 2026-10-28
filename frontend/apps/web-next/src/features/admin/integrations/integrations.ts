@@ -11,6 +11,9 @@ export const TENANT_INTEGRATIONS_KEY = ["admin-tenant-integrations"];
 export const SHAREPOINT_APP_KEY = ["admin-sharepoint-app"];
 export const SHAREPOINT_SUBSCRIPTIONS_KEY = ["admin-sharepoint-subscriptions"];
 
+/** sessionStorage key for a service-account sign-in in flight; the callback page checks it. */
+export const SHAREPOINT_OAUTH_STATE_KEY = "sharepoint_service_account_oauth";
+
 export function tenantIntegrationsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: TENANT_INTEGRATIONS_KEY,

@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from eneo.observability.error_text import user_visible_error
 
 
 def _empty_uuid_list() -> list[UUID]:
@@ -60,9 +62,27 @@ class TenantSharePointAppPublic(BaseModel):
         description="Email of the service account (only for service_account auth method)",
     )
     certificate_path: Optional[str]
+    auth_status: Literal["ok", "error", "unknown"] = Field(
+        "unknown",
+        description=(
+            "Credential health: 'error' when the latest token acquisition or "
+            "refresh failed, 'ok' after a success, 'unknown' before either."
+        ),
+    )
+    last_auth_error: Optional[str] = Field(
+        None, description="Message from the most recent credential failure"
+    )
+    last_auth_error_at: Optional[datetime] = None
+    last_auth_success_at: Optional[datetime] = None
     created_by: Optional[UUID]
     created_at: datetime
     updated_at: datetime
+
+    # Failures stored before credential errors were cleaned may hold URLs or host names.
+    @field_validator("last_auth_error")
+    @classmethod
+    def _clean_auth_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +155,13 @@ class SharePointSubscriptionPublic(BaseModel):
     last_webhook_received_at: Optional[datetime] = Field(
         None, description="Most recent valid webhook received for this subscription"
     )
+
+    # Failures stored before renewal errors were cleaned may hold URLs or host names.
+    @field_validator("last_renewal_error")
+    @classmethod
+    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
     owner_email: Optional[str] = Field(
         None,
         description="Email of subscription owner (None for organization integrations)",
@@ -189,6 +216,14 @@ class ServiceAccountAuthStart(BaseModel):
     )
 
 
+class ServiceAccountReauthStart(BaseModel):
+    """Request model to restart the service account sign-in with stored credentials."""
+
+    redirect_uri: str | None = Field(
+        default=None, description="An exact operator-registered OAuth callback URL."
+    )
+
+
 class ServiceAccountAuthStartResponse(BaseModel):
     """Response with OAuth URL for service account login."""
 
@@ -205,4 +240,7 @@ class ServiceAccountAuthCallback(BaseModel):
     auth_code: str = Field(
         ..., description="OAuth authorization code from Microsoft callback"
     )
-    state: str = Field(..., description="OAuth state parameter for verification")
+    # The issued state is token_urlsafe(32), 43 characters.
+    state: str = Field(
+        ..., max_length=256, description="OAuth state parameter for verification"
+    )

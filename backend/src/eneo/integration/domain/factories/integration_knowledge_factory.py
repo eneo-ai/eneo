@@ -37,6 +37,7 @@ class IntegrationKnowledgeFactory:
                 last_renewal_failed_at=subscription.last_renewal_failed_at,
                 last_renewal_error=subscription.last_renewal_error,
                 last_webhook_received_at=subscription.last_webhook_received_at,
+                notification_url=getattr(subscription, "notification_url", None),
                 created_at=subscription.created_at,
                 updated_at=subscription.updated_at,
             )
@@ -68,6 +69,10 @@ class IntegrationKnowledgeFactory:
             drive_id=getattr(record, "drive_id", None),
             wrapper_id=getattr(record, "wrapper_id", None),
             wrapper_name=getattr(record, "wrapper_name", None),
+            last_sync_status=getattr(record, "last_sync_status", None),
+            last_sync_error=getattr(record, "last_sync_error", None),
+            last_sync_attempted_at=getattr(record, "last_sync_attempted_at", None),
+            document_count=getattr(record, "document_count", None),
         )
 
     @classmethod

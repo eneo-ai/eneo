@@ -15,7 +15,7 @@ import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { historyBucket, type HistoryBucket } from "./format";
 import {
@@ -109,6 +109,7 @@ function HistoryPanel({
   const now = useNow();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const rescue = useFocusRescue();
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
@@ -121,7 +122,7 @@ function HistoryPanel({
     onDeleted: (id) => {
       setDeleting(null);
       // The deleted row (and the menu button the dialog returns focus to) is gone.
-      rescueFocus(headingRef.current);
+      rescue(headingRef.current);
       onDeleted(id);
     }
   });

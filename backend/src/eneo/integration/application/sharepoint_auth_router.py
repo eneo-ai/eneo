@@ -1,18 +1,14 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from eneo.integration.application.tenant_sharepoint_app_service import (
-    TenantSharePointAppService,
-)
 from eneo.integration.domain.entities.oauth_token import SharePointToken
-from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-    ServiceAccountAuthService,
-)
-from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-    TenantAppAuthService,
+from eneo.integration.domain.value_objects import IntegrationType
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    AccessTokenProvider,
+    OrgTokenProvider,
+    SharePointCredentialsInvalidError,
 )
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
-from eneo.integration.presentation.models import IntegrationType
 
 if TYPE_CHECKING:
     from eneo.integration.application.user_integration_service import (
@@ -31,18 +27,20 @@ class SharePointAuthRouter:
 
     def __init__(
         self,
-        tenant_app_service: TenantSharePointAppService,
-        tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
-        service_account_auth_service: Optional[ServiceAccountAuthService] = None,
+        org_token_provider: OrgTokenProvider,
     ) -> None:
         super().__init__()
-        self.tenant_app_service = tenant_app_service
-        self.tenant_app_auth_service = tenant_app_auth_service
         self.oauth_token_service = oauth_token_service
-        self.service_account_auth_service = (
-            service_account_auth_service or ServiceAccountAuthService()
-        )
+        self.org_token_provider = org_token_provider
+
+    def access_token_provider_for(
+        self, connection: "AuthorizedIntegration"
+    ) -> Optional[AccessTokenProvider]:
+        """Re-acquisition callback for organisation connections; None for user OAuth."""
+        if connection.tenant_app is None:
+            return None
+        return self.org_token_provider.access_token_provider(connection.tenant_app)
 
     async def get_token_for_integration(
         self, connection: "AuthorizedIntegration"
@@ -131,44 +129,16 @@ class SharePointAuthRouter:
         )
 
         try:
-            if tenant_app.is_service_account():
-                # Service account: delegated permissions via refresh token
-                token_response = (
-                    await self.service_account_auth_service.refresh_access_token(
-                        tenant_app
-                    )
-                )
-                access_token = token_response["access_token"]
-
-                # Update refresh token if a new one was issued
-                if "refresh_token" in token_response:
-                    new_refresh_token = token_response["refresh_token"]
-                    if new_refresh_token != tenant_app.service_account_refresh_token:
-                        tenant_app.update_refresh_token(new_refresh_token)
-                        await self.tenant_app_service.update(tenant_app)
-                        logger.debug(
-                            f"Updated service account refresh token for tenant {tenant_app.tenant_id}"
-                        )
-
-                logger.info(
-                    "Service account token acquired successfully",
-                    extra={
-                        "tenant_app_id": str(tenant_app.id),
-                        "service_account_email": tenant_app.service_account_email,
-                    },
-                )
-            else:
-                # Tenant app: application permissions via client credentials
-                access_token = await self.tenant_app_auth_service.get_access_token(
-                    tenant_app
-                )
-                logger.info(
-                    "Tenant app token acquired successfully",
-                    extra={
-                        "tenant_app_id": str(tenant_app.id),
-                        "has_token": bool(access_token),
-                    },
-                )
+            access_token = await self.org_token_provider.get_access_token(tenant_app)
+            logger.info(
+                "Organisation token acquired successfully",
+                extra={
+                    "tenant_app_id": str(tenant_app.id),
+                    "auth_method": tenant_app.auth_method,
+                },
+            )
+        except SharePointCredentialsInvalidError:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to acquire token: {type(e).__name__}: {str(e)}",

@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { File, FileText, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import File from "@lucide/svelte/icons/file";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import HighlightedText from "$lib/components/HighlightedText.svelte";
@@ -54,7 +57,7 @@
       class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
       role="status"
     >
-      <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+      <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
       {m.sharepoint_searching()}
     </div>
   {:else if error}

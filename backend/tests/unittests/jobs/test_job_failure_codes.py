@@ -195,3 +195,42 @@ def test_public_job_preserves_typed_crawl_failure_code() -> None:
 
     assert public.failure_code == "remote_unreachable"
     assert public.result_location is None
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        Task.PULL_SHAREPOINT_CONTENT,
+        Task.SYNC_SHAREPOINT_DELTA,
+        Task.PULL_CONFLUENCE_CONTENT,
+    ],
+)
+def test_public_job_cleans_a_failed_integration_sync_message(task: Task) -> None:
+    persisted = JobInDb(
+        id=uuid4(),
+        user_id=uuid4(),
+        name="Protokoll",
+        status=Status.FAILED,
+        task=task,
+        result_location=(
+            "403, message='Forbidden', url='https://contoso.sharepoint.com/sites/KS/"
+            "_layouts/15/download.aspx?UniqueId=abc&tempauth=v1.eyJhdWQiOiJ4In0.c2ln'"
+        ),
+    )
+
+    assert JobPublic.model_validate(persisted).result_location == "HTTP 403 Forbidden"
+
+
+def test_public_job_keeps_a_successful_integration_sync_summary() -> None:
+    persisted = JobInDb(
+        id=uuid4(),
+        user_id=uuid4(),
+        name="Protokoll",
+        status=Status.COMPLETE,
+        task=Task.PULL_SHAREPOINT_CONTENT,
+        result_location="Imported 3 files (1 folder scanned)",
+    )
+
+    assert JobPublic.model_validate(persisted).result_location == (
+        "Imported 3 files (1 folder scanned)"
+    )

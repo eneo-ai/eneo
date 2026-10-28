@@ -2,7 +2,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from eneo.integration.domain.entities.tenant_integration import TenantIntegration
-from eneo.integration.presentation.models import TenantIntegrationFilter
+from eneo.integration.domain.value_objects import TenantIntegrationFilter
 from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission, validate_permissions
 

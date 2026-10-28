@@ -251,3 +251,27 @@ async def test_version_1_keeps_its_fixed_candidate_count(monkeypatch):
 
     kwargs = datastore.semantic_search.await_args.kwargs
     assert (kwargs["num_chunks"], kwargs["autocut_cutoff"]) == (30, 3)
+
+
+async def test_get_references_hands_the_rerank_spec_to_the_datastore():
+    datastore = AsyncMock()
+    datastore.semantic_search = AsyncMock(return_value=[])
+    service = ReferencesService(AsyncMock(), datastore)
+    spec = object()
+    collection = MagicMock()
+
+    await service.get_references(
+        question="q", collections=[collection], version=2, rerank=spec
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["rerank"] is spec
+
+
+async def test_get_references_passes_no_spec_by_default():
+    datastore = AsyncMock()
+    datastore.semantic_search = AsyncMock(return_value=[])
+    service = ReferencesService(AsyncMock(), datastore)
+
+    await service.get_references(question="q", collections=[MagicMock()])
+
+    assert datastore.semantic_search.await_args.kwargs["rerank"] is None

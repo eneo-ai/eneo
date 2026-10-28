@@ -52,6 +52,7 @@ from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPAuthenticationError,
     MCPClient,
     MCPClientError,
+    MCPInsecureCredentialTransportError,
     validate_tool_catalog,
 )
 
@@ -92,6 +93,14 @@ FOREIGN_REFERENCE_NOTICE = (
     "this conversation. Only the reference urls given for this conversation's "
     "own files can be passed to tools. If the user wants that file used here, "
     "ask them to attach it to this conversation."
+)
+# Returned for a server saved with a plain-http address and a credential: the
+# refusal is permanent until an admin changes the address, so it must not read
+# as a passing outage the model could retry.
+INSECURE_CREDENTIAL_TRANSPORT_NOTICE = (
+    "The tool was not called: its MCP server is registered with a plain http "
+    "address, and Eneo sends the server's credential only over https. Tell the "
+    "user that an administrator must change this server's address to https."
 )
 AUTH_DENIED_NOTICE = (
     "Access was denied by this MCP tool. Check its permissions or the "
@@ -198,6 +207,9 @@ class MCPProxySession:
         # streamablehttp_client whose anyio cancel scope can only be exited from
         # its owner task.
         self._failed_server_ids: set[UUID] = set()
+        # Failed servers whose address may not receive their credential; a
+        # stored row cannot change within a session, so this is never cleared.
+        self._insecure_transport_server_ids: set[UUID] = set()
 
         # The asyncio.Task that opened the first MCP connection. All subsequent
         # connect/disconnect calls must run on this task — the MCP SDK's
@@ -1320,6 +1332,13 @@ class MCPProxySession:
             return self._unavailable_result(tool_name, arguments)
 
         if server.id in self._failed_server_ids:
+            if server.id in self._insecure_transport_server_ids:
+                return {
+                    "content": [
+                        {"type": "text", "text": INSECURE_CREDENTIAL_TRANSPORT_NOTICE}
+                    ],
+                    "is_error": True,
+                }
             return self._unavailable_result(tool_name, arguments)
 
         # Use cached client only. Connecting here is unsafe: this method runs
@@ -1432,6 +1451,8 @@ class MCPProxySession:
                     f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
                 )
                 self._mark_server_failed(server.id)
+                if isinstance(exc, MCPInsecureCredentialTransportError):
+                    self._insecure_transport_server_ids.add(server.id)
 
         # Execute all tool calls in parallel
         async def execute_single(

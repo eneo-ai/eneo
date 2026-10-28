@@ -15,7 +15,6 @@ from mcp.client.streamable_http import (
     GetSessionIdCallback,
     streamable_http_client,
 )
-from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
@@ -29,6 +28,11 @@ from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.domain.credential_transport import (
+    CREDENTIAL_TRANSPORT_REQUIREMENT,
+    LOOPBACK_HOSTS,
+    credential_transport_violation,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     bundled_tool_name,
@@ -63,6 +67,27 @@ RESOURCE_META_MAX_BYTES = 16 * 1024
 # A tool result's `structuredContent`, which an MCP App view renders from.
 STRUCTURED_CONTENT_MAX_BYTES = 256 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
+
+# Requests to a loopback host go direct, never through a proxy from the
+# environment (HTTP_PROXY, ALL_PROXY): plain http may carry a credential only
+# to these hosts because the request stays on the machine. A mount without a
+# transport is how httpx itself applies NO_PROXY hosts.
+_LOOPBACK_DIRECT: dict[str, httpx.AsyncBaseTransport | None] = {
+    f"all://[{host}]" if ":" in host else f"all://{host}": None
+    for host in LOOPBACK_HOSTS
+}
+
+
+class MCPInsecureCredentialTransportError(MCPClientError):
+    """The server's address would expose its admin-supplied credential.
+
+    Raised for a server saved before registration enforced https; the message
+    tells the admin what to change and names neither the address nor the
+    credential.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(CREDENTIAL_TRANSPORT_REQUIREMENT)
 
 
 def _origin(url: str) -> str:
@@ -499,8 +524,10 @@ async def _open_streamable_http_client(
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
-    async with create_mcp_http_client(
-        headers=http_headers, timeout=timeout
+    # The SDK's create_mcp_http_client sets only headers and timeout and takes
+    # no mounts; this client is the same plus the loopback bypass.
+    async with httpx.AsyncClient(
+        headers=http_headers, timeout=timeout, mounts=_LOOPBACK_DIRECT
     ) as http_client:
         wire_max_bytes = tool_catalog_max_bytes + MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES
         # This coarse pre-decode bound measures server-encoded HTTP/SSE bytes;
@@ -589,7 +616,9 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     rejects the probe body itself.
     """
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0), mounts=_LOOPBACK_DIRECT
+        ) as client:
             async with client.stream(
                 "POST",
                 url,
@@ -748,7 +777,23 @@ class MCPClient:
             await asyncio.sleep(0)
 
     async def _build_auth_headers(self) -> dict[str, str]:
-        """Build authentication headers for this connection."""
+        """Build authentication headers for this connection.
+
+        Every request the client sends carries the headers built here (the
+        transport and the diagnostic probe alike), so this is where a
+        credential bound for a plain-http address is refused. Eneo's own
+        loopback servers (knowledge, files) are exempt: their token is minted
+        per request for Eneo itself and goes to the deployment's
+        ``INTERNAL_MCP_BASE_URL``, not to an address an admin entered.
+        """
+        if (
+            not self.mcp_server.is_internal
+            and credential_transport_violation(
+                self.mcp_server.http_auth_type, self.endpoint_url
+            )
+            is not None
+        ):
+            raise MCPInsecureCredentialTransportError()
         headers: dict[str, str] = {}
 
         if self.mcp_server.http_auth_type in ("bearer", "internal"):

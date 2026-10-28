@@ -9,6 +9,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { eneoIcons } from "@eneo/ui/icons/vite-plugin-eneo-icons";
 import { svelteCssCache } from "./plugins/svelte-css-cache.js";
+import { lucideIconData } from "./plugins/lucide-icon-data.js";
 
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
@@ -42,11 +43,17 @@ export default defineConfig({
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",
-      strategy: ["url", "cookie", "baseLocale"]
+      strategy: ["url", "cookie", "baseLocale"],
+      // One module per message (paraglide's default) means ~15k modules for
+      // our catalog and pushed the production build past an 8 GB heap. Rollup
+      // merges them into one chunk that every page loads anyway, so per-locale
+      // modules cost no extra bytes.
+      outputStructure: "locale-modules"
     }) as PluginOption,
     tailwindcss() as PluginOption,
     eneoIcons() as PluginOption,
     svelteCssCache(),
+    lucideIconData(),
     sveltekit() as PluginOption
   ],
   test: {
@@ -73,6 +80,10 @@ export default defineConfig({
     projects: [
       {
         extends: "./vite.config.ts",
+        optimizeDeps: {
+          // Pre-bundled up front so the first axe test does not trigger a Vite reload mid-run.
+          include: ["axe-core"]
+        },
         test: {
           name: "client",
           // No `environment`: browser mode runs in a real Chromium, so Vitest

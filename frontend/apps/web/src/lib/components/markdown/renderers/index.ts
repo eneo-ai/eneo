@@ -22,6 +22,8 @@ import Def from "./Def.svelte";
 import Table from "./Table.svelte";
 import Link from "./Link.svelte";
 import Image from "./Image.svelte";
+import MathRenderer from "./Math.svelte";
+import Escape from "./Escape.svelte";
 
 type TokenMap = {
   [K in MarkedToken["type"]]: Extract<MarkedToken, { type: K }>;
@@ -45,6 +47,7 @@ export const renderers: Renderers = {
   eneoInref: Inref,
   eneoMention: Mention,
   eneoFile: FileMention,
+  eneoMath: MathRenderer,
   // Basic markdown blocks
   heading: Heading,
   text: Text,
@@ -61,7 +64,7 @@ export const renderers: Renderers = {
   hr: Hr,
   space: Space,
   def: Def,
-  escape: Space,
+  escape: Escape,
   table: Table,
   link: Link,
   image: Image,

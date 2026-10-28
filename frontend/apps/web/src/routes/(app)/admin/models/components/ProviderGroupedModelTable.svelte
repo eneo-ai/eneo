@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Generic provider-grouped table used by all four model-type tabs
-  (completion / embedding / transcription / image). Replaces three near-identical
+  Generic provider-grouped table used by all five model-type tabs
+  (completion / embedding / transcription / image / rerank). Replaces three near-identical
   copies that drifted apart over time. Per-type behaviour is limited to:
 
     - the deprecation banner — only completion models carry deprecation_date
@@ -15,19 +15,22 @@
 
 <script
   lang="ts"
-  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel"
+  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel"
 >
   import type {
     CompletionModel,
     EmbeddingModel,
     ImageModel,
     ModelProviderPublic,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { writable } from "svelte/store";
-  import { Plus, TriangleAlert, Clock } from "@lucide/svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Clock from "@lucide/svelte/icons/clock";
 
   import { m } from "$lib/paraglide/messages";
   import {
@@ -49,14 +52,16 @@
   import ProviderEmptyState from "./ProviderEmptyState.svelte";
   import { AddWizard } from "../AddWizard/index.js";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
-  type WizardModelType = "completion" | "embedding" | "transcription" | "image";
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+  type WizardModelType = "completion" | "embedding" | "transcription" | "image" | "rerank";
 
   const wizardModelTypeFor: Record<ModelTypeKey, WizardModelType> = {
     completionModel: "completion",
     embeddingModel: "embedding",
     transcriptionModel: "transcription",
-    imageModel: "image"
+    imageModel: "image",
+    rerankModel: "rerank"
   };
 
   export let models: M[];

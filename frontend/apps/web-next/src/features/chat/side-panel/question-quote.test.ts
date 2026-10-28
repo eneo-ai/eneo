@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { composeQuotedQuestion, parseQuotedQuestion, quotedFileMatches } from "./question-quote";
+import {
+  composeQuotedQuestion,
+  parseQuotedQuestion,
+  quotedFileMatches,
+  tableQuoteSummary
+} from "./question-quote";
 
 const fileId = "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b";
 
@@ -60,4 +65,12 @@ describe("question quotes", () => {
       )
     ).toBe(true);
   });
+});
+
+it("sums up a table quote as its columns and row count", () => {
+  expect(tableQuoteSummary("| Fas | Innehåll |\n| --- | --- |\n| A | b |\n| C | d |")).toEqual({
+    columns: ["Fas", "Innehåll"],
+    rows: 2
+  });
+  expect(tableQuoteSummary("Bara text")).toBeNull();
 });

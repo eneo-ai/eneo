@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         IntegrationKnowledge,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.templates.assistant_template.assistant_template import AssistantTemplate
     from eneo.websites.domain.website import Website
 
@@ -87,6 +88,7 @@ class Assistant(Entity):
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
         document_template: DocumentTemplateChoice | None = None,
+        rerank_model_id: Optional[UUID] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -117,6 +119,7 @@ class Assistant(Entity):
         self.insight_enabled = insight_enabled
         self.inline_file_text = inline_file_text
         self.knowledge_mode = knowledge_mode
+        self.rerank_model_id = rerank_model_id
         self.data_retention_days = data_retention_days
         self.type = (
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
@@ -412,6 +415,7 @@ class Assistant(Entity):
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -456,6 +460,9 @@ class Assistant(Entity):
 
         if knowledge_mode is not None:
             self.knowledge_mode = knowledge_mode
+
+        if is_provided(rerank_model_id):
+            self.rerank_model_id = rerank_model_id
 
         if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
@@ -522,6 +529,7 @@ class Assistant(Entity):
         internal_mcp_servers: Sequence["MCPServer"] = (),
         skill_runtime: "SkillActivationRuntime | None" = None,
         document_template: "DocumentTemplateReference | None" = None,
+        rerank: "RerankSpec | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -566,6 +574,7 @@ class Assistant(Entity):
                 integration_knowledge_list=self.integration_knowledge_list,
                 context_window_tokens=effective_model.max_input_tokens,
                 version=version,
+                rerank=rerank,
             )
         else:
             datastore_result = DatastoreResult(

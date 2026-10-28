@@ -1,13 +1,12 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { CircleAlert, CircleCheck } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
 
   type Props = {
     dirty: boolean;

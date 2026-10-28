@@ -1,8 +1,10 @@
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.integration.application.sharepoint_auth_router import (
@@ -35,8 +37,9 @@ class SharePointTreeService:
 
     async def _connect(
         self, user_integration_id: UUID, space_id: UUID
-    ) -> tuple[Any, Any]:
-        """The connection's token and refresh callback after every authorization check."""
+    ) -> tuple[Any, Any, Any]:
+        """The connection's token, refresh callback and organisation token
+        provider after every authorization check."""
         space = await self.space_repo.one(id=space_id)
         connection = await self.user_integration_service.get_authorized_integration(
             user_integration_id, space=space
@@ -82,9 +85,12 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise BadRequestException(
-                f"Failed to acquire SharePoint token for integration {user_integration_id} "
-                f"in {space_type} space: {str(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to acquire SharePoint token for integration "
+                    f"{user_integration_id} in {space_type} space: {user_visible_error(e)}"
+                )
             ) from e
 
         # Create a callback function for token refresh (only used for user OAuth)
@@ -109,7 +115,10 @@ class SharePointTreeService:
                 "refresh_token": refreshed_token.refresh_token,
             }
 
-        return token, token_refresh_callback
+        access_token_provider = self.sharepoint_auth_router.access_token_provider_for(
+            connection
+        )
+        return token, token_refresh_callback, access_token_provider
 
     async def get_folder_tree(
         self,
@@ -158,13 +167,14 @@ class SharePointTreeService:
             },
         )
 
-        token, token_refresh_callback = await self._connect(
+        token, token_refresh_callback, access_token_provider = await self._connect(
             user_integration_id, space_id
         )
 
         try:
             service = InfraSharePointTreeService(
-                token_refresh_callback=token_refresh_callback
+                token_refresh_callback=token_refresh_callback,
+                access_token_provider=access_token_provider,
             )
             logger.debug("Calling infrastructure service to fetch folder tree")
             tree_data = await service.get_folder_tree(
@@ -192,8 +202,11 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise BadRequestException(
-                f"Failed to fetch SharePoint folder tree: {str(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+                )
             ) from e
 
     async def search_library(
@@ -215,12 +228,13 @@ class SharePointTreeService:
             SharePointTreeService as InfraSharePointTreeService,
         )
 
-        token, token_refresh_callback = await self._connect(
+        token, token_refresh_callback, access_token_provider = await self._connect(
             user_integration_id, space_id
         )
         try:
             service = InfraSharePointTreeService(
-                token_refresh_callback=token_refresh_callback
+                token_refresh_callback=token_refresh_callback,
+                access_token_provider=access_token_provider,
             )
             return await service.search_library(
                 token=token,
@@ -235,6 +249,9 @@ class SharePointTreeService:
                 extra={"site_id": site_id, "drive_id": drive_id},
                 exc_info=True,
             )
-            raise BadRequestException(
-                f"Failed to search SharePoint library: {str(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to search SharePoint library: {user_visible_error(e)}"
+                )
             ) from e

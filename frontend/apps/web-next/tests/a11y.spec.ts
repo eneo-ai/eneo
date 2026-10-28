@@ -496,6 +496,16 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("admin integrations", async ({ page }) => {
+      await scan(page, "/admin/integrations", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
+        ).toBeVisible();
+        // The providers have loaded.
+        await expect(page.locator('[data-tour="admin-integrations"]')).toBeVisible();
+      });
+    });
+
     test("admin crawler", async ({ page }) => {
       await scan(page, "/admin/crawler", async () => {
         await expect(page.getByRole("heading", { level: 1, name: /^Crawler$/ })).toBeVisible();

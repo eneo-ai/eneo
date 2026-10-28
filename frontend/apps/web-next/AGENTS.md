@@ -121,6 +121,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     from its own description and status only): use `TextInput` from
     `@/components/astryx/text-input`, which adds the caller's ids after
     Astryx's own (as the password policy checklist needs).
+  - An error or warning `Banner` is `role="alert"`, read out assertively each
+    time it mounts. A notice about a state that lasts, shown on every visit to
+    its page or tab, is `QuietBanner` from `@/components/astryx/banner` (no
+    live region), and what is new is announced politely with `useAnnounce`.
   - CommandPalette marks only a picked value as selected: patched (the
     highlighted option is exposed as selected, as the APG combobox pattern
     says). DateInput's `nativePicker` is deprecated since 0.6.4: use
@@ -135,6 +139,9 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     (screen-reader-only) cell content escaped its scroll box and widened the
     page: `@/components/astryx/table` names the region, and `globals.css`
     (section 9) makes the scroll box `relative`.
+  - ScrollableArea's `axis="inline"` adds an `inline` class that collides with
+    Tailwind's display utility. `globals.css` restores block layout for its
+    viewport so overflowing content stays contained and keyboard-scrollable.
   - DateInput's calendar toggle is its 16 px icon, below the 24 px target
     size: `globals.css` (section 11) grows it. DateRangeInput's toggle
     (`astryx-date-range-input-toggle-icon`) is as small; extend section 11
@@ -180,6 +187,12 @@ the default name on a backend name collision (9017).
   the stale patch and the guard tests in `src/components/astryx/` fail:
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
   `.bun-tag-*` file), or drop a part Astryx has fixed.
+  - Mermaid 11.16.1 inserts SVG styles without a CSP nonce. The
+    `mermaid@11.16.1` patch uses `NonceProvider`'s request nonce while measuring,
+    parsing and displaying the SVG. Serialization hides a live node's nonce,
+    so it is restored on inert markup before sanitization and display. The production
+    `tests/answer-presentation.spec.ts` covers this; retain the patch on upgrades
+    until upstream supports nonces, then remove it once that test passes.
 - **Theme**: `src/theme/eneo-theme.ts` extends Astryx Neutral with the Eneo
   palette, radii, shadows and fonts; it is the single source of truth.
   `bun run theme:build` compiles it to `src/theme/eneo.{css,js,d.ts}`
@@ -219,8 +232,9 @@ the default name on a backend name collision (9017).
   the feed is open; 2 s while it is down and something runs or was just
   started; paused in hidden tabs) and compares snapshots with
   `job-transitions.ts`. Every job
-  the client starts goes through `trackJob(job)` so its completion counts even
-  when the first poll already says "complete". A finished job toasts and
+  the client starts goes through `trackJob(job)` (`trackJob(jobs)` for calls
+  made together) so its completion counts even when the first poll already
+  says "complete". A finished job toasts and
   announces (`job-feedback.ts`), refreshes the query keys in
   `job-invalidation.ts` (add a prefix there when a new kind of job lands
   somewhere new) and records its info-blob in `recent-results.ts`, which the
@@ -374,8 +388,10 @@ Shared behaviour outside `composites`:
 
 - Removing something from a list: `useRemovalMutation` + `RemovalFocusScope`
   (`src/features/spaces/removal.tsx`) wait for the refetch, close the dialog and
-  move focus with `rescueFocus` (`src/lib/focus-rescue.ts`) to the list's
-  heading or panel, so focus never falls to `<body>`.
+  move focus to the list's heading or panel, so focus never falls to `<body>`.
+  The scope owns that rescue (`useFocusRescue`, `src/lib/focus-rescue.ts`);
+  other actions that may remove the focused element call the hook in the
+  list or page that survives the change, never in the row.
 - Settings switches that save on toggle: `useSettingSwitch`
   (`src/features/admin/use-setting-switch.ts`) — optimistic, reverts on error,
   queues a press made during a save.

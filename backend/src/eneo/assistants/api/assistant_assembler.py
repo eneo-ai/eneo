@@ -266,6 +266,7 @@ class AssistantAssembler:
                 assistant.inline_file_text, effective_config
             ),
             knowledge_mode=assistant.knowledge_mode,
+            rerank_model_id=assistant.rerank_model_id,
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,

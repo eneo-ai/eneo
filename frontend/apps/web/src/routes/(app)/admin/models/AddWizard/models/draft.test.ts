@@ -4,7 +4,7 @@ vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
 
-import type { ImageModel } from "@eneo/eneo-js";
+import type { ImageModel, RerankModel } from "@eneo/eneo-js";
 import {
   applyCatalogModelToDraft,
   createEmptyDraft,
@@ -94,5 +94,91 @@ describe("image model drafts", () => {
 
     expect(isDraftComplete(draft, "image")).toBe(true);
     expect(isDraftComplete({ ...draft, displayName: "" }, "image")).toBe(false);
+  });
+});
+
+describe("rerank model drafts", () => {
+  it("only needs a name and display name to be complete", () => {
+    const draft = {
+      ...createEmptyDraft("rerank", "hosted_vllm"),
+      name: "Qwen/Qwen3-Reranker-4B",
+      displayName: "Qwen3 Reranker 4B"
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(true);
+    expect(isDraftComplete({ ...draft, name: "" }, "rerank")).toBe(false);
+  });
+
+  it("takes the name from a catalog entry and leaves every cost empty", () => {
+    const draft = applyCatalogModelToDraft(
+      createEmptyDraft("rerank", "cohere"),
+      { name: "rerank-v3.5", display_name: "Rerank 3.5", input_cost_per_token: 0.000002 },
+      "rerank"
+    );
+
+    expect(draft.name).toBe("rerank-v3.5");
+    expect(draft.displayName).toBe("Rerank 3.5");
+    expect(draft.inputCostPerTokenStr).toBe("");
+    expect(draftToWizardModel(draft)).toMatchObject({
+      name: "rerank-v3.5",
+      displayName: "Rerank 3.5",
+      inputCostPerToken: null,
+      outputCostPerToken: null
+    });
+  });
+
+  it("starts with the default candidate factor and cap and sends them", () => {
+    const draft = { ...createEmptyDraft("rerank", "cohere"), name: "r", displayName: "R" };
+
+    expect([draft.candidateFactorStr, draft.maxCandidatesStr]).toEqual(["5", "100"]);
+    expect(draftToWizardModel(draft)).toMatchObject({ candidateFactor: 5, maxCandidates: 100 });
+  });
+
+  it("reads the candidate factor and cap of an existing model", () => {
+    const model = {
+      id: "r-1",
+      name: "rerank-v3.5",
+      nickname: "Rerank",
+      hosting: "eu",
+      description: null,
+      security_classification: null,
+      candidate_factor: 3,
+      max_candidates: 250
+    } as unknown as RerankModel;
+
+    const draft = modelToDraft(model, "rerank");
+
+    expect([draft.candidateFactorStr, draft.maxCandidatesStr]).toEqual(["3", "250"]);
+  });
+
+  it.each([
+    ["candidateFactorStr", "0"],
+    ["candidateFactorStr", "21"],
+    ["candidateFactorStr", ""],
+    ["maxCandidatesStr", "0"],
+    ["maxCandidatesStr", "1001"],
+    ["maxCandidatesStr", "2.5"]
+  ])("is incomplete when %s is %s", (field, value) => {
+    const draft = {
+      ...createEmptyDraft("rerank", "cohere"),
+      name: "r",
+      displayName: "R",
+      [field]: value
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(false);
+  });
+
+  it("accepts the numbers a number input binds", () => {
+    const draft = {
+      ...createEmptyDraft("rerank", "cohere"),
+      name: "r",
+      displayName: "R",
+      candidateFactorStr: 4 as unknown as string,
+      maxCandidatesStr: 200 as unknown as string
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(true);
+    expect(draftToWizardModel(draft)).toMatchObject({ candidateFactor: 4, maxCandidates: 200 });
   });
 });

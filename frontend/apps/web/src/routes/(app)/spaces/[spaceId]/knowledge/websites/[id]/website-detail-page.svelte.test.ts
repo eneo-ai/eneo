@@ -1,13 +1,17 @@
 import type { CrawlRun } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { readable } from "svelte/store";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
+import { formatDateMedium, formatDateTime } from "$lib/core/formatting/dateTime";
+import { crawlRunFailureMessage } from "$lib/features/knowledge/crawlRunState";
+import { addressParams, restoreFrameUrl } from "$lib/test/shallowRouting";
 
 const latestRun = vi.hoisted(() => vi.fn());
 const listRuns = vi.hoisted(() => vi.fn());
 const listBlobs = vi.hoisted(() => vi.fn());
+const listFolders = vi.hoisted(() => vi.fn());
 const createRun = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
 const listFailures = vi.hoisted(() => vi.fn());
@@ -18,7 +22,7 @@ vi.mock("$lib/core/errors", async (importOriginal) => ({
 }));
 const route = vi.hoisted(() => ({
   url: new URL("http://localhost/?tab=crawls"),
-  state: { tab: "crawls" }
+  state: { tab: "crawls" } as { tab?: string }
 }));
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
@@ -30,7 +34,7 @@ vi.mock("$lib/core/Eneo", () => ({
         create: createRun,
         failures: listFailures
       },
-      indexedBlobs: { listPage: listBlobs }
+      indexedBlobs: { listPage: listBlobs, folders: listFolders }
     }
   })
 }));
@@ -39,21 +43,22 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
 }));
 vi.mock("$app/state", () => ({ page: route }));
 vi.mock("$app/stores", () => ({ page: readable(route) }));
-vi.mock("$app/navigation", () => ({
-  afterNavigate: vi.fn(),
-  beforeNavigate: vi.fn(),
-  goto: vi.fn(),
-  invalidate: vi.fn(),
-  invalidateAll: vi.fn(),
-  onNavigate: vi.fn(),
-  preloadCode: vi.fn(),
-  preloadData: vi.fn(),
-  pushState: vi.fn(),
-  replaceState: (url: URL, state: { tab: string }) => {
-    route.url = url;
-    route.state = state;
-  }
-}));
+vi.mock("$app/navigation", async () => {
+  const { replaceShallowState } = await import("$lib/test/shallowRouting");
+  return {
+    afterNavigate: vi.fn(),
+    beforeNavigate: vi.fn(),
+    goto: vi.fn(),
+    invalidate: vi.fn(),
+    invalidateAll: vi.fn(),
+    onNavigate: vi.fn(),
+    preloadCode: vi.fn(),
+    preloadData: vi.fn(),
+    pushState: vi.fn(),
+    replaceState: (url: URL | string, state: { tab?: string }) =>
+      replaceShallowState(route, url, state)
+  };
+});
 
 import WebsiteDetailPage from "./+page.svelte";
 
@@ -107,12 +112,64 @@ beforeEach(() => {
   latestRun.mockReset().mockResolvedValue(running);
   listRuns.mockReset().mockResolvedValue({ ...emptyPage, items: [running], total_count: 1 });
   listBlobs.mockReset().mockResolvedValue(emptyPage);
+  listFolders.mockReset().mockResolvedValue({ items: [], next_cursor: null });
   createRun.mockReset().mockResolvedValue({});
   cancelRun.mockReset().mockResolvedValue({});
   listFailures.mockReset();
   showError.mockReset();
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  restoreFrameUrl();
+});
+
+test("opens Content by default without fetching problem details", async () => {
+  route.url = new URL("http://localhost/");
+  route.state = {};
+  render(WebsiteDetailPage, { data: data as never });
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_content() }))
+    .toHaveAttribute("aria-selected", "true");
+  expect(listFailures).not.toHaveBeenCalled();
+});
+
+test("loads the latest completed crawl's grouped problems only when selected", async () => {
+  const completed: CrawlRun = {
+    ...terminal,
+    id: "completed",
+    outcome: "partial",
+    pages_failed: 2,
+    failure_summary: { http_404: 2 }
+  };
+  listFailures.mockResolvedValue({
+    ...emptyPage,
+    run: completed,
+    details_available: true,
+    items: [
+      { id: "failure-one", url: "https://example.test/missing", kind: "page", reason: "http_404" }
+    ],
+    total_count: 2,
+    next_cursor: "failure-one"
+  });
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [running, completed] } as never });
+  expect(listFailures).not.toHaveBeenCalled();
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await expect
+    .element(page.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(m.website_source_problem_count({ shown: 1, total: 2 })))
+    .toBeVisible();
+  expect(listFailures).toHaveBeenCalledExactlyOnceWith({
+    id: "completed",
+    limit: 100,
+    cursor: null
+  });
+  await page.getByRole("tab", { name: m.source_tab_activity() }).click();
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_activity() }))
+    .toHaveAttribute("aria-selected", "true");
+});
 
 test("opens a crawl's failed addresses and retries the next page without losing results", async () => {
   const run = {
@@ -136,14 +193,14 @@ test("opens a crawl's failed addresses and retries the next page without losing 
     next_cursor: "failure-1"
   });
   render(WebsiteDetailPage, { data: { ...data, crawlRuns: [run] } as never });
-  await page.getByRole("button", { name: /2026-09-04/ }).click();
-  const dialog = page.getByRole("dialog");
-  await expect.element(dialog.getByRole("link", { name: first.url })).toBeVisible();
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  const panel = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await expect.element(panel.getByRole("link", { name: first.url })).toBeVisible();
   expect(listFailures).toHaveBeenCalledWith({ id: run.id, limit: 100, cursor: null });
   listFailures.mockRejectedValueOnce(new Error("Temporary failure"));
-  await dialog.getByRole("button", { name: /1.*2/ }).click();
-  await expect.element(dialog.getByRole("button", { name: m.retry(), exact: true })).toBeVisible();
-  await expect.element(dialog.getByRole("link", { name: first.url })).toBeVisible();
+  await panel.getByRole("button", { name: /1.*2/ }).click();
+  await expect.element(panel.getByRole("button", { name: m.retry(), exact: true })).toBeVisible();
+  await expect.element(panel.getByRole("link", { name: first.url })).toBeVisible();
   listFailures.mockResolvedValueOnce({
     ...emptyPage,
     run,
@@ -151,9 +208,9 @@ test("opens a crawl's failed addresses and retries the next page without losing 
     items: [{ ...first, id: "failure-2", url: "https://example.test/missing", kind: "page" }],
     total_count: 2
   });
-  await dialog.getByRole("button", { name: m.retry(), exact: true }).click();
+  await panel.getByRole("button", { name: m.retry(), exact: true }).click();
   await expect
-    .element(dialog.getByRole("link", { name: "https://example.test/missing" }))
+    .element(panel.getByRole("link", { name: "https://example.test/missing" }))
     .toBeVisible();
   expect(listFailures).toHaveBeenLastCalledWith({ id: run.id, limit: 100, cursor: "failure-1" });
 });
@@ -163,18 +220,18 @@ test.each([false, true])(
   async (available) => {
     listFailures.mockRejectedValueOnce(new Error("Temporary failure"));
     render(WebsiteDetailPage, { data: { ...data, crawlRuns: [terminal] } as never });
-    await page.getByRole("button", { name: /2026-09-04/ }).click();
-    const dialog = page.getByRole("dialog");
-    await expect.element(dialog.getByRole("alert")).toBeVisible();
+    await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+    const panel = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+    await expect.element(panel.getByRole("alert")).toBeVisible();
     listFailures.mockResolvedValueOnce({
       ...emptyPage,
       run: terminal,
       details_available: available
     });
-    await dialog.getByRole("button", { name: m.retry(), exact: true }).click();
+    await panel.getByRole("button", { name: m.retry(), exact: true }).click();
     await expect
       .element(
-        dialog.getByText(available ? m.crawl_failures_empty() : m.crawl_failures_unavailable())
+        panel.getByText(available ? m.crawl_failures_empty() : m.crawl_failures_unavailable())
       )
       .toBeVisible();
   }
@@ -203,7 +260,7 @@ test("older history has a loading state and retries without losing the current r
   rejectPage(new Error("History unavailable"));
   await expect.element(page.getByRole("button", { name: label })).toBeEnabled();
   expect(showError).toHaveBeenCalledOnce();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
 
   listRuns.mockResolvedValue({
     ...emptyPage,
@@ -214,7 +271,7 @@ test("older history has a loading state and retries without losing the current r
   await expect
     .element(page.getByText(m.crawl_status_empty(), { exact: true }).first())
     .toBeVisible();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
   await expect.element(page.getByRole("button", { name: label })).not.toBeInTheDocument();
 });
 
@@ -255,7 +312,7 @@ test.each([terminal, null])(
     await vi.advanceTimersByTimeAsync(0);
     if (latest) {
       await expect
-        .element(page.getByText(m.crawl_status_succeeded(), { exact: true }))
+        .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
         .toBeVisible();
     }
     await expect
@@ -269,7 +326,7 @@ test("an idle mounted page discovers and displays a scheduled crawl, then refres
   render(WebsiteDetailPage, { data: data as never });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(latestRun).toHaveBeenCalledOnce();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
 
   latestRun.mockResolvedValue(terminal);
   listBlobs.mockResolvedValue({
@@ -279,12 +336,14 @@ test("an idle mounted page discovers and displays a scheduled crawl, then refres
     items: [{ id: "blob-1", metadata: { title: "Indexed report", size: 100 }, text: "Content" }]
   });
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
   expect(listBlobs).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledOnce();
   expect(listBlobs).toHaveBeenCalledOnce();
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await expect.element(page.getByText("Indexed report", { exact: true })).toBeVisible();
 });
 
@@ -302,7 +361,7 @@ test("polls never overlap, recover after a network error, and stop on unmount", 
   rejectRequest(new Error("Network unavailable"));
   await vi.advanceTimersByTimeAsync(10_000);
   expect(latestRun).toHaveBeenCalledTimes(2);
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
   await view.unmount();
   await vi.advanceTimersByTimeAsync(30_000);
   expect(latestRun).toHaveBeenCalledTimes(2);
@@ -321,8 +380,10 @@ test("a content refresh failure keeps the terminal status and retries without cl
     data: { ...data, crawlRuns: [running], infoBlobPage: oldPage } as never
   });
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await expect.element(page.getByText("Previous report", { exact: true })).toBeVisible();
   listBlobs.mockResolvedValue({
     ...oldPage,
@@ -340,7 +401,9 @@ test("history failures do not hide the latest status or block content, and histo
   render(WebsiteDetailPage, { data: data as never });
 
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
   expect(listBlobs).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(2);
@@ -350,9 +413,17 @@ test("history failures do not hide the latest status or block content, and histo
   listRuns.mockResolvedValue({ ...emptyPage, items: [running, older], total_count: 2 });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(3);
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).not.toBeInTheDocument();
   await expect
-    .poll(() => page.getByText(m.crawl_status_succeeded(), { exact: true }).all().length)
+    .element(page.getByText(m.in_progress(), { exact: true }).first())
+    .not.toBeInTheDocument();
+  await expect
+    .poll(
+      () =>
+        page
+          .getByRole("tabpanel", { name: m.source_tab_activity() })
+          .getByText(m.crawl_status_succeeded(), { exact: true })
+          .all().length
+    )
     .toBe(2);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(3);
@@ -380,7 +451,7 @@ test("a terminal refresh discards an older load-more response even if the cursor
   render(WebsiteDetailPage, {
     data: { ...data, crawlRuns: [running], infoBlobPage: oldFirstPage } as never
   });
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await page
     .getByRole("button", { name: m.website_indexed_content_load_more({ current: 1, total: 2 }) })
     .click();
@@ -466,7 +537,7 @@ test.each([false, true])(
   }
 );
 
-test("a file count opens the file filter and ignores an old response after switching", async () => {
+test("the Problems file filter selects files and ignores an old response after switching", async () => {
   const run: CrawlRun = {
     ...terminal,
     outcome: "partial",
@@ -481,7 +552,7 @@ test("a file count opens the file filter and ignores an old response after switc
     reason: "http_404"
   };
   let resolveFilePage: (value: unknown) => void = () => {};
-  listFailures.mockResolvedValueOnce({
+  listFailures.mockResolvedValue({
     ...emptyPage,
     run,
     details_available: true,
@@ -490,9 +561,10 @@ test("a file count opens the file filter and ignores an old response after switc
     next_cursor: file.id
   });
   render(WebsiteDetailPage, { data: { ...data, crawlRuns: [run] } as never });
-  await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
-  const dialog = page.getByRole("dialog");
-  await expect.element(dialog.getByRole("link", { name: file.url })).toBeVisible();
+  await page.getByRole("button", { name: m.website_source_see_problems() }).click();
+  await page.getByRole("button", { name: m.crawl_counts_files(), exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await expect.element(panel.getByRole("link", { name: file.url })).toBeVisible();
   expect(listFailures).toHaveBeenLastCalledWith({
     id: run.id,
     limit: 100,
@@ -500,7 +572,7 @@ test("a file count opens the file filter and ignores an old response after switc
     kind: "file"
   });
   await expect
-    .element(dialog.getByRole("button", { name: m.crawl_counts_files(), exact: true }))
+    .element(panel.getByRole("button", { name: m.crawl_counts_files(), exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   listFailures.mockImplementationOnce(
     () =>
@@ -508,7 +580,7 @@ test("a file count opens the file filter and ignores an old response after switc
         resolveFilePage = resolve;
       })
   );
-  await dialog
+  await panel
     .getByRole("button", { name: m.crawl_failures_load_more({ current: 1, total: 2 }) })
     .click();
   expect(listFailures).toHaveBeenLastCalledWith({
@@ -525,8 +597,8 @@ test("a file count opens the file filter and ignores an old response after switc
     items: [{ id: "page-1", url: address, kind: "page", reason: "_RedirectRejected" }],
     total_count: 104
   });
-  await dialog.getByRole("button", { name: m.crawl_counts_pages(), exact: true }).click();
-  await expect.element(dialog.getByRole("link", { name: address })).toBeVisible();
+  await panel.getByRole("button", { name: m.crawl_counts_pages(), exact: true }).click();
+  await expect.element(panel.getByRole("link", { name: address })).toBeVisible();
   expect(listFailures).toHaveBeenLastCalledWith({
     id: run.id,
     limit: 100,
@@ -540,15 +612,15 @@ test("a file count opens the file filter and ignores an old response after switc
     items: [{ ...file, id: "file-2" }],
     total_count: 2
   });
-  await expect.element(dialog.getByRole("link", { name: file.url })).not.toBeInTheDocument();
-  await dialog.getByText(m.crawl_failure_help_title(), { exact: true }).click();
-  await expect.element(dialog.getByText(m.crawl_failure_help_scope())).toBeVisible();
-  await expect.element(dialog.getByText(m.crawl_failure_help_not_found())).toBeVisible();
+  await expect.element(panel.getByRole("link", { name: file.url })).not.toBeInTheDocument();
+  await panel.getByRole("button", { name: m.crawl_failures_filter_all(), exact: true }).click();
+  await expect.element(panel.getByText(m.crawl_failure_help_scope())).toBeVisible();
+  await expect.element(panel.getByText(m.crawl_failure_help_not_found())).toBeVisible();
   await expect
-    .element(dialog.getByText("_RedirectRejected", { exact: false }))
+    .element(panel.getByText("_RedirectRejected", { exact: false }))
     .not.toBeInTheDocument();
   await expect
-    .element(dialog.getByRole("button", { name: m.crawl_retry_whole_website() }))
+    .element(panel.getByRole("button", { name: m.crawl_retry_whole_website() }))
     .not.toBeInTheDocument();
 });
 
@@ -559,6 +631,7 @@ test.each(["processing_failed", "resources_missing"] as const)(
     route.state = { tab: "blobs" };
     const run: CrawlRun = {
       ...terminal,
+      id: "completed-run",
       outcome: "partial",
       pages_failed: 6,
       files_failed: 2,
@@ -572,21 +645,28 @@ test.each(["processing_failed", "resources_missing"] as const)(
     const rendered = render(WebsiteDetailPage, {
       data: { ...data, crawlRuns: [running, run] } as never
     });
-    await expect.element(page.getByText(notice)).toBeVisible();
-    await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
-    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: notice })).toBeVisible();
+    await page.getByRole("button", { name: m.website_source_see_problems() }).click();
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("tab", { name: m.source_tab_problems() }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(addressParams().get("tab")).toBe("problems");
     if (failure_code === "resources_missing") {
       await expect
-        .element(page.getByRole("dialog").getByText(m.crawl_status_succeeded(), { exact: true }))
+        .element(
+          page
+            .getByRole("tabpanel", { name: m.source_tab_problems() })
+            .getByText(m.crawl_status_succeeded(), { exact: true })
+        )
         .toBeVisible();
     }
     expect(listFailures).toHaveBeenCalledWith({
       id: run.id,
       limit: 100,
-      cursor: null,
-      kind: "file"
+      cursor: null
     });
-    await page.getByRole("button", { name: m.close(), exact: true }).click();
+    await page.getByRole("tab", { name: m.source_tab_content() }).click();
     await rendered.rerender({
       data: {
         ...data,
@@ -594,7 +674,7 @@ test.each(["processing_failed", "resources_missing"] as const)(
         crawlRuns: [{ ...terminal, id: "clean-run" }, { ...run }]
       } as never
     });
-    await expect.element(page.getByText(notice)).not.toBeInTheDocument();
+    await expect.element(page.getByRole("heading", { name: notice })).not.toBeInTheDocument();
   }
 );
 
@@ -602,11 +682,233 @@ test("retrying from failure details uses the existing whole-website confirmation
   const run: CrawlRun = { ...terminal, outcome: "partial", pages_failed: 1 };
   listFailures.mockResolvedValue({ ...emptyPage, run, details_available: true });
   render(WebsiteDetailPage, { data: { ...data, readonly: false, crawlRuns: [run] } as never });
-  await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 1 }) }).click();
+  await page.getByRole("button", { name: m.website_source_see_problems() }).click();
   await page.getByRole("button", { name: m.crawl_retry_whole_website() }).click();
   const confirmation = page.getByRole("alertdialog");
   await expect.element(confirmation).toBeVisible();
   expect(createRun).not.toHaveBeenCalled();
   await confirmation.getByRole("button", { name: m.start_crawl(), exact: true }).click();
   expect(createRun).toHaveBeenCalledExactlyOnceWith(data.website);
+});
+
+test("activity groups crawls by date and opens an older run in Problems without a dialog", async () => {
+  const latest: CrawlRun = { ...terminal, id: "newest", outcome: "partial", pages_failed: 1 };
+  const sameDay: CrawlRun = { ...terminal, id: "same-day", created_at: "2026-09-04T06:00:00Z" };
+  const older: CrawlRun = { ...latest, id: "older", created_at: "2026-09-03T07:00:00Z" };
+  listFailures.mockImplementation(async ({ id }: { id: string }) => ({
+    ...emptyPage,
+    run: id === older.id ? older : latest,
+    details_available: true
+  }));
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [latest, sameDay, older] } as never });
+  const activity = page.getByRole("tabpanel", { name: m.source_tab_activity() });
+  await expect
+    .element(
+      activity.getByRole("heading", { name: formatDateMedium(latest.created_at), exact: true })
+    )
+    .toBeVisible();
+  expect(activity.getByRole("heading").all().length).toBe(2);
+  await expect.element(activity.getByRole("table")).not.toBeInTheDocument();
+  await activity.getByRole("button", { name: m.website_source_see_problems() }).last().click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  const problems = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_previous_crawl() }))
+    .toBeVisible();
+  await expect
+    .element(
+      problems.getByText(
+        m.website_source_problems_description({ date: formatDateTime(older.created_at) })
+      )
+    )
+    .toBeVisible();
+  expect(listFailures).toHaveBeenLastCalledWith({ id: older.id, limit: 100, cursor: null });
+  await problems.getByLabelText(m.website_source_choose_crawl()).selectOptions(latest.id);
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_latest_completed() }))
+    .toBeVisible();
+  expect(listFailures).toHaveBeenLastCalledWith({ id: latest.id, limit: 100, cursor: null });
+});
+
+test("activity retains a legacy crawl whose start date is unknown", async () => {
+  render(WebsiteDetailPage, {
+    data: { ...data, crawlRuns: [{ ...terminal, created_at: null }] } as never
+  });
+  const activity = page.getByRole("tabpanel", { name: m.source_tab_activity() });
+  await expect.element(activity.getByRole("heading", { name: m.not_available() })).toBeVisible();
+  await expect
+    .element(activity.getByText(m.crawl_status_succeeded(), { exact: true }))
+    .toBeVisible();
+});
+
+test("a poll with a fresh copy of the same finished crawl does not reload its problems", async () => {
+  const completed: CrawlRun = {
+    ...terminal,
+    id: "completed",
+    outcome: "partial",
+    pages_failed: 1,
+    failure_summary: { http_404: 1 }
+  };
+  listFailures.mockResolvedValue({
+    ...emptyPage,
+    run: completed,
+    details_available: true,
+    items: [
+      { id: "failure-one", url: "https://example.test/missing", kind: "page", reason: "http_404" }
+    ],
+    total_count: 1
+  });
+  latestRun.mockImplementation(async () => ({ ...completed }));
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [completed] } as never });
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  const panel = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await expect
+    .element(panel.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+  await vi.advanceTimersByTimeAsync(10_000);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(latestRun).toHaveBeenCalledTimes(2);
+  expect(listFailures).toHaveBeenCalledOnce();
+  await expect.element(panel.getByRole("status")).not.toBeInTheDocument();
+  await expect
+    .element(panel.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+});
+
+const siteOrigin = "https://example.test/";
+const indexed = (title: string) => ({
+  id: title,
+  metadata: {
+    title,
+    url: `${siteOrigin}docs/${title}`,
+    size: 10,
+    embedding_model_id: "model"
+  },
+  original_available: false,
+  created_at: "2026-10-19T09:00:00Z"
+});
+
+test("a selected directory survives a tab switch, on the page and in the address", async () => {
+  route.url = new URL("http://localhost/");
+  route.state = {};
+  listFolders.mockImplementation(async ({ prefix }: { prefix: string }) => ({
+    items: prefix
+      ? [{ path: `${siteOrigin}docs/`, count: 2, has_children: false }]
+      : [{ path: siteOrigin, count: 3, has_children: true }],
+    next_cursor: null
+  }));
+  listBlobs.mockResolvedValue({
+    ...emptyPage,
+    items: [indexed("Guide")],
+    count: 1,
+    total_count: 1
+  });
+  listFailures.mockResolvedValue({ ...emptyPage, run: terminal, details_available: true });
+  render(WebsiteDetailPage, {
+    data: {
+      ...data,
+      crawlRuns: [terminal],
+      infoBlobPage: { ...emptyPage, total_count: 3 }
+    } as never
+  });
+  await page.getByRole("link", { name: /^docs/ }).click();
+  await expect.element(page.getByRole("button", { name: "Guide" })).toBeVisible();
+  expect(addressParams().get("prefix")).toBe(`${siteOrigin}docs/`);
+
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_problems() }))
+    .toHaveAttribute("aria-selected", "true");
+  expect(addressParams().get("tab")).toBe("problems");
+  expect(addressParams().get("prefix")).toBe(`${siteOrigin}docs/`);
+
+  await page.getByRole("tab", { name: m.source_tab_content() }).click();
+  await expect
+    .element(page.getByRole("link", { name: /^docs/ }))
+    .toHaveAttribute("aria-current", "page");
+  await expect.element(page.getByRole("button", { name: "Guide" })).toBeVisible();
+  expect(listBlobs).toHaveBeenLastCalledWith({
+    id: data.website.id,
+    limit: 100,
+    cursor: null,
+    prefix: `${siteOrigin}docs/`
+  });
+});
+
+test("a deep-linked selection is shown from the server once, then fetched afresh", async () => {
+  route.url = new URL(
+    `http://localhost/?tab=blobs&prefix=${encodeURIComponent(siteOrigin + "docs/")}`
+  );
+  route.state = {};
+  listBlobs.mockResolvedValue({
+    ...emptyPage,
+    items: [indexed("Fresh guide")],
+    count: 1,
+    total_count: 1
+  });
+  listFailures.mockResolvedValue({ ...emptyPage, run: terminal, details_available: true });
+  render(WebsiteDetailPage, {
+    data: {
+      ...data,
+      crawlRuns: [terminal],
+      initialContent: {
+        prefix: `${siteOrigin}docs/`,
+        q: "",
+        page: { ...emptyPage, items: [indexed("Server guide")], count: 1, total_count: 1 }
+      }
+    } as never
+  });
+  await expect.element(page.getByRole("button", { name: "Server guide" })).toBeVisible();
+  expect(listBlobs).not.toHaveBeenCalled();
+
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await page.getByRole("tab", { name: m.source_tab_content() }).click();
+  await expect.element(page.getByRole("button", { name: "Fresh guide" })).toBeVisible();
+  expect(listBlobs).toHaveBeenCalledExactlyOnceWith({
+    id: data.website.id,
+    limit: 100,
+    cursor: null,
+    prefix: `${siteOrigin}docs/`
+  });
+});
+
+test("an older crawl chosen in Problems stays selected when the history is replaced", async () => {
+  const latest: CrawlRun = { ...terminal, id: "newest", outcome: "partial", pages_failed: 1 };
+  const older: CrawlRun = { ...latest, id: "older", created_at: "2026-09-03T07:00:00Z" };
+  listFailures.mockImplementation(async ({ id }: { id: string }) => ({
+    ...emptyPage,
+    run: id === older.id ? older : latest,
+    details_available: true
+  }));
+  const rendered = render(WebsiteDetailPage, {
+    data: { ...data, crawlRuns: [latest, older] } as never
+  });
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  const problems = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await problems.getByLabelText(m.website_source_choose_crawl()).selectOptions(older.id);
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_previous_crawl() }))
+    .toBeVisible();
+
+  const newer: CrawlRun = { ...terminal, id: "newer", created_at: "2026-09-05T07:00:00Z" };
+  await rendered.rerender({ data: { ...data, crawlRuns: [newer, latest] } as never });
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_previous_crawl() }))
+    .toBeVisible();
+  await expect
+    .element(problems.getByLabelText(m.website_source_choose_crawl()))
+    .toHaveValue(older.id);
+  expect(listFailures).toHaveBeenLastCalledWith({ id: older.id, limit: 100, cursor: null });
+});
+
+test("activity states why a crawl failed", async () => {
+  const failed: CrawlRun = {
+    ...terminal,
+    id: "failed",
+    outcome: "failed",
+    failure_code: "worker_interrupted"
+  };
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [failed] } as never });
+  const activity = page.getByRole("tabpanel", { name: m.source_tab_activity() });
+  await expect.element(activity.getByText(crawlRunFailureMessage(failed))).toBeVisible();
 });

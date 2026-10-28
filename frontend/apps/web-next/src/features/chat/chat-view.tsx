@@ -29,14 +29,20 @@ import { displayPartnerName } from "@/lib/chat/partner-name";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
 import { documentDraft } from "./side-panel/document-draft";
 import { documentExport } from "./side-panel/document-export";
+import { saveDocumentVersion, type DocumentSaver } from "./side-panel/document-saver";
 import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
-import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import {
+  addGeneratedFile,
+  messageGeneratedFiles,
+  messageToolCalls
+} from "./side-panel/message-tool-calls";
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
@@ -296,9 +302,10 @@ function ConversationView({
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
   const refocusComposer = useRef(false);
+  const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescueFocus(startTextareaRef.current);
-  }, [focusComposerIfLost]);
+    if (focusComposerIfLost) rescue(startTextareaRef.current);
+  }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =
@@ -461,6 +468,21 @@ function ConversationView({
     sessionId && isExportableDocument(file) && documents.versionsOf(file.id).length > 0
       ? documentExport(sessionId, file.id)
       : null;
+  // A reader's edit of such a document is saved as its next version, which
+  // joins the answer that holds the version it was edited from, as the
+  // backend has stored it, so the documents update without a reload.
+  const saverOf = (file: PreviewFile): DocumentSaver | null =>
+    sessionId && isExportableDocument(file) && documents.versionsOf(file.id).length > 0
+      ? {
+          save: async (content) => {
+            const version = await saveDocumentVersion(sessionId, file.id, content);
+            setMessages((current) => addGeneratedFile(current, version));
+            return version;
+          }
+        }
+      : null;
+  // Leaving the page would lose unsaved edits to a document.
+  useBeforeUnloadWarning(panel.dirty);
 
   // The panel and an answer's activity share the side region, one at a time.
   const panelOpen = panel.occupant.kind !== "closed";
@@ -488,8 +510,8 @@ function ConversationView({
     () => (busy && last?.role === "assistant" ? messageGeneratedFiles(last) : []),
     [busy, last]
   );
-  useEffect(() => {
-    // The newest document being written: actual text as it arrives.
+  // The newest document being written: actual text as it arrives.
+  const liveDraft = useMemo(() => {
     for (let index = liveCalls.length - 1; index >= 0; index--) {
       const call = liveCalls[index]!;
       const draft = documentDraft(
@@ -497,12 +519,13 @@ function ConversationView({
         call.input,
         liveFiles.some((file) => file.toolCallId === call.toolCallId)
       );
-      if (draft) {
-        panel.write(draft);
-        return;
-      }
+      if (draft) return draft;
     }
-  }, [liveCalls, liveFiles, panel]);
+    return null;
+  }, [liveCalls, liveFiles]);
+  useEffect(() => {
+    if (liveDraft) panel.write(liveDraft);
+  }, [liveDraft, panel]);
   const arrivedFiles = useRef(new Set<string>());
   useEffect(() => {
     for (const file of liveFiles) {
@@ -992,6 +1015,7 @@ function ConversationView({
         contents={panelContents}
         versionsOf={versionsOf}
         exportOf={exportOf}
+        saverOf={saverOf}
         latestActivity={latestActivity}
         activity={
           activity && activityMessage && activityForPanel
@@ -1060,6 +1084,7 @@ function ConversationView({
                   canDebug={debugAvailable && sessionId !== null}
                   conversationFiles={allFiles}
                   documents={documents.documents}
+                  draft={streaming ? liveDraft : null}
                 />
               );
             })}

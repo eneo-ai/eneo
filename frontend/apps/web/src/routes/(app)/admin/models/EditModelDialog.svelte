@@ -17,15 +17,17 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel,
     TenantCompletionModelUpdate,
     TenantEmbeddingModelUpdate,
     TenantImageModelUpdate,
+    TenantRerankModelUpdate,
     TenantTranscriptionModelUpdate
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import { LoaderCircle } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
@@ -40,6 +42,7 @@
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
+    hasValidRerankCandidateSettings,
     MAX_COST_INPUT,
     modelToDraft,
     rawCostToNumber,
@@ -48,7 +51,8 @@
     type ModelType
   } from "./AddWizard/models/draft";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
 
   let {
     openController,
@@ -56,7 +60,7 @@
     type
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
     type: ModelTypeKey;
   } = $props();
 
@@ -77,7 +81,9 @@
         ? "embedding"
         : type === "imageModel"
           ? "image"
-          : "transcription"
+          : type === "rerankModel"
+            ? "rerank"
+            : "transcription"
   );
 
   let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
@@ -183,6 +189,19 @@
     };
   }
 
+  function buildRerankUpdate(): TenantRerankModelUpdate {
+    return {
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      candidate_factor: Number(draft.candidateFactorStr),
+      max_candidates: Number(draft.maxCandidatesStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
+  }
+
   async function handleSubmit() {
     error = null;
     if (!draft.displayName.trim()) {
@@ -192,6 +211,10 @@
     // Mirror the AddWizard guard: completion models cannot persist with
     // null/0 token budgets — the backend rejects them and downstream code
     // would divide by zero on context-window math.
+    if (modelType === "rerank" && !hasValidRerankCandidateSettings(draft)) {
+      error = m.rerank_candidate_settings_invalid();
+      return;
+    }
     if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
       error = m.completion_token_budgets_required();
       return;
@@ -208,6 +231,8 @@
         await eneo.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
       } else if (type === "imageModel") {
         await eneo.tenantModels.updateImage({ id: model.id }, buildImageUpdate());
+      } else if (type === "rerankModel") {
+        await eneo.tenantModels.updateRerank({ id: model.id }, buildRerankUpdate());
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }

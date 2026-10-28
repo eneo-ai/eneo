@@ -75,6 +75,11 @@ describe("dedupeNestedSelection", () => {
 describe("buildBatchItems", () => {
   const site = { key: "site-key", name: "Site", url: "https://sp/site", type: "site" };
 
+  it("cuts a default name longer than the server takes to its 255 characters", () => {
+    const long = makeEntry({ name: "å".repeat(300) });
+    expect(buildBatchItems(site, [long])[0]?.name).toBe("å".repeat(255));
+  });
+
   it("maps a site_root selection to the site itself", () => {
     const root = makeEntry({ id: "", name: "Site", type: "site_root", path: "/" }, "My import");
     expect(buildBatchItems(site, [root])).toEqual([

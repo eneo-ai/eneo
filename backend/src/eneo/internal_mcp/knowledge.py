@@ -733,6 +733,17 @@ async def search_knowledge(
             )
             return [TextContent(type="text", text=unresolved.message)]
 
+        # The assistant's reranker, if chosen and still allowed in its space;
+        # the model's own search query is what the reranker scores against.
+        rerank = None
+        if assistant.rerank_model_id is not None:
+            space = await container.space_service().get_space(assistant.space_id)
+            rerank = await container.rerank_service().spec_for_model(
+                assistant.rerank_model_id,
+                query=query,
+                security_classification=space.security_classification,
+            )
+
         semantic_chunks = await container.datastore().semantic_search(
             query,
             embedding_model=embedding_model,
@@ -742,6 +753,7 @@ async def search_knowledge(
             info_blob_ids=scope.info_blob_ids,
             num_chunks=fetch,
             autocut_cutoff=autocut_cutoff,
+            rerank=rerank,
         )
 
         fetched = len(semantic_chunks)

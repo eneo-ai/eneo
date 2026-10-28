@@ -50,6 +50,15 @@ assets, so you can compare one version with the next. The backend, frontend
 and tool runtime container images also get provenance attestations when they
 are built and pushed to GitHub Container Registry.
 
+The application publication workflow checks the actual Node runtime in both
+frontend images and blocks fixable HIGH or CRITICAL image vulnerabilities
+before completing the release bundle. These checks use the exact image digest
+and also run when a previously published image is reused. The tools-runtime
+candidate similarly verifies its Bun runtime and Python Brotli version before
+its image scan. Updating a base-image tag does not update existing Eneo images
+or running containers; runtime fixes require a new application release and
+deployment.
+
 The SeaweedFS image is built and attested by Eneo from a pinned upstream source
 commit by its own workflow, which runs only when the image inputs change and
 publishes one immutable tag per `docker/seaweedfs/VERSION`. These attestations

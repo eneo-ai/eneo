@@ -311,6 +311,8 @@ _STUB_ID = "00000000-0000-0000-0000-000000000001"
 _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/assistants/", {"name": "x", "space_id": _STUB_ID}),
     ("POST", "/api/v1/spaces/", {"name": "x"}),
+    # An icon records its uploader, which a service key does not have.
+    ("POST", "/api/v1/icons/", None),
     (
         "POST",
         "/api/v1/spaces/{space_id}/applications/assistants/",
@@ -340,6 +342,26 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         "POST",
         "/api/v1/spaces/{space_id}/knowledge/websites/",
         {"name": "x", "url": "https://example.com", "space_id": _STUB_ID},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/",
+        {
+            "name": "x",
+            "embedding_model": {"id": _STUB_ID},
+            "url": "https://contoso.sharepoint.com/sites/x",
+        },
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/batch/",
+        {"embedding_model": {"id": _STUB_ID}, "items": []},
+    ),
+    # A sync queues a job owned by the caller, like a create.
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/{_STUB_ID}/sync/",
+        None,
     ),
     (
         "POST",

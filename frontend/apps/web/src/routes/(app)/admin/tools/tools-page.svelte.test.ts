@@ -224,6 +224,35 @@ describe("Tools capability configuration", () => {
     );
   });
 
+  it("saves a built-in source after an http URL with a user name was typed for an external one", async () => {
+    // Kills: the https hint judging the URL a built-in provider never submits,
+    // which kept Save disabled with no visible reason.
+    show();
+    await page
+      .getByRole("button", {
+        name: m.capability_configure({ capability: m.image_generation().toLocaleLowerCase() })
+      })
+      .click();
+    const source = page.getByLabelText(m.mcp_source_label(), { exact: true });
+    await source.click();
+    await page.getByRole("option", { name: m.mcp_source_external(), exact: true }).click();
+    await page
+      .getByRole("textbox", { name: m.server_url_required(), exact: false })
+      .fill("http://user:secret@example.test/mcp");
+    await source.click();
+    await page.getByRole("option", { name: m.mcp_source_builtin(), exact: true }).click();
+    await page
+      .getByRole("combobox", { name: m.mcp_builtin_image_model(), exact: false })
+      .selectOptions("model-1");
+    await page.getByRole("textbox", { name: m.name(), exact: false }).fill("Image Studio");
+    await page.getByRole("button", { name: m.tools_save_activate(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(api.mcpServers.create).toHaveBeenCalledWith(
+        expect.objectContaining({ http_auth_type: "internal", image_model_id: "model-1" })
+      )
+    );
+  });
+
   it("keeps an edit action and allows disabling a blocked active source", async () => {
     show([source({ readiness_reason: "model_disabled" })]);
     await expect

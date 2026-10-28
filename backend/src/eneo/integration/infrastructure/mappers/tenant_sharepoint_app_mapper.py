@@ -49,6 +49,9 @@ class TenantSharePointAppMapper(
                 entity.service_account_refresh_token
             ),
             "service_account_email": entity.service_account_email,
+            "last_auth_error": entity.last_auth_error,
+            "last_auth_error_at": entity.last_auth_error_at,
+            "last_auth_success_at": entity.last_auth_success_at,
             "created_by": entity.created_by,
         }
 
@@ -79,6 +82,9 @@ class TenantSharePointAppMapper(
                 db_model.service_account_refresh_token_encrypted
             ),
             service_account_email=db_model.service_account_email,
+            last_auth_error=db_model.last_auth_error,
+            last_auth_error_at=db_model.last_auth_error_at,
+            last_auth_success_at=db_model.last_auth_success_at,
             created_by=db_model.created_by,
             created_at=db_model.created_at,
             updated_at=db_model.updated_at,
