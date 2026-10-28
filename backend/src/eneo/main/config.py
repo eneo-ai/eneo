@@ -508,12 +508,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_browser_session_host(self):
-        # A development cookie (eneo_web, not Secure) only on a local host.
+        # A development cookie (eneo_web, not Secure) only on a local host: the
+        # hosts validate_public_origin accepts over http.
         if (
             self.browser_session_enabled
             and self.is_development
             and urlparse(self.public_origin or "").hostname
-            not in {"localhost", "127.0.0.1", "::1"}
+            not in {"localhost", "127.0.0.1"}
         ):
             raise ValueError(
                 "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "

@@ -1381,6 +1381,25 @@ No additional database, Redis, worker or backend instance is needed.
    Each UI has its own host-only session cookie. SSO can reuse the provider session,
    but a local logout in one UI does not necessarily log out the other.
 
+### Settings for the backend-served web app (not active yet)
+
+The backend now reads these optional variables. Nothing needs to be set: they
+prepare the move of the beta to a web app served by the backend, and later
+releases say when to turn them on.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
+| `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. |
+| `SHOW_WEB_SEARCH`, `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
+| `HELP_CENTER_URL`, `LEGACY_APP_URL`, `ACCESSIBILITY_STATEMENT_URL`, `REQUEST_INTEGRATION_FORM_URL` | unset | Same values as in `env_web_next.env`; blank counts as unset. |
+
+With `ENVIRONMENT=development`, the backend refuses to start with
+`BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
+`127.0.0.1` URL, so the development cookie, which is not marked Secure, never
+reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`: an absolute
+lifetime with no inactivity limit, and logout is local.
+
 ### Enable the invitation banner
 
 Set these **Svelte frontend runtime** variables and restart that frontend:

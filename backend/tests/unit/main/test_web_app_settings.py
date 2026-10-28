@@ -61,14 +61,22 @@ def test_development_cookie_refused_without_public_origin(public_origin: str | N
         )
 
 
-def test_development_cookie_allowed_on_localhost():
+@pytest.mark.parametrize(
+    ("public_origin", "normalized"),
+    [
+        ("http://localhost:3101", "http://localhost:3101"),
+        ("http://127.0.0.1:3101/", "http://127.0.0.1:3101"),
+    ],
+)
+def test_development_cookie_allowed_on_localhost(public_origin: str, normalized: str):
     settings = _settings(
         browser_session_enabled=True,
         environment="development",
-        public_origin="http://localhost:3101",
+        public_origin=public_origin,
     )
 
     assert settings.browser_session_enabled is True
+    assert settings.public_origin == normalized
 
 
 def test_production_session_allowed():
