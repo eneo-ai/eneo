@@ -4,7 +4,8 @@
 //
 //   PERF=1 E2E_USER=... E2E_PASSWORD=... bunx playwright test --project=perf
 //
-// Options: RUNS (default 5), PERF_OUT (default test-results/perf-baseline.json),
+// Options: RUNS (default 10; chat warm LCP is bimodal and 5 runs move its median by
+// about 25%), PERF_OUT (default test-results/perf-baseline.json),
 // PERF_FRAMEWORK (default "next"; the package whose version goes in meta).
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -15,7 +16,7 @@ import { devices, expect, test, type Browser, type Page } from "@playwright/test
 import { STORAGE_STATE } from "../../playwright.config";
 import { askChatQuestion, chatComposer, conversationLog, MOCK_REPLY, uniqueName } from "../helpers";
 
-const RUNS = Number(process.env.RUNS ?? 5);
+const RUNS = Number(process.env.RUNS ?? 10);
 const OUT = process.env.PERF_OUT ?? "test-results/perf-baseline.json";
 const FRAMEWORK = process.env.PERF_FRAMEWORK ?? "next";
 const ROUTES = ["/spaces/personal/chat", "/spaces/list", "/admin/users", "/admin/insights"];
@@ -180,7 +181,9 @@ test("performance baseline", async ({ browser }) => {
       date: new Date().toISOString(),
       runs: RUNS
     },
-    metrics: summarize(samples)
+    metrics: summarize(samples),
+    // Raw values, so a gate can judge spread and not only the medians.
+    samples
   };
   mkdirSync(path.dirname(OUT), { recursive: true });
   writeFileSync(OUT, `${JSON.stringify(report, null, 2)}\n`);
