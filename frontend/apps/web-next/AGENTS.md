@@ -10,6 +10,21 @@ explicitly intended for the beta. See
 [the frontend development policy](../../../AGENTS.md#frontend-development).
 The UI rules below apply to web-next.
 
+## Vite migration
+
+On `feat/web-next-vite` and its slice branches, the target is a Vite SPA with
+TanStack Router and Query; FastAPI is the only server. Build framework-neutral
+React in `src/features`, `src/components` and `src/lib`, with routes in
+`src/routes`. The existing `src/app` layer is frozen until removal; integrate
+existing responsive changes and make only the wiring changes required by the
+migration. SvelteKit in `apps/web` is the production behaviour reference and
+must not be changed by migration slices.
+
+Follow the migration epic `eneo-web-next-vite-ded5` in Beads from the
+`flows-core` workspace. Land reviewed slices by fast-forward on
+`feat/web-next-vite`; never modify `develop` or merge, approve, close or enable
+auto-merge on a pull request.
+
 ## In short
 
 - **New UI uses [Astryx](https://github.com/facebook/astryx)** (`@astryxdesign/core`)
@@ -180,6 +195,16 @@ through `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses
 the default name and announces the creation; `createWithUniqueName` numbers
 the default name on a backend name collision (9017).
 
+On a phone an editor opens on an index of its sections (decision 21): pass
+`phone` (`useEditorPhoneIndex`) and give each section a `group` and, where its
+data is loaded, a `summary` (`src/features/spaces/editor-summaries.ts`). The
+index and the sections are views of one mounted tree chosen by `?section=`,
+so a draft and its pending save outlive a trip to the index or a turn to the
+tablet layout; never render a section only in one view. A section's
+`SettingsGroup` drops its card frame and repeated title there by itself. A
+resource just created opens on General, so its name field is in view. Space
+settings uses the layout without `phone` and keeps one page on every width.
+
 ## How it is wired
 
 - **Packages** (beta, pinned exactly; upgrade together, then run
@@ -250,11 +275,38 @@ the default name on a backend name collision (9017).
   back with one class. Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
   the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
-  `/admin`, Astryx `MobileNav` below 768px and the ⌘K `CommandPalette`. A page
-  header that carries its own phone menu button (the chat header) calls
-  `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
-  opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
-  (`src/components/shell/routes.ts`).
+  `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
+  markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
+  `CommandPalette`. A page header that replaces the phone top bar (the chat
+  header, a pushed screen's `PageBar` with its back link) spreads
+  `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
+  from the server render on. A space is pushed on phones only (decision 24:
+  tablets show it with breadcrumbs under the top bar): its bar is
+  `PageBar until="md"`, which spreads `OWN_PHONE_HEADER` instead. The chat
+  header opens the drawer with
+  `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
+  (`src/components/shell/routes.ts`). Keep state that changes after
+  hydration out of contexts above the page: React replaces a page it has not
+  hydrated yet with its loading state when such a context changes.
+- **Phones and tablets**: the root layout's `viewport` runs the page edge to
+  edge (`viewportFit: "cover"`), lets the Android keyboard resize the layout
+  (`interactiveWidget: "resizes-content"`) and colours the status bar with the
+  surface token (`ThemeColor` follows an explicit Tema). Each safe-area inset
+  has one owner: the shell frame pads the top and sides, `main#main-content`
+  the bottom, the drawer's panel pads itself (`globals.css` section 14), and
+  Astryx Dialog, Popover and BottomSheet pad themselves. Don't add
+  `env(safe-area-inset-*)` inside the page. The page never pulls to refresh
+  (`overscroll-behavior`), and the drawer and dialogs have no backdrop blur.
+- **Panels by the room they have**: the chat's side panel and history decide
+  beside or sheet from the width of the row they share (`useElementWidth`,
+  decision 14: the conversation keeps 480 px), not from a media query; the
+  chat page owns that row and the history gives way to a panel that opens
+  where both do not fit. Widths in that rule are px, set inline.
+- **Collections of resources** (spaces, assistants, apps, services, the
+  catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
+  rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
+  many columns as the page has room for. A list row with a link is one
+  target (globals.css 12b); put controls in its end slot.
 - **Navigation and links**: app code imports `@/lib/navigation` and
   `@/lib/link`, never `next/navigation` or `next/link` (lint error; `src/app`
   excepted until it is ported to the Vite build, which swaps both modules).
@@ -373,6 +425,24 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   (`data` + `columns`) with a width on every column: `pixel(n)` for fixed
   columns, `proportional(n)` for text (it keeps a 120 px minimum). Its plugins
   do sorting, filtering, pagination and selection.
+- Size short columns (counts, dates, states, sizes) with `pixel(n)` to fit
+  their content and header, and leave the name `proportional(1, { minWidth })`.
+  The table's min width is the sum of the pixel columns plus, for each
+  proportional one, its min width times the total share over its own share:
+  three `proportional(1)` beside a `proportional(3)` make 840 px of a table
+  whose content needs half. Knowledge tables fit an iPad held upright (770 px).
+- Decision 9: a table keeps every column on a phone and scrolls sideways with
+  what names a row held in view: `pinnedColumn="name"` (the wrapper pins it
+  and any selection or row-status column before it, and keeps focus clear of
+  it). A space's Kunskap tab is the exception: on a phone its sources list
+  rows (`RowsOrTable` in `features/knowledge/knowledge-list.tsx`, rows from
+  `knowledge-rows.ts`, which the overview shares) under a segmented control;
+  selecting websites for bulk actions stays on tablets and desktop. A
+  collection's files stay a table. On touch, sortable headers are 44 px targets with their arrows shown,
+  and long header labels wrap (`globals.css` section 9b). A pinned column takes
+  its container's colour from `--table-sticky-background`: `TableFrame`
+  sets it (and runs edge to edge on a phone); a table on the page sets
+  `[--table-sticky-background:var(--color-ax-surface)]`.
 - Every table is named: `aria-labelledby` its visible heading, or a translated
   `aria-label` (the wrapper's type requires one). The wrapper gives the
   table's horizontal scroll region the same name; Astryx would call it just
@@ -384,9 +454,10 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   and one column without a width, which takes what is left, work as they are.
 - A column with a button or menu is at least `w-14 min-w-14`: on touch,
   Astryx controls are 44 px, plus the cell's 12 px start padding.
-- Give a table with many columns a min width (`min-w-*` on `Table`). Below it
-  the table scrolls sideways in its own focusable region instead of squeezing
-  the columns.
+- Give a children-mode table with many columns a min width (`min-w-*` on
+  `Table`; data-driven tables get it from their columns). Below it the table
+  scrolls sideways in its own focusable region instead of squeezing the
+  columns.
 - The page scans in `tests/a11y.spec.ts` fail on a column that collapsed.
 - Legacy shadcn tables (`@/components/ui/table`) get the same keyboard-scrollable,
   named container from Astryx's `useScrollableArea`; name them the same way.

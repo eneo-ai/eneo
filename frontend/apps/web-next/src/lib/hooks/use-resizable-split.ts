@@ -1,25 +1,20 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent
-} from "react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 const KEYBOARD_STEP = 24;
 
 export type ResizableSplitOptions = {
+  /** The width both halves share (handle included), `null` until it is measured. */
+  container: number | null;
   /** localStorage key the width is remembered under; none keeps it for the session. */
   storageKey?: string;
   defaultWidth: number;
   minWidth: number;
   /** The largest share of the container the panel may take. */
   maxFraction?: number;
-  /** Whether the panel is shown: the container is watched for size changes only then. */
-  enabled?: boolean;
+  /** What the rest of the container keeps beside the panel, the handle included. */
+  minRemaining?: number;
 };
 
 function readStored(key: string | undefined): number | null {
@@ -37,80 +32,72 @@ function readStored(key: string | undefined): number | null {
  * main area, with the WAI-ARIA separator semantics on the handle. Astryx has
  * no split-pane component (0.6.4), so the behaviour lives here.
  *
- * Attach `containerRef` to the element both halves share, spread
- * `separatorProps` on the handle and give the panel `width` in px.
+ * The width the user chose is kept; what is shown is that width as far as
+ * the container allows (on drag, on restore and on every resize), so a
+ * window that narrows and widens again gives the panel its width back. A
+ * press on the handle that does not move it changes nothing. `fits` says
+ * whether the panel fits at all at its smallest, `null` until the container
+ * is measured.
+ *
+ * Spread `separatorProps` on the handle and give the panel `width` in px.
  */
 export function useResizableSplit({
+  container,
   storageKey,
   defaultWidth,
   minWidth,
   maxFraction = 0.7,
-  enabled = true
+  minRemaining = 0
 }: ResizableSplitOptions) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(() => readStored(storageKey) ?? defaultWidth);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const dragging = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  const clamp = useCallback(
-    (next: number) => {
-      const container = containerRef.current?.clientWidth ?? Infinity;
-      const max = Math.max(minWidth, Math.floor(container * maxFraction));
-      return Math.round(Math.min(max, Math.max(minWidth, next)));
-    },
-    [minWidth, maxFraction]
+  const [chosen, setChosen] = useState(() => readStored(storageKey) ?? defaultWidth);
+  const dragging = useRef<{ startX: number; startWidth: number; width: number | null } | null>(
+    null
   );
 
-  const commit = useCallback(
-    (next: number) => {
-      const clamped = clamp(next);
-      setWidth(clamped);
-      if (!storageKey) return;
-      try {
-        window.localStorage.setItem(storageKey, String(clamped));
-      } catch {
-        // Remembering the width is a nicety.
-      }
-    },
-    [clamp, storageKey]
-  );
+  const max =
+    container === null
+      ? null
+      : Math.floor(Math.min(container * maxFraction, container - minRemaining));
+  const clamp = (next: number) => Math.round(Math.max(minWidth, Math.min(max ?? Infinity, next)));
+  const width = clamp(chosen);
+  const fits = max === null ? null : max >= minWidth;
 
-  // A window that shrinks under a wide panel narrows the panel with it.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!enabled || !container || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      setContainerWidth(container.clientWidth);
-      setWidth((current) => clamp(current));
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [clamp, enabled]);
+  const commit = (next: number) => {
+    const clamped = clamp(next);
+    setChosen(clamped);
+    if (!storageKey) return;
+    try {
+      window.localStorage.setItem(storageKey, String(clamped));
+    } catch {
+      // Remembering the width is a nicety.
+    }
+  };
 
   const onPointerDown = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
-    dragging.current = { startX: event.clientX, startWidth: width };
+    dragging.current = { startX: event.clientX, startWidth: width, width: null };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: PointerEvent<HTMLElement>) => {
     const drag = dragging.current;
     if (!drag) return;
     // The panel sits at the end: dragging the handle left widens it.
-    setWidth(clamp(drag.startWidth + (drag.startX - event.clientX)));
+    drag.width = clamp(drag.startWidth + (drag.startX - event.clientX));
+    setChosen(drag.width);
   };
   const onPointerUp = (event: PointerEvent<HTMLElement>) => {
-    if (!dragging.current) return;
+    const drag = dragging.current;
+    if (!drag) return;
     dragging.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    commit(width);
+    if (drag.width !== null) commit(drag.width);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    const container = containerRef.current?.clientWidth ?? width;
     const steps: Record<string, number> = {
       ArrowLeft: width + KEYBOARD_STEP,
       ArrowRight: width - KEYBOARD_STEP,
-      Home: container,
+      Home: Infinity,
       End: minWidth
     };
     const next = steps[event.key];
@@ -121,13 +108,13 @@ export function useResizableSplit({
 
   return {
     width,
-    containerRef,
+    fits,
     separatorProps: {
       role: "separator" as const,
       "aria-orientation": "vertical" as const,
       "aria-valuenow": width,
       "aria-valuemin": minWidth,
-      "aria-valuemax": containerWidth ? Math.floor(containerWidth * maxFraction) : undefined,
+      "aria-valuemax": max !== null && max >= minWidth ? max : undefined,
       tabIndex: 0,
       onPointerDown,
       onPointerMove,

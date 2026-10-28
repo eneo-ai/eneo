@@ -30,7 +30,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ClientTime } from "@/components/composites/client-time";
 import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useRemovalMutation } from "@/features/spaces/removal";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { skillQueryKey } from "./skill-revisions";
 
@@ -232,7 +232,7 @@ export function SpaceSkillsPage() {
             />
           ) : (
             <>
-              <SpaceTableFrame>
+              <TableFrame>
                 {/* Named like the page heading (PageHeader takes no id to point at). */}
                 <Table
                   data={items}
@@ -241,7 +241,7 @@ export function SpaceSkillsPage() {
                   verticalAlign="top"
                   aria-label={t("skills")}
                 />
-              </SpaceTableFrame>
+              </TableFrame>
               <LoadMore query={skills} label={t("load_more")} />
             </>
           )

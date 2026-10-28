@@ -11,23 +11,36 @@ export type RecentConversation = Schema<"RecentConversation">;
  * which searches them all.
  */
 export const RECENT_CONVERSATIONS_LIMIT = 20;
+/** The most the endpoint returns: what the history's "Alla" lists. */
+export const ALL_CONVERSATIONS_LIMIT = 50;
 
 const RECENT_CONVERSATIONS_KEY = ["conversations", "recent"] as const;
 
-/** The user's latest conversations with every assistant and group chat, latest activity first. */
-export function recentConversationsQueryOptions(api: EneoClient) {
+/**
+ * The user's latest `limit` conversations with every assistant and group
+ * chat, latest activity first.
+ */
+export function recentConversationsQueryOptions(
+  api: EneoClient,
+  limit = RECENT_CONVERSATIONS_LIMIT
+) {
   return queryOptions({
-    queryKey: RECENT_CONVERSATIONS_KEY,
+    queryKey: [...RECENT_CONVERSATIONS_KEY, limit],
     queryFn: async ({ signal }) => {
       const page = await unwrap(
-        api.GET("/api/v1/conversations/recent/", {
-          params: { query: { limit: RECENT_CONVERSATIONS_LIMIT } },
-          signal
-        })
+        api.GET("/api/v1/conversations/recent/", { params: { query: { limit } }, signal })
       );
       return page.items;
     }
   });
+}
+
+/** Drops a deleted conversation from every recent list at once; the refetch follows. */
+export function dropFromRecentConversations(queryClient: QueryClient, id: string) {
+  queryClient.setQueriesData<RecentConversation[]>(
+    { queryKey: RECENT_CONVERSATIONS_KEY },
+    (items) => items?.filter((item) => item.id !== id)
+  );
 }
 
 /**

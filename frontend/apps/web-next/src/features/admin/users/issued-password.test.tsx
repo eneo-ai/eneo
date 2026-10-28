@@ -96,11 +96,11 @@ describe("AdminUsersPage issued password", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
 
     const editor = await screen.findByRole("dialog", { name: "Redigera användare" });
-    await within(editor).findByRole("switch", { name: /^Generera ett nytt lösenord/ });
+    await within(editor).findByRole("checkbox", { name: /^Generera ett nytt lösenord/ });
     fireEvent.change(within(editor).getByLabelText(/^Användarnamn/), {
       target: { value: "bo.lind" }
     });
-    fireEvent.click(within(editor).getByRole("switch", { name: /^Generera ett nytt lösenord/ }));
+    fireEvent.click(within(editor).getByRole("checkbox", { name: /^Generera ett nytt lösenord/ }));
     fireEvent.click(within(editor).getByRole("button", { name: "Spara ändringar" }));
 
     const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
@@ -139,7 +139,7 @@ describe("AdminUsersPage issued password", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
     const editor = await screen.findByRole("dialog", { name: "Redigera användare" });
     fireEvent.click(
-      await within(editor).findByRole("switch", { name: /^Generera ett nytt lösenord/ })
+      await within(editor).findByRole("checkbox", { name: /^Generera ett nytt lösenord/ })
     );
     fireEvent.click(within(editor).getByRole("button", { name: "Spara ändringar" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
@@ -185,7 +185,7 @@ describe("AdminUsersPage issued password", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
     const editor = await screen.findByRole("dialog", { name: "Redigera användare" });
     fireEvent.click(
-      await within(editor).findByRole("switch", { name: /^Generera ett nytt lösenord/ })
+      await within(editor).findByRole("checkbox", { name: /^Generera ett nytt lösenord/ })
     );
     fireEvent.click(within(editor).getByRole("button", { name: "Spara ändringar" }));
     await waitFor(() => expect(settle["/api/v1/admin/users/{username}/"]).toBeDefined());

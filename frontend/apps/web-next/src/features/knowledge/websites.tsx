@@ -17,7 +17,9 @@ import {
   type TableSelectionState,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
+import { Table, type TableName } from "@/components/astryx/table";
+import { DockedActions } from "@/components/shell/docked-actions";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
@@ -38,7 +40,9 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
+import { RowsOrTable } from "./knowledge-list";
+import { websiteRow } from "./knowledge-rows";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type CrawlRun, type Website } from "./knowledge";
 import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
@@ -220,7 +224,7 @@ export function WebsiteActions({ website }: { website: Website }) {
 /**
  * One embedding model's websites. Sorting is shared across the groups; the
  * checkboxes (for bulk sync) select into one set, the header one selects this
- * group's rows. `labelledBy` names the table: the model heading when grouped
+ * group's rows. `name` names the table: the model heading when grouped
  * (which tells the groups' "select all" checkboxes apart), else the tab.
  */
 function WebsitesTable({
@@ -229,14 +233,14 @@ function WebsitesTable({
   selectable,
   selectedKeys,
   setSelectedKeys,
-  labelledBy
+  name
 }: {
   websites: Website[];
   sortConfig: UseTableSortableConfig<WebsiteSortKey>;
   selectable: boolean;
   selectedKeys: Set<string>;
   setSelectedKeys: Dispatch<SetStateAction<Set<string>>>;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -259,7 +263,7 @@ function WebsitesTable({
     {
       key: "name",
       header: t("website"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 152 }),
       sortable: true,
       renderCell: (website) => (
         <KnowledgeNameCell
@@ -273,7 +277,7 @@ function WebsitesTable({
     {
       key: "link",
       header: t("link"),
-      width: proportional(1),
+      width: pixel(112),
       renderCell: (website) => (
         <AstryxLink href={website.url} isExternalLink color="secondary">
           {t("go_to_website")}
@@ -283,7 +287,7 @@ function WebsitesTable({
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(136),
       sortable: true,
       renderCell: (website) => (
         <WebsiteStatusCell
@@ -298,21 +302,21 @@ function WebsitesTable({
     {
       key: "synced",
       header: t("website_last_indexed"),
-      width: proportional(1),
+      width: pixel(112),
       sortable: true,
       renderCell: (website) => <WebsiteSyncedCell website={website} />
     },
     {
       key: "interval",
       header: t("auto_updates"),
-      width: proportional(1),
+      width: pixel(144),
       sortable: true,
       renderCell: (website) => <WebsiteIntervalLabel website={website} />
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (website) => <WebsiteActions website={website} />
     }
@@ -320,17 +324,18 @@ function WebsitesTable({
 
   return (
     <>
-      <SpaceTableFrame>
+      <TableFrame>
         <Table
           data={websites}
           columns={columns}
           idKey="id"
-          aria-labelledby={labelledBy}
+          {...name}
+          pinnedColumn="name"
           plugins={
             selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
           }
         />
-      </SpaceTableFrame>
+      </TableFrame>
       {failures ? (
         <CrawlRunDetailsDialog
           run={failures.run}
@@ -343,8 +348,9 @@ function WebsitesTable({
   );
 }
 
-/** The websites tab; `labelledBy` is the tab, which names an ungrouped table. */
-export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; labelledBy: string }) {
+/** The websites tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
+export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
+  const phone = useMediaMatch(PHONE_QUERY);
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
@@ -506,6 +512,10 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const createDialog = showCreate ? (
     <WebsiteDialog open={showCreate} onOpenChange={setShowCreate} />
   ) : null;
+  // The tab's primary action: docked at the bottom on a phone.
+  const docked = canCreate ? (
+    <DockedActions label={t("space_knowledge_actions")}>{connectButton}</DockedActions>
+  ) : null;
 
   // Nothing to filter yet: the empty state carries the one create button.
   if (websites.length === 0) {
@@ -518,11 +528,7 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
           description={t("space_websites_empty_description")}
           headingLevel={3}
           actions={
-            canCreate ? (
-              connectButton
-            ) : (
-              <NoCreatePermissionInfo resourceType={t("resource_websites")} />
-            )
+            canCreate ? docked : <NoCreatePermissionInfo resourceType={t("resource_websites")} />
           }
         />
         {createDialog}
@@ -596,7 +602,7 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const action = (
     <>
       {canCreate && stoppableIds.length > 0 ? stopButton(stoppableIds, "stop_all_crawls") : null}
-      {canCreate ? connectButton : null}
+      {docked}
       {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {createDialog}
       <ConfirmDialogControlled
@@ -657,7 +663,9 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   return (
     <div className="flex flex-col gap-6">
       {toolbar}
-      {selectionToolbar}
+      {/* Bulk actions are a tablet and desktop task: a selection made there
+          waits, hidden, while a phone shows rows without checkboxes. */}
+      {phone ? null : selectionToolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
           ? sortedData.filter((website) => website.embedding_model.id === model.id)
@@ -671,14 +679,22 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <WebsitesTable
-              websites={rows}
-              sortConfig={sortConfig}
-              selectable={canCreate}
-              selectedKeys={selected}
-              setSelectedKeys={setSelected}
-              labelledBy={headingId ?? labelledBy}
-            />
+            <RowsOrTable
+              items={rows.map((website) => ({
+                row: websiteRow(website, routeId),
+                actions: <WebsiteActions website={website} />
+              }))}
+              name={headingId ? { "aria-labelledby": headingId } : name}
+            >
+              <WebsitesTable
+                websites={rows}
+                sortConfig={sortConfig}
+                selectable={canCreate}
+                selectedKeys={selected}
+                setSelectedKeys={setSelected}
+                name={headingId ? { "aria-labelledby": headingId } : name}
+              />
+            </RowsOrTable>
           </div>
         );
       })}

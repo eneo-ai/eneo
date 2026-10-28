@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
-import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
+import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -13,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,6 +23,8 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
 import { displayPartnerName } from "@/lib/chat/partner-name";
@@ -45,7 +48,7 @@ import {
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
-import { SidePanel } from "./side-panel/side-panel";
+import { SidePanel, type SidePanelLayout } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
@@ -54,6 +57,13 @@ import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
+import { ComposerDock, ConversationLayout } from "./conversation-layout";
+import {
+  pendingTools,
+  ToolApprovalsContext,
+  ToolDecisionBar,
+  useToolApprovalState
+} from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -91,27 +101,16 @@ type PendingQuestionState = {
   request: SendRequest;
 };
 
-/** Which answer's activity is shown, on which tab, and which source to focus. */
-export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
-
 /**
- * Height of an element, tracked with a ResizeObserver (0 where unsupported).
- * Returns a callback ref, so an element that mounts after the view (the
- * docked composer appears with the first question) is observed too.
+ * Below Tailwind's `sm`, a phone: its start state docks the composer
+ * (decision 5), and a waiting tool's decision takes the composer's place
+ * (decision 26).
  */
-function useElementHeight<T extends HTMLElement>() {
-  const [element, setElement] = useState<T | null>(null);
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setHeight(Math.ceil(entry.contentRect.height));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
-  return [setElement, height] as const;
-}
+const PHONE = "(width < 40rem)";
+
+/** Which answer's activity is shown, on which tab, and which source to focus. */
+
+export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
 /**
  * Astryx's message list is an aria-live log. ACCESSIBILITY.md → AI chat: the
@@ -167,6 +166,10 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
+  /** Whether the side panel holds a file, view or the overview (the activity is the page's). */
+  onPanelOpenChange?: (open: boolean) => void;
+  /** The row the side panel shares with the page's history. */
+  layout?: SidePanelLayout;
 };
 
 /**
@@ -196,7 +199,9 @@ function ConversationView({
   modelSelector,
   partnerToken,
   activity,
-  onActivityChange
+  onActivityChange,
+  onPanelOpenChange,
+  layout
 }: ChatViewProps) {
   const t = useTranslations();
   const { can } = useAppContext();
@@ -213,6 +218,8 @@ function ConversationView({
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
+  const online = useOnline();
+  const approvals = useToolApprovalState();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
   const toolChoices = useToolChoices(partner);
@@ -269,17 +276,35 @@ function ConversationView({
     return { tokens, turns };
   });
 
-  // Focus hand-off: the first question swaps the centred start composer for
-  // the docked one (and a first question that fails before it is sent swaps
+  // Focus hand-off: the first question swaps the start composer for the
+  // docked one (and a first question that fails before it is sent swaps
   // back); keep keyboard focus in the composer (WCAG 2.4.3).
-  const startComposerRef = useRef<HTMLDivElement>(null);
   const dockElement = useRef<HTMLDivElement | null>(null);
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Phones dock the start composer where it stays (decision 5): CSS picks
+  // from the first paint, and once the width is known the other place goes.
+  const phone = useMediaMatch(PHONE);
+  /** The start composer's field the user has: docked on phones, centred from 640px. */
+  const startTextarea = () =>
+    ((phone ?? window.matchMedia(PHONE).matches) ? startDockTextareaRef : startTextareaRef).current;
+  const startField = useEffectEvent(startTextarea);
   const refocusComposer = useRef(false);
+  // Crossing 640px (a phone turned, a window resized) swaps the start
+  // composer's place, and the field being typed in goes with it: the new
+  // one takes the focus. A removed field fires no blur, so this stays set.
+  const startHadFocus = useRef(false);
+  const trackStartFocus = {
+    onFocus: () => void (startHadFocus.current = true),
+    onBlur: () => void (startHadFocus.current = false)
+  };
+  useEffect(() => {
+    if (startHadFocus.current && document.activeElement === document.body) startField()?.focus();
+  }, [phone]);
   const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescue(startTextareaRef.current);
+    if (focusComposerIfLost) rescue(startField());
   }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
@@ -460,6 +485,12 @@ function ConversationView({
   useEffect(() => {
     if (panelOpen) onActivityChange(null);
   }, [panelOpen, onActivityChange]);
+  // Before paint: a history that gives way to the panel is gone in the same frame.
+  useLayoutEffect(() => {
+    if (!panelOpen) return;
+    onPanelOpenChange?.(true);
+    return () => onPanelOpenChange?.(false);
+  }, [panelOpen, onPanelOpenChange]);
 
   // The panel follows the answer being written: a document draft shows there
   // while the assistant writes it, and a file created in the live turn takes
@@ -540,12 +571,47 @@ function ConversationView({
   }, []);
 
   const started = messages.length > 0 || pendingQuestion !== null;
+
+  // A tool waiting for a decision in the latest answer: on a phone the
+  // decision takes the composer's place (decision 26); wider, the card in
+  // the conversation is the place.
+  const lastMessage = messages.at(-1);
+  const waitingApproval =
+    lastMessage?.role === "assistant"
+      ? lastMessage.parts.findLast(
+          (part) => part.type === "data-tool-approval" && part.data.status === "pending"
+        )
+      : undefined;
+  const decisionBar =
+    phone === true &&
+    // A pending call only waits while its stream is open: a broken stream
+    // gives the composer back (and its retry).
+    busy &&
+    waitingApproval?.type === "data-tool-approval" &&
+    pendingTools(waitingApproval.data, approvals.decisions).length > 0
+      ? waitingApproval.data
+      : null;
+  // The decision is made: the composer is back where the bar was, and the
+  // focus goes with it if it had none left.
+  const barApprovalId = decisionBar?.approval_id ?? null;
+  const approvalsHere = useMemo(
+    () => ({ ...approvals, barApprovalId }),
+    [approvals, barApprovalId]
+  );
+  const deciding = decisionBar !== null;
+  const wasDeciding = useRef(false);
+  useEffect(() => {
+    if (wasDeciding.current && !deciding && document.activeElement === document.body) {
+      dockTextareaRef.current?.focus();
+    }
+    wasDeciding.current = deciding;
+  }, [deciding]);
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
   useEffect(() => {
     reportStarted(started);
     if (refocusComposer.current) {
       refocusComposer.current = false;
-      (started ? dockTextareaRef : startTextareaRef).current?.focus();
+      (started ? dockTextareaRef.current : startField())?.focus();
     }
   }, [started]);
 
@@ -590,16 +656,17 @@ function ConversationView({
    * composer at once and waits in the conversation until all of them are on
    * the server (`awaitUploads`), or is withdrawn if they never are.
    */
-  function sendQuestion(question: string, resendFiles?: SentFiles) {
+  function sendQuestion(question: string, resendFiles?: SentFiles, fromComposer = false) {
     if (!question || sending || usage.willExceedContext) return;
     // A quote from a file or a view opens the question; it is sent once.
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
     if (!resendFiles) panel.clearQuote();
     if (!started) {
-      refocusComposer.current = Boolean(
-        startComposerRef.current?.contains(document.activeElement ?? null)
-      );
+      // A tapped Send button holds no focus in Safari: a question from the
+      // composer keeps it in the composer whatever has focus now.
+      refocusComposer.current =
+        fromComposer || Boolean(document.activeElement?.closest("[data-start-composer]"));
     }
     const request = requestOptions();
     // A retry leaves the composer alone unless it holds the retried question.
@@ -713,8 +780,12 @@ function ConversationView({
     : attachments;
 
   // Attachments still uploading do not block: the question waits for them in
-  // the conversation.
-  const canSubmit = input.trim().length > 0 && !usage.willExceedContext;
+  // the conversation. An empty draft is the composer's to explain.
+  const sendBlocked = !online
+    ? t("chat_send_offline")
+    : usage.willExceedContext
+      ? t("context_usage_will_exceed_estimate")
+      : null;
   const quote = panel.quote;
   const composerQuote = quote
     ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
@@ -734,6 +805,16 @@ function ConversationView({
 
   // Focus returns to the control that opened the panel (pill or citation).
   const activityTrigger = useRef<HTMLElement | null>(null);
+  // The answer whose activity took the focus, across presentations (F7).
+  const activityFocusedFor = useRef<string | null>(null);
+  const claimActivityFocus = useCallback((key: string) => {
+    if (activityFocusedFor.current === key) return false;
+    activityFocusedFor.current = key;
+    return true;
+  }, []);
+  useEffect(() => {
+    if (!activity) activityFocusedFor.current = null;
+  }, [activity]);
   const toggleActivity = (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
     const tab = request?.tab ?? "steps";
     // The pill toggles; a citation (or menu item with a tab) opens or switches.
@@ -750,6 +831,13 @@ function ConversationView({
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
+  // A call waiting for a decision takes the dock on a phone (decision 26): a
+  // sheet over the dock gives way to it, and the focus goes back to what
+  // opened the sheet.
+  const activityOpen = activity !== null;
+  useEffect(() => {
+    if (deciding && activityOpen) closeActivity();
+  }, [deciding, activityOpen, closeActivity]);
 
   const failure = error ? describeChatFailure(error, streamErrorCode, t) : null;
 
@@ -792,13 +880,13 @@ function ConversationView({
   const composerProps = {
     value: input,
     onChange: setInput,
-    onSubmit: () => sendQuestion(input.trim()),
-    canSubmit,
+    onSubmit: () => sendQuestion(input.trim(), undefined, true),
+    sendBlocked,
     busy: sending,
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
-    placeholder: t("chat_composer_placeholder"),
+    placeholder: composerLabel,
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
@@ -816,15 +904,6 @@ function ConversationView({
       />
     )
   };
-
-  const [observeDock, dockHeight] = useElementHeight<HTMLDivElement>();
-  const dockRef = useCallback(
-    (element: HTMLDivElement | null) => {
-      dockElement.current = element;
-      observeDock(element);
-    },
-    [observeDock]
-  );
 
   const fileInputElement =
     attachments.maxFiles !== 0 ? (
@@ -882,26 +961,51 @@ function ConversationView({
   if (!started) {
     return (
       <>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
             onPickStarter={(prompt) => {
               setInput(prompt);
-              startTextareaRef.current?.focus();
+              startTextarea()?.focus();
             }}
             composer={
-              <div ref={startComposerRef} className="flex w-full flex-col gap-3">
-                {errorNotice}
-                <Composer
-                  {...composerProps}
-                  variant="start"
-                  partnerToken={partnerToken}
-                  textareaRef={startTextareaRef}
-                />
-              </div>
+              phone !== true && (
+                // From 640px: centred under the greeting until the conversation starts.
+                <div
+                  data-start-composer=""
+                  {...trackStartFocus}
+                  className="flex w-full flex-col gap-3 max-sm:hidden"
+                >
+                  {errorNotice}
+                  <Composer
+                    {...composerProps}
+                    variant="start"
+                    partnerToken={partnerToken}
+                    textareaRef={startTextareaRef}
+                  />
+                </div>
+              )
             }
           />
         </div>
+        {phone !== false && (
+          // Phones: docked from the first frame where it stays once the
+          // conversation starts, so nothing moves when the question is sent.
+          <ComposerDock className="sm:hidden">
+            <div
+              data-start-composer=""
+              {...trackStartFocus}
+              className="mx-auto flex w-full max-w-[680px] flex-col gap-3"
+            >
+              {errorNotice}
+              <Composer
+                {...composerProps}
+                partnerToken={partnerToken}
+                textareaRef={startDockTextareaRef}
+              />
+            </div>
+          </ComposerDock>
+        )}
         {/* One file input for the view's lifetime (same position in both layouts). */}
         {fileInputElement}
       </>
@@ -918,12 +1022,17 @@ function ConversationView({
           detail: t("chat_activity_steps", {
             count: deriveActivity(latestAnswer, { knowledge: partner.knowledge }).steps.length
           }),
-          open: () => onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null })
+          open: () => {
+            // Opened from the panel's switcher: closing gives the focus to the
+            // panel button (side-panel.tsx), not to an earlier pill.
+            activityTrigger.current = null;
+            onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null });
+          }
         }
       : null;
 
   return (
-    <>
+    <ToolApprovalsContext value={approvalsHere}>
       <SidePanel
         panel={panel}
         messages={messages}
@@ -932,6 +1041,7 @@ function ConversationView({
         exportOf={exportOf}
         saverOf={saverOf}
         latestActivity={latestActivity}
+        layout={layout}
         activity={
           activity && activityMessage && activityForPanel
             ? {
@@ -946,6 +1056,7 @@ function ConversationView({
                     tab={activity.tab}
                     onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
                     focusSource={activity.source}
+                    claimFocus={claimActivityFocus}
                     debug={
                       debugAvailable && sessionId !== null
                         ? {
@@ -961,73 +1072,78 @@ function ConversationView({
             : null
         }
       >
-        <ChatLayout
-          className="min-w-0 flex-1"
-          // WCAG 2.4.11: Tab and focus() scroll the focused element above the
-          // docked composer instead of behind it.
-          style={{ scrollPaddingBottom: dockHeight + 28 }}
-          composer={
-            <div ref={dockRef} className="mx-auto w-full max-w-[680px]">
-              <Composer {...composerProps} textareaRef={dockTextareaRef} />
-            </div>
-          }
-        >
-          <ChatMessageList
-            ref={quietLog}
-            aria-label={t("chat_conversation_label")}
-            gap={6}
-            isStreaming={busy}
-            className="focus-visible:outline-ring rounded-ax-container mx-auto w-full max-w-[712px] focus-visible:outline-2 focus-visible:-outline-offset-2"
+        {({ sheetOver }) => (
+          <ConversationLayout
+            className="min-w-0 flex-1"
+            sheetOver={sheetOver}
+            sheetOpener={activityTrigger}
+            composer={
+              <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
+                {decisionBar ? (
+                  <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
+                ) : (
+                  <Composer {...composerProps} textareaRef={dockTextareaRef} />
+                )}
+              </div>
+            }
           >
-            {messages.map((message, messageIndex) => {
-              const streaming = busy && messageIndex === messages.length - 1;
-              return (
-                <ConversationMessage
-                  key={message.id}
-                  sessionId={sessionId}
-                  message={message}
-                  assistant={assistantIdentity}
-                  isStreaming={streaming}
-                  showResponseLabel={partner.showResponseLabel ?? false}
-                  liveAnswering={liveAnswering}
-                  knowledge={partner.knowledge}
-                  durations={timings.durations(message.id)}
-                  activityExpanded={activity?.messageId === message.id}
-                  onActivityToggle={(trigger, request) =>
-                    toggleActivity(message.id, trigger, request)
-                  }
-                  canDebug={debugAvailable && sessionId !== null}
+            <ChatMessageList
+              ref={quietLog}
+              aria-label={t("chat_conversation_label")}
+              gap={6}
+              isStreaming={busy}
+              className="focus-visible:outline-ring rounded-ax-container mx-auto w-full max-w-[712px] focus-visible:outline-2 focus-visible:-outline-offset-2"
+            >
+              {messages.map((message, messageIndex) => {
+                const streaming = busy && messageIndex === messages.length - 1;
+                return (
+                  <ConversationMessage
+                    key={message.id}
+                    sessionId={sessionId}
+                    message={message}
+                    assistant={assistantIdentity}
+                    isStreaming={streaming}
+                    showResponseLabel={partner.showResponseLabel ?? false}
+                    liveAnswering={liveAnswering}
+                    knowledge={partner.knowledge}
+                    durations={timings.durations(message.id)}
+                    activityExpanded={activity?.messageId === message.id}
+                    onActivityToggle={(trigger, request) =>
+                      toggleActivity(message.id, trigger, request)
+                    }
+                    canDebug={debugAvailable && sessionId !== null}
+                    conversationFiles={allFiles}
+                    documents={documents.documents}
+                    draft={streaming ? liveDraft : null}
+                  />
+                );
+              })}
+              {pendingQuestion && (
+                <PendingQuestion
+                  text={pendingQuestion.text}
+                  uploads={pendingUploads}
                   conversationFiles={allFiles}
-                  documents={documents.documents}
-                  draft={streaming ? liveDraft : null}
                 />
-              );
-            })}
-            {pendingQuestion && (
-              <PendingQuestion
-                text={pendingQuestion.text}
-                uploads={pendingUploads}
-                conversationFiles={allFiles}
-              />
-            )}
-            {(status === "submitted" || pendingQuestion) && (
-              <PendingAnswer
-                assistant={assistantIdentity}
-                status={
-                  pendingQuestion
-                    ? t("uploading_attachments_progress", {
-                        done: pendingDone,
-                        total: pendingUploads.length
-                      })
-                    : undefined
-                }
-              />
-            )}
-            {errorNotice}
-          </ChatMessageList>
-        </ChatLayout>
+              )}
+              {(status === "submitted" || pendingQuestion) && (
+                <PendingAnswer
+                  assistant={assistantIdentity}
+                  status={
+                    pendingQuestion
+                      ? t("uploading_attachments_progress", {
+                          done: pendingDone,
+                          total: pendingUploads.length
+                        })
+                      : undefined
+                  }
+                />
+              )}
+              {errorNotice}
+            </ChatMessageList>
+          </ConversationLayout>
+        )}
       </SidePanel>
       {fileInputElement}
-    </>
+    </ToolApprovalsContext>
   );
 }

@@ -118,19 +118,21 @@ export function MigrationHistoryPanel() {
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2.5">
-                <TextInput
-                  label={t("admin_models_history_search")}
-                  isLabelHidden
-                  placeholder={t("search")}
-                  startIcon={Search}
-                  value={search}
-                  onChange={(value) => {
-                    setSearch(value);
-                    announceResults({ search: value });
-                  }}
-                  hasClear
-                  className="w-full sm:w-72"
-                />
+                <div className="w-full sm:w-72">
+                  <TextInput
+                    label={t("admin_models_history_search")}
+                    isLabelHidden
+                    placeholder={t("search")}
+                    startIcon={Search}
+                    value={search}
+                    onChange={(value) => {
+                      setSearch(value);
+                      announceResults({ search: value });
+                    }}
+                    hasClear
+                    width="100%"
+                  />
+                </div>
                 <Selector
                   label={t("model_type")}
                   isLabelHidden

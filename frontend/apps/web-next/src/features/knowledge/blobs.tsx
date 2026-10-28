@@ -51,7 +51,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/lib/search";
 import type { InfoBlob } from "./knowledge";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 
 const PAGE_SIZE = 100;
 
@@ -310,21 +310,21 @@ export function BlobTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(4),
+      width: proportional(1),
       sortable: true,
       renderCell: (blob) => <BlobNameCell blob={blob} />
     },
     {
       key: "size",
       header: t("size"),
-      width: proportional(1),
+      width: pixel(96),
       sortable: true,
       renderCell: (blob) => formatBytes(blob.metadata.size, locale)
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (blob) => (canEdit ? <BlobActions blob={blob} /> : null)
     }
@@ -345,15 +345,16 @@ export function BlobTable({
       {filtered.length === 0 ? (
         <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           <Table
             data={paginateData(sortedData, currentPage, PAGE_SIZE)}
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
+            pinnedColumn="name"
             plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
     </div>
   );

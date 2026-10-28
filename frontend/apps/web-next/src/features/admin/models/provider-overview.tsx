@@ -21,6 +21,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { modelProvidersQueryOptions, providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
@@ -215,6 +216,14 @@ export function ProviderOverview({
     announce(isFiltering ? t("admin_models_results", { count: shown }) : "");
   }
 
+  const phone = useMediaMatch(PHONE_QUERY);
+  const kindOptions = KIND_FILTERS.map((filter) => ({
+    value: filter,
+    label: t("admin_models_kind_filter_option", {
+      label: filter === "all" ? t("all") : typeLabel(filter),
+      count: counts[filter]
+    })
+  }));
   const securityOptions = [
     { value: "all", label: t("all") },
     { value: UNCLASSIFIED, label: t("admin_models_unclassified") },
@@ -259,58 +268,83 @@ export function ProviderOverview({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2.5">
-        <TextInput
-          label={t("search_models_and_providers")}
-          isLabelHidden
-          placeholder={t("search_models_and_providers")}
-          startIcon={Search}
-          value={search}
-          onChange={(value) => {
-            setSearch(value);
-            announceResults({ search: value });
-          }}
-          hasClear
-          className="w-full sm:w-72"
-        />
-        {/* Segments wrap instead of overflowing on narrow screens (1.4.10). */}
-        <SegmentedControl
-          label={t("model_type")}
-          value={kind}
-          onChange={(value) => {
-            setKind(value as KindFilter);
-            announceResults({ kind: value as KindFilter });
-          }}
-          className="max-w-full flex-wrap"
-        >
-          {KIND_FILTERS.map((filter) => (
-            <SegmentedControlItem
-              key={filter}
-              value={filter}
-              label={t("admin_models_kind_filter_option", {
-                label: filter === "all" ? t("all") : typeLabel(filter),
-                count: counts[filter]
-              })}
-            />
-          ))}
-        </SegmentedControl>
-        {securityEnabled && (
-          <Selector
-            label={t("admin_models_security_filter")}
+        <div className="w-full sm:w-72">
+          <TextInput
+            label={t("search_models_and_providers")}
             isLabelHidden
-            options={securityOptions}
-            value={securityFilter}
+            placeholder={t("search_models_and_providers")}
+            startIcon={Search}
+            value={search}
             onChange={(value) => {
-              setSecurityFilter(value);
-              announceResults({ security: value });
+              setSearch(value);
+              announceResults({ search: value });
             }}
-            renderValue={(option) =>
-              t("admin_models_filter_value", {
-                label: t("admin_models_security_filter"),
-                value: option.label ?? ""
-              })
-            }
-            width="16rem"
+            hasClear
+            width="100%"
           />
+        </div>
+        {/* On a phone the type is a selector that opens as a sheet; from 768
+            px the segments, which wrap rather than overflow (1.4.10). Both
+            until the width is known, CSS showing one. */}
+        {phone !== false ? (
+          <div className="w-full md:hidden">
+            <Selector
+              label={t("model_type")}
+              isLabelHidden
+              options={kindOptions}
+              value={kind}
+              onChange={(value) => {
+                setKind(value as KindFilter);
+                announceResults({ kind: value as KindFilter });
+              }}
+              renderValue={(option) =>
+                t("admin_models_filter_value", {
+                  label: t("model_type"),
+                  value: option.label ?? ""
+                })
+              }
+              presentation="adaptive"
+              width="100%"
+            />
+          </div>
+        ) : null}
+        {phone !== true ? (
+          <SegmentedControl
+            label={t("model_type")}
+            value={kind}
+            onChange={(value) => {
+              setKind(value as KindFilter);
+              announceResults({ kind: value as KindFilter });
+            }}
+            className="max-w-full flex-wrap max-md:hidden"
+          >
+            {kindOptions.map((option) => (
+              <SegmentedControlItem key={option.value} value={option.value} label={option.label} />
+            ))}
+          </SegmentedControl>
+        ) : null}
+        {securityEnabled && (
+          // Astryx sizes the whole field by `width`; the wrapper makes it responsive.
+          <div className="w-full sm:w-64">
+            <Selector
+              label={t("admin_models_security_filter")}
+              isLabelHidden
+              options={securityOptions}
+              value={securityFilter}
+              onChange={(value) => {
+                setSecurityFilter(value);
+                announceResults({ security: value });
+              }}
+              renderValue={(option) =>
+                t("admin_models_filter_value", {
+                  label: t("admin_models_security_filter"),
+                  value: option.label ?? ""
+                })
+              }
+              presentation="adaptive"
+              width="100%"
+            />
+          </div>
         )}
       </div>
 

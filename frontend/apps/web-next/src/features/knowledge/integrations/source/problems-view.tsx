@@ -31,7 +31,7 @@ import type {
   SourceProblems,
   SyncFailure
 } from "../source-problems";
-import { SamePageLink, type InPlaceLink } from "./in-place-link";
+import { SamePageLink, type InPlaceLink } from "@/components/composites/in-place-link";
 import { useCopy } from "@/lib/hooks/use-copy";
 
 const FILES_SHOWN = 10;

@@ -1,11 +1,13 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
+import { ThemeColor } from "@/components/providers/theme-color";
 import { Toaster } from "@/components/ui/sonner";
 import { eneoTheme } from "@/theme/eneo";
+import { surfaceColors } from "@/theme/surface-colors";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,6 +17,27 @@ export const metadata: Metadata = {
   // their child pages inherit it without per-page boilerplate.
   title: { template: "%s · Eneo", default: "Eneo" },
   description: "Eneo"
+};
+
+const surface = surfaceColors();
+
+/**
+ * Phones and tablets: the page runs edge to edge (viewport-fit=cover) and pads
+ * itself clear of the notch and the home indicator (globals.css section 14,
+ * the shell frame); the on-screen keyboard shrinks the layout on Android as it
+ * does on iOS, so the docked composer stays above it. The status bar and the
+ * browser toolbar take the surface colour behind the top bar (ThemeColor
+ * follows an explicit Tema choice). Pinch zoom stays on (WCAG 1.4.4).
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: surface.light },
+    { media: "(prefers-color-scheme: dark)", color: surface.dark }
+  ]
 };
 
 export default async function RootLayout({
@@ -70,6 +93,7 @@ export default async function RootLayout({
           >
             <Providers nonce={nonce}>{children}</Providers>
             <Toaster />
+            <ThemeColor />
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

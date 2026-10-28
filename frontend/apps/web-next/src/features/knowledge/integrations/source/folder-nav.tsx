@@ -25,7 +25,7 @@ import {
 } from "../integration-tree";
 import { itemState, sourceStateStatus, type ItemState, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
-import type { InPlaceLink } from "./in-place-link";
+import type { InPlaceLink } from "@/components/composites/in-place-link";
 
 /** Below this many folders the whole tree fits and a filter only adds noise. */
 const FILTER_FROM = 8;

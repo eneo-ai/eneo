@@ -14,6 +14,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { TableFrame } from "@/components/composites/table-frame";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
@@ -210,14 +211,14 @@ export function AdminUsersPage() {
     results = <EmptyState title={t("no_users_found")} />;
   } else {
     results = (
-      <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
+      <TableFrame>
         <UserTable
           users={users}
           label={tabLabel(stateFilter)}
           onRemoved={() => rescue(panelRef.current)}
           onIssued={showIssued}
         />
-      </div>
+      </TableFrame>
     );
   }
 

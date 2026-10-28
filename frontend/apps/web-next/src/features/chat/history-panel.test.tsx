@@ -5,6 +5,7 @@ import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { HistoryAside } from "./history-panel";
 import { RenameSessionDialog } from "./session-actions";
@@ -14,9 +15,20 @@ const day = 86_400_000;
 
 type Row = { id: string; name: string; updated_at: string };
 
+type Recent = {
+  id: string;
+  name: string;
+  created_at: string;
+  last_activity_at: string;
+  partner: { type: "assistant" | "default-assistant" | "group-chat"; id: string; name: string };
+  space: { id: string; name: string; personal: boolean; organization: boolean };
+};
+
 const api = vi.hoisted(() => ({
   /** The history the backend holds, newest first, served two per page. */
   rows: [] as Row[],
+  /** The latest conversations with every assistant (`/conversations/recent/`). */
+  recent: [] as Recent[],
   cursors: [] as (string | undefined)[],
   GET: vi.fn(),
   PATCH: vi.fn(async () => ({ data: {}, response: new Response() })),
@@ -27,10 +39,14 @@ const api = vi.hoisted(() => ({
   })
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
 beforeAll(() => {
   api.GET.mockImplementation(
-    async (_path: string, init: { params: { query: { cursor?: string } } }) => {
+    async (path: string, init: { params: { query: { cursor?: string } } }) => {
+      if (path === "/api/v1/conversations/recent/") {
+        return { data: { items: api.recent }, response: new Response() };
+      }
       const cursor = init.params.query.cursor;
       api.cursors.push(cursor);
       const start = cursor ? Number(cursor) : 0;
@@ -49,6 +65,25 @@ beforeEach(() => {
     { id: "s2", name: "Protokoll KS", updated_at: new Date(now - 40 * day).toISOString() }
   ];
   api.cursors.length = 0;
+  const space = { id: "space-1", name: "Upphandling", personal: false, organization: false };
+  api.recent = [
+    {
+      id: "s9",
+      name: "Avtalsgranskning",
+      created_at: new Date(now).toISOString(),
+      last_activity_at: new Date(now).toISOString(),
+      partner: { type: "assistant", id: "assistant-2", name: "Avtalsgranskaren" },
+      space
+    },
+    {
+      id: "s1",
+      name: "Upphandlingsanalys",
+      created_at: new Date(now - day).toISOString(),
+      last_activity_at: new Date(now - day).toISOString(),
+      partner: { type: "assistant", id: "assistant-1", name: "Upphandlingsassistenten" },
+      space
+    }
+  ];
 });
 afterEach(() => {
   cleanup();
@@ -60,8 +95,8 @@ const partner: ChatPartner = {
   id: "assistant-1",
   name: "Upphandlingsassistenten"
 };
-/** The panel is the partner's own list; the sidebar's "Senaste" spans every partner. */
-const HEADING = "Konversationer med Upphandlingsassistenten";
+/** One panel for the conversations, scoped to this partner or to all (decision 29). */
+const HEADING = "Konversationer";
 
 /** Opens a row's menu and returns the menu item with the given name. */
 async function rowMenuItem(row: string, item: string) {
@@ -217,6 +252,7 @@ describe("HistoryAside", () => {
   });
 
   it("names the personal assistant's list after the personal assistant", async () => {
+    api.rows = [];
     renderInApp(
       <HistoryAside
         inline
@@ -229,7 +265,9 @@ describe("HistoryAside", () => {
       { queryClient: testQueryClient() }
     );
     expect(
-      await screen.findByRole("heading", { name: "Konversationer med Personlig assistent" })
+      await screen.findByText(
+        "Inga konversationer med Personlig assistent ännu. Din första fråga hamnar här."
+      )
     ).toBeTruthy();
     expect(screen.queryByText(/Default/)).toBeNull();
   });
@@ -245,6 +283,88 @@ describe("HistoryAside", () => {
     renderHistory();
     await screen.findByRole("region", { name: "Idag" });
     await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("HistoryAside scope (decision 29)", () => {
+  const scope = () => screen.getByRole("radiogroup", { name: "Visa konversationer" });
+
+  it("lists this assistant's conversations, and under Alla everyone's with whom they are with", async () => {
+    renderHistory();
+    expect(
+      within(scope())
+        .getByRole("radio", { name: "Den här assistenten" })
+        .getAttribute("aria-checked")
+    ).toBe("true");
+    await screen.findByRole("button", { name: "Protokoll KS" });
+
+    fireEvent.click(within(scope()).getByRole("radio", { name: "Alla" }));
+    const other = await screen.findByRole("button", { name: /^Avtalsgranskning/ });
+    expect(other.textContent).toContain("Avtalsgranskaren i Upphandling");
+    expect(screen.queryByRole("button", { name: "Protokoll KS" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^Upphandlingsanalys/ }).getAttribute("aria-current")
+    ).toBe("true");
+    // The latest conversations, not a paged list.
+    expect(screen.queryByRole("button", { name: "Visa fler konversationer" })).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("opens a conversation with another assistant where it lives, one with this assistant here", async () => {
+    const { onSelect } = renderHistory();
+    fireEvent.click(within(scope()).getByRole("radio", { name: "Alla" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Avtalsgranskning/ }));
+    expect(router.push).toHaveBeenCalledWith(
+      "/spaces/space-1/chat?type=assistant&id=assistant-2&session_id=s9"
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Upphandlingsanalys/ }));
+    expect(onSelect).toHaveBeenCalledWith("s1");
+  });
+
+  it("drops a deleted conversation from Alla at once and refreshes both lists", async () => {
+    const queryClient = testQueryClient();
+    // The SideNav's "Senaste" holds it too.
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    // …and so does the history of the assistant it is with.
+    const theirs = ["conversations", "assistant", "assistant-2"];
+    queryClient.setQueryData(theirs, {
+      pages: [{ items: [{ id: "s9", name: "Avtalsgranskning" }], next_cursor: null }],
+      pageParams: [null]
+    });
+    const { onDeleted } = renderHistory({ queryClient });
+    fireEvent.click(within(scope()).getByRole("radio", { name: "Alla" }));
+    fireEvent.click(await rowMenuItem("Avtalsgranskning", "Ta bort"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    api.recent = api.recent.filter((row) => row.id !== "s9");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s9"));
+    expect(screen.queryByRole("button", { name: /^Avtalsgranskning/ })).toBeNull();
+    expect(queryClient.getQueryData<{ id: string }[]>(nav)?.map((row) => row.id)).toEqual(["s1"]);
+    expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryData<{ pages: { items: unknown[] }[] }>(theirs)?.pages[0]?.items
+    ).toEqual([]);
+    expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
+  });
+
+  it("scopes a group chat's list to the group chat", async () => {
+    renderInApp(
+      <HistoryAside
+        inline
+        partner={{ type: "group-chat", id: "g1", name: "Ledningsgruppen" }}
+        activeSessionId={null}
+        onSelect={vi.fn()}
+        onDeleted={vi.fn()}
+        onClose={vi.fn()}
+      />,
+      { queryClient: testQueryClient() }
+    );
+    expect(within(scope()).getByRole("radio", { name: "Den här gruppchatten" })).toBeTruthy();
   });
 });
 
@@ -275,7 +395,9 @@ describe("RenameSessionDialog", () => {
       />
     );
     const dialog = screen.getByRole("dialog", { name: "Byt namn" });
-    const input = within(dialog).getByRole("textbox", { name: /^Namn/ });
+    // Required is the default and unmarked (decision 40).
+    const input = within(dialog).getByRole("textbox", { name: "Namn" });
+    expect(input.getAttribute("aria-required")).toBe("true");
     const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
     fireEvent.change(input, { target: { value: "  " } });
     // Never disabled: a disabled button says nothing about what is missing.

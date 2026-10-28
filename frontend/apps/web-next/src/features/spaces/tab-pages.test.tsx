@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { setViewport } from "@/test/setup-dom";
 import { renderInApp } from "@/test/render";
 import type { Space } from "./space";
 import { makeAssistant, makeSpace } from "./testing/space-fixture";
@@ -206,5 +207,28 @@ describe("AppsPage and ServicesPage", () => {
 
     show(makeSpace(), <AppsPage />);
     expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
+  });
+});
+
+describe("Collection tabs on a phone (decision 9)", () => {
+  it("list assistants as rows in their groups, apps and services too", async () => {
+    setViewport("phone");
+    const { container } = show(makeSpace({ assistants }), <AssistantsPage />);
+    const published = screen.getByRole("region", { name: "Publicerad" });
+    const row = within(published).getByRole("link", { name: /^Upphandlingsassistenten/ });
+    expect(row.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-1");
+    expect(row.closest(".astryx-item")).toBeTruthy();
+    expect(row.textContent).toContain("Svarar på frågor om LOU.");
+    expect(
+      within(row.closest("li")!).getByRole("button", {
+        name: "Fler åtgärder för Upphandlingsassistenten"
+      })
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Utkast" })).getByRole("link", {
+        name: /^Avtalsgranskaren/
+      })
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 });

@@ -4,21 +4,24 @@ import { Button as AxButton } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
-import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { toastApiError } from "@/lib/api/toast";
 import { asString, hostOf } from "@/lib/chat/metadata";
-import type { EneoUIMessage, SessionData, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
+import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
 import { sanitizeImageSrc, sanitizeWebHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 import { FileTypeTile, useSignedUrl } from "./attachments";
+import {
+  pendingTools,
+  ToolArguments,
+  toolDecision,
+  toolLabel,
+  useToolApprovals
+} from "./tool-approvals";
 import { fileExtension, formatBytes } from "@/lib/format";
 
 type Part = EneoUIMessage["parts"][number];
@@ -268,69 +271,26 @@ export function McpSnippetButton({
 }
 
 /**
- * MCP tool approval card for the data-tool-approval part. Each tool can be
- * approved/denied individually (the backend accepts a partial array of
- * decisions and tracks the remainder); "Godkänn alla" / "Avvisa alla" appear
- * when more than one tool is still pending. The still-open stream continues
- * server-side as decisions arrive. The decisions stay on the card as a record.
+ * MCP tool approval card for the data-tool-approval part. Each tool shows
+ * what it is and what it will be given (decision 12), and can be approved or
+ * denied on its own; "Godkänn alla" / "Avvisa alla" appear when more than one
+ * is still pending. Decisions come from the chat view's one owner
+ * (tool-approvals.tsx), which the phone's decision bar shares, and stay on the
+ * card as a record.
  */
-export function ToolApprovalCard({
-  data,
-  onResolved
-}: {
-  data: ToolApprovalData;
-  onResolved?: () => void;
-}) {
+export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
   const t = useTranslations();
   const headingId = useId();
-  const [decisions, setDecisions] = useState<Record<string, "approved" | "denied">>({});
-  // The button whose decision is being sent: busy, it stays enabled (Astryx
-  // isInterruptible) so it keeps focus, and presses while one is sent are
-  // ignored.
-  const [running, setRunning] = useState<string | null>(null);
-
-  const submit = useMutation({
-    mutationFn: (items: { tool_call_id: string; approved: boolean }[]) =>
-      unwrap(
-        browserApi.POST("/api/v1/conversations/approve-tools/", {
-          params: { query: { approval_id: data.approval_id } },
-          body: items
-        })
-      ),
-    onSuccess: (_, items) => {
-      setDecisions((prev) => {
-        const next = { ...prev };
-        for (const item of items) {
-          next[item.tool_call_id] = item.approved ? "approved" : "denied";
-        }
-        return next;
-      });
-      onResolved?.();
-    },
-    onError: (error) => toastApiError(error, t),
-    onSettled: () => setRunning(null)
-  });
-
+  const { decisions, running, decide, barApprovalId } = useToolApprovals();
+  // On a phone the decision bar asks (decision 26): the card shows what is
+  // asked and records the answer, without a second set of buttons.
+  const asksHere = barApprovalId !== data.approval_id;
   const timedOut = data.status === "timeout_denied";
-  // A decision made here wins while its request is in flight; otherwise the
-  // stream's decided part (data-tool-approval with status approved/denied,
-  // e.g. decided from another tab) names each tool's outcome.
-  const decisionFor = (tool: ToolCallInfo): "approved" | "denied" | undefined => {
-    const local = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
-    if (local) return local;
-    if (data.status === "pending" || timedOut) return undefined;
-    return tool.approved ? "approved" : "denied";
-  };
-  const pending = timedOut
-    ? []
-    : data.tools.filter((tool) => tool.tool_call_id && !decisionFor(tool));
-  function decide(control: string, items: { tool_call_id: string; approved: boolean }[]) {
-    if (running !== null || submit.isPending) return;
-    setRunning(control);
-    submit.mutate(items);
-  }
+  const pending = pendingTools(data, decisions);
+  const send = (control: string, items: { tool_call_id: string; approved: boolean }[]) =>
+    decide(data.approval_id, control, items);
   const decideAll = (approved: boolean) =>
-    decide(
+    send(
       approved ? "accept-all" : "deny-all",
       pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved }))
     );
@@ -346,79 +306,97 @@ export function ToolApprovalCard({
           <h3 id={headingId} className="text-[13.5px] font-semibold">
             {pending.length > 0 ? t("chat_tool_awaiting_approval") : t("chat_tool_approval_record")}
           </h3>
-          {pending.length > 0 && (
+          {pending.length > 0 && asksHere && (
             <p className="text-ax-text-secondary text-[13px]">{t("chat_tool_approval_hint")}</p>
           )}
         </div>
       </div>
       <ul className="flex flex-col gap-1.5">
         {data.tools.map((tool, index) => {
-          const decision = decisionFor(tool);
-          const name = `${tool.server_name}/${tool.tool_name}`;
+          const decision = toolDecision(tool, data, decisions);
+          const name = toolLabel(tool);
+          const titled = Boolean(tool.title?.trim());
           return (
             <li
               key={tool.tool_call_id ?? index}
-              className="bg-ax-muted rounded-ax-element flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
+              className="bg-ax-muted rounded-ax-element flex flex-col gap-1.5 px-2.5 py-2"
             >
-              <span className="min-w-0 font-mono text-xs break-all">{name}</span>
-              {timedOut ? (
-                <span className="text-ax-text-secondary flex items-center gap-1 text-xs font-medium">
-                  <ShieldX aria-hidden="true" className="size-3.5" />
-                  {t("chat_tool_approval_timed_out")}
-                </span>
-              ) : decision ? (
-                <span
-                  className={cn(
-                    "flex items-center gap-1 text-xs font-medium",
-                    decision === "approved" ? "text-ax-success" : "text-ax-error"
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-col">
+                  <span
+                    className={cn(
+                      "min-w-0 break-all",
+                      titled ? "text-[13.5px] font-medium" : "font-mono text-xs"
+                    )}
+                  >
+                    {name}
+                  </span>
+                  {titled && (
+                    <span className="text-ax-text-secondary font-mono text-xs break-all">
+                      {tool.server_name}/{tool.tool_name}
+                    </span>
                   )}
-                >
-                  {decision === "approved" ? (
-                    <ShieldCheck aria-hidden="true" className="size-3.5" />
-                  ) : (
+                </span>
+                {timedOut ? (
+                  <span className="text-ax-text-secondary flex items-center gap-1 text-xs font-medium">
                     <ShieldX aria-hidden="true" className="size-3.5" />
-                  )}
-                  {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
-                </span>
-              ) : (
-                // Astryx Button names itself from `label` (aria-label) and shows
-                // the children: each button names its tool, the text stays short.
-                <span className="flex gap-1.5">
-                  <AxButton
-                    label={t("chat_tool_accept_named", { tool: name })}
-                    variant="primary"
-                    size="sm"
-                    isLoading={running === `accept:${tool.tool_call_id}`}
-                    isInterruptible
-                    onClick={() =>
-                      decide(`accept:${tool.tool_call_id}`, [
-                        { tool_call_id: tool.tool_call_id ?? "", approved: true }
-                      ])
-                    }
+                    {t("chat_tool_approval_timed_out")}
+                  </span>
+                ) : decision ? (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 text-xs font-medium",
+                      decision === "approved" ? "text-ax-success" : "text-ax-error"
+                    )}
                   >
-                    {t("tool_accept")}
-                  </AxButton>
-                  <AxButton
-                    label={t("chat_tool_deny_named", { tool: name })}
-                    variant="secondary"
-                    size="sm"
-                    isLoading={running === `deny:${tool.tool_call_id}`}
-                    isInterruptible
-                    onClick={() =>
-                      decide(`deny:${tool.tool_call_id}`, [
-                        { tool_call_id: tool.tool_call_id ?? "", approved: false }
-                      ])
-                    }
-                  >
-                    {t("tool_deny")}
-                  </AxButton>
-                </span>
-              )}
+                    {decision === "approved" ? (
+                      <ShieldCheck aria-hidden="true" className="size-3.5" />
+                    ) : (
+                      <ShieldX aria-hidden="true" className="size-3.5" />
+                    )}
+                    {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
+                  </span>
+                ) : !asksHere ? null : (
+                  // Astryx Button names itself from `label` (aria-label) and shows
+                  // the children: each button names its tool, the text stays short.
+                  <span className="flex gap-1.5">
+                    <AxButton
+                      label={t("chat_tool_accept_named", { tool: name })}
+                      variant="primary"
+                      size="sm"
+                      isLoading={running === `accept:${tool.tool_call_id}`}
+                      isInterruptible
+                      onClick={() =>
+                        send(`accept:${tool.tool_call_id}`, [
+                          { tool_call_id: tool.tool_call_id ?? "", approved: true }
+                        ])
+                      }
+                    >
+                      {t("tool_accept")}
+                    </AxButton>
+                    <AxButton
+                      label={t("chat_tool_deny_named", { tool: name })}
+                      variant="secondary"
+                      size="sm"
+                      isLoading={running === `deny:${tool.tool_call_id}`}
+                      isInterruptible
+                      onClick={() =>
+                        send(`deny:${tool.tool_call_id}`, [
+                          { tool_call_id: tool.tool_call_id ?? "", approved: false }
+                        ])
+                      }
+                    >
+                      {t("tool_deny")}
+                    </AxButton>
+                  </span>
+                )}
+              </div>
+              {!decision && !timedOut && <ToolArguments tool={tool} />}
             </li>
           );
         })}
       </ul>
-      {pending.length > 1 && (
+      {asksHere && pending.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <AxButton
             label={t("tool_accept_all", { count: pending.length })}

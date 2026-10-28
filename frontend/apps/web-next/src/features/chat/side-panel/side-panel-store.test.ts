@@ -221,6 +221,42 @@ it("opens the overview over a file and remembers what opened it", async () => {
   opener.remove();
 });
 
+it("gives the focus back to its opener once a modal sheet over it has gone", async () => {
+  const store = panel();
+  const opener = document.createElement("button");
+  const sheet = document.createElement("button");
+  document.body.append(opener, sheet);
+  sheet.focus();
+  // A modal sheet still open keeps the opener inert: focusing it does nothing.
+  const focus = vi.spyOn(opener, "focus").mockImplementationOnce(() => {});
+  store.showOverview("uploads", opener);
+  store.closeOverview();
+  expect(document.activeElement).toBe(sheet);
+  // The sheet goes, and the focus with it.
+  sheet.remove();
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+  expect(focus).toHaveBeenCalledTimes(2);
+  opener.remove();
+});
+
+it("leaves the focus with the panel's next occupant that took it meanwhile", async () => {
+  const store = panel();
+  const opener = document.createElement("button");
+  const sheet = document.createElement("button");
+  const next = document.createElement("button");
+  document.body.append(opener, sheet, next);
+  sheet.focus();
+  vi.spyOn(opener, "focus").mockImplementationOnce(() => {});
+  store.showOverview("uploads", opener);
+  // Closed to show something else, which takes the focus itself.
+  store.closeOverview();
+  next.focus();
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  expect(document.activeElement).toBe(next);
+  for (const element of [opener, sheet, next]) element.remove();
+});
+
 it("notifies its subscribers once per change", () => {
   const store = panel();
   const listener = vi.fn();

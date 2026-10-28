@@ -121,6 +121,28 @@ describe("ToolApprovalCard", () => {
     expect(within(card).queryByRole("button")).toBeNull();
   });
 
+  it("shows each tool by its title and what it will be given (decision 12)", async () => {
+    renderCard({
+      approval_id: "a-4",
+      status: "pending",
+      tools: [
+        {
+          ...register,
+          title: "Sök ärende i diariet",
+          arguments: { arendenummer: "BN 2026-0412", falt: ["status", "handlingar"] }
+        }
+      ]
+    });
+    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).getByText("Sök ärende i diariet")).toBeTruthy();
+    expect(within(card).getByText("diarium/sok_arende")).toBeTruthy();
+    // Scalars in one line; everything, objects too, behind "Visa alla argument".
+    expect(within(card).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Visa alla argument" }));
+    await waitFor(() => expect(within(card).getByText(/"handlingar"/)).toBeTruthy());
+    expect(within(card).getByRole("button", { name: "Godkänn Sök ärende i diariet" })).toBeTruthy();
+  });
+
   it("has no axe violations", async () => {
     const { container } = renderCard({
       approval_id: "approval-5",

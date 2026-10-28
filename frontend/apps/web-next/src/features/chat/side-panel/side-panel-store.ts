@@ -230,7 +230,7 @@ export class SidePanelStore {
     if (this.overview === null) return;
     const opener = this.overview.opener;
     this.overview = null;
-    if (restoreFocus && opener?.isConnected) opener.focus();
+    if (restoreFocus) returnFocus(opener);
     this.#emit();
   }
 
@@ -790,7 +790,22 @@ export class SidePanelStore {
     this.content = null;
     this.highlight = null;
     this.#clearEdits();
-    if (this.#opener?.isConnected) this.#opener.focus();
+    returnFocus(this.#opener);
     this.#opener = null;
   }
+}
+
+/**
+ * Gives the focus back to the control that opened the panel. A modal sheet
+ * still open keeps it inert, so it is tried again once the sheet has gone,
+ * unless something else (the panel's next occupant) has taken the focus.
+ */
+function returnFocus(opener: HTMLElement | null) {
+  if (!opener?.isConnected) return;
+  opener.focus();
+  if (document.activeElement === opener) return;
+  requestAnimationFrame(() => {
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (lost && opener.isConnected) opener.focus();
+  });
 }

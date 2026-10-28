@@ -8,7 +8,7 @@ import sv from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems } from "../source-problems";
-import { inPlaceLink, SamePageLink } from "./in-place-link";
+import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 
 /** The props next/link gets, Astryx's links included (the app's LinkProvider uses next/link). */

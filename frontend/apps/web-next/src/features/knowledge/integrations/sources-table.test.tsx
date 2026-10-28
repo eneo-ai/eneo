@@ -70,7 +70,7 @@ function list(
         progress={progress}
         queued={queued}
         progressLoaded
-        labelledBy="sources"
+        name={{ "aria-labelledby": "sources" }}
       />
     </>
   );

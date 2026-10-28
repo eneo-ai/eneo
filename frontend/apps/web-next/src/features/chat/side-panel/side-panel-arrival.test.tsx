@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState, useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { observedElements, reportResize } from "@/test/setup-dom";
 import type { SidePanelStore as Store } from "./side-panel-store";
 
 // The file panel's code arrives when a test opens its gate. Each test starts
@@ -27,7 +27,6 @@ async function renderPanel(): Promise<Store> {
   const { SidePanelStore } = await import("./side-panel-store");
   let panel: Store | null = null;
   function Harness() {
-    setViewport("desktop");
     const [store] = useState(() => {
       const created = new SidePanelStore(() => Promise.reject(new Error("unused")));
       panel = created;
@@ -51,6 +50,13 @@ async function renderPanel(): Promise<Store> {
     );
   }
   renderInApp(<Harness />);
+  act(() => {
+    const region = observedElements().find((element) =>
+      element.contains(screen.getByRole("button", { name: "In the conversation" }))
+    );
+    if (!region) throw new Error("The conversation's region is not measured");
+    reportResize(region, { width: 1008, height: 800 });
+  });
   return panel!;
 }
 

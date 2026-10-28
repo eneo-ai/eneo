@@ -2,13 +2,7 @@
 
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
-import {
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow
-} from "@astryxdesign/core/Table";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
@@ -61,10 +55,11 @@ function BadgeList({ items }: { items: { id: string; name: string }[] }) {
 }
 
 /**
- * Users as a table: initials avatar with username and email, role and user
- * group badges, status dot with its label, and the row menu. Long names and
- * emails truncate with a tooltip; below the min width the table scrolls in
- * its own region.
+ * Users as a table: username and email (with an initials avatar from 768
+ * px), role and user group badges, status dot with its label, and the row menu. Every
+ * column stays on a phone (decision 9): the table scrolls sideways in its
+ * own named region with the name pinned, so a row is always named. Long
+ * names and emails truncate with a tooltip.
  */
 export function UserTable({
   users,
@@ -82,71 +77,91 @@ export function UserTable({
   const t = useTranslations();
   const stateLabel = useStateLabel();
 
-  // Each set width is also a min width (AGENTS.md → Tables).
-  return (
-    <Table aria-label={label} hasHover className="min-w-200 table-fixed">
-      <TableHeader>
-        <TableRow className="bg-ax-sunken [&>th]:text-xs">
-          <TableHeaderCell scope="col">{t("user")}</TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-1/4">
-            {t("roles")}
-          </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-1/4">
-            {t("user_groups")}
-          </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-36 min-w-36">
-            {t("status")}
-          </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-14 min-w-14">
-            <span className="sr-only">{t("actions")}</span>
-          </TableHeaderCell>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {users.map((user) => {
-          const name = user.username || user.email;
-          return (
-            <TableRow key={user.id}>
-              <TableCell>
-                <div className="flex min-w-0 items-center gap-3">
-                  {/* Decorative next to the visible name. */}
-                  <Avatar name={name} size="md" tooltip={false} aria-hidden="true" />
-                  <div className="flex min-w-0 flex-col">
-                    <Text weight="semibold" maxLines={1}>
-                      {name}
-                    </Text>
-                    {user.username && (
-                      <Text type="supporting" maxLines={1}>
-                        {user.email}
-                      </Text>
-                    )}
-                  </div>
-                </div>
-              </TableCell>
-              <TableCell>
-                <BadgeList items={user.roles} />
-              </TableCell>
-              <TableCell>
-                <BadgeList items={user.user_groups} />
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <StatusLabel
-                    status={STATE_TONE[user.state] ?? "neutral"}
-                    label={stateLabel(user.state)}
-                  />
-                  {user.password_change_required && (
+  const columns: TableColumn<AdminUser>[] = [
+    {
+      key: "name",
+      header: t("user"),
+      width: proportional(1.5, { minWidth: 208 }),
+      renderCell: (user) => {
+        const name = user.username || user.email;
+        return (
+          <div className="flex min-w-0 items-center gap-3">
+            {/* Decorative next to the visible name; a phone keeps the room. */}
+            <span className="hidden md:contents">
+              <Avatar name={name} size="md" tooltip={false} aria-hidden="true" />
+            </span>
+            <div className="flex min-w-0 flex-col">
+              <Text weight="semibold" maxLines={1}>
+                {name}
+              </Text>
+              {user.username && (
+                <Text type="supporting" maxLines={1}>
+                  {user.email}
+                </Text>
+              )}
+              {/* On a phone the exceptions are in view with the name, so no
+                  account's state waits on a sideways scroll. */}
+              {user.state !== "active" || user.password_change_required ? (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5 md:hidden">
+                  {user.state !== "active" ? (
+                    <StatusLabel status={STATE_TONE[user.state]} label={stateLabel(user.state)} />
+                  ) : null}
+                  {user.password_change_required ? (
                     <Badge label={t("admin_password_change_required_badge")} />
-                  )}
+                  ) : null}
                 </div>
-              </TableCell>
-              <TableCell className="text-end">
-                <UserActions user={user} onRemoved={onRemoved} onIssued={onIssued} />
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+              ) : null}
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      key: "roles",
+      header: t("roles"),
+      // Roles and groups share the remaining room, with badges wrapping on tablets.
+      width: proportional(1, { minWidth: 144 }),
+      renderCell: (user) => <BadgeList items={user.roles} />
+    },
+    {
+      key: "groups",
+      header: t("user_groups"),
+      width: proportional(1, { minWidth: 144 }),
+      renderCell: (user) => <BadgeList items={user.user_groups} />
+    },
+    {
+      key: "status",
+      header: t("status"),
+      width: pixel(156),
+      renderCell: (user) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusLabel
+            status={STATE_TONE[user.state] ?? "neutral"}
+            label={stateLabel(user.state)}
+          />
+          {user.password_change_required && (
+            <Badge label={t("admin_password_change_required_badge")} />
+          )}
+        </div>
+      )
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">{t("actions")}</span>,
+      width: pixel(72),
+      align: "end",
+      renderCell: (user) => <UserActions user={user} onRemoved={onRemoved} onIssued={onIssued} />
+    }
+  ];
+
+  return (
+    <Table
+      data={users}
+      columns={columns}
+      idKey="id"
+      aria-label={label}
+      pinnedColumn="name"
+      hasHover
+    />
   );
 }

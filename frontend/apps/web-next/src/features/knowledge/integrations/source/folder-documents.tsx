@@ -44,7 +44,7 @@ import { SourceStateLabel, useWatchStates } from "../source-status";
 import { itemState, watchStateLabel, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
-import type { InPlaceLink } from "./in-place-link";
+import type { InPlaceLink } from "@/components/composites/in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
@@ -330,14 +330,14 @@ export function FolderDocuments({
     {
       key: "name",
       header: t("name"),
-      width: proportional(2),
+      width: proportional(2, { minWidth: 192 }),
       sortable: true,
       renderCell: (row) => <DocumentNameCell document={row} />
     },
     {
       key: "path",
       header: t("integration_documents_path"),
-      width: proportional(1),
+      width: proportional(1, { minWidth: 96 }),
       sortable: true,
       renderCell: (row) => (
         <span className="text-ax-text-secondary block truncate" title={row.relative_path}>
@@ -355,7 +355,7 @@ export function FolderDocuments({
     {
       key: "updated_at",
       header: t("integration_documents_updated"),
-      width: proportional(1),
+      width: pixel(152),
       sortable: true,
       renderCell: (row) =>
         row.updated_at ? <ClientTime value={row.updated_at} format="date_time" /> : "–"
@@ -363,7 +363,7 @@ export function FolderDocuments({
     {
       key: "status",
       header: t("status"),
-      width: pixel(120),
+      width: pixel(128),
       renderCell: () => (
         <span className="text-ax-success inline-flex items-center gap-1.5 text-sm">
           <Check className="size-4" aria-hidden="true" />
@@ -374,7 +374,7 @@ export function FolderDocuments({
     {
       key: "link",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (row) => {
         const url = safeExternalUrl(row.url);
@@ -469,6 +469,8 @@ export function FolderDocuments({
                         columns={columns}
                         idKey="id"
                         aria-label={t("integration_documents_table_label", { name: item.name })}
+                        pinnedColumn="name"
+                        className="[--table-sticky-background:var(--color-ax-surface)]"
                         plugins={{ sort: sortPlugin }}
                       />
                     </div>

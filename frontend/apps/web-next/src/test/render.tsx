@@ -82,8 +82,7 @@ export function testAppContext({
 /** A shell context whose actions do nothing (pass `vi.fn()`s to check them). */
 export const noopShell: ShellContextValue = {
   openPalette: () => {},
-  openCreateSpace: () => {},
-  registerMobileHeader: () => () => {}
+  openCreateSpace: () => {}
 };
 
 export type RenderInAppOptions = {

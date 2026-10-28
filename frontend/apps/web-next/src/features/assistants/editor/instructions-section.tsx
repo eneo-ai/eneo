@@ -140,14 +140,15 @@ export function InstructionsSection({
   return (
     <SettingsGroup title={t("instructions")}>
       <div className="flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
+        {/* The buttons move under the label where both do not fit on a line. */}
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
             <label htmlFor="assistant-prompt" className="text-sm font-medium">
               {t("prompt")}
             </label>
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>

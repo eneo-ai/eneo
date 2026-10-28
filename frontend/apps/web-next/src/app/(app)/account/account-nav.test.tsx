@@ -6,7 +6,8 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { AccountNav } from "./account-nav.client";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/account/api-keys" }));
+const pathname = vi.hoisted(() => ({ current: "/account/api-keys" }));
+vi.mock("next/navigation", () => ({ usePathname: () => pathname.current }));
 
 afterEach(cleanup);
 
@@ -28,4 +29,15 @@ it("is a named navigation of account pages with the current one marked", async (
     "true"
   );
   await expectNoAxeViolations(container);
+});
+
+it("marks Profil on Konto's own pages, which hold what Profil holds", () => {
+  pathname.current = "/account/appearance";
+  render(
+    <NextIntlClientProvider locale="sv" messages={messages}>
+      <AccountNav />
+    </NextIntlClientProvider>
+  );
+  expect(screen.getByRole("link", { name: "Profil" }).getAttribute("aria-current")).toBe("true");
+  pathname.current = "/account/api-keys";
 });

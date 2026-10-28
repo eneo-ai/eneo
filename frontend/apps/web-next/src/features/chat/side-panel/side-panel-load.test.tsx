@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState, useSyncExternalStore } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { observedElements, reportResize } from "@/test/setup-dom";
 import { SidePanel } from "./side-panel";
 import { SidePanelStore } from "./side-panel-store";
 
@@ -42,7 +42,6 @@ const file = {
 };
 
 function Harness({ onPanel }: { onPanel: (panel: SidePanelStore) => void }) {
-  setViewport("desktop");
   const [panel] = useState(() => {
     const store = new SidePanelStore(() => Promise.reject(new Error("unused")));
     onPanel(store);
@@ -69,6 +68,13 @@ function Harness({ onPanel }: { onPanel: (panel: SidePanelStore) => void }) {
 async function openFile(): Promise<SidePanelStore> {
   let panel: SidePanelStore | null = null;
   renderInApp(<Harness onPanel={(store) => (panel = store)} />);
+  act(() => {
+    const region = observedElements().find((element) =>
+      element.contains(screen.getByText("The conversation"))
+    );
+    if (!region) throw new Error("The conversation's region is not measured");
+    reportResize(region, { width: 1008, height: 800 });
+  });
   await act(async () => panel!.open(file, null));
   return panel!;
 }

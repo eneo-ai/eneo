@@ -8,11 +8,13 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSubMenu
 } from "@astryxdesign/core/DropdownMenu";
+import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import {
   Accessibility,
   ArrowLeft,
   Building2,
+  ChevronRight,
   ChevronsUpDown,
   Globe,
   KeyRound,
@@ -21,18 +23,16 @@ import {
   Sparkles,
   User
 } from "lucide-react";
+import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
-import { setLocale } from "@/lib/i18n/actions";
-import { locales } from "@/lib/i18n/locales";
+import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
+import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
+import { navigateTo } from "@/lib/navigate-to";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 import { ThemeSubMenu } from "./theme-switcher";
-
-// Each language is named in its own language (and marked with `lang`, WCAG 3.1.2).
-const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
 
 /** The name the shell shows for the signed-in user (the API has no display name). */
 export function profileDisplayName(user: { username?: string | null; email: string }): string {
@@ -51,9 +51,52 @@ export function profileInitials(name: string): string {
   return initials || "?";
 }
 
-/** Full-page navigation for routes that are not React pages (logout, SSO, external). */
-function navigateTo(href: string) {
-  window.location.assign(href);
+/** Who is signed in, as the profile button and link show and name it. */
+function useProfile() {
+  const t = useTranslations();
+  const { user, tenant } = useAppContext();
+  const name = profileDisplayName(user);
+  const organisation = tenant.display_name?.trim() || tenant.name;
+  return {
+    name,
+    organisation,
+    // Starts with the visible name and organisation (WCAG 2.5.3).
+    label: t("shell_profile_button_label", { name, organisation }),
+    avatar: (
+      <EntityAvatar
+        id={user.id}
+        name={name}
+        icon={profileInitials(name)}
+        size="md"
+        className="rounded-full"
+      />
+    )
+  };
+}
+
+/**
+ * The profile in the drawer (decision 22): a link to Konto, which holds what
+ * the menu holds, so no menu opens on the drawer. It closes the drawer as the
+ * nav items do, Konto already open too.
+ */
+export function ProfileLink() {
+  const { name, organisation, label, avatar } = useProfile();
+  const { closeMobileNav } = useAppShellMobile();
+  return (
+    <Link
+      href="/account"
+      aria-label={label}
+      onClick={closeMobileNav}
+      className="hover:bg-ax-hover active:bg-ax-pressed focus-visible:outline-ring rounded-ax-element flex h-14 w-full items-center gap-2.5 px-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      {avatar}
+      <span className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate font-semibold">{name}</span>
+        <span className="text-ax-text-secondary truncate text-xs">{organisation}</span>
+      </span>
+      <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
+    </Link>
+  );
 }
 
 /**
@@ -64,34 +107,13 @@ function navigateTo(href: string) {
  */
 export function ProfileMenu() {
   const t = useTranslations();
-  const { user, tenant, federationStatus, links, versions } = useAppContext();
+  const { user, federationStatus, links, versions } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
-  const locale = useLocale();
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const { locale, switchLocale } = useLocaleSwitch();
   const { isCollapsed } = useSideNavCollapse();
 
-  const name = profileDisplayName(user);
-  const organisation = tenant.display_name?.trim() || tenant.name;
-  // Starts with the visible name and organisation (WCAG 2.5.3).
-  const buttonLabel = t("shell_profile_button_label", { name, organisation });
-
-  function switchLocale(next: string) {
-    startTransition(async () => {
-      await setLocale(next);
-      router.refresh();
-    });
-  }
-
-  const avatar = (
-    <EntityAvatar
-      id={user.id}
-      name={name}
-      icon={profileInitials(name)}
-      size="md"
-      className="rounded-full"
-    />
-  );
+  const { name, organisation, label: buttonLabel, avatar } = useProfile();
 
   return (
     <DropdownMenu
@@ -168,6 +190,7 @@ export function ProfileMenu() {
             <DropdownMenuRadioItem
               key={value}
               value={value}
+              // Each in its own language, marked with `lang` (WCAG 3.1.2).
               label={<span lang={value}>{LOCALE_LABELS[value] ?? value}</span>}
             />
           ))}

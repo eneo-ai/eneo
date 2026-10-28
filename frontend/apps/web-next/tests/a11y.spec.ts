@@ -7,11 +7,13 @@ import {
   activityPill,
   addActivityToAnswers,
   askChatQuestion,
+  auditLogs,
   chatComposer,
   conversationLog,
   createSpace,
   MOCK_REPLY,
   openCreateCollectionDialog,
+  spaceWithWork,
   uniqueName
 } from "./helpers";
 
@@ -268,6 +270,26 @@ async function openPalette(page: Page) {
   ).toBeVisible();
 }
 
+/**
+ * The touch layouts the page scans run at: phones and iPads, held both ways.
+ * `drawer`: below 1024 px the SideNav is a drawer behind the top bar's menu.
+ */
+const TOUCH_LAYOUTS = [
+  { name: "phone (390 × 844)", viewport: { width: 390, height: 844 }, phone: true, drawer: true },
+  {
+    name: "iPad portrait (820 × 1180)",
+    viewport: { width: 820, height: 1180 },
+    phone: false,
+    drawer: true
+  },
+  {
+    name: "iPad landscape (1180 × 820)",
+    viewport: { width: 1180, height: 820 },
+    phone: false,
+    drawer: false
+  }
+] as const;
+
 for (const colorScheme of ["light", "dark"] as const) {
   test.describe(`WCAG 2.2 AA, ${colorScheme} mode`, () => {
     // Reduced motion: no fade-ins mid-scan, so contrast is measured at rest.
@@ -520,57 +542,215 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    // Phone layouts: the top bar or the chat's own header instead of the
-    // SideNav, and a touch pointer, so the 44 px touch targets apply.
-    test.describe("phone (390 × 844)", () => {
-      test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    // Touch layouts: a phone, and an iPad upright and sideways. All report a
+    // coarse pointer, so the 44 px touch targets apply; below 1024 px (the
+    // phone, the iPad upright) the top bar or the chat's own header replaces
+    // the SideNav.
+    for (const layout of TOUCH_LAYOUTS) {
+      test.describe(layout.name, () => {
+        test.use({ viewport: layout.viewport, hasTouch: true, isMobile: true });
 
-      test("personal chat", async ({ page }) => {
-        await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
-      });
+        test("a touch pointer", async ({ page }) => {
+          await spacesList(page);
+          expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+        });
 
-      test("chat: an answer, and its activity sheet", async ({ page }) => {
-        await addActivityToAnswers(page);
-        await answeredQuestion(page);
-        await expectNoAxeViolations(page);
+        test("personal chat", async ({ page }) => {
+          await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
+        });
 
-        await activityPill(page).click();
-        const sheet = page.getByRole("dialog", { name: ACTIVITY_PANEL });
-        await expect(sheet.getByRole("tabpanel", { name: /^(Steg|Steps)$/ })).toBeVisible();
-        await expectNoAxeViolations(page);
-      });
+        if (layout.phone) {
+          test("offline: the banner, and a question kept with the reason", async ({
+            page,
+            context
+          }) => {
+            await page.goto("/spaces/personal/chat");
+            await chatStartReady(page);
+            await context.setOffline(true);
+            // One banner, under the chat's own header (the shell's gives way).
+            const banners = page.getByRole("main").getByText(/^(Du är offline|You're offline)$/);
+            const banner = banners.filter({ visible: true });
+            await expect(banner).toHaveCount(1);
+            const header = page.locator("[data-own-mobile-header]");
+            expect((await banner.boundingBox())!.y).toBeGreaterThan(
+              (await header.boundingBox())!.y + (await header.boundingBox())!.height - 1
+            );
 
-      test("spaces list", async ({ page }) => {
-        await scan(page, "/spaces/list", async () => {
-          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+            await chatComposer(page).fill("Vilken gräns gäller?");
+            await chatComposer(page).press("ControlOrMeta+Enter");
+            await expect(chatComposer(page)).toHaveValue("Vilken gräns gäller?");
+            await expect(chatComposer(page)).toHaveAccessibleDescription(
+              /^(Du är offline\. Skicka frågan|You're offline\. Send the question)/
+            );
+            await expectNoAxeViolations(page);
+
+            await context.setOffline(false);
+            await expect(banner).toBeHidden();
+          });
+
+          test("chat: an answer, and its activity sheet", async ({ page }) => {
+            await addActivityToAnswers(page);
+            await answeredQuestion(page);
+            await expectNoAxeViolations(page);
+
+            await activityPill(page).click();
+            const sheet = page.getByRole("dialog", { name: ACTIVITY_PANEL });
+            await expect(sheet.getByRole("tabpanel", { name: /^(Steg|Steps)$/ })).toBeVisible();
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("spaces list", async ({ page }) => {
+          await scan(page, "/spaces/list", async () => {
+            await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+          });
+        });
+
+        test("a space, and the organisation space", async ({ page }) => {
+          const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
+          const space = await createSpace(page, name);
+          await scan(page, `${space}/overview`, async () => {
+            await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+            // A phone lists what manages the space; tablets keep a tab for each.
+            await expect(
+              page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
+            ).toHaveCount(layout.phone ? 1 : 0);
+          });
+          await scan(page, "/spaces/organization/knowledge", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Organisation|Organization)$/ })
+            ).toBeVisible();
+          });
+        });
+
+        if (layout.drawer) {
+          test("the navigation drawer open", async ({ page }) => {
+            await spacesList(page);
+            await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+            const drawer = page.getByRole("dialog", { name: /^(Meny|Menu)$/ });
+            await expect(
+              drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })
+            ).toBeVisible();
+            // The profile opens Konto, not a menu on the drawer (decision 22).
+            await expect(
+              drawer.getByRole("link", {
+                name: /: (konto och inställningar|account and settings)$/
+              })
+            ).toHaveAttribute("href", "/account");
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("account", async ({ page }) => {
+          // Where the drawer is, Konto is a page (decision 22); sideways,
+          // "Mitt konto" and its tabs.
+          await scan(page, "/account", async () => {
+            await expect(
+              page.getByRole("heading", {
+                level: 1,
+                name: layout.drawer ? /^(Konto|Account)$/ : /^(Mitt konto|My account)$/
+              })
+            ).toBeVisible();
+          });
+          await scan(page, "/account/appearance", async () => {
+            await expect(page.getByRole("radiogroup", { name: /^(Tema|Theme)$/ })).toBeVisible();
+          });
+        });
+
+        test("the command palette open", async ({ page }) => {
+          await spacesList(page);
+          await openPalette(page);
+          await expectNoAxeViolations(page);
+        });
+
+        test("admin users", async ({ page }) => {
+          await scan(page, "/admin/users", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
+            ).toBeVisible();
+            await expect(
+              page.getByRole("main").getByText(/^\d+ (användare|users?)$/)
+            ).toBeVisible();
+          });
+        });
+
+        test("admin overview and models", async ({ page }) => {
+          await scan(page, "/admin", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
+            ).toBeVisible();
+          });
+          await scan(page, "/admin/models", async () => {
+            await expect(
+              page.getByRole("heading", { level: 2, name: "E2E Mock Provider" })
+            ).toBeVisible();
+          });
+        });
+
+        // A phone only: each scan opens an access session, and the backend
+        // allows five an hour (admin-audit.spec.ts opens one more).
+        if (layout.phone) {
+          test("admin audit log", async ({ page }) => {
+            await auditLogs(page);
+            await expectNoAxeViolations(page);
+          });
+        }
+
+        test("a space's assistants, apps and members, an editor and an app result", async ({
+          page
+        }) => {
+          const work = await spaceWithWork(page, uniqueName(`E2E A11y Touch Work ${colorScheme}`));
+          for (const [tab, name] of [
+            ["assistants", /^(Assistenter|Assistants)$/],
+            ["apps", /^(Appar|Apps)$/],
+            ["members", /^(Medlemmar|Members)$/]
+          ] as const) {
+            await scan(page, `${work.space}/${tab}`, async () => {
+              await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+            });
+          }
+          // A phone opens the editor on its index of sections (decision 21).
+          for (const editor of layout.phone
+            ? [work.editor, `${work.editor}?section=instructions`]
+            : [work.editor]) {
+            await scan(page, editor, async () => {
+              await expect(
+                page.getByRole("heading", { level: 1, name: /^Bygglov / })
+              ).toBeVisible();
+            });
+          }
+          await scan(page, work.result, async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
+            ).toBeVisible();
+          });
+        });
+
+        test("Konto's pages, and Nyheter", async ({ page }) => {
+          for (const [path, title] of [
+            ["/account/password", /^(Byt lösenord|Change password)$/],
+            ["/account/copy-format", /^(Kopieringsformat|Copy format)$/],
+            ["/account/api-keys", /^(Mina API-nycklar|My API keys)$/],
+            ["/account/integrations", /^(Integrationer|Integrations)$/]
+          ] as const) {
+            await scan(page, path, async () => {
+              // Below 1024 px the page's own heading; sideways, "Mitt konto".
+              await expect(
+                page.getByRole("heading", {
+                  level: 1,
+                  name: layout.drawer ? title : /^(Mitt konto|My account)$/
+                })
+              ).toBeAttached();
+            });
+          }
+          await scan(page, "/whats-new", async () => {
+            await expect(
+              page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
+            ).toBeVisible();
+          });
         });
       });
-
-      test("the navigation drawer open", async ({ page }) => {
-        await spacesList(page);
-        await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
-        const drawer = page.getByRole("dialog", { name: /^(Meny|Menu)$/ });
-        await expect(
-          drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })
-        ).toBeVisible();
-        await expectNoAxeViolations(page);
-      });
-
-      test("the command palette open", async ({ page }) => {
-        await spacesList(page);
-        await openPalette(page);
-        await expectNoAxeViolations(page);
-      });
-
-      test("admin users", async ({ page }) => {
-        await scan(page, "/admin/users", async () => {
-          await expect(
-            page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
-          ).toBeVisible();
-          await expect(page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
-        });
-      });
-    });
+    }
   });
 }
 
@@ -616,13 +796,45 @@ test.describe("reflow at 320 px (1.4.10)", () => {
   test("admin models", async ({ page }) => {
     await page.goto("/admin/models");
     await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
-    await expect(page.getByRole("main").getByRole("table").first()).toBeVisible();
+    // A phone lists a provider's models as rows (decision 31).
+    await expect(page.getByRole("main").getByRole("list").first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
 
   test("account", async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+    for (const path of [
+      "/account/appearance",
+      "/account/copy-format",
+      "/account/password",
+      "/account/api-keys",
+      "/account/integrations",
+      "/whats-new"
+    ]) {
+      await page.goto(path);
+      await expect(
+        page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })
+      ).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+  });
+
+  test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {
+    const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
+    for (const tab of ["assistants", "apps", "members"]) {
+      await page.goto(`${work.space}/${tab}`);
+      await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+    for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
+      await page.goto(editor);
+      await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+    await page.goto(work.result);
+    await expect(page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
 });

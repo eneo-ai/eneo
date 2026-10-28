@@ -1,8 +1,10 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Spinner } from "@astryxdesign/core/Spinner";
@@ -26,13 +28,15 @@ import { tableLocationLabel } from "@/features/workspace/preview/table-reference
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { AnswerRating, EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-import { deriveActivity, modelName } from "./activity";
+import { deriveActivity, modelName, type ActivitySource } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
+import { sourceMeta } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
 import {
   answerLinkComponents,
@@ -376,6 +380,10 @@ function AnswerActions({
     [copyText, t, text]
   );
 
+  // Decision 7: on touch the actions say what they do ("Kopiera", "Bra
+  // svar", "Dåligt svar"), 44 px targets 8 px apart; a mouse keeps the icons
+  // with tooltips. Known once hydrated; answers render after that.
+  const labelled = useMediaMatch("(pointer: coarse)") === true;
   const iconClass = "pointer-coarse:size-11";
   // The panel returns focus to the menu button that opened it.
   const openPanel = (open: (trigger: HTMLElement) => void) => {
@@ -392,21 +400,39 @@ function AnswerActions({
   ];
 
   return (
-    <div className="text-ax-text-secondary -ms-1.5 flex w-full items-center gap-0.5">
-      <IconButton
-        label={t("chat_copy_answer")}
-        tooltip={preferred === "richtext" ? t("copy_as_richtext") : t("copy_as_markdown")}
-        icon={<Copy className="size-4" />}
-        variant="ghost"
-        size="sm"
-        className={iconClass}
-        onClick={() => void copy(preferred)}
-      />
+    <div
+      className={cn(
+        "text-ax-text-secondary -ms-1.5 flex w-full items-center",
+        labelled ? "flex-wrap gap-2 [&_.astryx-toggle-button-group]:gap-2" : "gap-0.5"
+      )}
+    >
+      {labelled ? (
+        // Shown "Kopiera", named "Kopiera svaret": the name starts with what it shows.
+        <Button
+          variant="ghost"
+          size="sm"
+          label={t("chat_copy_answer")}
+          onClick={() => void copy(preferred)}
+        >
+          {t("copy")}
+        </Button>
+      ) : (
+        <IconButton
+          label={t("chat_copy_answer")}
+          tooltip={preferred === "richtext" ? t("copy_as_richtext") : t("copy_as_markdown")}
+          icon={<Copy className="size-4" />}
+          variant="ghost"
+          size="sm"
+          className={iconClass}
+          onClick={() => void copy(preferred)}
+        />
+      )}
       {feedback && (
         // ToggleButton takes no className: size its buttons for touch from here.
-        <span className="contents pointer-coarse:[&_button]:size-11">
-          {/* One choice at a time; pressing the chosen thumb again clears it.
-              A filled thumb marks the choice besides the pressed background. */}
+        <span className="contents pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11">
+          {/* One choice at a time; pressing the chosen one again clears it.
+              With icons, a filled thumb marks the choice besides the pressed
+              background. */}
           <ToggleButtonGroup
             label={t("feedback_group_label")}
             size="sm"
@@ -418,16 +444,20 @@ function AnswerActions({
             <ToggleButton
               value="good"
               label={t("chat_feedback_good")}
-              isIconOnly
-              icon={<ThumbsUp className="size-4" />}
-              pressedIcon={<ThumbsUp className="size-4" fill="currentColor" />}
+              isIconOnly={!labelled}
+              icon={labelled ? undefined : <ThumbsUp className="size-4" />}
+              pressedIcon={
+                labelled ? undefined : <ThumbsUp className="size-4" fill="currentColor" />
+              }
             />
             <ToggleButton
               value="bad"
               label={t("chat_feedback_bad")}
-              isIconOnly
-              icon={<ThumbsDown className="size-4" />}
-              pressedIcon={<ThumbsDown className="size-4" fill="currentColor" />}
+              isIconOnly={!labelled}
+              icon={labelled ? undefined : <ThumbsDown className="size-4" />}
+              pressedIcon={
+                labelled ? undefined : <ThumbsDown className="size-4" fill="currentColor" />
+              }
             />
           </ToggleButtonGroup>
         </span>
@@ -443,6 +473,72 @@ function AnswerActions({
       </div>
       <span className="flex-1" />
       {timestamp && <Timestamp value={timestamp} format="date_time" />}
+    </div>
+  );
+}
+
+/** Sources shown under an answer before "Visa alla N källor". */
+const SOURCES_SHOWN = 5;
+
+/**
+ * The answer's sources as a numbered list under it (decision 6), so what it
+ * rests on is seen without opening anything. A row opens that source in the
+ * Aktivitet panel or sheet, as its citation in the text does, and is named
+ * the same ("Källa 2: …").
+ */
+function AnswerSources({
+  messageId,
+  sources,
+  onOpen
+}: {
+  messageId: string;
+  sources: ActivitySource[];
+  onOpen: (index: number, trigger: HTMLElement) => void;
+}) {
+  const t = useTranslations();
+  const shown = sources.slice(0, SOURCES_SHOWN);
+  return (
+    <div className="border-ax-border flex flex-col gap-1 border-t pt-2">
+      <List
+        density="balanced"
+        edgeCompensation="inline"
+        header={
+          <span className="text-ax-text-secondary text-[13px] font-semibold">
+            {t("chat_sources_label")}
+          </span>
+        }
+      >
+        {shown.map((source, index) => (
+          <ListItem
+            key={`${messageId}-${source.key}`}
+            label={
+              <>
+                <span className="sr-only">{t("chat_source_number", { number: index + 1 })} </span>
+                {source.title}
+              </>
+            }
+            description={sourceMeta(source, t) || undefined}
+            onClick={(event) => onOpen(index, event.currentTarget as HTMLElement)}
+            startContent={
+              <span
+                aria-hidden="true"
+                className="bg-ax-accent-muted text-ax-text-accent rounded-ax-inner flex size-6 shrink-0 items-center justify-center text-xs font-semibold tabular-nums"
+              >
+                {index + 1}
+              </span>
+            }
+          />
+        ))}
+      </List>
+      {sources.length > SOURCES_SHOWN && (
+        <Button
+          variant="ghost"
+          size="sm"
+          label={t("chat_show_all_sources", { count: sources.length })}
+          onClick={(event) => onOpen(SOURCES_SHOWN, event.currentTarget as HTMLElement)}
+          className="self-start"
+        />
+      )}
     </div>
   );
 }
@@ -595,6 +691,9 @@ function AssistantMessage({
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
         {draft && <DraftLine draft={draft} />}
         <GeneratedFiles message={message} documents={documents} />
+        {hasText && !isStreaming && sources.length > 0 && onActivityToggle && (
+          <AnswerSources messageId={message.id} sources={sources} onOpen={openSource} />
+        )}
         {hasText && !isStreaming && (
           <AnswerActions
             text={text}

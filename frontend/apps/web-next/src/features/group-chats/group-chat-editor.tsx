@@ -14,6 +14,7 @@ import {
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,12 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
-import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { editorSummaries } from "@/features/spaces/editor-summaries";
+import {
+  EditorHeader,
+  useCreatedAnnouncement,
+  useEditorPhoneIndex
+} from "@/features/spaces/editor-header";
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { GroupChatAssistantList } from "./assistant-list";
@@ -127,11 +133,9 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
   }
 
   return (
-    <SettingsGroup title={t("group_settings")}>
-      <SettingsRow
-        title={t("assistants")}
-        description={t("assistants_will_be_able_to_answer_questions")}
-      >
+    // Named as its section is in the editor's links and on a phone's index.
+    <SettingsGroup title={t("assistants")}>
+      <SettingsRow description={t("assistants_will_be_able_to_answer_questions")}>
         <GroupChatAssistantList selected={selected} onChange={handleChange} />
       </SettingsRow>
     </SettingsGroup>
@@ -273,6 +277,7 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
   const created = useJustCreated("group-chat", groupChatId);
   useCreatedAnnouncement(created, t("group_chat_created_announcement"));
   const permissions = groupChat.permissions ?? [];
+  const summary = editorSummaries(t);
   const sections: SettingsSection[] = [
     {
       id: "general",
@@ -284,6 +289,10 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
       id: "assistants",
       label: t("assistants"),
       icon: Bot,
+      summary:
+        groupChat.tools.assistants.length > 0
+          ? t("space_assistants_count", { count: groupChat.tools.assistants.length })
+          : t("editor_summary_no_assistants"),
       node: <AssistantsSection groupChat={groupChat} />
     },
     {
@@ -298,31 +307,42 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
             id: "publishing",
             label: t("publishing"),
             icon: Send,
+            summary: summary.publishing(groupChat.published),
             node: <PublishingSection groupChat={groupChat} />
           }
         ]
       : [])
   ];
 
+  const test = (
+    <Button asChild size="sm">
+      <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
+        <Play className="size-4" />
+        {t("test")}
+      </Link>
+    </Button>
+  );
+  const phone = useEditorPhoneIndex({
+    section: "assistants",
+    name: groupChat.name,
+    actions: (
+      <AstryxButton
+        href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}
+        variant="secondary"
+        icon={<Play aria-hidden="true" className="size-4" />}
+        label={t("test")}
+      />
+    ),
+    created
+  });
+
   return (
     <SaveStatusProvider>
       <SectionedSettings
         navigationLabel={t("editor_sections_label")}
         sections={sections}
-        header={
-          <EditorHeader
-            section="assistants"
-            name={groupChat.name}
-            actions={
-              <Button asChild size="sm">
-                <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
-                  <Play className="size-4" />
-                  {t("test")}
-                </Link>
-              </Button>
-            }
-          />
-        }
+        phone={phone}
+        header={<EditorHeader section="assistants" name={groupChat.name} actions={test} />}
       />
     </SaveStatusProvider>
   );

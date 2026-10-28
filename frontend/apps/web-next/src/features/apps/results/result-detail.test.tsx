@@ -56,6 +56,12 @@ function renderResult(run: AppRun) {
   });
 }
 
+/** The docked bar's controls, in the order they sit. */
+function dockedActions() {
+  const dock = screen.getByRole("group", { name: "Resultat, åtgärder" });
+  return [...dock.querySelectorAll("a, button")].map((control) => control.textContent);
+}
+
 describe("ResultDetail", () => {
   it("shows the output and the transcription as keyboard tabs, each panel named by its tab", async () => {
     const { container } = renderResult(makeRun());
@@ -93,6 +99,10 @@ describe("ResultDetail", () => {
     );
     await expectNoAxeViolations(container);
 
+    // The page's Kopiera and Ladda ner act on the output, so they leave with
+    // it: the transcription has its own Ladda ner per file.
+    expect(dockedActions()).toEqual(["Ny körning"]);
+
     fireEvent.keyDown(transcription, { key: "Home" });
     expect(document.activeElement).toBe(results);
   });
@@ -104,6 +114,49 @@ describe("ResultDetail", () => {
     expect(screen.getByText("Sammanfattning av intervjun")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Kopiera" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Ny körning" }).getAttribute("href")).toBe("/apps/new");
+  });
+
+  it("docks Kopiera, Ladda ner and Ny körning, the primary last, for a finished run", () => {
+    const { container } = renderResult(makeRun());
+
+    expect(dockedActions()).toEqual(["Kopiera", "Ladda ner", "Ny körning"]);
+    // The input files are one line of the summary.
+    expect(container.querySelector("aside")?.textContent).toContain("Indataintervju.mp3");
+    // The output panel no longer repeats them.
+    const panel = screen.getByRole("tabpanel", { name: "Resultat" });
+    expect(within(panel).queryByRole("button", { name: "Kopiera" })).toBeNull();
+    expect(screen.getByText("Slutförd")).toBeTruthy();
+  });
+
+  it.each([
+    ["in progress", "Pågår"],
+    ["queued", "I kö"]
+  ] as const)(
+    "shows a %s run as pending: its status, a skeleton and where the result is kept",
+    async (status, label) => {
+      const { container } = renderResult(
+        makeRun({ status, output: null, finished_at: null } as Partial<AppRun>)
+      );
+
+      // A static Token, not a live region of its own.
+      expect(screen.getByText(label)).toBeTruthy();
+      expect(screen.queryByRole("status", { name: label })).toBeNull();
+      expect(screen.getByText("Ditt resultat genereras.")).toBeTruthy();
+      expect(screen.getByText("Du kan lämna sidan, resultatet sparas i Resultat.")).toBeTruthy();
+      expect(container.querySelector("[data-result-skeleton]")?.getAttribute("aria-hidden")).toBe(
+        "true"
+      );
+      // Nothing to copy or download yet: only Ny körning is docked.
+      expect(dockedActions()).toEqual(["Ny körning"]);
+      await expectNoAxeViolations(container);
+    }
+  );
+
+  it("docks only Ny körning for a failed run without output", () => {
+    renderResult(makeRun({ status: "failed", output: null, input: { text: "x", files: [] } }));
+
+    expect(screen.getByText("Misslyckades")).toBeTruthy();
+    expect(dockedActions()).toEqual(["Ny körning"]);
   });
 
   it("downloads failed-run input files through the app's authenticated proxy", async () => {

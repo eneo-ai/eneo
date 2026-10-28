@@ -1,7 +1,9 @@
 "use client";
 
 import { useSpaceSegments } from "@/lib/navigation";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { SpaceHeader } from "./space-header";
+import { SpacePhoneHeader } from "./space-phone-header";
 import { spaceRoute } from "./space-sections";
 
 /**
@@ -16,12 +18,18 @@ import { spaceRoute } from "./space-sections";
  * focus), Page Down works right after the skip link, and the page reflows at
  * 320 px / 400 %.
  *
- * Pages sit in a `p-6` inset. A page that spans the frame edge to edge, such
- * as the editors with their sticky header, marks its root element with
- * `data-space-full-bleed` and the inset goes away.
+ * Pages sit in a `p-6` inset (16 px on a phone). A page that spans the frame
+ * edge to edge, such as the editors with their sticky header, marks its root
+ * element with `data-space-full-bleed` and the inset goes away.
+ *
+ * A phone gets SpacePhoneHeader instead of the header (decision 24). CSS
+ * picks one from the server render on; once the width is known, the other
+ * is dropped.
  */
 export function SpaceFrame({ children }: { children: React.ReactNode }) {
-  const route = spaceRoute(useSpaceSegments());
+  const segments = useSpaceSegments();
+  const route = spaceRoute(segments);
+  const phone = useMediaMatch(PHONE_QUERY);
 
   if (route.kind === "chat") {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>;
@@ -33,8 +41,9 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <SpaceHeader route={route} />
-      <div className="flex min-w-0 flex-1 flex-col p-6 has-[[data-space-full-bleed]]:p-0">
+      {phone !== false ? <SpacePhoneHeader route={route} segments={segments} /> : null}
+      {phone !== true ? <SpaceHeader route={route} className="max-md:hidden" /> : null}
+      <div className="flex min-w-0 flex-1 flex-col p-4 has-[[data-space-full-bleed]]:p-0 md:p-6">
         {children}
       </div>
     </div>

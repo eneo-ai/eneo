@@ -1,6 +1,7 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { dehydrate } from "@tanstack/react-query";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { HydrationBoundary } from "@/components/providers";
 import { QueryAppContextProvider } from "@/components/providers/app-context-from-queries";
 import { AppShellFrame } from "@/components/shell/app-shell";
 import {
@@ -20,9 +21,12 @@ import packageJson from "../../../package.json";
 /** Every app page can be added to the home screen (public/manifest.json). */
 export const metadata: Metadata = {
   manifest: "/manifest.json",
+  // "default": dark status-bar text on the light surface; with
+  // "black-translucent" the white text would vanish on the white top bar.
   appleWebApp: {
     capable: true,
-    title: "Eneo"
+    title: "Eneo",
+    statusBarStyle: "default"
   },
   other: {
     "mobile-web-app-capable": "yes"

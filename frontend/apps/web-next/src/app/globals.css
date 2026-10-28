@@ -475,12 +475,19 @@
  *    transparent native <input> centred on their indicator, which Astryx sizes
  *    to 24 px: grow it to 44 × 44. The theme gives their rows 44 px, so the
  *    enlarged inputs of neighbouring rows never overlap.
+ *    A Token is 8 px under the element size, so the theme made it 36 px high:
+ *    one that is only a label (a capability, where a model runs, a run's
+ *    status) is no target and keeps a label's height. A token with a link or
+ *    a button (a removable filter) keeps its size.
  */
 @layer components {
   @media (pointer: coarse) {
     :where(.astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field) input {
       min-inline-size: 44px;
       min-block-size: 44px;
+    }
+    .astryx-token[data-size="sm"]:not(a, :has(a, button)) {
+      block-size: 1.5rem;
     }
   }
 }
@@ -653,6 +660,40 @@
   .astryx-table-scroll-wrapper {
     position: relative;
   }
+  /*
+   * A table with a pinned column (web-next Table `pinnedColumn`) stays its
+   * own scroll container when it fits. Astryx clips one that fits, and its
+   * pinned cells then stuck to the page instead: off their column where a
+   * phone's table runs over the page's gutters.
+   */
+  .astryx-table-scroll-wrapper[data-pinned] {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+}
+
+/*
+ * 9b. Sortable column headers (Astryx useTableSortable). The header's ellipsis
+ *    cannot reach a label inside the flex sort button, so a label wider than
+ *    its column was cut off mid-word: it wraps instead. On a coarse pointer
+ *    the button is at least 44 px high (decision 9; the cell keeps its block
+ *    padding, which its focus ring needs), and the arrows of an unsorted
+ *    column, which Astryx shows only on hover, are always shown: a touch
+ *    screen has no hover to reveal them.
+ */
+@layer components {
+  .astryx-table-header-cell button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  @media (pointer: coarse) {
+    .astryx-table-header-cell button {
+      min-block-size: 44px;
+    }
+    .astryx-table-header-cell button > span:has(> .astryx-icon) {
+      opacity: 1;
+    }
+  }
 }
 
 /*
@@ -762,6 +803,26 @@
   }
   .astryx-tab {
     scroll-snap-align: start;
+  }
+}
+
+/*
+ * 12b. A list row with a link (Astryx ListItem `href`: collections on a phone,
+ *     "Hantera ytan") is one target (decision 9). Astryx links only the label
+ *     column; the link's ::after covers the row (Item is the positioned
+ *     parent), and the row's own controls (a "…" menu) stay above it.
+ */
+@layer components {
+  .astryx-item > a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .astryx-item:has(> a)
+    :is(a, button, input, select, textarea, [role="button"]):not(.astryx-item > a) {
+    position: relative;
+    z-index: 1;
   }
 }
 
@@ -989,5 +1050,90 @@
   .document-prose .hljs-template-variable,
   .document-prose .hljs-type {
     color: var(--color-text-teal);
+  }
+}
+
+/*
+ * 14. Phones and tablets: the page holds still and sits clear of the hardware.
+ *    - Pulling down at the top of the page would reload it (Android Chrome) or
+ *      drag the whole shell (iOS Safari), losing a draft or a streaming answer.
+ *      main#main-content is the one scroller and keeps its own bounce.
+ *    - The scrim alone separates the drawer and dialogs from the page: no
+ *      blur behind them (Astryx blurs their ::backdrop by 2 px).
+ *    - The drawer opens and closes at the theme's open duration (225 ms)
+ *      instead of 300 ms. The custom property is set on the whole drawer, the
+ *      dialog included, because MobileNav times its close from the dialog's
+ *      computed transition duration; the ::backdrop inherits it.
+ *    - With viewport-fit=cover (app/layout.tsx) the page runs under the notch
+ *      and the home indicator. Astryx's Dialog, Popover and BottomSheet pad
+ *      themselves; its MobileNav does not, so its panel (the dialog's first
+ *      child) pads here. The shell frame pads the top and sides of the page
+ *      and main#main-content its bottom (components/shell/app-shell.tsx).
+ */
+@layer components {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+  #main-content {
+    overscroll-behavior-y: contain;
+  }
+  .astryx-mobile-nav::backdrop,
+  .astryx-dialog::backdrop {
+    backdrop-filter: none;
+  }
+  .astryx-mobile-nav {
+    --duration-medium: var(--duration-medium-min);
+  }
+  .astryx-mobile-nav > div:first-child {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-inline-start: env(safe-area-inset-left, 0px);
+  }
+  /* The touch type scale (eneo-theme.ts → adaptations) for hand-built text:
+     Tailwind's text-sm and text-xs grow with Astryx's body and supporting
+     sizes, so the two never sit side by side at different sizes. */
+  @media (pointer: coarse) {
+    :root {
+      --text-sm: 0.9375rem;
+      --text-xs: 0.8125rem;
+    }
+  }
+  /* A pushed screen's PageBar (components/shell/page-bar.tsx) fades its
+     title in as the page's own h1 scrolls under the bar; the scroller is
+     main#main-content. Without scroll timelines the title stays hidden: the
+     back link is what the bar is for. */
+  .page-bar-title {
+    opacity: 0;
+  }
+  @supports (animation-timeline: scroll()) {
+    .page-bar-title {
+      animation: page-bar-title linear both;
+      animation-timeline: scroll(nearest block);
+      animation-range: 1.5rem 3.5rem;
+    }
+  }
+  @keyframes page-bar-title {
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/*
+ * 14b. A phone's docked action bar (DockedActions): the toasts rest above it
+ *     instead of on its button (sonner sets its offsets inline, hence
+ *     !important).
+ */
+@layer components {
+  @media (width < 48rem) {
+    body:has([data-docked-actions]) [data-sonner-toaster] {
+      --offset-bottom: calc(
+        var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px
+      ) !important;
+      --mobile-offset-bottom: calc(
+        var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px
+      ) !important;
+    }
   }
 }

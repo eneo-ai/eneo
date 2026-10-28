@@ -23,9 +23,11 @@ import {
 import { useTour } from "./tour-provider";
 import { useWhatsNew } from "./whats-new-provider";
 
+// The accent text token, not --primary: primary text on its own tint is below
+// 4.5:1 in light mode.
 const typeTone = {
   new: "border-success/30 bg-success/10 text-success",
-  improved: "border-primary/30 bg-primary/10 text-primary",
+  improved: "border-primary/30 bg-primary/10 text-ax-text-accent",
   fixed: "border-warning/30 bg-warning/10 text-warning"
 } as const;
 
@@ -98,7 +100,7 @@ export function WhatsNewPage({ title }: { title: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-4 sm:p-6">
       <PageHeader title={title} />
       <p className="text-muted-foreground">{t("whats_new_intro")}</p>
       {releases.length === 0 ? (
@@ -126,9 +128,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                   className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
                 >
                   {release.version}
-                  {!release.date && (
-                    <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
-                  )}
+                  {!release.date && <span className="text-xs">{t("whats_new_upcoming")}</span>}
                   {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
                     <>
                       <span aria-hidden="true" className="bg-success size-2 rounded-full" />

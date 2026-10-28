@@ -1,117 +1,156 @@
 "use client";
 
-import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, useState } from "react";
+import { useMemo, useState } from "react";
+import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
-import { Badge } from "@/components/ui/badge";
+import { StatusLabel } from "@/components/composites/status-label";
+import { TableFrame } from "@/components/composites/table-frame";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import { useCopy } from "@/lib/hooks/use-copy";
 import { actionLabel, type AuditLog } from "./audit";
 
+/**
+ * The audit log as a table that keeps every column on a phone (decision 9):
+ * it scrolls sideways in its own named region with the event pinned, and the
+ * pinned cell says what happened, to what, and whether it failed, so no row
+ * depends on a scroll. The event opens its full details.
+ */
 export function AuditTable({ logs }: { logs: AuditLog[] }) {
   const t = useTranslations();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The event opened last stays in the dialog while it closes.
+  const [shown, setShown] = useState<AuditLog | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Kept across renders: new columns would remount the cells, and with them
+  // the event that has the focus the dialog returns to.
+  const columns = useMemo((): TableColumn<AuditLog>[] => {
+    const show = (log: AuditLog) => {
+      setShown(log);
+      setIsOpen(true);
+    };
+    const outcome = (log: AuditLog) =>
+      log.outcome === "success" ? t("audit_outcome_success") : t("audit_outcome_failure");
+    return [
+      {
+        key: "event",
+        header: t("audit_event"),
+        width: proportional(1, { minWidth: 240 }),
+        renderCell: (log) => (
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={(event) => {
+              // Safari does not focus a tapped button; the dialog returns focus
+              // to what had it when it opened, so this event takes it first.
+              event.currentTarget.focus();
+              show(log);
+            }}
+            className="focus-visible:outline-ring rounded-ax-inner flex min-h-11 w-full min-w-0 flex-col items-start gap-0.5 py-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <span className="line-clamp-2 font-semibold break-words">
+              {actionLabel(t, log.action)}
+            </span>
+            <span className="text-ax-text-secondary line-clamp-2 text-sm break-words">
+              {log.description}
+            </span>
+            {log.outcome === "success" ? null : <StatusLabel status="error" label={outcome(log)} />}
+          </button>
+        )
+      },
+      {
+        key: "time",
+        header: t("audit_timestamp"),
+        width: pixel(152),
+        renderCell: (log) => (
+          <span className="text-sm tabular-nums">
+            <ClientTime value={log.timestamp} format="date_time" />
+          </span>
+        )
+      },
+      {
+        key: "actor",
+        header: t("audit_actor"),
+        width: pixel(168),
+        renderCell: (log) => (
+          <span className="text-sm">
+            <span className="text-ax-text-secondary">{t(`audit_actor_${log.actor_type}`)}</span>
+            {log.actor_id ? (
+              <span className="ms-1 font-mono text-xs">{log.actor_id.slice(0, 8)}</span>
+            ) : null}
+          </span>
+        )
+      },
+      {
+        key: "outcome",
+        header: t("audit_outcome"),
+        width: pixel(136),
+        renderCell: (log) => (
+          <StatusLabel
+            status={log.outcome === "success" ? "success" : "error"}
+            label={outcome(log)}
+          />
+        )
+      }
+    ];
+  }, [t]);
 
   return (
-    <div className="overflow-x-auto">
-      <Table aria-label={t("audit_logs")}>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-8" />
-            <TableHead className="whitespace-nowrap">{t("audit_timestamp")}</TableHead>
-            <TableHead>{t("action")}</TableHead>
-            <TableHead>{t("audit_actor")}</TableHead>
-            <TableHead>{t("description")}</TableHead>
-            <TableHead>{t("audit_outcome")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {logs.map((log) => {
-            const isOpen = expanded.has(log.id);
-            return (
-              <Fragment key={log.id}>
-                {/* Clicking the row is a pointer shortcut for the details button in
-                    its first cell, which keyboards and screen readers use. */}
-                <TableRow className="cursor-pointer" onClick={() => toggle(log.id)}>
-                  <TableCell className="w-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6"
-                      aria-label={t("audit_full_details")}
-                      aria-expanded={isOpen}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggle(log.id);
-                      }}
-                    >
-                      {isOpen ? (
-                        <ChevronDown className="size-4" />
-                      ) : (
-                        <ChevronRight className="size-4" />
-                      )}
-                    </Button>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
-                    <ClientTime value={log.timestamp} format="date_time" />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{actionLabel(t, log.action)}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <span className="text-muted-foreground">
-                      {t(`audit_actor_${log.actor_type}`)}
-                    </span>
-                    {log.actor_id && (
-                      <span className="ml-1 font-mono text-xs">{log.actor_id.slice(0, 8)}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-md truncate text-sm" title={log.description}>
-                    {log.description}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={
-                        log.outcome === "success"
-                          ? "border-success/40 text-success"
-                          : "border-destructive/40 text-destructive"
-                      }
-                    >
-                      {log.outcome === "success"
-                        ? t("audit_outcome_success")
-                        : t("audit_outcome_failure")}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-                {isOpen && <AuditDetailRow log={log} t={t} />}
-              </Fragment>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+    <>
+      <TableFrame>
+        <Table
+          data={logs}
+          columns={columns}
+          idKey="id"
+          aria-label={t("audit_logs")}
+          // No row hover: only the event opens the details, the row does not.
+          pinnedColumn="event"
+        />
+      </TableFrame>
+      {/* Mounted from the start: a dialog that mounts open records where focus
+          was only after its contents have taken it, and returns nowhere. */}
+      <AuditDetailsDialog log={shown} isOpen={isOpen} onOpenChange={setIsOpen} />
+    </>
   );
 }
 
-function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTranslations> }) {
+/** One event in full: when, the outcome, who, what, from where, and its metadata. */
+function AuditDetailsDialog({
+  log,
+  isOpen,
+  onOpenChange
+}: {
+  log: AuditLog | null;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Dialog isOpen={isOpen} onOpenChange={onOpenChange} width={640} maxHeight="85dvh">
+      <Layout
+        height="auto"
+        header={
+          <DialogHeader
+            title={log ? actionLabel(t, log.action) : t("audit_full_details")}
+            subtitle={log?.description}
+            onOpenChange={onOpenChange}
+          />
+        }
+        content={
+          // Keyed: each event starts afresh (a copy confirmation is the one it was for).
+          <LayoutContent>{log ? <AuditDetails key={log.id} log={log} /> : null}</LayoutContent>
+        }
+      />
+    </Dialog>
+  );
+}
+
+function AuditDetails({ log }: { log: AuditLog }) {
+  const t = useTranslations();
   const hasMetadata = log.metadata && Object.keys(log.metadata).length > 0;
   const { copy, isCopied } = useCopy();
 
@@ -120,68 +159,87 @@ function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTra
   };
 
   return (
-    <TableRow className="bg-muted/30 hover:bg-muted/30">
-      <TableCell />
-      <TableCell colSpan={5} className="py-3">
-        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Field label={t("audit_actor")} value={log.actor_id} mono />
-          <Field label={t("audit_entity")} value={`${log.entity_type} · ${log.entity_id}`} mono />
-          <Field
-            label={t("audit_ip_address")}
-            value={log.ip_address}
-            mono
-            fallback={t("audit_not_recorded")}
-          />
-          <Field
-            label={t("audit_request_id")}
-            value={log.request_id}
-            mono
-            fallback={t("audit_not_recorded")}
-          />
-          <Field
-            label={t("audit_user_agent")}
-            value={log.user_agent}
-            fallback={t("audit_not_recorded")}
-            className="sm:col-span-2"
-          />
-          {log.error_message && (
-            <Field
-              label={t("audit_error_message")}
-              value={log.error_message}
-              className="text-destructive sm:col-span-2"
+    <div className="flex flex-col gap-4 pb-2">
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("audit_timestamp")}</dt>
+          <dd>
+            <ClientTime value={log.timestamp} format="date_time" />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("audit_outcome")}</dt>
+          <dd>
+            <StatusLabel
+              status={log.outcome === "success" ? "success" : "error"}
+              label={
+                log.outcome === "success" ? t("audit_outcome_success") : t("audit_outcome_failure")
+              }
             />
-          )}
-        </dl>
-
-        {hasMetadata && (
-          <div className="mt-3">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-muted-foreground text-xs font-medium">
-                {t("audit_metadata_json")}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                onClick={() => void copyMetadata()}
-              >
-                {isCopied ? <Check className="size-3" /> : <Copy className="size-3" />}
-                {isCopied ? t("audit_json_copied") : t("audit_copy_json")}
-              </Button>
-            </div>
-            {/* A scroll area without focusable content: focusable, so it scrolls by keyboard. */}
-            <pre
-              role="region"
-              aria-label={t("audit_metadata_json")}
-              tabIndex={0}
-              className="bg-background focus-visible:outline-ring max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              {JSON.stringify(log.metadata, null, 2)}
-            </pre>
-          </div>
+          </dd>
+        </div>
+        {/* What kind of actor, with its id: a system event has none. */}
+        <Field
+          label={t("audit_actor")}
+          value={t(`audit_actor_${log.actor_type}`) + (log.actor_id ? ` · ${log.actor_id}` : "")}
+          mono
+        />
+        <Field label={t("audit_entity")} value={`${log.entity_type} · ${log.entity_id}`} mono />
+        <Field
+          label={t("audit_ip_address")}
+          value={log.ip_address}
+          mono
+          fallback={t("audit_not_recorded")}
+        />
+        <Field
+          label={t("audit_request_id")}
+          value={log.request_id}
+          mono
+          fallback={t("audit_not_recorded")}
+        />
+        <Field
+          label={t("audit_user_agent")}
+          value={log.user_agent}
+          fallback={t("audit_not_recorded")}
+          className="sm:col-span-2"
+        />
+        {log.error_message && (
+          <Field
+            label={t("audit_error_message")}
+            value={log.error_message}
+            className="text-destructive sm:col-span-2"
+          />
         )}
-      </TableCell>
-    </TableRow>
+      </dl>
+
+      {hasMetadata && (
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-muted-foreground text-xs font-medium">
+              {t("audit_metadata_json")}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-xs"
+              onClick={() => void copyMetadata()}
+            >
+              {isCopied ? <Check className="size-3" /> : <Copy className="size-3" />}
+              {isCopied ? t("audit_json_copied") : t("audit_copy_json")}
+            </Button>
+          </div>
+          {/* A scroll area without focusable content: focusable, so it scrolls by keyboard. */}
+          <pre
+            role="region"
+            aria-label={t("audit_metadata_json")}
+            tabIndex={0}
+            className="bg-background focus-visible:outline-ring max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            {JSON.stringify(log.metadata, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 

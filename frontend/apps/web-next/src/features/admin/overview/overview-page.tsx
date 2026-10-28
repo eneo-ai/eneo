@@ -5,9 +5,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Link } from "@astryxdesign/core/Link";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { Activity, ChevronRight, Cpu, Globe, History, Users, type LucideIcon } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useId, useMemo, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -17,9 +19,13 @@ import { StatusLabel, type StatusTone } from "@/components/composites/status-lab
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { actionLabel } from "@/features/admin/audit/audit";
 import type { CrawlerSchedulerHealth } from "@/features/admin/crawler/crawler";
+import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { AttentionSection, useAdminAttention } from "./attention";
 import {
   latestAuditEventsQueryOptions,
   overviewCrawlerQueryOptions,
@@ -232,6 +238,22 @@ function CrawlerCard() {
   );
 }
 
+/**
+ * Whether the audit logs are locked: they answer 401 until the admin opens a
+ * justified access session (the page's gate). Remembered while the query
+ * retries, which clears its error, so the lock does not flip to a load error.
+ */
+function useAuditLocked(query: UseQueryResult<unknown, Error>): boolean {
+  const [locked, setLocked] = useState(false);
+  const now = query.error
+    ? query.error instanceof EneoApiError && query.error.status === 401
+    : query.data !== undefined
+      ? false
+      : locked;
+  if (now !== locked) setLocked(now);
+  return now;
+}
+
 function AuditLocked() {
   const t = useTranslations();
   return (
@@ -250,6 +272,7 @@ function AuditLocked() {
 function AuditCard() {
   const t = useTranslations();
   const query = useQuery(latestAuditEventsQueryOptions(browserApi));
+  const locked = useAuditLocked(query);
   const logs = query.data?.logs ?? [];
 
   return (
@@ -258,10 +281,7 @@ function AuditCard() {
       href="/admin/audit-logs"
       linkLabel={t("admin_overview_audit_link")}
       query={query}
-      renderError={(error) =>
-        // 401: the audit logs need a justified access session (the page's gate).
-        error instanceof EneoApiError && error.status === 401 ? <AuditLocked /> : undefined
-      }
+      renderError={() => (locked ? <AuditLocked /> : undefined)}
     >
       {query.data && logs.length === 0 ? (
         <CardEmpty title={t("admin_overview_audit_empty")} />
@@ -284,23 +304,252 @@ function AuditCard() {
   );
 }
 
+/** A query with nothing to wait for or fail: a locked area's row. */
+const SETTLED: CardQuery = {
+  data: null,
+  isPending: false,
+  isError: false,
+  isFetching: false,
+  errorUpdatedAt: 0,
+  dataUpdatedAt: 0,
+  error: null,
+  refetch: () => Promise.reject(new Error("settled"))
+};
+
+/** One area on a phone: its name, how it stands now, and its page. */
+function AreaRow({
+  href,
+  icon: Icon,
+  label,
+  query,
+  state
+}: {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  query: CardQuery;
+  /** How the area stands, once its data is in. */
+  state: ReactNode;
+}) {
+  const t = useTranslations();
+  const description = blockingError(query)
+    ? t("query_error_title")
+    : query.isPending
+      ? t("loading")
+      : state;
+  return (
+    <ListItem
+      href={href}
+      className="min-h-14"
+      label={
+        <span className="block break-words">
+          {label}
+          <span className="sr-only">, </span>
+        </span>
+      }
+      description={
+        <span className="flex flex-wrap items-center gap-x-1 break-words">{description}</span>
+      }
+      startContent={<Icon aria-hidden="true" className="text-ax-text-secondary size-5" />}
+      endContent={<ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4" />}
+    />
+  );
+}
+
 /**
- * The admin landing: what is going on in the organisation, one card per
- * area with a link to its page. The audit card appears only when audit
- * logging is on (otherwise there is nothing to list).
+ * "Läget just nu" on a phone (decision 30): each area as a row with its live
+ * state, in place of the cards. An area whose problem leads the page says so
+ * here too, so the row never contradicts it.
+ */
+function AreaRows({ className }: { className?: string }) {
+  const t = useTranslations();
+  const id = useId();
+  const format = useNumberFormat();
+  const { settings } = useAppContext();
+  const users = useQuery(overviewUsersQueryOptions(browserApi));
+  const models = useQuery(adminModelsQueryOptions(browserApi));
+  const usage = useQuery(overviewUsageQueryOptions(browserApi));
+  const crawler = useQuery(overviewCrawlerQueryOptions(browserApi));
+  const audit = useQuery({
+    ...latestAuditEventsQueryOptions(browserApi),
+    enabled: settings.audit_logging_enabled
+  });
+  const auditLocked = useAuditLocked(audit);
+  // What leads the page is said here too, so a row never reads as fine.
+  const attention = useAdminAttention();
+  const modelsAttention = attention.filter((row) => row.href.startsWith("/admin/models"));
+  const scheduler = attention.find((row) => row.key === "crawler-scheduler");
+
+  const metadata = users.data?.metadata;
+  const active = metadata?.counts?.active ?? metadata?.total_count ?? 0;
+  const inactive = metadata?.counts?.inactive;
+  // The models the Modeller page lists: those of a provider (built-in global
+  // models without one are not managed there).
+  const providerModels = models.data
+    ? [
+        ...models.data.completion_models,
+        ...models.data.embedding_models,
+        ...models.data.transcription_models,
+        ...models.data.image_models
+      ].filter((model) => model.provider_id != null)
+    : [];
+  const summary = crawler.data?.summary;
+  const latest = audit.data?.logs[0];
+
+  return (
+    <section aria-labelledby={id} className={cn("flex flex-col gap-2", className)}>
+      <Heading level={2} id={id} className="text-lg">
+        {t("admin_areas_title")}
+      </Heading>
+      <List hasDividers edgeCompensation="inline">
+        <AreaRow
+          href="/admin/users"
+          icon={Users}
+          label={t("users")}
+          query={users}
+          state={
+            metadata
+              ? inactive != null
+                ? t("admin_area_users", { active, inactive })
+                : t("admin_area_users_active", { active })
+              : null
+          }
+        />
+        <AreaRow
+          href="/admin/models"
+          icon={Cpu}
+          label={t("models")}
+          query={models}
+          state={
+            models.data ? (
+              <>
+                {modelsAttention.length > 0 ? (
+                  <>
+                    <StatusLabel
+                      status={
+                        modelsAttention.some((row) => row.tone === "error") ? "error" : "warning"
+                      }
+                      label={t("admin_attention_title")}
+                      className="text-[length:inherit]"
+                    />
+                    {" · "}
+                  </>
+                ) : null}
+                {t("admin_area_models", {
+                  active: providerModels.filter((model) => model.is_org_enabled).length,
+                  total: providerModels.length
+                })}
+              </>
+            ) : null
+          }
+        />
+        <AreaRow
+          href="/admin/usage"
+          icon={Activity}
+          label={t("usage")}
+          query={usage}
+          state={
+            usage.data
+              ? usage.data.total_token_usage === 0
+                ? t("admin_overview_usage_empty")
+                : t("admin_area_usage", {
+                    tokens: format.format(usage.data.total_token_usage),
+                    count: usage.data.models.length
+                  })
+              : null
+          }
+        />
+        <AreaRow
+          href="/admin/crawler"
+          icon={Globe}
+          label={t("admin_crawler_title")}
+          query={crawler}
+          state={
+            summary ? (
+              <>
+                {scheduler ? (
+                  <>
+                    <StatusLabel
+                      status={scheduler.tone}
+                      label={scheduler.description}
+                      className="text-[length:inherit]"
+                    />
+                    {" · "}
+                  </>
+                ) : null}
+                {[
+                  summary.issues > 0
+                    ? t("admin_attention_crawler_issues", { count: summary.issues })
+                    : null,
+                  t("admin_area_crawler", {
+                    ongoing: format.format(summary.ongoing),
+                    queued: format.format(summary.queued)
+                  })
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </>
+            ) : null
+          }
+        />
+        {settings.audit_logging_enabled ? (
+          <AreaRow
+            href="/admin/audit-logs"
+            icon={History}
+            label={t("audit_logs")}
+            // Locked until an access session (401) is a state, not a failure.
+            query={auditLocked ? SETTLED : audit}
+            state={
+              auditLocked
+                ? t("admin_overview_audit_locked")
+                : audit.data
+                  ? latest
+                    ? t.rich("admin_area_audit", {
+                        event: latest.description,
+                        time: () => <ClientTime value={latest.timestamp} format="auto" />
+                      })
+                    : t("admin_overview_audit_empty")
+                  : null
+            }
+          />
+        ) : null}
+      </List>
+    </section>
+  );
+}
+
+/**
+ * The admin landing: what needs an admin first, when anything does
+ * (decision 30), then what is going on in the organisation, one card per
+ * area with a link to its page, or on a phone one row per area. The audit
+ * area appears only when audit logging is on (otherwise there is nothing to
+ * list). Both layouts render until the width is known; CSS shows one.
  */
 export function AdminOverviewPage() {
   const t = useTranslations();
   const { settings } = useAppContext();
+  const phone = useMediaMatch(PHONE_QUERY);
+  const layouts = useRef<HTMLDivElement>(null);
+  useFocusAcrossLayouts(layouts, phone);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title={t("overview")} description={t("admin_overview_description")} />
-      <div className="grid gap-4 md:grid-cols-2">
-        <UsersCard />
-        <UsageCard />
-        <CrawlerCard />
-        {settings.audit_logging_enabled ? <AuditCard /> : null}
+      <PageHeader
+        title={t("overview")}
+        // The cards' summary; a phone's rows say it themselves ("Läget just nu").
+        description={<span className="max-md:hidden">{t("admin_overview_description")}</span>}
+      />
+      <AttentionSection />
+      <div ref={layouts} className="contents">
+        {phone !== false ? <AreaRows className="md:hidden" /> : null}
+        {phone !== true ? (
+          <div className="grid gap-4 max-md:hidden md:grid-cols-2">
+            <UsersCard />
+            <UsageCard />
+            <CrawlerCard />
+            {settings.audit_logging_enabled ? <AuditCard /> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
