@@ -49,19 +49,20 @@ function Button({
   size = "default",
   asChild = false,
   children,
+  onClick,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot.Root : "button";
-  // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms);
-  // the spinner shows sighted users what aria-busy tells assistive tech. Not
+  // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms),
+  // and a second press is ignored here, not by every caller: no onClick, and
+  // no implicit form submit.
+  const ariaBusy = props["aria-busy"] === true || props["aria-busy"] === "true";
+  // The spinner shows sighted users what aria-busy tells assistive tech. Not
   // for icon buttons, whose fixed size has no room for it, nor asChild.
-  const busy =
-    !asChild &&
-    !size?.startsWith("icon") &&
-    (props["aria-busy"] === true || props["aria-busy"] === "true");
+  const busy = ariaBusy && !asChild && !size?.startsWith("icon");
 
   return (
     <Comp
@@ -69,6 +70,9 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }), busy && "cursor-progress")}
+      onClick={
+        ariaBusy ? (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault() : onClick
+      }
       {...props}
     >
       {busy ? (

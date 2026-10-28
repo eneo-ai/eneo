@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { Button, buttonVariants } from "./button";
 import { Checkbox } from "./checkbox";
@@ -84,6 +84,45 @@ describe("Button", () => {
       </Button>
     );
     expect(screen.getByRole("button", { name: "Uppdatera" }).querySelector("svg")).toBeNull();
+  });
+
+  it("ignores a press while busy and acts on one when idle", () => {
+    const onClick = vi.fn();
+    const { rerender } = render(
+      <Button aria-busy onClick={onClick}>
+        Spara
+      </Button>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(onClick).not.toHaveBeenCalled();
+
+    rerender(<Button onClick={onClick}>Spara</Button>);
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a press on a busy icon button, which shows no spinner", () => {
+    const onClick = vi.fn();
+    render(
+      <Button size="icon" aria-label="Stoppa inspelning" aria-busy="true" onClick={onClick}>
+        ■
+      </Button>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa inspelning" }));
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("does not submit its form while busy", () => {
+    const onSubmit = vi.fn((event: React.SubmitEvent) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <Button type="submit" aria-busy>
+          Skicka
+        </Button>
+      </form>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("is a named, focusable button", async () => {
