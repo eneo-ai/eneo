@@ -8,7 +8,11 @@ import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -120,9 +124,7 @@ export function SharePointAppConfigDialog({
               ? tenantDomainRef
               : null;
     if (!firstProblem) return true;
-    // Rendered before focus moves, so the field is read with its error.
-    flushSync(() => setSubmitted(true));
-    firstProblem.current?.focus();
+    revealProblems(() => setSubmitted(true), firstProblem.current);
     return false;
   }
 

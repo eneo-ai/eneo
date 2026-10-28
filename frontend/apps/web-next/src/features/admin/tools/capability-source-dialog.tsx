@@ -4,12 +4,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -67,13 +70,6 @@ const FIELD_IDS: Partial<Record<FormField, string>> = {
   toolDefinitionMaxKiB: "source-max-definition"
 };
 
-/** Fields inside the collapsed "advanced options". */
-const ADVANCED: ReadonlySet<FormField> = new Set([
-  "toolCatalogMaxCount",
-  "toolCatalogMaxMiB",
-  "toolDefinitionMaxKiB"
-]);
-
 export function CapabilitySourceDialog({
   purpose,
   server,
@@ -93,7 +89,6 @@ export function CapabilitySourceDialog({
   const [saved, setSaved] = useState(false);
   const [tokenConfirmation, setTokenConfirmation] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const advancedRef = useRef<HTMLDetailsElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
   const tokenConfirmationRef = useRef<HTMLInputElement>(null);
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
@@ -159,16 +154,15 @@ export function CapabilitySourceDialog({
     if (tokenMismatch) withProblems.add("tokenConfirmation");
     const firstProblem = FIELD_ORDER.find((field) => withProblems.has(field));
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      if (ADVANCED.has(firstProblem) && advancedRef.current) advancedRef.current.open = true;
-      const element =
+      // Advanced fields sit in a closed details, which revealProblems opens.
+      revealProblems(
+        () => setSubmitted(true),
         firstProblem === "token"
           ? tokenRef.current
           : firstProblem === "tokenConfirmation"
             ? tokenConfirmationRef.current
-            : document.getElementById(FIELD_IDS[firstProblem] ?? "");
-      (element?.matches("fieldset") ? element.querySelector("input") : element)?.focus();
+            : FIELD_IDS[firstProblem]
+      );
       return;
     }
     setBusy(true);
@@ -446,7 +440,7 @@ export function CapabilitySourceDialog({
             />
             <FieldProblem id="source-priority" problem={problemAt("priority")} />
           </div>
-          <details ref={advancedRef} className="rounded-lg border p-3">
+          <details className="rounded-lg border p-3">
             <summary className="cursor-pointer text-sm font-medium">
               {t("skills_advanced_options")}
             </summary>

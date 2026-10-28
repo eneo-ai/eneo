@@ -3,11 +3,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -113,9 +113,7 @@ export function RenameSessionDialog({
   const save = () => {
     if (pending || !session) return;
     if (!value.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmittedFor(session));
-      inputRef.current?.focus();
+      revealProblems(() => setSubmittedFor(session), inputRef.current);
       return;
     }
     onSave(value.trim());

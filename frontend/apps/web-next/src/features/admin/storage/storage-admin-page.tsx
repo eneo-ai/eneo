@@ -3,9 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { revealProblems } from "@/components/composites/field-problem";
 import { useRouter } from "@/lib/navigation";
 import { useCallback, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -196,9 +196,7 @@ function StoragePolicyEditor({
     if (saving || saveBlocked) return;
     const invalid = LIMIT_FIELDS.find(({ field }) => !isValidByteLimit(draft[field]));
     if (invalid) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(invalid.id)?.focus();
+      revealProblems(() => setSubmitted(true), invalid.id);
       return;
     }
     if (targetChanged) setConfirmOpen(true);

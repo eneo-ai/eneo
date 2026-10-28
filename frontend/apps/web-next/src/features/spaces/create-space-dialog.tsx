@@ -3,12 +3,12 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -63,9 +63,7 @@ export function CreateSpaceDialog({
     if (createSpace.isPending) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setShowError(true));
-      inputRef.current?.focus();
+      revealProblems(() => setShowError(true), inputRef.current);
       return;
     }
     createSpace.mutate({ name: trimmed });

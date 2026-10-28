@@ -3,12 +3,12 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Text } from "@astryxdesign/core/Text";
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
+import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -179,9 +179,7 @@ function UserEditorForm({
     if (pending || policyQuery.isPending) return;
     const first = (Object.keys(errors) as Field[]).find((field) => errors[field]);
     if (first) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      fields[first].current?.focus();
+      revealProblems(() => setSubmitted(true), fields[first].current);
       return;
     }
     if (mode === "update" && !user?.username) {

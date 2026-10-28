@@ -4,12 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -149,9 +152,7 @@ export function McpServerDialog({
             ? tokenConfirmationRef
             : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     save.mutate();

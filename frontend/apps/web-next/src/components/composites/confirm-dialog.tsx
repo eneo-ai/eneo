@@ -1,9 +1,12 @@
 "use client";
 
 import { useId, useRef, useState, type ReactNode } from "react";
-import { flushSync } from "react-dom";
 import { useTranslations } from "next-intl";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -122,9 +125,7 @@ export function ConfirmDialog({
   async function confirm() {
     if (busy) return;
     if (blocked) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      inputRef.current?.focus();
+      revealProblems(() => setSubmitted(true), inputRef.current);
       return;
     }
     setRunning(true);

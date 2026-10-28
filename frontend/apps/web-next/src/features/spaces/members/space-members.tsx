@@ -5,9 +5,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -193,9 +196,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   function add() {
     if (addMember.isPending) return;
     if (!selectedId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      searchRef.current?.focus();
+      revealProblems(() => setSubmitted(true), searchRef.current);
       return;
     }
     addMember.mutate({ id: selectedId, role });
@@ -398,9 +399,7 @@ function AddGroupMemberDialog() {
   function add() {
     if (addGroup.isPending) return;
     if (!selectedId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      groupRef.current?.focus();
+      revealProblems(() => setSubmitted(true), groupRef.current);
       return;
     }
     addGroup.mutate({ id: selectedId, role });

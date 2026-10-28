@@ -3,8 +3,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -265,9 +268,7 @@ function EditModelForm({
                   ? "model-max-candidates"
                   : null;
               if (firstInvalid) {
-                // Rendered before focus moves, so the field is read with its problem.
-                flushSync(() => setSaveTried(true));
-                document.getElementById(firstInvalid)?.focus();
+                revealProblems(() => setSaveTried(true), firstInvalid);
                 return;
               }
             }

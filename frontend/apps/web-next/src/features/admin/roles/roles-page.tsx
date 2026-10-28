@@ -22,8 +22,11 @@ import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -168,9 +171,7 @@ export function RolesPage() {
     event.preventDefault();
     if (!editor || saving) return;
     if (!name.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      nameRef.current?.focus();
+      revealProblems(() => setSubmitted(true), nameRef.current);
       return;
     }
     // Nothing changed: nothing to send.

@@ -5,8 +5,11 @@ import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -107,9 +110,7 @@ export function ModulesPage({ title }: { title: string }) {
           ? serviceKeyRef
           : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     const key = trimmedKey;

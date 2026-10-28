@@ -4,8 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Shield } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -94,9 +97,7 @@ export function JustificationForm() {
                 ? descriptionRef
                 : null;
             if (firstProblem) {
-              // Rendered before focus moves, so the field is read with its error.
-              flushSync(() => setSubmitted(true));
-              firstProblem.current?.focus();
+              revealProblems(() => setSubmitted(true), firstProblem.current);
               return;
             }
             create.mutate();

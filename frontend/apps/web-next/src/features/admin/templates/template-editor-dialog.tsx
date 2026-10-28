@@ -3,8 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -181,9 +184,7 @@ export function TemplateEditorDialog({
             if (save.isPending) return;
             const firstProblem = !name.trim() ? nameRef : !category.trim() ? categoryRef : null;
             if (firstProblem) {
-              // Rendered before focus moves, so the field is read with its error.
-              flushSync(() => setSubmitted(true));
-              firstProblem.current?.focus();
+              revealProblems(() => setSubmitted(true), firstProblem.current);
               return;
             }
             save.mutate();

@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@/components/astryx/switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -31,7 +32,6 @@ import {
   useRef,
   useState
 } from "react";
-import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -154,8 +154,7 @@ function AnalysisTab({
             if (ask.isPending) return;
             if (!text) {
               // An empty question shows at the field, which takes focus.
-              flushSync(() => setAsked(true));
-              questionRef.current?.focus();
+              revealProblems(() => setAsked(true), questionRef.current);
               return;
             }
             setAnswer("");

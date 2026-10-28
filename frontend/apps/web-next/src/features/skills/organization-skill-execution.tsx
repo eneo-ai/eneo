@@ -4,8 +4,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -51,9 +54,7 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
   async function change() {
     if (!action || busy) return;
     if (!reason.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      reasonRef.current?.focus();
+      revealProblems(() => setSubmitted(true), reasonRef.current);
       return;
     }
     // Nothing to unblock (it went meanwhile).

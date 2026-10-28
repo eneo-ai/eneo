@@ -4,8 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -64,9 +67,7 @@ export function SharePointAppDeleteDialog({
 
   function deleteApp() {
     if (!confirmed) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      confirmRef.current?.focus();
+      revealProblems(() => setSubmitted(true), confirmRef.current);
       return;
     }
     remove.mutate();

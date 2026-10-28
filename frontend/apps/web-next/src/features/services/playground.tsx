@@ -5,8 +5,11 @@ import { useMutation } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,9 +50,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
   // Run is never disabled: an empty input shows at the field, which takes focus.
   function runService() {
     if (!input.trim()) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById("service-input")?.focus();
+      revealProblems(() => setSubmitted(true), "service-input");
       return;
     }
     run.mutate(input);

@@ -4,8 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -186,9 +189,7 @@ export function MigrateModelDialog({
         ? "migration-force-override"
         : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(firstProblem)?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem);
       return;
     }
     migrate.mutate();

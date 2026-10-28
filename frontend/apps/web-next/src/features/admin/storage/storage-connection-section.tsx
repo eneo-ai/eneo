@@ -11,8 +11,11 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -235,9 +238,7 @@ export function StorageConnectionSection({
       ] as const
     ).find(([problem]) => problem)?.[1];
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     setSubmitting(true);

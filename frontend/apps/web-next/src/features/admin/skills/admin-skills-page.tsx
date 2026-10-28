@@ -6,9 +6,12 @@ import { CircleAlert, RotateCcw } from "lucide-react";
 import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -152,12 +155,10 @@ function PolicyEditor({
       ({ key }) => !fieldValid(draft[key], policy.editable_bounds[key])
     );
     if (invalid) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => {
+      revealProblems(() => {
         setSubmitted(true);
         setStatus(null);
-      });
-      document.getElementById(invalid.id)?.focus();
+      }, invalid.id);
       return;
     }
     if (draftsEqual(draft, policyDraft(policy))) {

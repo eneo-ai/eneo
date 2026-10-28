@@ -3,8 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -62,9 +65,7 @@ export function MoveResourceDialog({
   function move() {
     if (pending) return;
     if (!targetId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      destinationRef.current?.focus();
+      revealProblems(() => setSubmitted(true), destinationRef.current);
       return;
     }
     onMove(targetId);

@@ -18,10 +18,13 @@ import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
 import {
@@ -129,9 +132,7 @@ function CollectionDialog({
             if (save.isPending) return;
             const firstProblem = noModels ? noModelsRef : !name.trim() ? nameRef : null;
             if (firstProblem) {
-              // Rendered before focus moves, so the field is read with its error.
-              flushSync(() => setSubmitted(true));
-              firstProblem.current?.focus();
+              revealProblems(() => setSubmitted(true), firstProblem.current);
               return;
             }
             save.mutate();
