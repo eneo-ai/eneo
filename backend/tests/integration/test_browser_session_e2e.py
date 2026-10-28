@@ -183,6 +183,8 @@ async def test_a_password_that_must_be_replaced_still_signs_in(
     blocked = await client.post(TICKETS, json=TICKET, headers=cookie | SAME_ORIGIN)
     assert blocked.status_code == 403, blocked.text
     assert blocked.json()["eneo_error_code"] == 9070
+    # Admitted is not authenticated: a refused request names no generation.
+    assert GENERATION not in blocked.headers
 
 
 @pytest.mark.integration

@@ -52,7 +52,7 @@ from eneo.main.logging import OTELJSONFormatter
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
 from eneo.users import user_router
-from eneo.users.user import UserInDB
+from eneo.users.user import UserInDB, UserState
 from eneo.users.user_service import UserService
 from tests.fixtures import TEST_USER
 from tests.unit.browser_session_test_utils import expected_set_cookie
@@ -63,6 +63,7 @@ TOKEN_LOGIN = "/api/v1/users/login/token/"
 LOGOUT = "/api/v1/auth/session/logout/"
 PROBE = "/api/v1/auth/session/"
 ME = "/api/v1/users/me/"
+ADMIN_ONLY = "/api/v1/admin/password-policy"
 SESSION = "__Host-eneo_web"
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 GENERATION = "Eneo-Session-Generation"
@@ -153,8 +154,11 @@ def endpoints(
             app.dependency_overrides[container.call] = lambda: login_container
 
     caplog.set_level(logging.DEBUG)
-    # SimpleLogger has its own handler; capture its records and extras too.
-    loggers = (user_router.logger, browser_session.logger)
+    # eneo.main.logging may have raised an ancestor to CRITICAL at import.
+    caplog.set_level(logging.DEBUG, logger="eneo.server.exception_handlers")
+    # The app's logging setup replaced the root handlers, and SimpleLogger does
+    # not propagate: capture the root and both SimpleLoggers directly.
+    loggers = (logging.getLogger(), user_router.logger, browser_session.logger)
     for logger in loggers:
         logger.addHandler(caplog.handler)
     client = TestClient(app, client=("10.0.0.1", 50000))
@@ -507,6 +511,27 @@ def test_probe_refuses_without_an_admitted_cookie_session(
     response = endpoints.client.get(PROBE, headers=headers)
 
     assert response.status_code == 401
+    assert GENERATION not in response.headers
+
+
+@pytest.mark.parametrize("refusal", ["missing permission", "inactive user"])
+def test_a_refused_cookie_session_names_no_generation(
+    endpoints: Endpoints, refusal: str
+):
+    # A valid cookie refused by admission (an admin route) or by the user's
+    # state: the generation is named only once the request was admitted.
+    token = mint()
+    endpoints.valid_tokens.add(token)
+    path = ADMIN_ONLY
+    if refusal == "inactive user":
+        endpoints.user.state = UserState.INACTIVE
+        path = PROBE
+
+    response = endpoints.client.get(
+        path, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    )
+
+    assert response.status_code == 403, response.text
     assert GENERATION not in response.headers
 
 
