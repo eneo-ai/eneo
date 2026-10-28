@@ -34,7 +34,7 @@ import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
 import { documentDraft } from "./side-panel/document-draft";
-import { documentExport } from "./side-panel/document-export";
+import { documentExport, isExportableDocument } from "./side-panel/document-export";
 import { saveDocumentVersion, type DocumentSaver } from "./side-panel/document-saver";
 import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
 import {
@@ -47,7 +47,6 @@ import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
-import { isExportableDocument } from "./side-panel/file-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
@@ -200,7 +199,7 @@ function ConversationView({
   onActivityChange
 }: ChatViewProps) {
   const t = useTranslations();
-  const { featureFlags, can } = useAppContext();
+  const { can } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
@@ -579,11 +578,7 @@ function ConversationView({
     });
     return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      disabled_capabilities: disabledCapabilitiesForRequest(
-        partner,
-        toolChoices.disabledCapabilities,
-        featureFlags.showWebSearch
-      ),
+      disabled_capabilities: disabledCapabilitiesForRequest(toolChoices.disabledCapabilities),
       ...mcpOptions
     };
   }

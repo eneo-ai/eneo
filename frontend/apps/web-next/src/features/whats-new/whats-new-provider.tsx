@@ -1,10 +1,13 @@
 "use client";
 
 import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
-import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createContext, useCallback, useContext, useRef } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import type { Schema } from "@/lib/api/models";
+import { sessionQueries } from "@/lib/api/session";
 import { pendingAnnouncement, type Marker } from "./release-model";
 
 interface WhatsNewContextValue {
@@ -17,25 +20,39 @@ interface WhatsNewContextValue {
   resetState: () => Promise<void>;
 }
 
+type WhatsNewState = Schema<"WhatsNewStatePublic">;
+
 const WhatsNewContext = createContext<WhatsNewContextValue | null>(null);
 
-export function WhatsNewProvider({
-  enabled,
-  initialSeen,
-  initialAnnounced,
-  children
-}: {
-  enabled: boolean;
-  initialSeen: Marker;
-  initialAnnounced: Marker;
-  children: React.ReactNode;
-}) {
-  const { can } = useAppContext();
+const markers = sessionQueries(browserApi).whatsNew;
+
+/**
+ * What's new for the signed-in user, over the session's What's new query: the
+ * one owner of the markers (null when the backend could not say: unknown, not
+ * "never seen"). Recording one writes the backend's answer into that query;
+ * the provider holds no marker state of its own, so a marker change updates
+ * what shows it and remounts nothing.
+ */
+export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
+  const { can, settings } = useAppContext();
+  const enabled = settings.whats_new_enabled !== false;
+  const queryClient = useQueryClient();
+  const { data: state } = useSuspenseQuery(markers);
+  const seenVersion: Marker = state?.seen_version;
+  const announcedVersion: Marker = state?.announced_version;
   const latest = latestRelease();
   const latestVisible = latest && visibleEntries(latest, can).length > 0;
-  const [seenVersion, setSeenVersion] = useState<Marker>(initialSeen);
-  const [announcedVersion, setAnnouncedVersion] = useState<Marker>(initialAnnounced);
   const seenInFlight = useRef<Promise<void> | null>(null);
+
+  // One marker at a time, so an answer never overwrites the other marker's
+  // pending change. Unknown markers (null) stay unknown.
+  const setMarker = useCallback(
+    (marker: keyof WhatsNewState, version: string | null) =>
+      queryClient.setQueryData(markers.queryKey, (current) =>
+        current ? { ...current, [marker]: version } : current
+      ),
+    [queryClient]
+  );
 
   const hasUnseen =
     enabled &&
@@ -49,14 +66,16 @@ export function WhatsNewProvider({
     if (seenInFlight.current) return seenInFlight.current;
     const latest = latestRelease();
     if (!latest) return Promise.resolve();
-    const previous = seenVersion;
-    setSeenVersion(latest.version);
+    const previous = seenVersion ?? null;
+    setMarker("seen_version", latest.version);
     const request = unwrap(
       browserApi.PUT("/api/v1/whats-new/seen/", { body: { version: latest.version } })
     )
-      .then((state) => setSeenVersion(state.seen_version))
+      .then((answer) => {
+        setMarker("seen_version", answer.seen_version);
+      })
       .catch((error: unknown) => {
-        setSeenVersion(previous);
+        setMarker("seen_version", previous);
         console.error("Could not record What's new as seen", error);
       })
       .finally(() => {
@@ -64,7 +83,7 @@ export function WhatsNewProvider({
       });
     seenInFlight.current = request;
     return request;
-  }, [hasUnseen, seenVersion]);
+  }, [hasUnseen, seenVersion, setMarker]);
 
   const markLatestAnnounced = useCallback((): Promise<void> => {
     const latest = pendingAnnouncement(
@@ -73,21 +92,22 @@ export function WhatsNewProvider({
       announcedVersion
     );
     if (!latest) return Promise.resolve();
-    setAnnouncedVersion(latest.version);
+    setMarker("announced_version", latest.version);
     return unwrap(
       browserApi.PUT("/api/v1/whats-new/announced/", { body: { version: latest.version } })
     )
-      .then((state) => setAnnouncedVersion(state.announced_version))
+      .then((answer) => {
+        setMarker("announced_version", answer.announced_version);
+      })
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
       });
-  }, [announcedVersion, enabled, latestVisible]);
+  }, [announcedVersion, enabled, latestVisible, setMarker]);
 
   const resetState = useCallback(async () => {
-    await unwrap(browserApi.DELETE("/api/v1/whats-new/state/"));
-    setSeenVersion(null);
-    setAnnouncedVersion(null);
-  }, []);
+    const answer = await unwrap(browserApi.DELETE("/api/v1/whats-new/state/"));
+    queryClient.setQueryData(markers.queryKey, answer);
+  }, [queryClient]);
 
   return (
     <WhatsNewContext.Provider
