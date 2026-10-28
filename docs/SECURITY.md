@@ -6,13 +6,13 @@ public GitHub issues, pull requests, or discussions.
 
 ## Reporting a Vulnerability
 
-Report a vulnerability privately in one of two ways:
+Report a vulnerability privately. GitHub is the preferred way:
 
-- On GitHub, through **Security → Report a vulnerability**
+- **Preferred: on GitHub**, through **Security → Report a vulnerability**
   (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
-  visible only to you and the maintainers, and the fix can be coordinated in a
-  private advisory.
-- By email to `security@sundsvall.se`.
+  visible only to you and the maintainers, and the fix is coordinated with you
+  in the same private advisory.
+- **If you cannot use GitHub**, by email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
 
@@ -132,6 +132,14 @@ The repository uses GitHub security features and CI to prevent regressions:
   requests. The tool runtime (`tool-runtime/`) has no Dependabot entry yet.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
+- The self-hosted [Review Agent](https://github.com/CCimen/review-agent)
+  reviews a pull request for security, correctness and other quality problems
+  when a maintainer comments `/review`. It reads the exact commits through
+  bounded read tools, reports only findings that survive a second, disproving
+  pass, and has no write access or merge authority; it does not gate the merge
+  and is not a full security audit
+  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work)). Its findings are fixed or answered in the pull
+  request.
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules over
   `backend/src`, both frontends' sources and `.github`, and scans the added Git
@@ -271,7 +279,7 @@ on the documentation site.
 - **Workflow trust.** Pull requests from forks run with a read-only
   `GITHUB_TOKEN` and without repository secrets. Workflows started from
   branches in this repository can request package write permissions, which is
-  why write access is not granted outside Core Maintainers. Keep repository
+  why write access stays with the Core Maintainers and the organisation owners. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
   secret is no longer used, delete it and revoke it at its source.
 - **Changes to access.** Only organisation owners change team roles, rulesets

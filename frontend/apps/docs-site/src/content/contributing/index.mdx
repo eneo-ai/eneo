@@ -160,6 +160,13 @@ A Core Maintainer reviews the pull request. Answer the comments and push new
 commits to the same branch instead of force-pushing, so reviewers can see what
 changed. Every conversation must be resolved before the merge.
 
+A maintainer can also run our [Review Agent](https://ccimen.github.io/review-agent/docs/how-reviews-work), which reviews the change
+for security and quality problems, by commenting `/review`. Each finding has a
+severity, the file and line, the impact and the smallest safe fix; fix or answer
+it. After new commits, `/review` again reviews the latest commit. If it missed
+something, comment `/review feedback missed because …`. The review is advisory,
+and a Core Maintainer still decides.
+
 When the change is ready, the Core Maintainer approves it and chooses **Merge
 when ready**. The pull request enters the merge queue as soon as the checks are
 green, and the queue tests it against the latest `develop` and squash-merges
@@ -244,7 +251,8 @@ for how the checks fit with the rest of Eneo's security work.
 Never report a vulnerability in a public issue, pull request or discussion.
 Report it privately, either through
 [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
-on GitHub or by email to `security@sundsvall.se`. The
+on GitHub, which is the preferred way, or, if you cannot use GitHub, by email to
+`security@sundsvall.se`. The
 [security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
 describes what to include and the response times.
 

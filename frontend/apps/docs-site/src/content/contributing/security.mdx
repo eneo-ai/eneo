@@ -6,7 +6,7 @@ title: Security for Contributors
 
 This page explains the security checks contributors see when they open a pull request. For the overall picture, see [Security at Eneo](/docs/security). The canonical security policy is [`docs/SECURITY.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md).
 
-Do not report sensitive vulnerabilities in public issues, pull requests, or discussions. Report them privately through [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new) or by email to `security@sundsvall.se`.
+Do not report sensitive vulnerabilities in public issues, pull requests, or discussions. Report them privately on GitHub through [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new), the preferred way, or by email to `security@sundsvall.se` if you cannot use GitHub.
 
 ## Pull Request Checks
 
@@ -156,7 +156,7 @@ Who can approve, merge and release, and how branches and tags are protected, is 
 
 ## Dependency Updates
 
-Dependabot alerts report vulnerable dependencies, and the `Security` workflow audits the lockfiles on every pull request and every week. Maintainers patch what they find in focused `fix(deps)` pull requests and carry the fixes to the supported release lines. Automatic Dependabot version-update pull requests are paused: every ecosystem in `.github/dependabot.yml` has `open-pull-requests-limit: 0` and is re-enabled one at a time.
+Dependabot alerts report vulnerable dependencies, and the `Security` workflow audits the lockfiles on pull requests into `develop` and the release branches, and every week. Maintainers patch what they find in focused `fix(deps)` pull requests and carry the fixes to the supported release lines. Automatic Dependabot version-update pull requests are paused: every ecosystem in `.github/dependabot.yml` has `open-pull-requests-limit: 0` and is re-enabled one at a time.
 
 For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
 

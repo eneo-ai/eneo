@@ -443,7 +443,7 @@ erDiagram
 
 **Multi-tenancy:**
 - All entities include `tenant_id` for data isolation
-- The application layer scopes every query to the caller's tenant; PostgreSQL row-level security is not used
+- Tenant isolation is enforced in application repositories and services through scoped queries and authorization checks; PostgreSQL row-level security is not used
 - UUID primary keys prevent enumeration attacks
 
 **Soft Deletes:**
@@ -470,7 +470,7 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 
 **Database Level:**
 - All entities include `tenant_id`
-- Repositories and services filter every query by tenant; there are no PostgreSQL row-level security policies
+- Tenant isolation is enforced in application repositories and services through scoped queries and authorization checks; there are no PostgreSQL row-level security policies
 - UUID primary keys prevent enumeration
 
 **Authentication Modes:**

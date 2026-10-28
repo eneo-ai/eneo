@@ -12,10 +12,11 @@ what goes into the platform to the evidence that comes with every release. It is
 an overview: each section links to the page that owns the details.
 
 <Callout type="warning">
-  Found a vulnerability? Report it privately through [**Security → Report a
-  vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new) or
-  by e-mail to `security@sundsvall.se`. Never report it in a public issue, pull
-  request or discussion.
+  Found a vulnerability? Report it privately on GitHub through [**Security →
+  Report a
+  vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new). If
+  you cannot use GitHub, e-mail `security@sundsvall.se`. Never report it in a
+  public issue, pull request or discussion.
 </Callout>
 
 ## Who is responsible for what
@@ -62,12 +63,16 @@ The rules are public at
   with a known high-severity vulnerability. Every endpoint must declare who may
   call it, or the application refuses to start. GitHub secret scanning with
   push protection blocks known credential formats.
-- **Automated review.** A Core Maintainer can ask for an AI code review of any
-  pull request by commenting `/review`. The self-hosted
-  [Review Agent](https://github.com/CCimen/review-agent) reads the exact
-  commits and posts evidence-backed findings, security issues included, as
-  review comments. It is advisory: it cannot change the repository, approve or
-  merge.
+- **AI code review.** We use a self-hosted
+  [Review Agent](https://github.com/CCimen/review-agent) that reviews pull
+  requests for security, correctness and other quality problems. A maintainer
+  starts it by commenting `/review`. It first looks for problems the change
+  introduces and then tries to disprove each one, so it reports only findings
+  that survive the evidence. The author fixes or answers each finding. The
+  review is advisory: it cannot change the repository, approve or merge, and
+  it is not a full security audit
+  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work), [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)). A separate advisory
+  report lists dead code and unused dependencies on each pull request.
 - **How a release is published.** A `v*` tag starts the publication workflow.
   It builds the images, checks the runtimes, blocks fixable high and critical
   vulnerabilities in the frontend and tool runtime images, runs a combined
@@ -138,7 +143,7 @@ with its own supply-chain checks; see
 
 ## Vulnerabilities and updates
 
-![Five steps. In private: report through GitHub or by e-mail, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
+![Five steps. In private: report on GitHub, or by e-mail as a fallback, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
 
 A reported vulnerability stays private while the Core Maintainers confirm it
 and prepare the fix for every affected supported release line, in a private

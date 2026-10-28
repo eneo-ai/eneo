@@ -54,7 +54,7 @@ from a fork, in exactly the same way as Collaborators.
 
 ## How a change reaches Eneo
 
-![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and publish a release from a release branch, where a second Core Maintainer approves each change, with a v tag. GitHub rulesets ensure that only Core Maintainers can merge into develop, push to release branches and create v tags.](/diagrams/contribution-governance.svg)
+![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and publish a release from a release branch, where a second Core Maintainer approves each change, with a v tag. GitHub rulesets ensure that only people with write access can merge into develop, and that only Core Maintainers can push to release branches and create v tags.](/diagrams/contribution-governance.svg)
 
 1. **Issue.** The change is described and agreed in an issue.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
@@ -265,5 +265,6 @@ required checks and go through the merge queue.
 
 Privately, through
 [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
-or by email to `security@sundsvall.se`. Never report it in a public issue, pull
-request or discussion.
+on GitHub, which is the preferred way. If you cannot use GitHub, email
+`security@sundsvall.se`. Never report it in a public issue, pull request or
+discussion.

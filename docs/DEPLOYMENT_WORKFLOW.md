@@ -25,13 +25,13 @@ We use a Git Flow-inspired workflow with **persistent release branches**. Every 
 ```mermaid
 graph LR
     A[Feature Branch] -->|PR| B[develop]
-    B -->|Push| C[Build :develop image]
-    C -->|Image Update| D[Deploy to Dev]
+    B -->|Push| C[Build and verify develop bundle]
+    C -->|Completed bundle| D[Deploy to Dev]
     B -->|Create branch| E[release/v1.8]
-    E -->|Tag v1.8.0-rc.1| F[Build :1.8.0-rc.1 image]
-    F -->|Deploy| G[Test Environment]
-    E -->|Tag v1.8.0| H[Build :1.8.0 image]
-    H -->|Deploy| I[Production]
+    E -->|Tag v1.8.0-rc.1| F[Build and verify 1.8.0-rc.1 bundle]
+    F -->|Completed bundle| G[Test Environment]
+    E -->|Tag v1.8.0| H[Build and verify 1.8.0 bundle]
+    H -->|Completed bundle| I[Production]
 ```
 
 ```
