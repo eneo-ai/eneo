@@ -1,4 +1,6 @@
-from urllib.parse import ParseResult, urlparse
+from urllib.parse import ParseResult, urlparse, urlsplit
+
+from eneo.main.config import serialize_origin
 
 
 def _safe_port(parsed: ParseResult) -> int | None:
@@ -25,19 +27,22 @@ def _has_port_wildcard(parsed: ParseResult) -> bool:
 
 
 def origin_matches_pattern(origin: str, pattern: str) -> bool:
-    origin_parsed = urlparse(origin)
-    if not origin_parsed.scheme or not origin_parsed.hostname:
+    """Whether a request's Origin matches one allowlist pattern.
+
+    The Origin is client input and a pattern may be a stored typo, so a value
+    that does not parse matches nothing rather than raising, which would turn a
+    refused origin into a 500. ``serialize_origin`` is the one parser of the
+    Origin: anything but an http(s) origin is refused.
+    """
+    origin_url = serialize_origin(origin)
+    if origin_url is None:
         return False
 
-    origin_scheme = origin_parsed.scheme.lower()
-    origin_host = origin_parsed.hostname.lower()
-    try:
-        origin_port_raw = origin_parsed.port
-    except ValueError:
-        # Inbound Origin had a malformed port — fail closed. (A bracketed IPv6
-        # host has colons but no port, so the netloc alone cannot tell.)
-        return False
-    origin_port = origin_port_raw or (443 if origin_scheme == "https" else 80)
+    # Lowercase, IPv6 compressed and a valid port: this parse cannot fail.
+    origin_parsed = urlsplit(origin_url)
+    origin_scheme = origin_parsed.scheme
+    origin_host = origin_parsed.hostname or ""
+    origin_port = origin_parsed.port or (443 if origin_scheme == "https" else 80)
 
     if "://" not in pattern:
         pattern_host = pattern.lower()
@@ -50,7 +55,10 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
             return len(origin_labels) == len(base_labels) + 1
         return origin_host == pattern_host
 
-    pattern_parsed = urlparse(pattern)
+    try:
+        pattern_parsed = urlparse(pattern)
+    except ValueError:
+        return False
     if not pattern_parsed.scheme or not pattern_parsed.hostname:
         return False
 

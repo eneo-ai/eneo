@@ -274,6 +274,9 @@ async def test_loopback_origin_passes_only_in_development(
         "http://[::ffff:127.0.0.1]",
         "http://0.0.0.0:5173",
         "null",
+        "http://[::1",
+        "http://localhost:99999",
+        "ws://localhost:5173",
     ],
 )
 async def test_development_trusts_only_the_exact_loopback_hosts(monkeypatch, origin):
@@ -406,6 +409,47 @@ def test_credentialed_cors_headers_only_for_an_accepted_loopback_origin(
         for response in (preflight, actual):
             assert "access-control-allow-origin" not in response.headers
         assert "access-control-allow-credentials" not in actual.headers
+
+
+_MALFORMED_ORIGINS = [
+    b"http://[::1",
+    b"https://app.example:99999",
+    b"https://[app.example]",
+    b"https://\xc3\xa9.example",  # UTF-8 bytes; a browser sends punycode
+    b"chrome-extension://app.example",
+    b"null",
+    b"",
+]
+
+
+@pytest.mark.parametrize("origin", _MALFORMED_ORIGINS)
+@pytest.mark.parametrize(
+    "tenant_origins", [(), ("https://app.example", "app.example", "http://[::1]:*")]
+)
+def test_malformed_origin_is_refused_with_400_not_500(
+    monkeypatch, caplog, app_in, origin, tenant_origins
+):
+    """No Origin value turns the CORS check into a 500: one that does not parse
+    as an http(s) origin is refused and logged like any unregistered origin."""
+    _install_common_fakes(monkeypatch, tenant_origins=tenant_origins)
+    monkeypatch.setattr(cors_module, "logger", logging.getLogger("test.cors"))
+    caplog.set_level(logging.WARNING, logger="test.cors")
+    client = app_in("production")
+
+    preflight = client.options(
+        "/api/v1/users/me/",
+        headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+    )
+    actual = client.get("/api/livez", headers={"Origin": origin})
+
+    assert (preflight.status_code, preflight.text) == (400, "Disallowed CORS origin")
+    assert actual.status_code == 400
+    assert actual.json()["code"] == "disallowed_cors_origin"
+    for response in (preflight, actual):
+        assert "access-control-allow-origin" not in response.headers
+    assert [record.getMessage() for record in caplog.records] == [
+        "CORS origin refused: GET /api/livez from origin " + origin.decode("latin-1")
+    ]
 
 
 @pytest.mark.asyncio
@@ -974,6 +1018,23 @@ async def test_inactive_secret_key_still_needs_a_registered_origin(monkeypatch):
 
     headers = Headers({"X-API-Key": "sk_example"})
     assert not await callback_module.get_origin("https://integration.example", headers)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("origin", ["http://[::1", "null"])
+async def test_active_secret_key_passes_a_malformed_origin_without_an_error(
+    monkeypatch, origin
+):
+    """The allowlist refuses an origin that does not parse; a secret key is
+    exempt from the allowlist whatever Origin its caller attached."""
+    _install_common_fakes(monkeypatch, tenant_origins=("https://app.example",))
+    monkeypatch.setattr(callback_module, "get_settings", _settings)
+    _install_secret_key(monkeypatch)
+
+    assert not await callback_module.get_origin(origin, Headers())
+    assert await callback_module.get_origin(
+        origin, Headers({"X-API-Key": "sk_example"})
+    )
 
 
 @pytest.mark.asyncio
