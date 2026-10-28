@@ -28,6 +28,53 @@ Include as much of the following as possible:
 Please do not publicly disclose the issue until a fix or mitigation is
 available and maintainers have had a reasonable coordination window.
 
+## What Happens After You Report
+
+1. **Triage.** A report made through GitHub opens a private security advisory
+   that only you and the maintainers can see. A Core Maintainer answers within
+   the first-response target below and either accepts it or closes it with an
+   explanation, for example when it is out of scope or a duplicate. An e-mail
+   report is moved into a private advisory, and you are added to it if you
+   have a GitHub account.
+2. **Fix.** The maintainers rate the severity and prepare the fix for every
+   affected supported release line. The conversation stays in the advisory,
+   where you can follow the work and check the fix.
+3. **Publish.** The fix lands, patch releases are published and the advisory
+   follows straight after. The advisory names the affected and patched
+   versions and credits you as the reporter, unless you ask not to be named.
+
+## Scope
+
+In scope:
+
+- the code in this repository and the container images Eneo publishes
+  (`ghcr.io/eneo-ai/eneo-*`)
+- the build, release and publication workflows in `.github/`
+- the reference deployment configuration in `docs/deployment/`
+
+Out of scope here:
+
+- a vulnerability in a specific organisation's Eneo deployment that comes from
+  how it is hosted or configured: report it to that organisation
+- a vulnerability in a third-party dependency that is already public: open an
+  ordinary issue or pull request so the dependency can be updated
+- findings without a security impact, such as an outdated software version
+  without a reachable vulnerability
+
+When in doubt, report it privately; the maintainers will tell you where it
+belongs.
+
+## Testing Guidelines
+
+- Test against your own local or test installation, never against a
+  deployment you do not operate.
+- Use your own accounts and test data. Do not access, change or keep data that
+  belongs to other users or tenants; if you reach it by accident, stop and say
+  so in the report.
+- Do not degrade the service: no denial-of-service, load or spam tests.
+- Stop at the smallest proof of concept that shows the impact.
+- Keep the details private until the advisory is published.
+
 ## Response Targets
 
 These are targets, not guarantees. Active exploitation, exposed secrets, malware,
@@ -55,15 +102,17 @@ Every affected supported line receives the fix: `develop` and each supported
 vulnerability is already public.
 
 - **Reported privately.** Keep the work private until it is ready. Confirm and
-  rate the report in a private GitHub Security Advisory, and prepare the fix in
-  the advisory's temporary private fork or on unpublished local branches. A
-  temporary private fork can merge only into `develop`, and GitHub runs no
-  status checks and applies no rulesets to that merge, so run the backend and
-  frontend checks on the fix before merging it. Fixes for release branches go
-  through ordinary pull requests, which need the second Core Maintainer
-  approval. Open them when the patch releases are ready, merge them, tag the
-  releases and publish the advisory the same day, naming the affected and
-  patched versions.
+  rate the report in a private GitHub Security Advisory, and prepare and review
+  the fix for every affected line in the advisory's temporary private fork or
+  on unpublished local branches. Then land it the normal way: ordinary pull
+  requests into `develop` (required checks and merge queue) and into each
+  release branch (second Core Maintainer approval), followed by the patch
+  releases and the advisory, naming the affected and patched versions. The
+  first public pull request discloses the fix, so open them only when every
+  line is ready, and keep the time from the first public pull request to the
+  published advisory as short as the checks allow. Do not use the advisory's
+  **Merge** button: it merges into `develop` without status checks, rulesets
+  or the merge queue.
 - **Already public**, such as a published advisory for a dependency. Fix it in
   ordinary pull requests on `develop` and backport it to the supported release
   lines.
@@ -86,8 +135,10 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules over
   `backend/src`, both frontends' sources and `.github`, and scans the added Git
-  history with Gitleaks. It runs on every pull request and merge-queue
-  candidate as part of the required CI aggregate, and weekly on a schedule.
+  history with Gitleaks. It runs inside CI on pull requests into `develop` and
+  `release/**` and on merge-queue candidates, and weekly on a schedule. CI is a
+  required check only on `develop`; on release branches it runs but does not
+  block the merge, and pull requests into `main` do not run it.
   On `develop` and tag builds, component images are pushed while the checks
   run; only the completed release bundle waits for them, so deployments must
   consume the bundle. The tool runtime's `bun.lock` is not part of the audit
@@ -182,23 +233,25 @@ Access to the `eneo-ai` organisation follows least privilege. Core Maintainers
 for what is merged and released. Collaborators from partner municipalities and
 agencies contribute through pull requests. The contributor-facing explanation,
 including the role table, diagrams and an FAQ, is
-[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+[Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
 on the documentation site.
 
 - **Roles.** `@eneo-ai/core-maintainers` is the only team with write-level
-  (Maintain) access. It also holds the organisation's Security manager and
-  CI/CD admin roles. Collaborators (`@eneo-ai/collaborators`) have Triage
-  access and contribute from forks. A small number of organisation owners hold
+  (Maintain) access. It also holds the organisation's Security manager role.
+  Collaborators (`@eneo-ai/collaborators`) and individual outside
+  collaborators have Triage access and contribute from forks. A small number of organisation owners hold
   Admin rights for rulesets, team access and repository settings. The
   organisation base permission is read.
-- **`develop`.** Changes arrive only through pull requests, and only Core
-  Maintainers can add a pull request to the merge queue. Required checks must
+- **`develop`.** Changes arrive only through pull requests, and only people
+  with write access (the Core Maintainers and the organisation owners) can add
+  a pull request to the merge queue; the Core Maintainers do the ordinary
+  merges. Required checks must
   pass and review conversations must be resolved. A Core Maintainer reviews
   and approves contributions from outside the team before queueing them;
   `.github/CODEOWNERS` requests that review automatically. If someone without
   write access pushes new commits afterwards, GitHub cancels the pending
-  merge. Core Maintainers may queue their own pull requests without a second
-  approval.
+  merge. Core Maintainers agree on their own changes as a team and may queue
+  them without a formal approval.
 - **Releases.** Only Core Maintainers can create, update or delete
   `release/**` branches and `v*` tags. A `v*` tag starts image publication,
   so this restriction controls who can publish a release. Every pull request

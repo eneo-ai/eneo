@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="462" viewBox="0 0 900 462" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
   <title id="title">How a change reaches Eneo</title>
-  <desc id="desc">Three lanes. Collaborators from partner municipalities and agencies agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers at Sundsvalls kommun approve the pull request, merge it through the merge queue into develop, and publish releases from a release branch, where a second Core Maintainer approves each change, with a v tag. GitHub rulesets ensure that only Core Maintainers can merge into develop, push to release branches and create v tags. Pull requests from forks run with a read-only token and without secrets.</desc>
+  <desc id="desc">Three lanes. Collaborators from partner municipalities and agencies agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers at Sundsvalls kommun approve the pull request, merge it through the merge queue into develop, and publish releases from a release branch, where a second Core Maintainer approves each change, with a v tag. GitHub rulesets ensure that only people with write access can merge into develop, and that only Core Maintainers can push to release branches and create v tags. Pull requests from forks run with a read-only token and without secrets.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
@@ -78,6 +78,6 @@
 
   <!-- Enforcement -->
   <rect x="24" y="388" width="852" height="56" rx="8" fill="#ffffff" stroke="#0e7c86"/>
-  <text x="40" y="411" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only Core Maintainers can merge into develop, push to release/** and create v* tags.</text>
+  <text x="40" y="411" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only write access can merge into develop; only Core Maintainers update release/** and tag v*.</text>
   <text x="40" y="431" fill="#455a64" font-size="12">Pull requests from forks run with a read-only token and without secrets. Only a v* tag produces a versioned release.</text>
 </svg>

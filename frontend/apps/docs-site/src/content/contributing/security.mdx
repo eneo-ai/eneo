@@ -52,19 +52,20 @@ Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the 
 
 `Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests into `develop`. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
 
-When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
+When this check fails, update the dependency to a safe version, remove it, or, if the vulnerable code is genuinely unreachable, ask a Core Maintainer to add the advisory to `allow-ghsas` in `.github/workflows/dependency-review.yml` with the reason recorded in the PR. Do not dismiss the warning just to make the PR green.
 
 ### Source, dependency and secret scanning
 
-The reusable `Security` workflow is part of the CI aggregate. It runs a complete
-lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
-added Git history.
+The reusable `Security` workflow is part of the CI aggregate. It audits the
+backend's runtime Python lock and the frontend lock, runs Semgrep's
+security-audit and GitHub Actions rules, and runs Gitleaks on added Git
+history.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 
-The release review also scans full Git history, verifies credential revocation,
-and exercises both frontends in staging with the actual authentication and
-integration providers. Automated scanning does not replace those checks.
+The release review also scans the full Git history for secrets and confirms
+that any real historical credentials have been revoked. Automated scanning does
+not replace that check.
 
 ### Code scanning
 
@@ -132,9 +133,9 @@ permission before the handler executes. Generated documentation and internal
 MCP transport routes have explicit declarations at their registration sites;
 MCP tools still authorize each tool invocation.
 
-`scripts/check_route_metadata.py --all` checks declarations and rejects duplicate
+`scripts/check_route_metadata.py --repo-root . --all` checks declarations and rejects duplicate
 endpoint permission/session gates without importing the application. CI also runs
-`tests/unit/test_endpoint_access.py` and `tests/unit/test_endpoint_access_matrix.py`.
+`backend/tests/unit/test_endpoint_access.py` and `backend/tests/unit/test_endpoint_access_matrix.py`.
 The matrix exercises the shipped user-authentication dependency graphs, rejecting
 anonymous callers, users missing the declared permission and API keys on session-only
 endpoints before handler dispatch. When adding an endpoint, add behavior tests showing

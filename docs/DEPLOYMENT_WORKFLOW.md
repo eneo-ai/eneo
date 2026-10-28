@@ -20,7 +20,7 @@ This document describes our Git workflow and deployment process. Please read it 
 
 ## Overview
 
-We use a Git Flow-inspired workflow with **persistent release branches**. Every minor version gets a `release/v1.X` branch. Tags always live on release branches. Deployment systems consume the completed release bundle of a tag, or the `:develop` image for the development environment.
+We use a Git Flow-inspired workflow with **persistent release branches**. Every minor version gets a `release/v1.X` branch. Tags always live on release branches. Deployment systems consume a completed release bundle: the bundle attached to a tag's release, or for the development environment the bundle of the latest successful `develop` build. The `:develop` aliases are a convenience; they move one component at a time and can briefly mix revisions.
 
 ```mermaid
 graph LR
@@ -46,7 +46,7 @@ Backflow (patches):
 
 | Environment | Purpose | Branch/Tag | Image Tag | Deployment Method |
 |------------|---------|------------|-----------|-------------------|
-| **Development** | Latest features, may be unstable | `develop` | `:develop` | Auto (on image update) |
+| **Development** | Latest features, may be unstable | `develop` | `develop` bundle (`:develop` alias) | Auto (on a completed bundle) |
 | **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:1.8.0-rc.1` | Manual deploy |
 | **Production** | Live system | `v*` tags on `release/v1.X` | `:1.8.0` | Manual deploy |
 
@@ -65,7 +65,7 @@ Backflow (patches):
 - All version tags (`v1.X.Y`) live here
 - Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
-- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs an approval from a Core Maintainer other than its author. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs an approval from a Core Maintainer other than its author. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
 
 ### Supporting Branches
 
@@ -254,21 +254,21 @@ GitHub Actions builds the `1.7.4` images and the release bundle. The `:latest` t
 Neither `develop` nor a release branch accepts direct pushes, so every cherry-pick goes through a pull request:
 
 ```bash
-# 1. Take the fix as it landed on the source branch
-git checkout release/v1.7 && git pull
-git log -1 --format=%H  # the squashed commit; copy this SHA
+# 1. Find the commit the fix pull request landed (here PR #123)
+SHA=$(gh pr view 123 --json mergeCommit --jq .mergeCommit.oid)
+git fetch origin && git show --stat "$SHA"   # check that this is the whole fix
 
 # 2. Apply it on a topic branch from the target branch
 git checkout develop && git pull
 git checkout -b fix/carry-xyz
-git cherry-pick <sha>   # for a merge commit: git cherry-pick -m 1 <sha>
+git cherry-pick "$SHA"   # for a merge commit: git cherry-pick -m 1 "$SHA"
 git push origin fix/carry-xyz
 
 # 3. Open the pull request
 gh pr create --base develop --head fix/carry-xyz
 ```
 
-- **Source commit.** Use the commit on the source branch, not the one on your `hotfix/*` branch. A squashed commit is the whole fix; the hotfix branch's commits do not survive its deletion.
+- **Source commit.** Take the commit from the fix's pull request, not the latest commit on the branch (another pull request may have landed since) and not the commits on your `hotfix/*` branch, which do not survive its deletion. Squash-merge fix pull requests so that this one commit is the whole fix. A rebase-merged pull request lands several commits; carry each of them, in order, or squash it instead.
 - **Into `develop`.** The pull request needs the required checks and the merge queue; Core Maintainers agree on it together, with no formal approval.
 - **Into a release branch.** Another Core Maintainer approves the pull request. Several fixes for the same release can go in one pull request.
 
@@ -283,7 +283,7 @@ When a bug is fixed on `develop` but also affects an older release, carry the fi
 
 ## Security Patches Across Multiple Releases
 
-When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): a vulnerability that was reported privately stays private until the patch releases and the advisory are published together.
+When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): prepare the fixes privately, then open the public pull requests only when every line is ready, because the first one discloses the fix, and publish the patch releases and the advisory straight after.
 
 1. **Fix on the oldest affected release branch first**
 2. **Carry it forward** to each newer release branch, then to `develop`, with [the procedure above](#carrying-a-fix-to-another-branch)
@@ -366,7 +366,7 @@ move at release time.
 **A:** For any change that adds functionality, fixes a bug, or modifies behavior. Even small changes should go through a PR for code review.
 
 ### Q: Can I push directly to develop or release branches?
-**A:** No. `develop` only accepts pull requests through the merge queue, and release branches only accept pull requests that another Core Maintainer has approved. See [Carrying a Fix to Another Branch](#carrying-a-fix-to-another-branch). See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+**A:** No. `develop` only accepts pull requests through the merge queue, and release branches only accept pull requests that another Core Maintainer has approved. See [Carrying a Fix to Another Branch](#carrying-a-fix-to-another-branch) and [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
 ### Q: Where and how do I create version tags?
 **A:** Always on a `release/v1.X` branch. Use **GitHub Releases** (not the CLI) to create tags — this gives you release notes, pre-release marking, and a clean audit trail. See [Quick Command Reference](#creating-tags-github-ui).

@@ -51,9 +51,11 @@ but jobs are not confined to their own files; see
 
 The runtime's own code and the engines it bundles are part of the Eneo release
 and are updated by the maintainers in dependency pull requests. The runtime's
-lockfile is not yet covered by Dependabot or by the lockfile audit in CI; its
-image is scanned before it is published. The layers below are about what those
-engines are fed, not about the release itself.
+lockfile is not yet covered by Dependabot or by the lockfile audit in CI. A
+candidate image is scanned for fixable high and critical vulnerabilities
+before publication, and the published digest is scanned again before the
+release bundle is completed. The layers below are about what those engines are
+fed, not about the release itself.
 
 ## The layers, from the outside in
 

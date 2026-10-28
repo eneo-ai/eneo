@@ -26,9 +26,11 @@ an overview: each section links to the page that owns the details.
 | **Collaborators** (`@eneo-ai/collaborators`) and other contributors | Partner organisations and anyone else build features and fixes in the open and propose them from a fork. They review each other's work and organise issues.           |
 | **Operators**                                                       | The organisation that runs Eneo hosts it, configures identity providers and secrets, provides the host capabilities the runtime relies on, and installs new releases. |
 
-`.github/CODEOWNERS` names the Core Maintainers as owners of the whole
-repository, so GitHub asks them to review every pull request. The roles, the
-permission table and the reasons behind them are in
+A small number of organisation owners also hold administrator rights. They
+manage settings, team access and rulesets, and are not part of the day-to-day
+merge flow. `.github/CODEOWNERS` names the Core Maintainers as owners of the
+whole repository, so GitHub asks them to review every pull request. The roles,
+the permission table and the reasons behind them are in
 [Governance and Roles](/contributing/governance).
 
 ## From change to release
@@ -39,7 +41,8 @@ Every change is a pull request, and GitHub rulesets decide what may be merged.
 The rules are public at
 [github.com/eneo-ai/eneo/rules](https://github.com/eneo-ai/eneo/rules).
 
-- **Into `develop`.** Only Core Maintainers can add a pull request to the merge
+- **Into `develop`.** Only people with write access, the Core Maintainers and
+  the organisation's administrators, can add a pull request to the merge
   queue, and nothing enters it without the required checks: **CI**,
   **Dependency Review** and **PR labels**. The queue tests each change again
   against the latest `develop`. There is no bypass. A Core Maintainer reviews
@@ -49,15 +52,22 @@ The rules are public at
 - **Into a release.** A pull request into a `release/vX.Y` branch, or into
   `main`, needs an approval from a Core Maintainer other than its author. Only
   Core Maintainers can create release branches and `v*` tags.
-- **What the checks cover.** CI runs the tests, linters and type checks and
-  builds the container images without publishing them. Its security job
-  audits the backend and frontend lockfiles for known vulnerabilities, runs
-  Semgrep's security rules over the application code and workflows, and scans
-  newly added Git history for secrets with Gitleaks. Dependency Review fails a
-  pull request into `develop` that adds a dependency with a known
-  high-severity vulnerability. Every endpoint must declare who may call it, or
-  the application refuses to start. GitHub secret scanning with push
-  protection blocks known credential formats.
+- **What the checks cover.** CI runs on pull requests into `develop` and the
+  release branches. It runs the tests, linters and type checks and builds the
+  container images without publishing them. Its security job audits the
+  backend's runtime lockfile and the frontend lockfile for known
+  vulnerabilities, runs Semgrep's security rules over the application code and
+  workflows, and scans newly added Git history for secrets with Gitleaks.
+  Dependency Review fails a pull request into `develop` that adds a dependency
+  with a known high-severity vulnerability. Every endpoint must declare who may
+  call it, or the application refuses to start. GitHub secret scanning with
+  push protection blocks known credential formats.
+- **Automated review.** A Core Maintainer can ask for an AI code review of any
+  pull request by commenting `/review`. The self-hosted
+  [Review Agent](https://github.com/CCimen/review-agent) reads the exact
+  commits and posts evidence-backed findings, security issues included, as
+  review comments. It is advisory: it cannot change the repository, approve or
+  merge.
 - **How a release is published.** A `v*` tag starts the publication workflow.
   It builds the images, checks the runtimes, blocks fixable high and critical
   vulnerabilities in the frontend and tool runtime images, runs a combined
@@ -73,10 +83,17 @@ The rules are public at
   Contributors](/contributing/security).
 </Callout>
 
-The checks have known limits. CodeQL code scanning is paused while we look for
-a setup with actionable results, so Semgrep is the code scanner. The backend
-image is covered by the audit of its Python lockfile, not by an image scan, and
-the tool runtime's own lockfile is not yet part of the automated audit.
+Some choices are deliberate, and some checks have known gaps:
+
+- **CodeQL is paused.** Its alerts were mostly false positives, so code
+  scanning relies on Semgrep's security rules and on review.
+- **Dependabot update pull requests are paused.** They produced more noise
+  than fixes. Dependabot alerts stay on, and the Core Maintainers patch
+  vulnerable dependencies in focused pull requests.
+- **Not every artefact is scanned yet.** The backend image is covered by the
+  audit of its Python lockfile, not by an image scan, and the tool runtime's
+  own lockfile is not yet part of the automated audit.
+
 Automated checks find known patterns and known vulnerabilities, not design
 flaws; that is what review is for.
 
@@ -86,9 +103,9 @@ flaws; that is what review is for.
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | Signing in                    | Username and password, per-tenant OIDC federation, SCIM provisioning and scoped API keys.                                                                                              | [Authentication Architecture](/docs/authentication-architecture) |
 | Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check the tenant, space and resource.                                                         | [Security for Contributors](/contributing/security)              |
-| API keys                      | Stored only as HMAC hashes and limited to their scope, with origin, IP and expiry guardrails.                                                                                          | [API Key Management](/docs/api-key-management)                   |
+| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                    | [API Key Management](/docs/api-key-management)                   |
 | Code and files from the model | Run in a separate tool runtime with no access to the database, keys or the internet. Each job is confined with Landlock where the host kernel supports it; operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             |
-| Stored files                  | PostgreSQL owns identity, integrity and authorization; file bytes are verified against their checksum before they are served.                                                          | [Object Content Architecture](/docs/object-content-architecture) |
+| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                       | [Object Content Architecture](/docs/object-content-architecture) |
 | Traceability                  | A per-tenant audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                          | [Audit Logging](/docs/audit-logging)                             |
 
 Several protections depend on the deployment. The
@@ -121,16 +138,31 @@ with its own supply-chain checks; see
 
 ## Vulnerabilities and updates
 
-![Five steps. In private: report through GitHub or by e-mail, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure: publish the patch releases and the advisory together. Then operators deploy the patched release.](/diagrams/security-vulnerability-response.svg)
+![Five steps. In private: report through GitHub or by e-mail, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
 
-A reported vulnerability stays private until it is fixed. The Core Maintainers
-confirm it, prepare the fix for every affected supported release line, and then
-publish the patch releases and a GitHub Security Advisory together. The advisory
-names the affected and patched versions. A vulnerability that is already public
-is fixed in ordinary pull requests. The
-[security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
-owns the response targets, the supported versions and how exceptions are
-recorded.
+A reported vulnerability stays private while the Core Maintainers confirm it
+and prepare the fix for every affected supported release line, in a private
+GitHub Security Advisory. The fix then lands through ordinary pull requests,
+with the same checks, merge queue and release review as any other change. The
+first public pull request is the moment of disclosure, so the maintainers open
+them only when everything is ready and publish the patch releases and the
+advisory straight after. The advisory names the affected and patched versions
+and credits the reporter. A vulnerability that is already public is fixed in
+ordinary pull requests.
+
+- **If you report:** say which version and component are affected and how to
+  reproduce it, test only on an installation you run yourself, and keep the
+  details private until the advisory is published. The
+  [security policy](https://github.com/eneo-ai/eneo/security/policy) lists
+  what to include, what is in scope and how we respond.
+- **If you run Eneo:** watch the repository's releases on GitHub
+  (**Watch → Custom → Releases**) and check the
+  [advisories](https://github.com/eneo-ai/eneo/security/advisories) when a
+  patch release appears. An advisory says which versions are affected and what
+  to upgrade to.
+
+The security policy owns the response targets, the supported versions and how
+exceptions are recorded.
 
 Vulnerable dependencies are reported by Dependabot alerts and by the lockfile
 audit in CI, which also runs every week. The Core Maintainers patch them in

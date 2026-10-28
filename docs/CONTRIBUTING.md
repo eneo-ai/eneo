@@ -5,7 +5,7 @@ Welcome to the Eneo community! This guide provides everything needed to contribu
 Anyone with a GitHub account can contribute: you do not need to belong to a team or an organisation. This file is the developer guide. Two companion pages on the documentation site follow the same steps:
 
 - **[Contributing to Eneo](https://docs.eneo.ai/contributing)**: every way to contribute, how to create an issue, and the contribution steps with best practices.
-- **[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)**: Core Maintainers and Collaborators, protected branches, releases, and an FAQ.
+- **[Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)**: Core Maintainers and Collaborators, protected branches, releases, and an FAQ.
 
 ---
 
@@ -127,7 +127,7 @@ git switch -c feature/your-feature-name upstream/develop
 pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
-Use a prefix that describes the work, as listed under [Branch Naming](#branch-strategy). The hooks run formatting, commit message and pre-push checks locally, so problems show up before CI.
+Use a prefix that describes the work, as listed under [Branch Naming](#branch-strategy); CI rejects a branch without an allowed prefix. The hooks run formatting, commit message and pre-push checks locally, so problems show up before CI.
 
 ### 4. Make and Test Your Change
 
@@ -150,7 +150,7 @@ Update tests and documentation in the same pull request when behaviour changes; 
 
 Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fill in the [pull request template](../.github/pull_request_template.md):
 
-- Write the title as a Conventional Commit, for example `fix(spaces): resolve permission check bug`. It becomes the commit message on `develop`.
+- Write the title as a Conventional Commit, for example `fix(spaces): resolve permission check bug`. A pull request with several commits lands with its title as the commit title on `develop`; one with a single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in **Changes**, **Why**, **User-facing** and **Testing**, plus **Accessibility** for UI changes.
 - Leave **Allow edits by maintainers** ticked so a maintainer can push a small fix for you.
@@ -164,7 +164,7 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
 - If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
-Only Core Maintainers have write access and can add pull requests to the merge queue, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+Only Core Maintainers have write access and can add pull requests to the merge queue, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
 **For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. From the command line, `gh pr merge <number> --auto` works only while the repository setting **Allow auto-merge** is on; otherwise run `gh pr merge <number>` once the checks are green. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer.
 
@@ -492,11 +492,10 @@ gitgraph
     commit id: "feat: add API endpoints"
     commit id: "test: add comprehensive tests"
     checkout develop
-    merge feature/new-assistant-type
-    commit id: "merge: new assistant type"
+    commit id: "feat(assistants): add new assistant type (#123)"
 ```
 
-> Features always flow back to `develop`. Version tags live on `release/vX.Y` branches (for example `release/v2.0` and `release/v2.1`), not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
+> Pull requests are squash-merged, so each one lands on `develop` as a single commit. Features always flow back to `develop`. Version tags live on `release/vX.Y` branches (for example `release/v2.0` and `release/v2.1`), not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
 
 **Branch Naming:**
 - `feature/description` - New features
@@ -504,6 +503,8 @@ gitgraph
 - `docs/description` - Documentation updates
 - `refactor/description` - Code refactoring
 - `test/description` - Test improvements
+
+CI also accepts `feat/`, `hotfix/`, `security/`, `chore/`, `deps/`, `ci/`, `perf/` and `remove/`, and fails a pull request whose branch has none of the allowed prefixes.
 
 ### Commit Message Format
 
@@ -530,14 +531,14 @@ test(users): add integration tests for user creation
 The step-by-step flow is in [Quick Start for Contributors](#-quick-start-for-contributors). These rules apply to every pull request:
 
 1. **Create Focused PRs**: One issue, one pull request. Split unrelated changes.
-2. **Use a Conventional Commit Title**: The title becomes the squash commit message on `develop`.
+2. **Use a Conventional Commit Title**: For a pull request with several commits, the title becomes the squash commit title on `develop`; a single-commit pull request uses its commit message.
 3. **Link the Issue**: Write `Fixes #123` under **Planning** in the template.
 4. **Write Clear Descriptions**: Explain what changes and why.
 5. **Include Tests**: All new functionality requires tests.
 6. **Update Documentation**: Keep docs synchronized with code changes.
 7. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
 8. **Labels**: Every PR needs one change type and at least one area, as described in the [required-label policy](../.github/PROJECT_WORKFLOW.md#required-labels). If you cannot add labels, a maintainer adds them.
-9. **Review**: GitHub requests a review from `@eneo-ai/core-maintainers` automatically through `.github/CODEOWNERS`. A Core Maintainer approves contributions from outside the team, and only Core Maintainers can add a pull request to the merge queue. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
+9. **Review**: GitHub requests a review from `@eneo-ai/core-maintainers` automatically through `.github/CODEOWNERS`. A Core Maintainer approves contributions from outside the team, and only people with write access can add a pull request to the merge queue; the Core Maintainers do the ordinary merges. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
 **PR Template:** GitHub fills in the [pull request template](../.github/pull_request_template.md) when you open a PR. Its sections are **Changes**, **Why**, **Planning**, **User-facing**, **Testing**, **Accessibility** (for UI changes) and **Screenshots**.
 
@@ -645,7 +646,12 @@ import * as m from '$lib/paraglide/messages.js';
 Every HTTP and WebSocket endpoint must declare who it accepts and who may call it with `@endpoint_access`, directly below the route decorator. The application refuses to start if a route is missing a declaration. Domain services still check space membership, tenant boundaries and ownership.
 
 ```python
-@router.post("/{provider_id}/test/")
+@router.post(
+    "/{provider_id}/test/",
+    response_model=ProviderTestResult,
+    description="Test connectivity using the provider's stored credentials.",
+    responses=responses.get_responses([403, 404]),
+)
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
@@ -655,7 +661,7 @@ async def test_provider(provider_id: UUID, user: CurrentUser):
     ...
 ```
 
-See *Declare access on every endpoint* in [Security for Contributors](../frontend/apps/docs-site/src/content/contributing/security.mdx) for the rules and the tests to add.
+See *Declare access on every endpoint* in [Security for Contributors](https://docs.eneo.ai/dev/contributing/security) for the rules and the tests to add.
 
 ### Vulnerability Reporting
 
@@ -872,10 +878,10 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 ### Contributing to Releases
 
-- Feature freeze 1 week before minor releases
-- Critical bug fixes accepted during freeze
+- A release is stabilised on its `release/vX.Y` branch through RC tags, while `develop` continues
+- Fixes reach the release branch through pull requests that a second Core Maintainer approves
 - Core Maintainers decide what enters the merge queue, cut release branches and publish releases
-- Changelog updated with each release
+- User-facing notes go in `frontend/packages/whats-new/releases.json`; operator notes go in the GitHub release
 
 ---
 

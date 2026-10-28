@@ -109,9 +109,12 @@ git switch -c fix/short-description upstream/develop
 pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
-Use a prefix that describes the work: `feature/`, `fix/`, `docs/`, `refactor/`
-or `test/`. The hooks run formatting, commit message and pre-push checks
-locally, so problems show up before CI.
+Start the branch name with a prefix that describes the work, such as
+`feature/`, `fix/`, `docs/`, `refactor/` or `test/`. CI rejects a branch
+without an allowed prefix; the full list is `feature/`, `feat/`, `fix/`,
+`hotfix/`, `security/`, `chore/`, `deps/`, `docs/`, `test/`, `refactor/`,
+`remove/`, `ci/` and `perf/`. The hooks run formatting, commit message and
+pre-push checks locally, so problems show up before CI.
 
 ### Make the change
 
@@ -127,11 +130,15 @@ Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
 `develop` branch. Before you submit:
 
 - Write the title as a Conventional Commit, for example
-  `fix(spaces): resolve permission check bug`. It becomes the commit message
-  on `develop`.
+  `fix(spaces): resolve permission check bug`. A pull request with several
+  commits lands with its title as the commit title on `develop`; one with a
+  single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in the rest of the template: **Changes**, **Why**, **User-facing**,
-  **Testing**, and **Accessibility** for UI changes.
+  **Testing**, and **Accessibility** for UI changes. `CI / CI` fails when
+  **User-facing** is empty; write a sentence or `No`. CI does not rerun when
+  you only edit the description, so push a commit or ask a maintainer to rerun
+  it.
 - Leave **Allow edits by maintainers** ticked, so a maintainer can push a small
   fix for you.
 - Open it as a **draft** if you want early feedback on the direction.
@@ -143,8 +150,9 @@ must pass. If you are not a member of the `eneo-ai` organisation, a maintainer
 approves your workflow runs before they start.
 
 You may not be able to add labels yourself. A maintainer adds them during
-review, and the PR label check turns green when they do. If the pull request
-links no issue, it gets a `needs:task-link` label until you add `Fixes #123`.
+review, and the PR label check turns green when they do. A ready pull request
+into `develop` that links no issue gets a `needs:task-link` label until you
+add `Fixes #123`.
 
 ### Review and merge
 

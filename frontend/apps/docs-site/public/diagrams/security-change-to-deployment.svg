@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
   <title id="title">From change to deployment</title>
-  <desc id="desc">Three lanes. People: a change starts as an issue and a pull request. GitHub runs CI, dependency audits and secret scanning. A Core Maintainer adds the pull request to the merge queue into develop. A pull request into a release branch is approved by a second Core Maintainer, and a Core Maintainer creates the v tag. GitHub then builds and scans the images, generates SBOMs and attestations and completes the release bundle. Operators verify the bundle and deploy it. Rulesets ensure that only Core Maintainers can queue, release and tag. Deployments consume the completed release bundle, not a single image tag.</desc>
+  <desc id="desc">Three lanes. People: a change starts as an issue and a pull request. GitHub runs CI, dependency audits and secret scanning. A Core Maintainer adds the pull request to the merge queue into develop. A pull request into a release branch is approved by a second Core Maintainer, and a Core Maintainer creates the v tag. GitHub then builds and scans the images, generates SBOMs and attestations and completes the release bundle. Operators verify the bundle and deploy it. Rulesets ensure that only people with write access can queue into develop, and that only Core Maintainers can update release branches and create tags. Deployments consume the completed release bundle, not a single image tag.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
@@ -86,6 +86,6 @@
 
   <!-- Enforcement -->
   <rect x="24" y="404" width="852" height="50" rx="8" fill="#ffffff" stroke="#0e7c86"/>
-  <text x="40" y="425" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only Core Maintainers can queue into develop, approve and update releases, and tag.</text>
+  <text x="40" y="425" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only write access can queue into develop; only Core Maintainers update releases and tag.</text>
   <text x="40" y="443" fill="#455a64" font-size="12">Deployments consume the completed release bundle, not a single image tag.</text>
 </svg>

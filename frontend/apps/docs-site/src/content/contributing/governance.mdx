@@ -59,7 +59,9 @@ from a fork, in exactly the same way as Collaborators.
 1. **Issue.** The change is described and agreed in an issue.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
    pull request against `develop`.
-3. **Checks.** CI, Dependency Review and the PR label check run automatically.
+3. **Checks.** CI, Dependency Review and the PR label check run. For
+   contributors outside the `eneo-ai` organisation, CI and Dependency Review
+   start once a Core Maintainer approves the workflow run.
 4. **Review.** A Core Maintainer reviews and approves it.
 5. **Merge.** The Core Maintainer chooses **Merge when ready**. As soon as the
    checks are green, the pull request enters the merge queue, which tests it
@@ -81,13 +83,15 @@ Each step is described for contributors in
 The rules are enforced by GitHub team roles and repository rulesets. They do not
 depend on anyone remembering them.
 
-- **Least privilege.** Only Core Maintainers have write access to the
-  repository. Everyone else contributes from forks. Administrator rights are
-  limited to a small number of organisation owners.
-- **Only Core Maintainers decide what is merged.** Only they can add a pull
-  request to the merge queue. Their rule is to review and approve every
-  contribution from outside the team before queueing it; GitHub enforces who
-  can queue, not who approved. If someone without write access pushes new
+- **Least privilege.** Core Maintainers is the only team with write access to
+  the repository. Everyone else contributes from forks. Administrator rights
+  are limited to a small number of organisation owners, who manage settings
+  and are not part of the day-to-day merge flow.
+- **Core Maintainers decide what is merged.** Only people with write access can
+  add a pull request to the merge queue, and the Core Maintainers do the
+  ordinary merges. Their rule is to review and approve every contribution from
+  outside the team before queueing it; GitHub enforces who can queue, not who
+  approved. If someone without write access pushes new
   commits afterwards, GitHub cancels **Merge when ready** and the change must be
   looked at again.
 - **Green checks, no shortcuts.** Nothing reaches `develop` without passing the
@@ -119,16 +123,17 @@ The security policy behind these controls is in
 
 ## Roles and permissions
 
-| Role             | Team                        | Access to `eneo`                                                    | What the role can do                                                                                                                                 |
-| ---------------- | --------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Everyone         | –                           | Public                                                              | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork.                            |
-| Collaborators    | `@eneo-ai/collaborators`    | Triage                                                              | Everything above, plus label, assign, close and reopen issues and pull requests.                                                                     |
-| Teknisk kommitté | –                           | Through each member's own role                                      | Shape the technical roadmap through issues and discussions.                                                                                          |
-| Core Maintainers | `@eneo-ai/core-maintainers` | Maintain on every repository, plus Security manager and CI/CD admin | Queue pull requests, approve release changes, cut release branches, publish releases, triage security alerts and manage Actions secrets and runners. |
-| Administrators   | Organisation owners         | Admin                                                               | Change rulesets, team access and repository settings.                                                                                                |
+| Role             | Team                        | Access to `eneo`                                        | What the role can do                                                                                                      |
+| ---------------- | --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Everyone         | –                           | Public                                                  | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork. |
+| Collaborators    | `@eneo-ai/collaborators`    | Triage                                                  | Everything above, plus label, assign, close and reopen issues and pull requests.                                          |
+| Teknisk kommitté | –                           | Through each member's own role                          | Shape the technical roadmap through issues and discussions.                                                               |
+| Core Maintainers | `@eneo-ai/core-maintainers` | Maintain, plus the organisation's Security manager role | Queue pull requests, approve release changes, cut release branches, publish releases and triage security alerts.          |
+| Administrators   | Organisation owners         | Admin                                                   | Change rulesets, team access and repository settings.                                                                     |
 
 Organisation members have read access to the organisation's repositories by
-default. Any further rights come from the teams above.
+default. Any further rights come from the teams above, or from Triage granted
+directly to an individual outside collaborator.
 
 ## Protected branches and tags
 
