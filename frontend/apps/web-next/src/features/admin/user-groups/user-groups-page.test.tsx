@@ -27,13 +27,18 @@ const eva = { id: "u3", email: "eva.ek@kommun.se", username: "eva.ek" };
 
 type Group = { id: string; name: string; users: (typeof anna | typeof per)[] };
 
-/** The backend: groups (changed by the test as the requests land) and the user directory. */
+/**
+ * The backend: groups (changed by the test as the requests land) and the user
+ * directory, filtered by the e-mail search as the backend does.
+ */
 function serve(initial: Group[], directory = [anna, per, eva]) {
   let groups = initial;
-  api.GET.mockImplementation((path: string) => {
+  api.GET.mockImplementation((path: string, init?: { params?: { query?: { email?: string } } }) => {
     if (path === "/api/v1/user-groups/") return ok({ items: groups, count: groups.length });
     if (path === "/api/v1/users/") {
-      return ok({ items: directory, total_count: directory.length, next_cursor: null });
+      const email = init?.params?.query?.email;
+      const items = email ? directory.filter((user) => user.email.includes(email)) : directory;
+      return ok({ items, total_count: items.length, next_cursor: null });
     }
     throw new Error(`unexpected GET ${path}`);
   });
@@ -222,6 +227,39 @@ describe("AdminUserGroupsPage members", () => {
       within(dialog).getByRole("button", { name: "Ta bort anna.lind@kommun.se från gruppen" })
     ).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("keeps the users ticked across searches and adds them together", async () => {
+    const { dialog, backend } = await openMembers([{ ...economy, users: [] }]);
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /per\.berg@kommun\.se/ }));
+
+    // A search that hides Per: the e-mail goes to the backend, and Per stays picked.
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Sök användare på e-post" }), {
+      target: { value: "eva" }
+    });
+    await waitFor(() =>
+      expect(within(dialog).queryByRole("checkbox", { name: /per\.berg@kommun\.se/ })).toBeNull()
+    );
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/users/", {
+      params: { query: { email: "eva", limit: 100, cursor: undefined } },
+      signal: expect.any(AbortSignal)
+    });
+    expect(within(dialog).getByRole("list", { name: "Valda användare" }).textContent).toContain(
+      "per.berg@kommun.se"
+    );
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /eva\.ek@kommun\.se/ }));
+    const add = within(dialog).getByRole("button", { name: /^Lägg till valda/ });
+    expect(add.textContent).toContain("(2)");
+
+    backend.set([{ ...economy, users: [per, eva] }]);
+    fireEvent.click(add);
+
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    expect(
+      api.POST.mock.calls.map(
+        (call) => (call[1] as { params: { path: { user_id: string } } }).params.path.user_id
+      )
+    ).toEqual(["u2", "u3"]);
   });
 
   it("adds several users at once", async () => {
