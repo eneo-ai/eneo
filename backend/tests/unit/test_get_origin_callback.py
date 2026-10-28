@@ -88,6 +88,19 @@ def test_tenant_origin_requirement_is_enabled_by_default():
         ("https://other.example.com", {}, 400),
         ("https://api.example.com", {"Authorization": "Bearer token"}, 204),
         ("https://api.example.com", {"X-Widget-Key": "invalid"}, 400),
+        # An empty API-key header is still an API-key request: no shortcut.
+        ("https://api.example.com", {"X-Widget-Key": ""}, 400),
+        # Bearer wins over any API-key header, as in authentication.
+        (
+            "https://api.example.com",
+            {"Authorization": "Bearer token", "X-Widget-Key": ""},
+            204,
+        ),
+        (
+            "https://api.example.com",
+            {"Authorization": "Bearer token", "X-Widget-Key": "invalid"},
+            204,
+        ),
         ("https://api.example.com:bad", {}, 400),
         ("https://api.example.com/path", {}, 400),
         (
@@ -137,6 +150,24 @@ async def test_cors_uses_request_origin_without_bypassing_api_keys(
             "http://eneo.example.se",
             "https://eneo.example.se",
             {"X-Widget-Key": "invalid"},
+            400,
+        ),
+        (
+            "http://eneo.example.se",
+            "https://eneo.example.se",
+            {"X-Widget-Key": ""},
+            400,
+        ),
+        (
+            "http://eneo.example.se",
+            "https://eneo.example.se",
+            {"Authorization": "Bearer token", "X-Widget-Key": ""},
+            204,
+        ),
+        (
+            "http://eneo.example.se",
+            "https://tenant-b.example.se",
+            {"Authorization": "Bearer token", "X-Widget-Key": ""},
             400,
         ),
         ("http://eneo.example.se", "https://eneo.example.se:8443", {}, 400),
