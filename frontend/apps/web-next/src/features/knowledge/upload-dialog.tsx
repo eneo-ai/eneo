@@ -214,7 +214,6 @@ function UploadBlobsForm({
   // Upload is never disabled: with no files, or files it cannot take, the
   // problem shows at the file field, which takes focus.
   async function startUpload() {
-    if (checking) return;
     if (files.length === 0 || errors.length > 0) {
       revealProblems(() => setSubmitted(true), FILES_ID);
       return;
