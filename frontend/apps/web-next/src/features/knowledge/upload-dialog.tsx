@@ -22,9 +22,8 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { sessionQueries } from "@/lib/api/session";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { collectionBlobsQueryOptions } from "./knowledge";
@@ -92,8 +91,8 @@ export function UploadBlobsDialog({
   const [submitted, setSubmitted] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
-  const [dragging, setDragging] = useState(false);
   const [duplicateFileNames, setDuplicateFileNames] = useState<string[]>([]);
+  const { dragging, handlers } = useFileDrop(addSelectedFiles);
 
   const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
   const sizeLimitByType = new Map(
@@ -177,7 +176,6 @@ export function UploadBlobsDialog({
   function reset() {
     setFiles([]);
     setSkippedFiles([]);
-    setDragging(false);
     setDuplicateFileNames([]);
     setSubmitted(false);
   }
@@ -230,21 +228,7 @@ export function UploadBlobsDialog({
                 "rounded-lg border-2 border-dashed p-4",
                 dragging && "border-primary bg-primary/5"
               )}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                void collectDroppedFiles(event.dataTransfer)
-                  .then(addSelectedFiles)
-                  .catch(() => toast.error(t("file_upload_error")));
-              }}
+              {...handlers}
             >
               <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
                 {t("upload_dropzone_prompt")}

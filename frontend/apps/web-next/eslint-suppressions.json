@@ -52,28 +52,13 @@
       "count": 1
     }
   },
-  "src/features/files/resource-attachments-section.tsx": {
-    "jsx-a11y/no-static-element-interactions": {
-      "count": 1
-    }
-  },
   "src/features/group-chats/assistant-list.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1
     }
   },
-  "src/features/knowledge/upload-dialog.tsx": {
-    "jsx-a11y/no-static-element-interactions": {
-      "count": 1
-    }
-  },
   "src/features/services/editor/service-editor.tsx": {
     "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
-  "src/features/templates/template-gallery-dialog.tsx": {
-    "jsx-a11y/no-static-element-interactions": {
       "count": 1
     }
   }
