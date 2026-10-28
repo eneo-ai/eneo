@@ -262,10 +262,10 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
         }
         const summary = announcementSummary(release, can);
         expect(summary.entries.map((entry) => entry.id)).toEqual([
+          "conversation-settings",
           "file-creation-progress",
           "file-analysis-trace",
-          "compute-and-charts",
-          "conversation-uploads"
+          "compute-and-charts"
         ]);
         expect(summary.total).toBe(entries.length);
         expect(summary.more).toBe(entries.length - 4);

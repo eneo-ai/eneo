@@ -181,6 +181,16 @@ describe("ChatView conversation", () => {
       true
     );
     expect(api.PATCH).not.toHaveBeenCalled();
+    const reload = screen.getByRole("button", { name: "Läs in sparade val" });
+    reload.focus();
+    fireEvent.click(reload);
+    await waitFor(() => expect(notice.isConnected).toBe(false));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: /Meddelande till/ }))
+    );
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      false
+    );
   });
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);

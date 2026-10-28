@@ -82,33 +82,38 @@ class ConversationSettingsState(BaseModel):
         """
         if not isinstance(value, dict):
             return handler(value)
-        fields = cast(dict[object, object], value)
+        fields = cast(dict[str, object], value)
         if not isinstance(fields.get("settings"), dict):
             return handler(value)
-        payload = _JSON_OBJECT.validate_python(value)
-        choices = _JSON_OBJECT.validate_python(payload["settings"])
-        unknown = {
-            k: v
-            for k, v in choices.items()
-            if k not in ConversationSettings.model_fields
-        }
+        # Known fields may come from model_dump() with native UUID values and
+        # UUID map keys. Their typed model owns validation; only opaque values
+        # must already be JSON-safe so they can be preserved in storage.
+        choices = cast(dict[str, object], fields["settings"])
+        unknown = _JSON_OBJECT.validate_python(
+            {
+                k: v
+                for k, v in choices.items()
+                if k not in ConversationSettings.model_fields
+            }
+        )
         known = {k: v for k, v in choices.items() if k not in unknown}
         unknown_capabilities: dict[str, JsonValue] = {}
         capabilities = known.get("capability_states")
         if isinstance(capabilities, dict):
+            capabilities = cast(dict[str, object], capabilities)
             purposes = get_args(CapabilityPurpose)
-            unknown_capabilities = {
-                k: v for k, v in capabilities.items() if k not in purposes
-            }
+            unknown_capabilities = _JSON_OBJECT.validate_python(
+                {k: v for k, v in capabilities.items() if k not in purposes}
+            )
             known["capability_states"] = {
                 k: v for k, v in capabilities.items() if k in purposes
             }
-        state = handler({"revision": payload.get("revision"), "settings": known})
+        state = handler({"revision": fields.get("revision"), "settings": known})
         state._unknown_settings = unknown
         state._unknown_capabilities = unknown_capabilities
-        state._unknown_fields = {
-            k: v for k, v in payload.items() if k not in cls.model_fields
-        }
+        state._unknown_fields = _JSON_OBJECT.validate_python(
+            {k: v for k, v in fields.items() if k not in cls.model_fields}
+        )
         return state
 
     @property

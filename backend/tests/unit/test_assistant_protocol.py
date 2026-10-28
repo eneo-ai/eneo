@@ -5,18 +5,68 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    CompletionModelPublic,
     McpToolReference,
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
 )
+from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.api.assistant_protocol import (
     to_ask_conversation_response,
+    to_conversation_response,
     to_sse_response,
 )
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import UseTools
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import SessionInDB, TokenUsageEvent
+
+
+@pytest.mark.asyncio
+async def test_conversation_stream_emits_settings_ids_before_the_answer():
+    model_id, server_id = uuid4(), uuid4()
+    settings = ConversationSettingsState(
+        revision=2,
+        settings=ConversationSettings(
+            completion_model_id=model_id, mcp_server_states={server_id: False}
+        ),
+    )
+
+    async def answer():
+        yield Completion(response_type=ResponseType.TEXT, text="pong")
+
+    response = await to_conversation_response(
+        AssistantResponse(
+            question="ping",
+            files=[],
+            session=SessionInDB(id=uuid4(), name="Conversation", settings=settings),
+            answer=answer(),
+            info_blobs=[],
+            tools=UseTools(assistants=[]),
+            completion_model=CompletionModelPublic(
+                id=model_id,
+                name="test",
+                max_input_tokens=1000,
+                max_output_tokens=1000,
+                is_deprecated=False,
+                vision=False,
+                reasoning=False,
+            ),
+            question_id=uuid4(),
+            created_at=None,
+            updated_at=None,
+        ),
+        stream=True,
+    )
+    events = [event async for event in response.body_iterator]
+    assert events[0].event == ResponseType.FIRST_CHUNK.value
+    assert json.loads(events[0].data)["settings"] == settings.model_dump(mode="json")
+    assert events[1].event == ResponseType.TEXT.value
+    assert json.loads(events[1].data)["answer"] == "pong"
 
 
 def test_non_streaming_conversation_response_includes_mcp_references():

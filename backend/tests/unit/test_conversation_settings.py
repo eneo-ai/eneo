@@ -658,6 +658,36 @@ def test_future_state_preserves_history_without_exposing_unknown_editable_fields
         state.with_settings(ConversationSettings())
 
 
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_settings_round_trip_accepts_typed_ids_and_preserves_opaque_choices(mode):
+    model_id, server_id = uuid4(), uuid4()
+    state = ConversationSettingsState(
+        revision=3,
+        settings=ConversationSettings(
+            completion_model_id=model_id, mcp_server_states={server_id: False}
+        ),
+    )
+    payload = state.model_dump(mode=mode)
+    payload["settings"]["capability_states"]["retired_tool"] = {"selected": True}
+    restored = ConversationSettingsState.model_validate(payload)
+    assert restored.settings == state.settings
+    assert restored.to_storage()["settings"]["mcp_server_states"] == {
+        str(server_id): False
+    }
+    assert restored.to_storage()["settings"]["capability_states"] == {
+        "retired_tool": {"selected": True}
+    }
+
+
+def test_opaque_stored_fields_must_still_be_json_safe():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ConversationSettingsState.model_validate(
+            {"revision": 1, "settings": {"future_option": uuid4()}}
+        )
+
+
 def test_retired_capability_is_preserved_across_updates_but_never_executed():
     state = ConversationSettingsState.model_validate(
         {

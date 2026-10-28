@@ -910,7 +910,7 @@ function ConversationView({
             isInterruptible
             onClick={async () => {
               await conversationSettings.reload();
-              rescueFocus((started ? dockTextareaRef : startTextareaRef).current);
+              rescue((started ? dockTextareaRef : startTextareaRef).current);
             }}
           />
         </span>
