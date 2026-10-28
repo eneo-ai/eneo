@@ -27,10 +27,15 @@ function localDate(date: Date): IsoDate {
   return `${date.getFullYear()}-${month}-${day}` as IsoDate;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * `days` of elapsed time from now, as the backend counts a policy's maximum
+ * (now + timedelta(days)): not calendar days, which run an hour longer
+ * across a daylight saving change.
+ */
 function daysFromNow(days: number): Date {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date;
+  return new Date(Date.now() + days * DAY_MS);
 }
 
 /** The expiry `days` from now, as an instant. */
@@ -39,11 +44,14 @@ export function expiryInDays(days: number): string {
 }
 
 /**
- * A picked day expires at its end, local time: the backend compares expires_at
- * in real time, so 23:59:59 keeps the key usable through the chosen day.
+ * A picked day expires at its end, local time (the backend compares
+ * expires_at in real time, so the key works through the chosen day), but
+ * never later than the policy's maximum: the last allowed day ends then.
  */
-function endOfDay(date: IsoDate): string {
-  return new Date(`${date}T23:59:59`).toISOString();
+function endOfDay(date: IsoDate, maxDays: number | null | undefined): string {
+  const end = new Date(`${date}T23:59:59`);
+  const latest = maxDays ? daysFromNow(maxDays) : null;
+  return (latest && latest < end ? latest : end).toISOString();
 }
 
 function initialChoice(value: string | null): Choice {
@@ -94,7 +102,7 @@ export function ExpirationPicker({
     else if (next !== "custom") onChange(expiryInDays(Number(next)));
     else if (!value) {
       const month = localDate(daysFromNow(30));
-      onChange(endOfDay(max && max < month ? max : month));
+      onChange(endOfDay(max && max < month ? max : month, maxDays));
     }
   }
 
@@ -129,7 +137,7 @@ export function ExpirationPicker({
           max={max}
           value={value ? localDate(new Date(value)) : undefined}
           onChange={(next) => {
-            if (next) onChange(endOfDay(next));
+            if (next) onChange(endOfDay(next, maxDays));
           }}
         />
       )}

@@ -1628,5 +1628,6 @@
   "api_keys_rate_limit_invalid": "Enter a whole number of requests per hour, 1 or more.",
   "api_keys_allowed_ips_placeholder": "10.0.0.0/8",
   "api_keys_admin_policy_require_tenant_origin": "Require tenant-approved origins",
-  "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list."
+  "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list.",
+  "api_keys_allowlist_unadded": "“{value}” is not added yet. Press Enter to add it, or clear the field."
 }

@@ -103,6 +103,56 @@ describe("CreateApiKeyDialog", () => {
     expect(within(dialog).getByText(/300\.1\.1\.1: /)).toBeTruthy();
   });
 
+  it("does not drop an IP that is typed but not added", async () => {
+    const { dialog } = await open();
+    fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Integration" } });
+    const ips = within(dialog).getByRole("combobox", { name: /Tillåtna IP-adresser/ });
+    fireEvent.change(ips, { target: { value: "203.0.113.5" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(ips);
+    expect(within(dialog).getByText(/203\.0\.113\.5.* är inte tillagd än/)).toBeTruthy();
+  });
+
+  it("keeps a one-day policy's expiry within the backend's limit", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T09:00:00Z"));
+    try {
+      api.POST.mockReturnValue(ok({ api_key: { id: "key-1" }, secret: "sk_secret" }));
+      const { dialog } = await open({ require_expiration: true, max_expiration_days: 1 });
+      fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Kort" } });
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Anpassad" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+
+      await waitFor(() => expect(api.POST).toHaveBeenCalled());
+      const body = api.POST.mock.calls[0]?.[1]?.body as { expires_at: string };
+      expect(new Date(body.expires_at).getTime()).toBeLessThanOrEqual(
+        new Date("2026-10-29T09:00:00Z").getTime()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("offers the spaces while the assistants and apps are still loading", async () => {
+    const { dialog } = await open();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/spaces/{id}/applications/"
+        ? new Promise(() => {})
+        : path === "/api/v1/spaces/"
+          ? ok({ items: [{ id: "space-1", name: "Upphandling", applications: null }] })
+          : Promise.resolve({ error: {}, response: new Response("{}", { status: 404 }) })
+    );
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Yta" }));
+    const picker = await within(dialog).findByRole("combobox", { name: "Välj yta" });
+    await waitFor(() => expect(picker.hasAttribute("disabled")).toBe(false));
+    expect(api.GET).not.toHaveBeenCalledWith(
+      "/api/v1/spaces/{id}/applications/",
+      expect.anything()
+    );
+  });
+
   it("follows the policy: required and bounded expiry, capped rate limit", async () => {
     const { dialog } = await open({
       require_expiration: true,

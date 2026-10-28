@@ -124,6 +124,8 @@ export function ApiKeyForm({
   const { can } = useAppContext();
   const [draft, setDraft] = useState(initial);
   const [submitted, setSubmitted] = useState(false);
+  // What is typed into the origins or IPs field but not added as an entry yet.
+  const [unadded, setUnadded] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const id = (field: string) => `${idPrefix}-key-${field}`;
   const creating = mode === "create";
@@ -133,6 +135,12 @@ export function ApiKeyForm({
   const scopeNoun = scopeLabel.toLocaleLowerCase();
 
   const problems = draftProblems(draft, { mode, constraints }, t);
+  // Typed but not added, a restriction would be dropped without a word: it
+  // stops the submit until it is added or cleared.
+  const allowlist = draft.keyType === "pk_" ? "origins" : "ips";
+  if (unadded.trim()) {
+    problems[allowlist] = t("api_keys_allowlist_unadded", { value: unadded.trim() });
+  }
   // An invalid origin or IP is named as soon as it is added; the rest on submit.
   const live: Partial<Record<DraftField, string>> = {
     origins: invalidEntry(draft.allowedOrigins, originProblem, t),
@@ -194,9 +202,10 @@ export function ApiKeyForm({
             id={id("type")}
             legend={t("api_keys_key_type")}
             value={draft.keyType}
-            onChange={(keyType) =>
-              setDraft((current) => withKeyType(current, keyType as ApiKeyType))
-            }
+            onChange={(keyType) => {
+              setUnadded("");
+              setDraft((current) => withKeyType(current, keyType as ApiKeyType));
+            }}
             options={[
               {
                 value: "sk_",
@@ -318,6 +327,7 @@ export function ApiKeyForm({
             suggestions={ORIGIN_SUGGESTIONS}
             values={draft.allowedOrigins}
             onChange={(allowedOrigins) => update({ allowedOrigins })}
+            onUnaddedChange={setUnadded}
             problem={shown("origins")}
             isRequired
           />
@@ -330,6 +340,7 @@ export function ApiKeyForm({
             suggestions={IP_SUGGESTIONS}
             values={draft.allowedIps}
             onChange={(allowedIps) => update({ allowedIps })}
+            onUnaddedChange={setUnadded}
             problem={shown("ips")}
           />
         )}
@@ -584,6 +595,7 @@ function AllowlistField({
   suggestions,
   values,
   onChange,
+  onUnaddedChange,
   problem,
   isRequired = false
 }: {
@@ -594,6 +606,8 @@ function AllowlistField({
   suggestions: string[];
   values: string[];
   onChange: (values: string[]) => void;
+  /** The text typed but not added as an entry (Astryx clears it on add without saying so). */
+  onUnaddedChange: (text: string) => void;
   problem: string | null;
   isRequired?: boolean;
 }) {
@@ -603,6 +617,8 @@ function AllowlistField({
       createStaticSource<SearchableItem>(suggestions.map((value) => ({ id: value, label: value }))),
     [suggestions]
   );
+  // Stable between keystrokes: the field re-renders as the typed text is reported.
+  const tokens = useMemo(() => values.map((value) => ({ id: value, label: value })), [values]);
   return (
     <div data-field={field}>
       <Tokenizer
@@ -610,8 +626,12 @@ function AllowlistField({
         description={description}
         placeholder={placeholder}
         searchSource={source}
-        value={values.map((value) => ({ id: value, label: value }))}
-        onChange={(items) => onChange(items.map((item) => item.id.trim()).filter(Boolean))}
+        value={tokens}
+        onChange={(items) => {
+          onUnaddedChange("");
+          onChange(items.map((item) => item.id.trim()).filter(Boolean));
+        }}
+        onChangeQuery={onUnaddedChange}
         hasCreate
         hasEntriesOnFocus
         debounceMs={0}
