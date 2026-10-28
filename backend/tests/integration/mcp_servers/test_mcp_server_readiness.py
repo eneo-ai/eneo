@@ -6,11 +6,22 @@ from uuid import UUID
 import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
+from eneo.database.tables.mcp_server_table import (
+    MCPServers,
+    MCPServerTools,
+    MCPServerToolSettings,
+)
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification,
+)
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
 )
+
+# The admin tools panel switches a tool per tenant; that setting, not the
+# tool's default, is what activation and capability resolution use.
+TENANT_TOOL_SETTINGS = {"tenant_disabled": False, "tenant_enabled": True}
 
 
 @pytest.fixture
@@ -20,13 +31,29 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user):
 
 
 @pytest.mark.parametrize(
-    "tool_state", ["approved", "disabled", "removed", "pending", "absent"]
+    "tool_state",
+    [
+        "approved",
+        "disabled",
+        "removed",
+        "pending",
+        "absent",
+        *TENANT_TOOL_SETTINGS,
+    ],
 )
-async def test_read_and_update_agree_with_settings_without_changing_tools(
+async def test_reads_and_edits_agree_with_settings_and_keep_stored_data(
     client, db_container, admin_user, admin_token, tool_state
 ):
     async with db_container() as container:
         session = container.session()
+        classification = SecurityClassification(
+            tenant_id=admin_user.tenant_id,
+            name="Readiness regression",
+            security_level=1,
+        )
+        session.add(classification)
+        await session.flush()
+        classification_id = classification.id
         server = MCPServers(
             tenant_id=admin_user.tenant_id,
             name="Readiness regression",
@@ -34,25 +61,32 @@ async def test_read_and_update_agree_with_settings_without_changing_tools(
             http_url="https://example.test/mcp",
             http_auth_type="none",
             is_enabled=False,
+            security_classification_id=classification_id,
         )
         session.add(server)
         await session.flush()
         server_id = server.id
         if tool_state != "absent":
-            session.add(
-                MCPServerTools(
-                    mcp_server_id=server_id,
-                    name="search",
-                    description=None if tool_state == "pending" else "Search",
-                    input_schema=None
-                    if tool_state == "pending"
-                    else {"type": "object"},
-                    pending_description="Awaiting approval",
-                    requires_approval=True,
-                    is_enabled_by_default=tool_state != "disabled",
-                    removed_from_remote=tool_state == "removed",
-                )
+            tool = MCPServerTools(
+                mcp_server_id=server_id,
+                name="search",
+                description=None if tool_state == "pending" else "Search",
+                input_schema=None if tool_state == "pending" else {"type": "object"},
+                pending_description="Awaiting approval",
+                requires_approval=True,
+                is_enabled_by_default=tool_state not in ("disabled", "tenant_enabled"),
+                removed_from_remote=tool_state == "removed",
             )
+            session.add(tool)
+            await session.flush()
+            if tool_state in TENANT_TOOL_SETTINGS:
+                session.add(
+                    MCPServerToolSettings(
+                        tenant_id=admin_user.tenant_id,
+                        mcp_server_tool_id=tool.id,
+                        is_enabled=TENANT_TOOL_SETTINGS[tool_state],
+                    )
+                )
         await session.flush()
         # Include pending definitions and timestamps: a server edit must not
         # rewrite, approve or delete any part of its existing tool catalog.
@@ -62,7 +96,9 @@ async def test_read_and_update_agree_with_settings_without_changing_tools(
         before = (await session.execute(tool_rows)).mappings().all()
 
     headers = {"Authorization": f"Bearer {admin_token}"}
-    expected = None if tool_state == "approved" else "no_approved_tools"
+    expected = (
+        None if tool_state in ("approved", "tenant_enabled") else "no_approved_tools"
+    )
     for path in ("/api/v1/mcp-servers/settings/", "/api/v1/mcp-servers/"):
         response = await client.get(path, headers=headers)
         assert response.status_code == 200, response.text
@@ -93,9 +129,25 @@ async def test_read_and_update_agree_with_settings_without_changing_tools(
     assert response.status_code == 200, response.text
     assert response.json()["readiness_reason"] == expected
 
+    response = await client.post(
+        f"/api/v1/mcp-servers/{server_id}/deactivate/", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["readiness_reason"] == expected
+
     async with db_container() as container:
-        after = (await container.session().execute(tool_rows)).mappings().all()
+        session = container.session()
+        after = (await session.execute(tool_rows)).mappings().all()
         assert after == before
+        # None of these edits names a classification, so each must keep it.
+        assert (
+            await session.scalar(
+                sa.select(MCPServers.security_classification_id).where(
+                    MCPServers.id == server_id
+                )
+            )
+            == classification_id
+        )
 
 
 @pytest.mark.parametrize("activate", [False, True])
