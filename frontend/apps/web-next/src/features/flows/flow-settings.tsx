@@ -21,7 +21,9 @@ import {
   hasOptions,
   metadataWithSettings,
   renamedFormFields,
+  roleFor,
   suggestedFieldName,
+  withFieldChanged,
   type FormFieldDraft,
   type FormFieldProblem,
   type FormFieldType
@@ -142,6 +144,7 @@ function FormFieldRow({
   const nameProblem = problems.find((problem) => problem.part === "name");
   const optionsProblem = problems.find((problem) => problem.part === "options");
   const title = field.label.trim() || t("flows_form_field_number", { number: index + 1 });
+  const role = roleFor(field.type);
 
   return (
     <div
@@ -212,6 +215,22 @@ function FormFieldRow({
         value={field.required}
         onChange={(required) => onChange({ ...field, required })}
       />
+      {role ? (
+        <CheckboxInput
+          label={t(
+            role === "run_label"
+              ? "flows_form_field_role_run_label"
+              : "flows_form_field_role_run_date"
+          )}
+          description={t(
+            role === "run_label"
+              ? "flows_form_field_role_run_label_hint"
+              : "flows_form_field_role_run_date_hint"
+          )}
+          value={field.role === role}
+          onChange={(on) => onChange({ ...field, role: on ? role : undefined })}
+        />
+      ) : null}
     </div>
   );
 }
@@ -379,11 +398,7 @@ export function FlowSettings({
                 existingNames={fields
                   .filter((other) => other.key !== field.key)
                   .map((other) => other.name)}
-                onChange={(next) =>
-                  setFields((current) =>
-                    current.map((candidate) => (candidate.key === next.key ? next : candidate))
-                  )
-                }
+                onChange={(next) => setFields((current) => withFieldChanged(current, next))}
                 onRemove={() => {
                   setFields((current) =>
                     current.filter((candidate) => candidate.key !== field.key)

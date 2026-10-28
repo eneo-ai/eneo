@@ -8,7 +8,9 @@ import {
   persistedFormFields,
   renamedFormFields,
   restrictedBeforeApproval,
+  roleFor,
   suggestedFieldName,
+  withFieldChanged,
   type FormFieldDraft
 } from "./flow-form-fields";
 
@@ -63,6 +65,53 @@ describe("persistedFormFields", () => {
       { name: "val", label: "Val", type: "select", required: false, order: 2, options: ["a"] },
       { name: "text", label: "Ärende", type: "text", required: false, order: 3 }
     ]);
+  });
+});
+
+describe("field roles", () => {
+  it("reads a role only from a field of the type that can hold it", () => {
+    const fields = formFieldsOf({
+      form_schema: {
+        fields: [
+          { name: "mote", type: "text", role: "run_label" },
+          { name: "datum", type: "date", role: "run_date" },
+          { name: "fel", type: "date", role: "run_label" }
+        ]
+      }
+    });
+    expect(fields.map((field) => field.role)).toEqual(["run_label", "run_date", undefined]);
+    expect(roleFor("text")).toBe("run_label");
+    expect(roleFor("date")).toBe("run_date");
+    expect(roleFor("number")).toBeUndefined();
+  });
+
+  it("saves a role with its field, and drops it when the field's type no longer holds it", () => {
+    expect(
+      persistedFormFields([
+        draft({ name: "mote", role: "run_label" }),
+        draft({ name: "datum", type: "date", role: "run_date" }),
+        draft({ name: "antal", type: "number", role: "run_label" })
+      ])
+    ).toEqual([
+      { name: "mote", label: "Ärende", type: "text", required: false, order: 1, role: "run_label" },
+      { name: "datum", label: "Ärende", type: "date", required: false, order: 2, role: "run_date" },
+      { name: "antal", label: "Ärende", type: "number", required: false, order: 3 }
+    ]);
+  });
+
+  it("gives a role to one field at a time", () => {
+    const fields = [
+      draft({ key: "1", name: "mote", role: "run_label" }),
+      draft({ key: "2", name: "arende" }),
+      draft({ key: "3", name: "datum", type: "date", role: "run_date" })
+    ];
+    const next = withFieldChanged(fields, draft({ key: "2", name: "arende", role: "run_label" }));
+    expect(next.map((field) => field.role)).toEqual([undefined, "run_label", "run_date"]);
+    const relabelled = draft({ key: "2", name: "arende", label: "Möte", role: "run_label" });
+    expect(withFieldChanged(next, relabelled)[1]).toMatchObject({
+      label: "Möte",
+      role: "run_label"
+    });
   });
 });
 

@@ -16,6 +16,22 @@ export const FORM_FIELD_TYPES = [
 ] as const;
 export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 
+/**
+ * What a field's value is to the run besides an input: its name (a text field)
+ * or its day (a date field). Eneo names and dates each run by them, in the
+ * run lists and in the names of the documents it generates.
+ */
+export type FormFieldRole = "run_label" | "run_date";
+const ROLE_OF_TYPE: Partial<Record<FormFieldType, FormFieldRole>> = {
+  text: "run_label",
+  date: "run_date"
+};
+
+/** The role a field of this type can hold, if any. */
+export function roleFor(type: FormFieldType): FormFieldRole | undefined {
+  return ROLE_OF_TYPE[type];
+}
+
 /** A form field while it is edited; `key` tells rows apart while names change. */
 export type FormFieldDraft = {
   key: string;
@@ -26,6 +42,7 @@ export type FormFieldDraft = {
   options: string[];
   /** The author typed the name; until then it follows the label. */
   nameEdited: boolean;
+  role?: FormFieldRole;
 };
 
 /** A form field as the flow stores it. */
@@ -36,6 +53,7 @@ export type PersistedFormField = {
   required: boolean;
   order: number;
   options?: string[];
+  role?: FormFieldRole;
 };
 
 type Metadata = Record<string, unknown> | null | undefined;
@@ -93,6 +111,7 @@ export function formFieldsOf(metadata: Metadata): FormFieldDraft[] {
       const name = typeof field.name === "string" ? field.name.trim() : "";
       const label = typeof field.label === "string" ? field.label.trim() : "";
       const type = normalizedType(field.type);
+      const role = roleFor(type) === field.role ? roleFor(type) : undefined;
       return {
         key: `saved-${index}`,
         name,
@@ -104,7 +123,8 @@ export function formFieldsOf(metadata: Metadata): FormFieldDraft[] {
               typeof option === "string" && option.trim() ? [option.trim()] : []
             )
           : [],
-        nameEdited: true
+        nameEdited: true,
+        ...(role ? { role } : {})
       };
     });
 }
@@ -123,7 +143,20 @@ export function persistedFormFields(fields: readonly FormFieldDraft[]): Persiste
     if (hasOptions(field.type)) {
       persisted.options = field.options.map((option) => option.trim()).filter(Boolean);
     }
+    if (field.role && roleFor(field.type) === field.role) persisted.role = field.role;
     return persisted;
+  });
+}
+
+/** `fields` with `next` in place of its row; a role it takes leaves the field that had it. */
+export function withFieldChanged(
+  fields: readonly FormFieldDraft[],
+  next: FormFieldDraft
+): FormFieldDraft[] {
+  return fields.map((field) => {
+    if (field.key === next.key) return next;
+    if (next.role && field.role === next.role) return { ...field, role: undefined };
+    return field;
   });
 }
 

@@ -106,6 +106,58 @@ describe("FlowSettings", () => {
     // The axe scan of the whole form takes a few seconds in jsdom.
   }, 20_000);
 
+  it("names the run after one text field at a time, and saves which", async () => {
+    const onSave = vi.fn(async () => true);
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={onSave} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const saved = screen.getByRole("group", { name: "Diarienummer" });
+    fireEvent.click(within(saved).getByRole("checkbox", { name: /Namnge körningen efter fältet/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const added = screen.getByRole("group", { name: "Fält 2" });
+    fireEvent.change(within(added).getByRole("textbox", { name: /Etikett/ }), {
+      target: { value: "Möte" }
+    });
+    // The new field takes the role; the field that had it lets it go.
+    fireEvent.click(within(added).getByRole("checkbox", { name: /Namnge körningen efter fältet/ }));
+    expect(
+      (
+        within(saved).getByRole("checkbox", {
+          name: /Namnge körningen efter fältet/
+        }) as HTMLInputElement
+      ).checked
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata_json: expect.objectContaining({
+          form_schema: {
+            fields: [
+              {
+                name: "diarienummer",
+                label: "Diarienummer",
+                type: "text",
+                required: true,
+                order: 1
+              },
+              {
+                name: "möte",
+                label: "Möte",
+                type: "text",
+                required: false,
+                order: 2,
+                role: "run_label"
+              }
+            ]
+          }
+        })
+      })
+    );
+  });
+
   it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
     const onSave = vi.fn(async () => true);
     renderInApp(

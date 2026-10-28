@@ -21280,7 +21280,7 @@ export interface components {
       max_speakers?: number | null;
       /**
        * Run Label
-       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null. The label is run metadata: the content-free list and status reads return it and the list searches it, so name the run rather than describe its content.
+       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null, the run takes the value of the flow's form field with the role `run_label` (made one line and cut to 120 characters), else no label. The label is run metadata: the content-free list and status reads return it and the list searches it, so name the run rather than describe its content.
        */
       run_label?: string | null;
       /**
@@ -21994,8 +21994,14 @@ export interface components {
        */
       revision: number;
       /**
+       * Run Date
+       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
+       * @example 2026-10-01
+       */
+      run_date?: string | null;
+      /**
        * Run Label
-       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
        * @example Case 123
        */
       run_label?: string | null;
@@ -23976,8 +23982,14 @@ export interface components {
        */
       revision: number;
       /**
+       * Run Date
+       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
+       * @example 2026-10-01
+       */
+      run_date?: string | null;
+      /**
        * Run Label
-       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
        * @example Case 123
        */
       run_label?: string | null;
@@ -25782,8 +25794,14 @@ export interface components {
        */
       revision: number;
       /**
+       * Run Date
+       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
+       * @example 2026-10-01
+       */
+      run_date?: string | null;
+      /**
        * Run Label
-       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
        * @example Case 123
        */
       run_label?: string | null;
