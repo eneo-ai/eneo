@@ -40,6 +40,13 @@ describe("useIntegrationAuth", () => {
 
     expect(opened.location.href).toBe("https://login.microsoftonline.com/x/authorize?a=1");
     expect(onConnected).not.toHaveBeenCalled();
+    // The identity provider's registration, byte for byte.
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
+      params: {
+        path: { tenant_integration_id: "ti-1" },
+        query: { redirect_uri: `${window.location.origin}/integrations/callback/token/` }
+      }
+    });
   });
 
   it.each(["http://login.example.com/", "javascript:alert(1)", "/relative"])(
