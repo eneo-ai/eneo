@@ -1624,5 +1624,14 @@
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
+  "admin_user_groups_description": "Gather users in groups. A group can be given access to spaces and functions, and everyone in it gets that access. Changes take effect immediately.",
+  "admin_user_groups_created": "The group {name} was created",
+  "admin_user_groups_renamed": "The group is now called {name}",
+  "admin_user_groups_deleted": "The group {name} was deleted",
+  "admin_user_groups_delete_named": "Delete the group {name}? Its members lose the access the group gives them.",
+  "admin_user_groups_members_added": "{count, plural, one {# user was added to {name}} other {# users were added to {name}}}",
+  "admin_user_groups_member_removed": "{email} was removed from {name}",
+  "admin_user_groups_remove_member": "Remove {email} from the group",
+  "admin_user_groups_selected": "Selected users"
 }

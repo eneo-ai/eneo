@@ -6800,5 +6800,14 @@
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
+  "admin_user_groups_description": "Samla användare i grupper. En grupp kan få åtkomst till utrymmen och funktioner, och alla i gruppen får den åtkomsten. Ändringar gäller direkt.",
+  "admin_user_groups_created": "Gruppen {name} skapades",
+  "admin_user_groups_renamed": "Gruppen heter nu {name}",
+  "admin_user_groups_deleted": "Gruppen {name} raderades",
+  "admin_user_groups_delete_named": "Vill du radera gruppen {name}? Medlemmarna förlorar den åtkomst som gruppen ger.",
+  "admin_user_groups_members_added": "{count, plural, one {# användare lades till i {name}} other {# användare lades till i {name}}}",
+  "admin_user_groups_member_removed": "{email} togs bort från {name}",
+  "admin_user_groups_remove_member": "Ta bort {email} från gruppen",
+  "admin_user_groups_selected": "Valda användare"
 }
