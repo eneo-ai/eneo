@@ -12,7 +12,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -29,17 +29,15 @@ import {
 
 type CardQuery = Pick<
   UseQueryResult<unknown, Error>,
-  "isPending" | "isError" | "isFetching" | "errorUpdatedAt" | "dataUpdatedAt" | "error" | "refetch"
+  | "data"
+  | "isPending"
+  | "isError"
+  | "isFetching"
+  | "errorUpdatedAt"
+  | "dataUpdatedAt"
+  | "error"
+  | "refetch"
 >;
-
-/**
- * A failed query, also while a retry without cached data is in flight: React
- * Query reports that as "pending" and clears isError, which would swap the
- * retry button for a skeleton under the keyboard user's focus.
- */
-function hasFailed(query: CardQuery): boolean {
-  return query.isError || (query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt);
-}
 
 function useNumberFormat() {
   const locale = useLocale();
@@ -72,7 +70,7 @@ function OverviewCard({
   children: ReactNode;
 }) {
   const headingId = useId();
-  const failed = hasFailed(query);
+  const failed = blockingError(query);
   return (
     <section aria-labelledby={headingId} className="flex min-w-0">
       <Card className="flex min-w-0 flex-1 flex-col gap-4">
@@ -91,7 +89,10 @@ function OverviewCard({
           ) : query.isPending ? (
             <LoadingState rows={2} />
           ) : (
-            children
+            <>
+              <RefreshError queries={[query]} />
+              {children}
+            </>
           )}
         </div>
         <Link href={href} className="self-start text-sm">

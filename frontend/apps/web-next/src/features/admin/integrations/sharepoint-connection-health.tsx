@@ -9,6 +9,7 @@ import { Check, Circle, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
+import { blockingError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -214,10 +215,10 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
   const rescue = useFocusRescue();
   const { query, total, expired, failing, active } = watch;
 
-  const description = query.isPending
-    ? t("loading")
-    : query.isError && !query.data
-      ? t("sharepoint_subscriptions_load_error")
+  const description = blockingError(query)
+    ? t("sharepoint_subscriptions_load_error")
+    : query.isPending
+      ? t("loading")
       : total === 0
         ? t("sharepoint_health_watch_none")
         : failing === 0 && expired > 0

@@ -36,7 +36,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { toast } from "@/lib/toast";
@@ -350,39 +350,30 @@ function QuestionsTab({
         <span className="text-ax-text-secondary text-sm">{countLabel}</span>
       </div>
 
-      {query.isPending ? (
-        <LoadingState rows={5} />
-      ) : query.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
-      ) : items.length === 0 ? (
-        <p className="text-ax-text-secondary text-sm">{t("no_questions_found_current_settings")}</p>
-      ) : (
-        <Table
-          aria-label={t("question_history")}
-          data={items}
-          columns={columns}
-          idKey="id"
-          verticalAlign="top"
-        />
-      )}
+      <QueryStateBoundary query={query} rows={5}>
+        {() =>
+          items.length === 0 ? (
+            <p className="text-ax-text-secondary text-sm">
+              {t("no_questions_found_current_settings")}
+            </p>
+          ) : (
+            <Table
+              aria-label={t("question_history")}
+              data={items}
+              columns={columns}
+              idKey="id"
+              verticalAlign="top"
+            />
+          )
+        }
+      </QueryStateBoundary>
 
-      <div className="flex items-center justify-end gap-2">
-        {!query.hasNextPage && items.length > 0 ? (
-          <span className="text-ax-text-secondary text-sm">
-            {t("loaded_all_questions", { total })}
-          </span>
-        ) : null}
-        <Button
-          label={t("load_more_questions")}
-          isDisabled={!query.hasNextPage}
-          // Stays focusable while the next page loads.
-          isLoading={query.isFetchingNextPage}
-          isInterruptible
-          onClick={() => {
-            if (!query.isFetchingNextPage) void query.fetchNextPage();
-          }}
-        />
-      </div>
+      {!query.hasNextPage && items.length > 0 ? (
+        <span className="text-ax-text-secondary self-end text-sm">
+          {t("loaded_all_questions", { total })}
+        </span>
+      ) : null}
+      <LoadMore query={query} label={t("load_more_questions")} />
     </Card>
   );
 }

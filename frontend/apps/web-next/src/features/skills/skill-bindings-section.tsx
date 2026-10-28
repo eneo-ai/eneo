@@ -18,10 +18,17 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ListError } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  LoadMore,
+  QueryStateBoundary,
+  RefreshError
+} from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { useSpace } from "@/features/spaces/use-space";
 import {
   candidateRevisionId,
@@ -226,7 +233,7 @@ export function SkillBindingsEditor({
 
   const catalogue = useInfiniteQuery({
     queryKey: ["skill-binding-catalogue", spaceId, search],
-    initialPageParam: null as string | null,
+    ...cursorPagination,
     queryFn: ({ pageParam }) =>
       loadSkillBindingCatalog({
         spaceId,
@@ -234,14 +241,12 @@ export function SkillBindingsEditor({
         cursor: pageParam,
         search
       }),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: showPicker,
     retry: false
   });
   const catalogItems = useMemo(() => {
     const byId = new Map<string, SkillCandidate>();
-    for (const skill of catalogue.data?.pages.flatMap((page) => page.items) ?? [])
-      byId.set(skill.id, skill);
+    for (const skill of flattenPages(catalogue.data?.pages)) byId.set(skill.id, skill);
     for (const skill of created) byId.set(skill.id, skill);
     return [...byId.values()];
   }, [catalogue.data, created]);
@@ -359,13 +364,7 @@ export function SkillBindingsEditor({
     });
   }
 
-  if (resource !== "personal_chat" && configuration.isPending)
-    return (
-      <SettingsGroup title={t("skills")}>
-        <p role="status">{t("loading")}</p>
-      </SettingsGroup>
-    );
-  if (resource !== "personal_chat" && configuration.isError)
+  if (resource !== "personal_chat" && blockingError(configuration))
     return (
       <SettingsGroup title={t("skills")}>
         <ListError
@@ -373,6 +372,12 @@ export function SkillBindingsEditor({
           isRetrying={configuration.isFetching}
           onRetry={() => void configuration.refetch()}
         />
+      </SettingsGroup>
+    );
+  if (resource !== "personal_chat" && configuration.isPending)
+    return (
+      <SettingsGroup title={t("skills")}>
+        <p role="status">{t("loading")}</p>
       </SettingsGroup>
     );
 
@@ -390,6 +395,7 @@ export function SkillBindingsEditor({
         </Badge>
       }
     >
+      <RefreshError queries={[configuration]} />
       <p className="text-muted-foreground text-sm">
         {t(
           resource === "personal_chat"
@@ -627,56 +633,43 @@ export function SkillBindingsEditor({
             placeholder={t("skills_search_existing")}
             aria-label={t("skills_search_existing")}
           />
-          {catalogue.isPending ? (
-            <p role="status">{t("loading")}</p>
-          ) : catalogue.isError && !catalogue.data ? (
-            <Button variant="outline" onClick={() => void catalogue.refetch()}>
-              {t("retry")}
-            </Button>
-          ) : choices.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {t(search ? "skills_search_no_results" : "skills_no_available")}
-            </p>
-          ) : (
-            <ul className="max-h-72 divide-y overflow-y-auto">
-              {choices.map((skill) => (
-                <li key={skill.id}>
-                  <button
-                    type="button"
-                    className="hover:bg-muted w-full rounded-md p-3 text-left"
-                    onClick={() => void openPreview(skill)}
-                  >
-                    <span className="font-medium">{skill.display_name}</span>
-                    <span className="text-muted-foreground ml-2 text-xs">
-                      {t("skills_revision_label", {
-                        revision: String(candidateRevisionNumber(skill))
-                      })}
-                    </span>
-                    <p className="text-muted-foreground text-sm">{skill.description}</p>
-                    <span className="text-muted-foreground text-xs">
-                      {t(
-                        skill.source === "organization"
-                          ? "skills_source_organization"
-                          : "skills_source_space"
-                      )}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {catalogue.hasNextPage && (
-            <Button
-              variant="ghost"
-              aria-busy={catalogue.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!catalogue.isFetchingNextPage) void catalogue.fetchNextPage();
-              }}
-            >
-              {catalogue.isFetchingNextPage ? t("loading") : t("load_more")}
-            </Button>
-          )}
+          <QueryStateBoundary query={catalogue} rows={3}>
+            {() =>
+              choices.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  {t(search ? "skills_search_no_results" : "skills_no_available")}
+                </p>
+              ) : (
+                <ul className="max-h-72 divide-y overflow-y-auto">
+                  {choices.map((skill) => (
+                    <li key={skill.id}>
+                      <button
+                        type="button"
+                        className="hover:bg-muted w-full rounded-md p-3 text-left"
+                        onClick={() => void openPreview(skill)}
+                      >
+                        <span className="font-medium">{skill.display_name}</span>
+                        <span className="text-muted-foreground ml-2 text-xs">
+                          {t("skills_revision_label", {
+                            revision: String(candidateRevisionNumber(skill))
+                          })}
+                        </span>
+                        <p className="text-muted-foreground text-sm">{skill.description}</p>
+                        <span className="text-muted-foreground text-xs">
+                          {t(
+                            skill.source === "organization"
+                              ? "skills_source_organization"
+                              : "skills_source_space"
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+          </QueryStateBoundary>
+          <LoadMore query={catalogue} label={t("load_more")} />
         </div>
       )}
       {resource !== "personal_chat" && (

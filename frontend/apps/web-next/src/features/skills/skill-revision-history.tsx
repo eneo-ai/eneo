@@ -4,7 +4,6 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Eye, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,9 +16,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import {
   getSkillRevision,
   listSkillRevisions,
@@ -87,9 +87,8 @@ export function SkillRevisionHistory({
   const canRestore = allowRestore && !("removed_at" in skill && skill.removed_at);
   const revisions = useInfiniteQuery({
     queryKey: [...key, skill.id, "revisions"],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => listSkillRevisions(scope, skill.id, pageParam),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    ...cursorPagination,
+    queryFn: ({ pageParam }) => listSkillRevisions(scope, skill.id, pageParam ?? null),
     retry: false
   });
   const preview = useQuery({
@@ -99,7 +98,7 @@ export function SkillRevisionHistory({
     retry: false
   });
   const revision = viewId === skill.current_revision_id ? skill.current_revision : preview.data;
-  const items = revisions.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = flattenPages(revisions.data?.pages);
 
   async function restore() {
     if (!restoreId || restoring || !canRestore) return;
@@ -145,77 +144,48 @@ export function SkillRevisionHistory({
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
       </p>
-      {revisions.isPending ? (
-        <p role="status">{t("loading")}</p>
-      ) : revisions.isError && !revisions.data ? (
-        <ListError
-          error={revisions.error}
-          isRetrying={revisions.isFetching}
-          onRetry={() => void revisions.refetch()}
-        />
-      ) : (
-        <>
-          <div className="divide-y rounded-lg border">
-            {items.map((item) => (
-              <div key={item.id} className="flex flex-wrap items-center gap-3 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {t("skills_revision_label", { revision: String(item.revision_number) })}
-                    {item.id === skill.current_revision_id && (
-                      <Badge variant="secondary">{t("skills_library_current_revision")}</Badge>
-                    )}
-                  </p>
-                  <p className="text-muted-foreground truncate text-xs">
-                    {item.display_name} ·{" "}
-                    {new Date(item.created_at).toLocaleString(locale, {
-                      dateStyle: "short",
-                      timeStyle: "short"
+      <QueryStateBoundary query={revisions} rows={3}>
+        {() => (
+          <>
+            <div className="divide-y rounded-lg border">
+              {items.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center gap-3 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      {t("skills_revision_label", { revision: String(item.revision_number) })}
+                      {item.id === skill.current_revision_id && (
+                        <Badge variant="secondary">{t("skills_library_current_revision")}</Badge>
+                      )}
+                    </p>
+                    <p className="text-muted-foreground truncate text-xs">
+                      {item.display_name} ·{" "}
+                      {new Date(item.created_at).toLocaleString(locale, {
+                        dateStyle: "short",
+                        timeStyle: "short"
+                      })}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("skills_library_view_revision_aria", {
+                      revision: String(item.revision_number)
                     })}
-                  </p>
+                    onClick={() => {
+                      setError(null);
+                      setViewId(item.id);
+                    }}
+                  >
+                    <Eye className="size-4" />
+                    {t("preview")}
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={t("skills_library_view_revision_aria", {
-                    revision: String(item.revision_number)
-                  })}
-                  onClick={() => {
-                    setError(null);
-                    setViewId(item.id);
-                  }}
-                >
-                  <Eye className="size-4" />
-                  {t("preview")}
-                </Button>
-              </div>
-            ))}
-          </div>
-          {revisions.hasNextPage && (
-            <Button
-              variant="outline"
-              aria-busy={revisions.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!revisions.isFetchingNextPage) void revisions.fetchNextPage();
-              }}
-            >
-              {revisions.isFetchingNextPage
-                ? t("skills_library_loading_older")
-                : t("skills_library_load_older")}
-            </Button>
-          )}
-          {revisions.isFetchNextPageError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("skills_library_load_older_error")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" onClick={() => void revisions.fetchNextPage()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
+              ))}
+            </div>
+            <LoadMore query={revisions} label={t("skills_library_load_older")} />
+          </>
+        )}
+      </QueryStateBoundary>
       <Dialog
         open={viewId !== null}
         onOpenChange={(open) => {

@@ -19,7 +19,7 @@ import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
 import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -636,14 +636,8 @@ function McpServersSection() {
   const update = useUpdateSpace();
   const autosave = useAutosave("mcp-servers");
 
-  const {
-    data: mcpServers,
-    isPending,
-    isError,
-    error,
-    isFetching,
-    refetch
-  } = useQuery(mcpServersQueryOptions(browserApi));
+  const servers = useQuery(mcpServersQueryOptions(browserApi));
+  const mcpServers = servers.data;
   const savedIds = (space.mcp_servers ?? []).map((server) => server.id);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(savedIds));
 
@@ -687,23 +681,16 @@ function McpServersSection() {
       title={t("mcp_servers")}
       description={t("select_mcp_servers_description")}
     >
-      {isError && mcpServers ? (
+      <RefreshError queries={[servers]} />
+      {blockingError(servers) ? (
         <ListError
-          error={error}
+          error={servers.error}
           title={t("space_mcp_servers_load_failed")}
-          isRetrying={isFetching}
-          onRetry={() => void refetch()}
+          isRetrying={servers.isFetching}
+          onRetry={() => void servers.refetch()}
         />
-      ) : null}
-      {isPending ? (
+      ) : servers.isPending ? (
         <LoadingState rows={2} />
-      ) : isError && !mcpServers ? (
-        <ListError
-          error={error}
-          title={t("space_mcp_servers_load_failed")}
-          isRetrying={isFetching}
-          onRetry={() => void refetch()}
-        />
       ) : candidates.length === 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-muted-foreground text-sm">{t("enable_mcp_servers_in_admin")}</p>
