@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from eneo.audit.application.audit_config_service import AuditConfigService
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
@@ -72,7 +72,8 @@ class AuditService:
         """
         Check if an action should be logged based on audit configuration.
 
-        Implements 2-stage filtering:
+        Implements 2-stage filtering, after ALWAYS_AUDITED_ACTIONS which no
+        tenant setting can switch off:
         1. Global audit_logging_enabled feature flag (kill switch)
         2. Action-level configuration (3-level: global → category → action override)
 
@@ -83,6 +84,9 @@ class AuditService:
         Returns:
             True if action should be logged, False otherwise
         """
+        if action in ALWAYS_AUDITED_ACTIONS:
+            return True
+
         # Stage 1: Check global feature flag
         if self.feature_flag_service:
             try:

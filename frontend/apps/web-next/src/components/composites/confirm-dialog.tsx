@@ -80,7 +80,8 @@ export function ConfirmDialogControlled({
  * user must type it (e.g. the resource name): confirming without it says so at
  * the field, which takes focus. While the action runs it cannot be closed and
  * the confirm button keeps focus; when it fails (the caller reports the error)
- * the dialog stays open with what the user typed.
+ * the dialog stays open with what the user typed. `children` renders under the
+ * description (what will be lost).
  */
 export function ConfirmDialog({
   trigger,
@@ -90,7 +91,8 @@ export function ConfirmDialog({
   confirmValue,
   confirmValueLabel,
   pending = false,
-  onConfirm
+  onConfirm,
+  children
 }: {
   trigger: React.ReactNode;
   title: string;
@@ -99,7 +101,8 @@ export function ConfirmDialog({
   confirmValue?: string;
   confirmValueLabel?: string;
   pending?: boolean;
-  onConfirm: () => void | Promise<void>;
+  onConfirm: () => void | Promise<unknown>;
+  children?: ReactNode;
 }) {
   const t = useTranslations();
   const inputId = useId();
@@ -151,6 +154,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         {confirmValue !== undefined ? (
           <div className="flex flex-col gap-2">
             <Label htmlFor={inputId}>{confirmValueLabel}</Label>

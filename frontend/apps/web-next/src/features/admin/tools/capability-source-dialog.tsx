@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { modelProvidersQueryOptions } from "@/features/admin/governance/governance";
+import { userGroupsQueryOptions } from "@/features/admin/user-groups/user-groups";
 import type { Capability } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -93,11 +94,7 @@ export function CapabilitySourceDialog({
   const tokenRef = useRef<HTMLInputElement>(null);
   const tokenConfirmationRef = useRef<HTMLInputElement>(null);
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
-  const groups = useQuery({
-    queryKey: ["user-groups"],
-    queryFn: async () => (await unwrap(browserApi.GET("/api/v1/user-groups/"))).items,
-    retry: false
-  });
+  const groups = useQuery({ ...userGroupsQueryOptions(browserApi), retry: false });
   const models = useQuery({
     queryKey: ["image-models"],
     queryFn: async () => (await unwrap(browserApi.GET("/api/v1/image-models/"))).items,

@@ -117,7 +117,7 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 
 import contextlib
-from typing import AsyncGenerator, Generator
+from typing import Any, AsyncGenerator, Generator
 from unittest.mock import patch
 
 import psycopg2
@@ -1077,7 +1077,10 @@ def oidc_mock(monkeypatch):
         *,
         discovery: dict[str, tuple[dict, int] | dict] | None = None,
         tokens: dict[tuple[str, str | None], tuple[dict, int] | dict] | None = None,
-    ) -> Callable[[], dict[str, list[tuple[str, str]]]]:
+        clients: dict[str, str] | None = None,
+    ) -> Callable[[], dict[str, list[Any]]]:
+        """``clients`` maps client_id to secret: a token request with other
+        credentials gets the IdP's 401 invalid_client, as a real IdP answers."""
         discovery_map: dict[str, tuple[dict, int]] = {}
         for url, payload in (discovery or {}).items():
             if isinstance(payload, tuple):
@@ -1092,6 +1095,7 @@ def oidc_mock(monkeypatch):
             else:
                 token_map[key] = (payload, 200)
         request_log: list[tuple[str, str]] = []
+        token_clients: list[str | None] = []
 
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
@@ -1125,6 +1129,11 @@ def oidc_mock(monkeypatch):
                 code = None
                 if isinstance(data, dict):
                     code = data.get("code") or data.get("authorization_code")
+                    if clients is not None:
+                        client_id = data.get("client_id")
+                        token_clients.append(client_id)
+                        if clients.get(client_id) != data.get("client_secret"):
+                            return _FakeResponse({"error": "invalid_client"}, 401)
                 key = (url, code)
                 if key not in token_map:
                     raise AssertionError(f"Unmocked token request: {url} code={code}")
@@ -1149,8 +1158,8 @@ def oidc_mock(monkeypatch):
             raising=False,
         )
 
-        def _summary() -> dict[str, list[tuple[str, str]]]:
-            return {"requests": request_log}
+        def _summary() -> dict[str, list[Any]]:
+            return {"requests": request_log, "token_clients": token_clients}
 
         return _summary
 

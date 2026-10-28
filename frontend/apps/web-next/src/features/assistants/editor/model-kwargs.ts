@@ -93,6 +93,78 @@ export function modelSpecificKwargs(model: ModelWithKwargs | null | undefined): 
   return MODEL_SPECIFIC_KWARGS.filter((name) => supportsKwarg(model, name));
 }
 
+// --- Number settings ---
+
+/** The settings typed as numbers: the custom temperature and the numeric model settings. */
+export type NumericSettingName = NumericKwargName | "temperature";
+
+const NUMERIC_SETTINGS = [
+  "temperature",
+  "top_p",
+  "presence_penalty",
+  "frequency_penalty",
+  "top_k"
+] as const satisfies readonly NumericSettingName[];
+
+const DEFAULT_NUMERIC_MAX: Record<NumericSettingName, number> = {
+  temperature: 2,
+  top_p: 1,
+  presence_penalty: 2,
+  frequency_penalty: 2,
+  top_k: 100
+};
+
+/** The backend stores these as whole numbers (ModelKwargs.top_k is an int). */
+const WHOLE_NUMBER_SETTINGS: readonly NumericSettingName[] = ["top_k"];
+
+/** The range a number setting takes: the model's own, else the editor's defaults. */
+export function numericKwargRange(
+  model: ModelWithKwargs | null | undefined,
+  name: NumericSettingName
+): { min: number; max: number; step: number; wholeNumber: boolean } {
+  const capability = kwargCapability(model, name);
+  const wholeNumber = WHOLE_NUMBER_SETTINGS.includes(name);
+  return {
+    min: capability?.minimum ?? 0,
+    max: capability?.maximum ?? DEFAULT_NUMERIC_MAX[name],
+    step: capability?.step ?? (wholeNumber ? 1 : 0.05),
+    wholeNumber
+  };
+}
+
+/** Whether a typed number can be saved for the setting: in its range, and whole where it must be. */
+export function isValidNumericKwarg(
+  model: ModelWithKwargs | null | undefined,
+  name: NumericSettingName,
+  value: number | null | undefined
+): boolean {
+  if (value == null) return true;
+  const { min, max, wholeNumber } = numericKwargRange(model, name);
+  return (
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max &&
+    (!wholeNumber || Number.isInteger(value))
+  );
+}
+
+/**
+ * The first number setting, in the editor's order, that the model takes and
+ * whose value cannot be saved. That includes a preset's temperature: a model
+ * may allow less than Kreativ's 1.25.
+ */
+export function firstInvalidNumericKwarg(
+  model: ModelWithKwargs | null | undefined,
+  kwargs: ModelKwargs
+): NumericSettingName | null {
+  const sent = filterSupportedKwargs(kwargs, model);
+  return (
+    NUMERIC_SETTINGS.find(
+      (name) => !isValidNumericKwarg(model, name, sent[name] as number | null | undefined)
+    ) ?? null
+  );
+}
+
 /** Strips kwargs the selected model does not support before saving. */
 export function filterSupportedKwargs(
   kwargs: ModelKwargs | null | undefined,

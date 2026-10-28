@@ -368,7 +368,9 @@ Enable or disable global audit logging for your tenant.
 
 **Behavior:**
 - Updates the `audit_logging_enabled` feature flag for your tenant
-- When disabled: No audit logs are created for any action (global kill switch)
+- When disabled: No audit logs are created (global kill switch), except for
+  changes to the organisation's sign-in settings (`federation_updated`), which
+  are always logged
 - When enabled: Audit logging resumes with category and action-level filtering
 - This is independent from category/action configuration
 - Change takes effect immediately for all workers

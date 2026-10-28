@@ -572,6 +572,7 @@ class TenantRepository:
         """Set or update federation config for tenant.
 
         IMPORTANT: client_secret must be encrypted BEFORE calling this method.
+        The caller's transaction commits it, together with its audit row.
 
         Args:
             tenant_id: The UUID of the tenant
@@ -586,10 +587,9 @@ class TenantRepository:
             )
         )
         await self.session.execute(stmt)
-        await self.session.commit()
 
     async def delete_federation_config(self, tenant_id: UUID) -> None:
-        """Remove federation config for tenant.
+        """Remove federation config for tenant; the caller's transaction commits.
 
         Args:
             tenant_id: The UUID of the tenant
@@ -603,7 +603,21 @@ class TenantRepository:
             )
         )
         await self.session.execute(stmt)
-        await self.session.commit()
+
+    async def lock_federation_config(self, tenant_id: UUID) -> dict[str, Any] | None:
+        """The stored federation config, with the tenant row locked until commit.
+
+        Every federation write reads under this lock, so two writers serialize
+        and the second one sees the first one's result. None when the tenant
+        does not exist.
+        """
+        stmt = (
+            sa.select(Tenants.federation_config)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
+        config = await self.session.scalar(stmt)
+        return None if config is None else dict(config)
 
     async def get_federation_config_with_metadata(
         self, tenant_id: UUID

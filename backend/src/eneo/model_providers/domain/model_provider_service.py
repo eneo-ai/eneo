@@ -65,6 +65,7 @@ from eneo.model_providers.infrastructure.tenant_model_credential_resolver import
     TenantModelCredentialResolver,
 )
 from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.masking import looks_masked
 from eneo.tenants.provider_field_config import (
     get_canonical_provider_type,
     is_field_required,
@@ -155,12 +156,6 @@ def normalize_destination(endpoint: str | None) -> str | None:
 def _has_stored_api_key(credentials: dict[str, Any]) -> bool:
     value = credentials.get("api_key")
     return isinstance(value, str) and bool(value.strip())
-
-
-def _is_masked_api_key(value: str) -> bool:
-    """A value that is only the display form of a key, never a key."""
-    stripped = value.strip()
-    return stripped.startswith("...") or set(stripped) <= set("*•·")
 
 
 def _coerce_to_epoch(value: Any) -> float:
@@ -729,7 +724,7 @@ class ModelProviderService:
         """
         if credentials is not None:
             raw = credentials.get("api_key")
-            if isinstance(raw, str) and raw.strip() and _is_masked_api_key(raw):
+            if isinstance(raw, str) and raw.strip() and looks_masked(raw):
                 raise BadRequestException(
                     "The API key looks like the masked display value; "
                     "enter the actual key."

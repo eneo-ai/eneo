@@ -15,15 +15,24 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
-import { UserEditorDialog } from "./user-editor";
+import { UserEditorDialog, type IssuedPassword } from "./user-editor";
 import type { AdminUser } from "./users";
 
 /**
  * Row menu for one user: edit, deactivate or reactivate, delete. The row
  * leaves the current tab after a state change or delete, so `onRemoved` lets
- * the page put focus somewhere sensible once the list has refetched.
+ * the page put focus somewhere sensible once the list has refetched. A
+ * password the editor sets goes to `onIssued`, shown by the page, not the row.
  */
-export function UserActions({ user, onRemoved }: { user: AdminUser; onRemoved?: () => void }) {
+export function UserActions({
+  user,
+  onRemoved,
+  onIssued
+}: {
+  user: AdminUser;
+  onRemoved?: () => void;
+  onIssued: (issued: IssuedPassword) => void;
+}) {
   const t = useTranslations();
   const { user: currentUser } = useAppContext();
   const queryClient = useQueryClient();
@@ -107,7 +116,12 @@ export function UserActions({ user, onRemoved }: { user: AdminUser; onRemoved?: 
         />
       </DropdownMenu>
 
-      <UserEditorDialog open={showEdit} onOpenChange={setShowEdit} user={user} />
+      <UserEditorDialog
+        open={showEdit}
+        onOpenChange={setShowEdit}
+        user={user}
+        onIssued={onIssued}
+      />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}

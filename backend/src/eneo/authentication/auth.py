@@ -1,3 +1,4 @@
+import hmac
 from typing import Annotated
 
 from fastapi import Request, Security
@@ -42,7 +43,14 @@ def authenticate_super_api_key(
 
     resolved_key = _resolve_api_key(request, api_key_header)
 
-    if resolved_key and super_api_key == resolved_key:
+    # Constant time, so the response time does not tell how much of a guess
+    # matches. Bytes, because compare_digest refuses non-ASCII text.
+    if (
+        super_api_key
+        and resolved_key
+        and hmac.compare_digest(
+            resolved_key.encode("utf-8"), super_api_key.encode("utf-8")
+        )
+    ):
         return resolved_key
-    else:
-        raise AuthenticationException("Unauthorized")
+    raise AuthenticationException("Unauthorized")
