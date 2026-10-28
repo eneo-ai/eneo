@@ -65,6 +65,7 @@ import {
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
 import Link from "@/lib/link";
@@ -82,7 +83,9 @@ import { ApiKeyPolicyDialog } from "./policy-panel";
 
 /** A pasted full key: looking it up, the key it found (by id), or why it could not. */
 type Lookup =
-  { status: "pending" } | { status: "found"; id: string } | { status: "failed"; error: unknown };
+  | { status: "pending" }
+  | { status: "found"; id: string }
+  | { status: "failed"; error: unknown; retrying?: boolean };
 
 const SCOPE_FILTERS: (ApiKeyScopeType | "all")[] = ["all", "tenant", "space", "assistant", "app"];
 const KEY_TYPE_FILTERS = [
@@ -114,6 +117,7 @@ export function OrgApiKeysPage() {
   const [showConstraintPolicy, setShowConstraintPolicy] = useState(false);
   const headingId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const rescueFocus = useFocusRescue();
   const scopeNames = useScopeResourceNames();
 
   function showSecret(title: string) {
@@ -147,27 +151,40 @@ export function OrgApiKeysPage() {
       )
   });
 
-  async function apply(filters: AdminKeyFilters) {
+  /**
+   * Applies the filters; a whole key is looked up first. A retry keeps the
+   * failure (and its focused Retry button) on screen until the answer comes;
+   * when the answer replaces it, focus goes to the list's panel.
+   */
+  async function apply(filters: AdminKeyFilters, { retry = false } = {}) {
     const run = ++lookupRun.current;
     setApplied(filters);
     if (!isFullApiKeySecret(filters.search)) {
       setLookup(null);
       return;
     }
-    setLookup({ status: "pending" });
+    setLookup((current) =>
+      retry && current?.status === "failed" ? { ...current, retrying: true } : { status: "pending" }
+    );
+    const settled = () => {
+      if (retry) rescueFocus(() => panelRef.current);
+    };
     try {
       const result = await unwrap(
         browserApi.POST("/api/v1/admin/api-keys/lookup", {
           body: { secret: filters.search.trim() }
         })
       );
-      if (run === lookupRun.current) setLookup({ status: "found", id: result.api_key.id });
+      if (run !== lookupRun.current) return;
+      setLookup({ status: "found", id: result.api_key.id });
+      settled();
     } catch (error) {
       if (run !== lookupRun.current) return;
       if (error instanceof EneoApiError && error.status === 404) {
         // No exact match: its suffix still finds the candidates.
         setLookup(null);
         setApplied({ ...filters, search: secretSuffix(filters.search) });
+        settled();
       } else {
         setLookup({ status: "failed", error });
       }
@@ -189,7 +206,7 @@ export function OrgApiKeysPage() {
       list.data && { filtered: list.items.length, total: list.totalCount ?? list.items.length };
 
   function refresh() {
-    if (lookup?.status === "failed") void apply(applied);
+    if (lookup?.status === "failed") void apply(applied, { retry: true });
     else if (foundId) void found.refetch();
     else if (lookup === null) void list.refetch();
   }
@@ -276,7 +293,11 @@ export function OrgApiKeysPage() {
             {lookup?.status === "pending" ? (
               <LoadingState rows={3} />
             ) : lookup?.status === "failed" ? (
-              <ListError error={lookup.error} onRetry={() => void apply(applied)} />
+              <ListError
+                error={lookup.error}
+                isRetrying={lookup.retrying}
+                onRetry={() => void apply(applied, { retry: true })}
+              />
             ) : foundId ? (
               <QueryStateBoundary query={found} rows={3}>
                 {(key) => table([{ ...key, search_match_reasons: ["exact_secret"] }])}

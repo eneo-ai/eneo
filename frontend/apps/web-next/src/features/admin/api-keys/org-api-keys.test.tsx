@@ -204,10 +204,23 @@ describe("OrgApiKeysPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
 
     expect(await screen.findByText("Lookup down")).toBeTruthy();
+    // A retry that fails again keeps the error and its focused Retry button.
+    let fail: (value: unknown) => void = () => {};
+    api.POST.mockReturnValue(new Promise((done) => (fail = done)));
+    const retry = screen.getByRole("button", { name: /^Försök igen/ });
+    retry.focus();
+    fireEvent.click(retry);
+    expect(screen.getByText("Lookup down")).toBeTruthy();
+    fail({ error: { message: "Still down" }, response: new Response("{}", { status: 503 }) });
+    expect(await screen.findByText("Still down")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Försök igen/ }));
+
     api.POST.mockReturnValue(ok({ api_key: { id: "key-9" } }));
     fireEvent.click(screen.getByRole("button", { name: /^Försök igen/ }));
     expect(await screen.findByText("Hittad nyckel")).toBeTruthy();
-    expect(api.POST).toHaveBeenCalledTimes(2);
+    expect(api.POST).toHaveBeenCalledTimes(3);
+    // The answer replaced the button: focus is on the list's panel, not lost.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
     expect(JSON.stringify(api.GET.mock.calls)).not.toContain('"id":""');
   });
 
