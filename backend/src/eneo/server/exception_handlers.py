@@ -407,13 +407,14 @@ def _http_exception_body(
     The raised detail stays in `detail` for one release, so a client reading
     `body.detail.code` keeps working while it moves to the top-level fields.
     """
-    detail: Any = exc.detail
-    if isinstance(detail, dict) and "code" in detail and "message" in detail:
+    detail: object = exc.detail
+    structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
+    if structured is not None and "code" in structured and "message" in structured:
         # Every raiser of this shape means it as the documented error, and its
         # extra keys (`retry_after_seconds`, `existing_status`) are part of the
         # route's contract, so the dict becomes the body. Most raisers left the
         # numeric category out; fill it here so a direct raise cannot bypass it.
-        body = dict(cast(dict[str, Any], detail))
+        body = dict(structured)
         body.setdefault(
             "eneo_error_code", default_error_code_for_status(exc.status_code).value
         )
@@ -422,11 +423,7 @@ def _http_exception_body(
         body["detail"] = detail
         return body
 
-    raised_message = (
-        cast(dict[str, Any], detail).get("message")
-        if isinstance(detail, dict)
-        else detail
-    )
+    raised_message = structured.get("message") if structured is not None else detail
     message = (
         raised_message
         if isinstance(raised_message, str)
@@ -434,9 +431,10 @@ def _http_exception_body(
     )
     # No status-default `eneo_error_code`: both clients prefer a category's
     # catalog text over the message, which would turn a specific refusal into
-    # a generic "Forbidden".
+    # a generic "Forbidden". A structured refusal without a code (the healthz
+    # report) moves to `details`, so nothing lives only in the deprecated copy.
     return GeneralError(
-        message=message, request_id=request_id, detail=detail
+        message=message, request_id=request_id, details=structured, detail=detail
     ).model_dump(exclude_none=True)
 
 

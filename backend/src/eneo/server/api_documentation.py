@@ -25,10 +25,11 @@ written for people and may be reworded. Quote `request_id`, or `error_id` on a
 `500`, when you contact support.
 
 Request validation is the one exception: it answers `422` with
-`{"detail": [...]}`. Other errors also carry a deprecated `detail` with the
-route's raw refusal, a string or an object such as the report `/api/healthz`
-returns with `503`; it is kept for one release, so read the top-level fields.
-An unexpected `500` adds `error` and `error_id`.
+`{"detail": [...]}`. An HTTP refusal raised by a route also carries a
+deprecated `detail` with its raw value, a string or an object; it is kept for
+one release, so read the top-level fields. An object without a `code`, such as
+the report `/api/healthz` returns with `503`, is also in `details`. An
+unexpected `500` adds `error` and `error_id`.
 
 ### Errors that no operation lists
 

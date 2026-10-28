@@ -26,9 +26,11 @@ Fields:
 - `context` (optional): safe, non-sensitive metadata.
 - `details` (optional): structured data about the failure.
 - `request_id` (optional): request correlation ID for support/debugging.
-- `detail` (deprecated): the route's raw refusal, a string or an object, kept
-  for one release so clients reading `detail` keep working. Read the top-level
-  fields instead; `detail` will be removed.
+- `detail` (deprecated): on a refusal raised as an HTTP exception, its raw
+  value, a string or an object, kept for one release so clients reading
+  `detail` keep working. Read the top-level fields instead; `detail` will be
+  removed. An object without a `code` (such as the `/api/healthz` report) is
+  also in `details`.
 
 A route may add operation-specific fields next to `code`, such as
 `retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown

@@ -305,7 +305,7 @@ Errors are JSON. Every error except request validation answers in one envelope:
 
 `422` request validation errors keep FastAPI's shape: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
 
-Other errors also carry `detail`, the route's raw refusal (a string or an object). It is deprecated and kept for one release so existing clients keep working; read the top-level fields instead.
+A refusal raised as an HTTP exception also carries `detail`, its raw value (a string or an object). It is deprecated and kept for one release so existing clients keep working; read the top-level fields instead. An object without a `code`, such as the `/api/healthz` report, is also in `details`.
 
 Unhandled failures return `500` with `error`, `error_id` and `message`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
 

@@ -52441,6 +52441,15 @@ export interface operations {
           "text/plain": string;
         };
       };
+      /** @description validationToken is longer than 1024 characters. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -52489,9 +52498,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            detail: string;
-          };
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

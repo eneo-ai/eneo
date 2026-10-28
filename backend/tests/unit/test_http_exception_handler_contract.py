@@ -14,7 +14,7 @@ from eneo.main.models import GeneralError
 from eneo.server.main import get_application
 
 
-def _build_client_for_exception(detail):
+def _build_client_for_exception(detail, status_code=503):
     app = get_application()
 
     @app.get("/_test-http-exc")
@@ -24,7 +24,7 @@ def _build_client_for_exception(detail):
         reason="Test-only route for HTTP exception handling.",
     )
     async def _test_http_exc():
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(status_code=status_code, detail=detail)
 
     return TestClient(app)
 
@@ -72,7 +72,7 @@ def test_http_exception_structured_detail_is_unchanged():
     payload = response.json()
     assert payload["detail"] == detail
     assert payload["message"] == "Something went wrong."
-    GeneralError.model_validate(payload)
+    assert GeneralError.model_validate(payload).details == detail
 
 
 def test_dict_detail_message_without_code_is_the_envelope_message():
@@ -298,10 +298,13 @@ def test_rate_limit_body_is_readable_flat_and_through_detail():
         "message": "Too many attempts.",
         "retry_after_seconds": 30,
     }
-    client = _build_client_for_exception(detail)
+    client = _build_client_for_exception(detail=detail, status_code=429)
 
-    payload = client.get("/_test-http-exc").json()
+    response = client.get("/_test-http-exc")
 
+    assert response.status_code == 429
+    payload = response.json()
+    GeneralError.model_validate(payload)
     assert payload["code"] == "rate_limit_exceeded"
     assert payload["retry_after_seconds"] == 30
     assert payload["detail"]["code"] == "rate_limit_exceeded"
