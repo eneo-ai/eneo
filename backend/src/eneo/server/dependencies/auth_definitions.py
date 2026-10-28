@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Annotated
 
 from fastapi import Header, Request, WebSocketException, status
@@ -5,7 +6,19 @@ from fastapi.security import OAuth2PasswordBearer
 from fastapi.security.api_key import APIKeyHeader
 
 from eneo.authentication.browser_session import session_token_from_request
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
+
+
+def is_api_key_request(headers: Mapping[str, str], settings: Settings) -> bool:
+    """Whether a request presents an API key: the configured header is present.
+
+    ``headers`` must look names up case-insensitively, as Starlette's
+    ``Headers`` does. Presence, not a non-empty value, decides, like the
+    ``Authorization`` rule: an empty key header still rules out the session
+    cookie and the same-origin CORS shortcut, so CORS, guards and
+    authentication never classify one request differently.
+    """
+    return settings.api_key_header_name in headers
 
 
 class _SessionAwareBearer(OAuth2PasswordBearer):
@@ -20,7 +33,7 @@ class _SessionAwareBearer(OAuth2PasswordBearer):
         if "authorization" in request.headers:
             # FastAPI returns "" for "Bearer " with nothing after it.
             return await super().__call__(request) or None
-        if get_settings().api_key_header_name in request.headers:
+        if is_api_key_request(request.headers, get_settings()):
             return None
         return session_token_from_request(request)
 

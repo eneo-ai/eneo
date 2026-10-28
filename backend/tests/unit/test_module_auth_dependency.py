@@ -95,6 +95,8 @@ async def test_module_dependency_resolves_service_key_and_module_token_together(
         (None, "sk_module-service-key"),
         ("Basic credentials", "sk_module-service-key"),
         ("Bearer module-user-token", None),
+        # An empty API-key header is no service-key credential.
+        ("Bearer module-user-token", ""),
     ],
 )
 async def test_module_dependency_requires_both_credentials(
