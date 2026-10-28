@@ -61,7 +61,7 @@ function CategorySwitch({
 }
 
 /** An action's switch, labelled by the row it sits in: saves on toggle and keeps focus. */
-function ActionSwitch({
+export function ActionSwitch({
   action,
   enabled,
   onSaved
