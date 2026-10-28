@@ -88,7 +88,8 @@ async function load() {
   return dehydrate(server);
 }
 
-async function renderApp() {
+/** `browser`: the browser's query client (a fresh one unless the test brings its own). */
+async function renderApp(browser = testQueryClient()) {
   let state = await load();
   const tree = () => (
     <HydrationBoundary state={state}>
@@ -99,7 +100,7 @@ async function renderApp() {
   );
   contextValues = [];
   const html = renderToHtml(tree(), { queryClient: testQueryClient() });
-  const view = renderInApp(tree(), { queryClient: testQueryClient() });
+  const view = renderInApp(tree(), { queryClient: browser });
   return {
     ...view,
     html,
@@ -196,6 +197,25 @@ it("loads an unavailable What's new state as null: unknown markers, not a first 
 
   expect(queryClient.getQueryData(appContextKeys.whatsNew)).toBeNull();
   expect(screen.getByTestId("seen").textContent).toBe("unknown");
+});
+
+it("starts a new user's document with their context, never the previous user's", async () => {
+  const { getQueryClient } = await import("@/lib/api/query");
+  const previousDocument = getQueryClient();
+  previousDocument.setQueryData(appContextKeys.me, signedIn.user);
+
+  // Logging in loads a new document (LoginForm): its modules, the browser's
+  // query client among them, start over.
+  vi.resetModules();
+  const { getQueryClient: inNewDocument } = await import("@/lib/api/query");
+  const browser = inNewDocument();
+  expect(browser).not.toBe(previousDocument);
+  backend.set(ME, ok({ ...signedIn.user, username: "Bo Ek" }));
+
+  await renderApp(browser);
+
+  expect(contextValues.length).toBeGreaterThan(0);
+  expect(contextValues.every((context) => context.user.username === "Bo Ek")).toBe(true);
 });
 
 it("fails to load when a required source fails", async () => {
