@@ -36,6 +36,20 @@ const add = (dialog: HTMLElement) =>
   within(dialog).getByRole("button", { name: "Lägg till MCP-server" }) as HTMLButtonElement;
 
 describe("McpServerDialog", () => {
+  it("starts empty again when reopened after a cancelled add", async () => {
+    api.GET.mockImplementation(() => ok({ security_enabled: false, security_classifications: [] }));
+    const { rerender } = renderInApp(<McpServerDialog open onOpenChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+    fireEvent.click(add(screen.getByRole("dialog")));
+
+    rerender(<McpServerDialog open={false} onOpenChange={() => {}} />);
+    rerender(<McpServerDialog open onOpenChange={() => {}} />);
+
+    const name = within(await screen.findByRole("dialog")).getByLabelText("Namn");
+    expect((name as HTMLInputElement).value).toBe("");
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("shows each problem at its field when added, and moves focus to the first", async () => {
     const dialog = renderDialog();
     // Never disabled: a disabled button says nothing about what is missing.

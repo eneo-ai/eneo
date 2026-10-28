@@ -45,6 +45,29 @@ export function ConfluenceImportDialog({
   onBack: () => void;
   integration: UserIntegration;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        {/* DialogContent remounts on every opening, so each import starts over. */}
+        <ConfluenceImportForm
+          onOpenChange={onOpenChange}
+          onBack={onBack}
+          integration={integration}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConfluenceImportForm({
+  onOpenChange,
+  onBack,
+  integration
+}: {
+  onOpenChange: (open: boolean) => void;
+  onBack: () => void;
+  integration: UserIntegration;
+}) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
@@ -60,7 +83,7 @@ export function ConfluenceImportDialog({
   const userIntegrationId = integration.id ?? "";
   const preview = useQuery({
     ...integrationPreviewQueryOptions(browserApi, userIntegrationId),
-    enabled: open && userIntegrationId.length > 0
+    enabled: userIntegrationId.length > 0
   });
 
   const spaces = useMemo(() => {
@@ -91,8 +114,6 @@ export function ConfluenceImportDialog({
     onSuccess: (job) => {
       trackJob(job);
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      setSelected(null);
-      setSubmitted(false);
       onOpenChange(false);
     },
     onError: (error) => toastApiError(error, t)
@@ -120,110 +141,98 @@ export function ConfluenceImportDialog({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setSelected(null);
-          setSubmitted(false);
-        }
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t("import_knowledge_from_confluence")}</DialogTitle>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle>{t("import_knowledge_from_confluence")}</DialogTitle>
+      </DialogHeader>
 
-        {space.embedding_models.length === 0 && (
-          <p
-            id="confluence-no-models"
-            tabIndex={-1}
-            className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm"
-          >
-            <span className="font-semibold">{t("warning")}:</span>{" "}
-            {t("warning_no_embedding_models")}
-          </p>
-        )}
+      {space.embedding_models.length === 0 && (
+        <p
+          id="confluence-no-models"
+          tabIndex={-1}
+          className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm"
+        >
+          <span className="font-semibold">{t("warning")}:</span> {t("warning_no_embedding_models")}
+        </p>
+      )}
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="confluence-space-search">{t("import_knowledge_from")}</Label>
-          <div className="relative">
-            <Input
-              id="confluence-space-search"
-              value={search}
-              placeholder={t("find_confluence_space")}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <Search className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2" />
-          </div>
-          <div
-            id="confluence-spaces"
-            role="group"
-            aria-label={t("confluence_spaces_label")}
-            className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
-            {...fieldProblemProps("confluence-spaces", spaceProblem)}
-          >
-            {userIntegrationId.length === 0 ? (
-              <ImportPreviewError
-                message={t("integration_preview_connection_missing")}
-                onBack={onBack}
-                settingsHref={settingsHref}
-              />
-            ) : preview.isError ? (
-              <ImportPreviewError
-                message={t("integration_preview_failed")}
-                onBack={onBack}
-                onRetry={() => void preview.refetch()}
-                settingsHref={settingsHref}
-              />
-            ) : preview.isPending ? (
-              <div
-                role="status"
-                className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm"
-              >
-                <Spinner size="sm" aria-hidden /> {t("loading_available_spaces")}
-              </div>
-            ) : spaces.length === 0 ? (
-              <p className="text-muted-foreground px-2 py-3 text-sm">
-                {t("no_matching_spaces_found")}
-              </p>
-            ) : (
-              spaces.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  aria-pressed={selected?.key === entry.key}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
-                    selected?.key === entry.key ? "bg-accent" : "hover:bg-muted/50"
-                  }`}
-                  onClick={() => setSelected(entry)}
-                >
-                  <FileText className="text-muted-foreground size-4 shrink-0" />
-                  <span className="truncate text-sm">{entry.name}</span>
-                </button>
-              ))
-            )}
-          </div>
-          <FieldProblem id="confluence-spaces" problem={spaceProblem} />
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="confluence-space-search">{t("import_knowledge_from")}</Label>
+        <div className="relative">
+          <Input
+            id="confluence-space-search"
+            value={search}
+            placeholder={t("find_confluence_space")}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <Search className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2" />
         </div>
+        <div
+          id="confluence-spaces"
+          role="group"
+          aria-label={t("confluence_spaces_label")}
+          className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
+          {...fieldProblemProps("confluence-spaces", spaceProblem)}
+        >
+          {userIntegrationId.length === 0 ? (
+            <ImportPreviewError
+              message={t("integration_preview_connection_missing")}
+              onBack={onBack}
+              settingsHref={settingsHref}
+            />
+          ) : preview.isError ? (
+            <ImportPreviewError
+              message={t("integration_preview_failed")}
+              onBack={onBack}
+              onRetry={() => void preview.refetch()}
+              settingsHref={settingsHref}
+            />
+          ) : preview.isPending ? (
+            <div
+              role="status"
+              className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm"
+            >
+              <Spinner size="sm" aria-hidden /> {t("loading_available_spaces")}
+            </div>
+          ) : spaces.length === 0 ? (
+            <p className="text-muted-foreground px-2 py-3 text-sm">
+              {t("no_matching_spaces_found")}
+            </p>
+          ) : (
+            spaces.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                aria-pressed={selected?.key === entry.key}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
+                  selected?.key === entry.key ? "bg-accent" : "hover:bg-muted/50"
+                }`}
+                onClick={() => setSelected(entry)}
+              >
+                <FileText className="text-muted-foreground size-4 shrink-0" />
+                <span className="truncate text-sm">{entry.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+        <FieldProblem id="confluence-spaces" problem={spaceProblem} />
+      </div>
 
-        <EmbeddingModelSelect
-          models={space.embedding_models}
-          value={embeddingModelId}
-          onChange={setEmbeddingModelId}
-        />
+      <EmbeddingModelSelect
+        models={space.embedding_models}
+        value={embeddingModelId}
+        onChange={setEmbeddingModelId}
+      />
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onBack}>
-            {t("back")}
-          </Button>
-          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-          <Button aria-busy={importSpace.isPending || undefined} onClick={submit}>
-            {importSpace.isPending ? t("importing") : t("import_space")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter>
+        <Button variant="outline" onClick={onBack}>
+          {t("back")}
+        </Button>
+        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+        <Button aria-busy={importSpace.isPending || undefined} onClick={submit}>
+          {importSpace.isPending ? t("importing") : t("import_space")}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

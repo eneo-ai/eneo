@@ -337,3 +337,32 @@ it("SharePoint: shows why a batch could not start at all, and lets the import be
   fireEvent.click(importButton);
   await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
 });
+
+it("Confluence: starts over when reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  const search = () => document.getElementById("confluence-space-search") as HTMLInputElement;
+  await screen.findByRole("button", { name: "Personal" });
+  fireEvent.change(search(), { target: { value: "Pers" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+
+  await screen.findByRole("button", { name: "Personal" });
+  expect(search().value).toBe("");
+  expect(
+    (await screen.findByRole("button", { name: "Personal" })).getAttribute("aria-pressed")
+  ).toBe("false");
+});
