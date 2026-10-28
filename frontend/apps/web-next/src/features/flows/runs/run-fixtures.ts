@@ -177,7 +177,8 @@ export function makeCheckpoint(overrides: Partial<ReviewCheckpoint> = {}): Revie
     original_payload_json: { text: "Hej Anna, tack för ditt brev." },
     created_at: "2026-10-21T08:00:30Z",
     updated_at: "2026-10-21T08:00:30Z",
-    expires_at: "2026-10-28T08:00:30Z",
+    // Far ahead so the default checkpoint stays open; expiry tests pass their own.
+    expires_at: "2099-10-28T08:00:30Z",
     ...overrides
   };
 }

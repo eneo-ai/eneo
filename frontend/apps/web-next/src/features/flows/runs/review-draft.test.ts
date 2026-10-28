@@ -189,10 +189,15 @@ describe("reviewOptions", () => {
   });
 
   it("closes the decision at the deadline but still resumes an approval made in time", () => {
+    const expires_at = "2026-10-28T08:00:30Z";
     const late = Date.parse("2026-10-29T00:00:00Z");
-    expect(reviewExpired(makeCheckpoint(), late)).toBe(true);
-    expect(reviewOptions(makeCheckpoint(), true, late).canDecide).toBe(false);
-    const approved = makeCheckpoint({ state: "approved", approved_at: "2026-10-27T08:00:00Z" });
+    expect(reviewExpired(makeCheckpoint({ expires_at }), late)).toBe(true);
+    expect(reviewOptions(makeCheckpoint({ expires_at }), true, late).canDecide).toBe(false);
+    const approved = makeCheckpoint({
+      state: "approved",
+      approved_at: "2026-10-27T08:00:00Z",
+      expires_at
+    });
     expect(reviewOptions(approved, true, late)).toMatchObject({
       canDecide: false,
       canResume: true
