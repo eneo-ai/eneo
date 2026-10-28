@@ -9,6 +9,7 @@ import test from "node:test";
 const config = fileURLToPath(new URL("../../.gitleaks.toml", import.meta.url));
 // Assemble public examples so this test does not itself introduce key findings.
 const examples = [
+  ["backend/src/eneo/authentication/api_key_rate_limiter.py", ["ApiKey", "V2InDB"]],
   ["docker-compose.e2e.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["docker-compose.e2e.ci.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["backend/tests/unittests/model_providers/test_provider_connection_probe.py", ["sk-live-", "secret-1234"]],
