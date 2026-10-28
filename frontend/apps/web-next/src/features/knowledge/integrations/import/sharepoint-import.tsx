@@ -46,6 +46,15 @@ import {
   type SelectedTreeItem
 } from "./selection";
 
+/** One batch import, as the form hands it to the dialog that owns the request. */
+type SharePointBatch = {
+  embeddingModelId: string;
+  wrapperName: string | undefined;
+  items: ReturnType<typeof buildBatchItems>;
+  /** Reports several created items together under this name. */
+  batchName: string;
+};
+
 type PreviewCategory =
   "my_teams" | "public_teams_not_member" | "other_sites" | "onedrive" | "unknown";
 
@@ -94,12 +103,74 @@ export function SharePointImportDialog({
   onBack: () => void;
   integration: UserIntegration;
 }) {
+  const t = useTranslations();
+  const { space, routeId } = useSpace();
+  const queryClient = useQueryClient();
+  const { trackJob } = useJobs();
+  const userIntegrationId = integration.id ?? "";
+
+  // Owned here, not by the form: a pending import outlives a close and reopen.
+  const importBatch = useMutation({
+    mutationFn: ({ embeddingModelId, wrapperName, items }: SharePointBatch) =>
+      unwrap(
+        browserApi.POST(
+          "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
+          {
+            params: { path: { id: space.id, user_integration_id: userIntegrationId } },
+            body: { embedding_model: { id: embeddingModelId }, wrapper_name: wrapperName, items }
+          }
+        )
+      ),
+    onSuccess: (result, { batchName }) => {
+      // Each created item's first sync is reported with its counts once its job
+      // is over; several are reported together, under the first job's id.
+      const created = result.items.filter((item) => item.status === "created" && item.job);
+      const firstJob = created[0]?.job;
+      const batch = created.length > 1 && firstJob ? { batchId: firstJob.id, batchName } : {};
+      trackImports(
+        created.flatMap((item) =>
+          item.job && item.integration_knowledge_id
+            ? [
+                {
+                  jobId: item.job.id,
+                  knowledgeId: item.integration_knowledge_id,
+                  name: item.name,
+                  spaceRouteId: routeId,
+                  ...batch
+                }
+              ]
+            : []
+        )
+      );
+      trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      if (result.created_count === 0) {
+        toast.error(
+          t("sharepoint_batch_import_all_failed", { failed: String(result.failed_count) })
+        );
+        return;
+      }
+      if (result.failed_count > 0) {
+        toast.warning(
+          t("sharepoint_batch_import_partial", {
+            created: String(result.created_count),
+            total: String(result.items.length),
+            failed: String(result.failed_count)
+          })
+        );
+      }
+      onOpenChange(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         {/* DialogContent remounts on every opening, so each import starts over. */}
         <SharePointImportForm
-          onOpenChange={onOpenChange}
+          pending={importBatch.isPending}
+          onImport={(batch) => importBatch.mutate(batch)}
           onBack={onBack}
           integration={integration}
         />
@@ -109,19 +180,19 @@ export function SharePointImportDialog({
 }
 
 function SharePointImportForm({
-  onOpenChange,
+  pending,
+  onImport,
   onBack,
   integration
 }: {
-  onOpenChange: (open: boolean) => void;
+  pending: boolean;
+  onImport: (batch: SharePointBatch) => void;
   onBack: () => void;
   integration: UserIntegration;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { space, routeId } = useSpace();
-  const queryClient = useQueryClient();
-  const { trackJob } = useJobs();
+  const { space } = useSpace();
 
   const [search, setSearch] = useState("");
   const [showPublicTeams, setShowPublicTeams] = useState(true);
@@ -196,80 +267,10 @@ function SharePointImportForm({
     );
   }
 
-  const importBatch = useMutation({
-    mutationFn: () => {
-      if (!site || !embeddingModelId) throw new Error("unreachable: checked on submit");
-      return unwrap(
-        browserApi.POST(
-          "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
-          {
-            params: { path: { id: space.id, user_integration_id: userIntegrationId } },
-            body: {
-              embedding_model: { id: embeddingModelId },
-              wrapper_name: requiresWrapperName ? wrapperName.trim() : undefined,
-              items: buildBatchItems(
-                { key: site.key, name: site.name, url: site.url, type: site.type },
-                deduped.effectiveEntries
-              )
-            }
-          }
-        )
-      );
-    },
-    onSuccess: (result) => {
-      // Each created item's first sync is reported with its counts once its job
-      // is over; several are reported together, under the first job's id.
-      const created = result.items.filter((item) => item.status === "created" && item.job);
-      const firstJob = created[0]?.job;
-      const batch =
-        created.length > 1 && firstJob && site
-          ? {
-              batchId: firstJob.id,
-              batchName: requiresWrapperName ? wrapperName.trim() : site.name
-            }
-          : {};
-      trackImports(
-        created.flatMap((item) =>
-          item.job && item.integration_knowledge_id
-            ? [
-                {
-                  jobId: item.job.id,
-                  knowledgeId: item.integration_knowledge_id,
-                  name: item.name,
-                  spaceRouteId: routeId,
-                  ...batch
-                }
-              ]
-            : []
-        )
-      );
-      trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
-      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      if (result.created_count === 0) {
-        toast.error(
-          t("sharepoint_batch_import_all_failed", { failed: String(result.failed_count) })
-        );
-        return;
-      }
-      if (result.failed_count > 0) {
-        toast.warning(
-          t("sharepoint_batch_import_partial", {
-            created: String(result.created_count),
-            total: String(result.items.length),
-            failed: String(result.failed_count)
-          })
-        );
-      }
-      onOpenChange(false);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
   // Import is never disabled: without an embedding model focus moves to the
   // warning; otherwise what is missing (a site, content, the group name)
   // shows at its place, and focus moves there.
   function submit() {
-    if (importBatch.isPending) return;
     const target = noModels
       ? document.getElementById("sharepoint-no-models")
       : siteProblem
@@ -281,11 +282,26 @@ function SharePointImportForm({
           : wrapperNameProblem
             ? document.getElementById("sharepoint-wrapper-name")
             : null;
-    if (noModels || siteProblem || itemsProblem || wrapperNameProblem) {
+    if (
+      noModels ||
+      siteProblem ||
+      itemsProblem ||
+      wrapperNameProblem ||
+      !site ||
+      !embeddingModelId
+    ) {
       revealProblems(() => setSubmitted(true), target);
       return;
     }
-    importBatch.mutate();
+    onImport({
+      embeddingModelId,
+      wrapperName: requiresWrapperName ? wrapperName.trim() : undefined,
+      items: buildBatchItems(
+        { key: site.key, name: site.name, url: site.url, type: site.type },
+        deduped.effectiveEntries
+      ),
+      batchName: requiresWrapperName ? wrapperName.trim() : site.name
+    });
   }
 
   const selectedKeys = new Set(selected.map((entry) => entry.selectionKey));
@@ -499,8 +515,8 @@ function SharePointImportForm({
           {t("back")}
         </Button>
         {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-        <Button aria-busy={importBatch.isPending || undefined} onClick={submit}>
-          {importBatch.isPending ? t("importing") : t("import")}
+        <Button aria-busy={pending || undefined} onClick={submit}>
+          {pending ? t("importing") : t("import")}
         </Button>
       </DialogFooter>
     </>

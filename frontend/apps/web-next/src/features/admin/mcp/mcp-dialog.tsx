@@ -57,20 +57,48 @@ export function McpServerDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  // Owned here, not by the form: a pending add outlives a close and reopen.
+  const save = useMutation({
+    mutationFn: (body: McpServerCreatePayload) => createMcpServer(browserApi, body),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: MCP_KEY });
+      toast.success(
+        t("mcp_created_with_tools", { count: result.connection.tools_discovered ?? 0 })
+      );
+      onOpenChange(false);
+      router.push(`/admin/mcp-servers/${result.server.id}`);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         {/* DialogContent remounts on every opening, so each add starts empty. */}
-        <McpServerForm onOpenChange={onOpenChange} />
+        <McpServerForm
+          pending={save.isPending}
+          onSave={(body) => save.mutate(body)}
+          onOpenChange={onOpenChange}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-function McpServerForm({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+function McpServerForm({
+  pending,
+  onSave,
+  onOpenChange
+}: {
+  pending: boolean;
+  onSave: (body: McpServerCreatePayload) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
   const t = useTranslations();
-  const router = useRouter();
-  const queryClient = useQueryClient();
 
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security?.security_enabled ?? false;
@@ -106,38 +134,26 @@ function McpServerForm({ onOpenChange }: { onOpenChange: (open: boolean) => void
   const tokenBlank = authType === "bearer" && bearerToken !== "" && bearerToken.trim() === "";
   const shown = (problem: string | null) => (submitted ? problem : null);
 
-  const save = useMutation({
-    mutationFn: async () => {
-      const body: McpServerCreatePayload = {
-        name: name.trim(),
-        http_url: httpUrl.trim(),
-        http_auth_type: authType,
-        description: description.trim() || null,
-        tags: tags.length > 0 ? tags : null,
-        icon_url: iconUrl.trim() || null,
-        documentation_url: documentationUrl.trim() || null
-      };
-      if (authType === "bearer" && bearerToken) {
-        body.http_auth_config_schema = { token: bearerToken };
-      }
-      if (securityEnabled && classificationId !== NO_CLASSIFICATION) {
-        body.security_classification = { id: classificationId };
-      }
-      return createMcpServer(browserApi, body);
-    },
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: MCP_KEY });
-      toast.success(
-        t("mcp_created_with_tools", { count: result.connection.tools_discovered ?? 0 })
-      );
-      onOpenChange(false);
-      router.push(`/admin/mcp-servers/${result.server.id}`);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
+  function payload(): McpServerCreatePayload {
+    const body: McpServerCreatePayload = {
+      name: name.trim(),
+      http_url: httpUrl.trim(),
+      http_auth_type: authType,
+      description: description.trim() || null,
+      tags: tags.length > 0 ? tags : null,
+      icon_url: iconUrl.trim() || null,
+      documentation_url: documentationUrl.trim() || null
+    };
+    if (authType === "bearer" && bearerToken) {
+      body.http_auth_config_schema = { token: bearerToken };
+    }
+    if (securityEnabled && classificationId !== NO_CLASSIFICATION) {
+      body.security_classification = { id: classificationId };
+    }
+    return body;
+  }
 
   function add() {
-    if (save.isPending) return;
     const firstProblem = nameProblem
       ? nameRef
       : urlProblem
@@ -151,7 +167,7 @@ function McpServerForm({ onOpenChange }: { onOpenChange: (open: boolean) => void
       revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
-    save.mutate();
+    onSave(payload());
   }
 
   return (
@@ -303,12 +319,12 @@ function McpServerForm({ onOpenChange }: { onOpenChange: (open: boolean) => void
       </div>
 
       <DialogFooter>
-        <Button variant="outline" disabled={save.isPending} onClick={() => onOpenChange(false)}>
+        <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
           {t("cancel")}
         </Button>
         {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-        <Button aria-busy={save.isPending || undefined} onClick={add}>
-          {save.isPending ? t("mcp_connecting") : t("add_mcp_server")}
+        <Button aria-busy={pending || undefined} onClick={add}>
+          {pending ? t("mcp_connecting") : t("add_mcp_server")}
         </Button>
       </DialogFooter>
     </>

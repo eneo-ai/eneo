@@ -33,6 +33,8 @@ import {
 } from "../queries";
 import { ImportPreviewError } from "./preview-state";
 
+type ConfluenceImport = { selected: IntegrationPreview; embeddingModelId: string };
+
 /** Confluence import: pick one space, then import it whole with an embedding model. */
 export function ConfluenceImportDialog({
   open,
@@ -45,12 +47,43 @@ export function ConfluenceImportDialog({
   onBack: () => void;
   integration: UserIntegration;
 }) {
+  const t = useTranslations();
+  const { space, routeId } = useSpace();
+  const queryClient = useQueryClient();
+  const { trackJob } = useJobs();
+  const userIntegrationId = integration.id ?? "";
+
+  // Owned here, not by the form: a pending import outlives a close and reopen.
+  const importSpace = useMutation({
+    mutationFn: ({ selected, embeddingModelId }: ConfluenceImport) =>
+      unwrap(
+        browserApi.POST("/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/", {
+          params: { path: { id: space.id, user_integration_id: userIntegrationId } },
+          body: {
+            name: selected.name,
+            url: selected.url,
+            key: selected.key,
+            selected_item_type: selected.type,
+            resource_type: "site",
+            embedding_model: { id: embeddingModelId }
+          }
+        })
+      ),
+    onSuccess: (job) => {
+      trackJob(job);
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      onOpenChange(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         {/* DialogContent remounts on every opening, so each import starts over. */}
         <ConfluenceImportForm
-          onOpenChange={onOpenChange}
+          pending={importSpace.isPending}
+          onImport={(choice) => importSpace.mutate(choice)}
           onBack={onBack}
           integration={integration}
         />
@@ -60,18 +93,18 @@ export function ConfluenceImportDialog({
 }
 
 function ConfluenceImportForm({
-  onOpenChange,
+  pending,
+  onImport,
   onBack,
   integration
 }: {
-  onOpenChange: (open: boolean) => void;
+  pending: boolean;
+  onImport: (choice: ConfluenceImport) => void;
   onBack: () => void;
   integration: UserIntegration;
 }) {
   const t = useTranslations();
-  const { space, routeId } = useSpace();
-  const queryClient = useQueryClient();
-  const { trackJob } = useJobs();
+  const { space } = useSpace();
 
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<IntegrationPreview | null>(null);
@@ -94,31 +127,6 @@ function ConfluenceImportForm({
   }, [preview.data, search]);
   const settingsHref = space.personal ? "/account/integrations" : null;
 
-  const importSpace = useMutation({
-    mutationFn: () => {
-      if (!selected || !embeddingModelId) throw new Error("unreachable: checked on submit");
-      return unwrap(
-        browserApi.POST("/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/", {
-          params: { path: { id: space.id, user_integration_id: userIntegrationId } },
-          body: {
-            name: selected.name,
-            url: selected.url,
-            key: selected.key,
-            selected_item_type: selected.type,
-            resource_type: "site",
-            embedding_model: { id: embeddingModelId }
-          }
-        })
-      );
-    },
-    onSuccess: (job) => {
-      trackJob(job);
-      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      onOpenChange(false);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
   const noModels = space.embedding_models.length === 0 || !embeddingModelId;
   const spaceProblem = submitted && !selected ? t("form_problem_choose_confluence_space") : null;
 
@@ -126,8 +134,7 @@ function ConfluenceImportForm({
   // warning; without a chosen space the problem shows at the list, and focus
   // moves to its first space (or the search, when none is listed).
   function submit() {
-    if (importSpace.isPending) return;
-    if (noModels || !selected) {
+    if (noModels || !selected || !embeddingModelId) {
       revealProblems(
         () => setSubmitted(true),
         noModels
@@ -137,7 +144,7 @@ function ConfluenceImportForm({
       );
       return;
     }
-    importSpace.mutate();
+    onImport({ selected, embeddingModelId });
   }
 
   return (
@@ -229,8 +236,8 @@ function ConfluenceImportForm({
           {t("back")}
         </Button>
         {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-        <Button aria-busy={importSpace.isPending || undefined} onClick={submit}>
-          {importSpace.isPending ? t("importing") : t("import_space")}
+        <Button aria-busy={pending || undefined} onClick={submit}>
+          {pending ? t("importing") : t("import_space")}
         </Button>
       </DialogFooter>
     </>

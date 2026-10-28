@@ -366,3 +366,32 @@ it("Confluence: starts over when reopened", async () => {
     (await screen.findByRole("button", { name: "Personal" })).getAttribute("aria-pressed")
   ).toBe("false");
 });
+
+it("Confluence: keeps a pending import pending when closed and reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  api.POST.mockImplementation(() => new Promise(() => {}));
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importera yta" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  const busy = screen.getByRole("button", { name: "Importerar..." });
+  fireEvent.click(busy);
+
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  expect(api.POST).toHaveBeenCalledTimes(1);
+});
