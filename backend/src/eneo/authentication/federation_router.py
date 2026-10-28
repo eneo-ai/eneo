@@ -10,7 +10,7 @@ from typing import Annotated, Any, Optional, Protocol, cast
 from uuid import UUID
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 from typing_extensions import NotRequired, TypedDict
@@ -441,6 +441,7 @@ async def list_tenants(
     reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def initiate_auth(
+    response: Response,
     container: Annotated[Container, Depends(get_container())],
     tenant: Annotated[
         Optional[str],
@@ -598,6 +599,9 @@ async def initiate_auth(
         )
 
     correlation_id = ensure_correlation_id()
+    # The id the callback restores from the state; the trace middleware only
+    # sets this header when a span is active.
+    response.headers["X-Correlation-ID"] = correlation_id
 
     # Resolve redirect_uri server-side
     try:
