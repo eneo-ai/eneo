@@ -40,11 +40,3 @@ export function documentExport(sessionId: string, fileId: string): DocumentExpor
     }
   };
 }
-
-/** Hands a file to the browser to save under `name`. */
-export function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  Object.assign(document.createElement("a"), { href: url, download: name }).click();
-  // The exported file exists only in this page.
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}

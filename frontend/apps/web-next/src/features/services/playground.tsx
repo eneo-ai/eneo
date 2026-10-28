@@ -1,6 +1,5 @@
 "use client";
 
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -13,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 function stringifyOutput(output: unknown): string {
   if (typeof output === "string") return output;
@@ -25,7 +24,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
   const t = useTranslations();
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   const run = useMutation({
     mutationFn: async (text: string) => {
@@ -83,9 +82,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
           variant="outline"
           className="self-end"
           disabled={!output}
-          onClick={async () => {
-            if (!(await copy(output))) toast.error(t("chat_copy_failed"));
-          }}
+          onClick={() => void copy(output)}
         >
           {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {isCopied ? t("copied") : t("copy_response")}

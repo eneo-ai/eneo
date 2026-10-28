@@ -5736,7 +5736,7 @@
   "chat_composer_placeholder": "Ask, paste text or drop files here",
   "chat_conversation_label": "Conversation",
   "chat_copy_answer": "Copy the answer",
-  "chat_copy_failed": "Could not copy. Try again or select the text and copy it.",
+  "copy_failed": "Could not copy. Try again or select the text and copy it.",
   "chat_delete_conversation": "Delete the conversation",
   "chat_drop_files": "Drop the files to attach them",
   "chat_edit_assistant": "Edit the assistant",

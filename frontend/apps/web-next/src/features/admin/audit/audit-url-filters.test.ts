@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { EneoClient } from "@/lib/api/browser";
 import type { ActionType, AuditFilters } from "./audit";
-import { auditExportRequest } from "./audit";
+import { auditExportRequest, auditLogsQueryOptions } from "./audit";
 import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters";
 
 const action = (value: string) => value as ActionType;
@@ -156,5 +157,15 @@ describe("auditFiltersSearchParams", () => {
     expect(params.get("user_label")).toBe("user@example.com");
     expect(params.has("search")).toBe(false);
     expect(params.has("actions")).toBe(false);
+  });
+});
+
+describe("auditLogsQueryOptions", () => {
+  it("keys on the trimmed search, so trailing whitespace reuses the cached logs", () => {
+    const api = {} as EneoClient;
+    const filters: AuditFilters = { page: 1, actions: [], search: "abc" };
+    expect(auditLogsQueryOptions(api, { ...filters, search: "abc " }).queryKey).toEqual(
+      auditLogsQueryOptions(api, filters).queryKey
+    );
   });
 });

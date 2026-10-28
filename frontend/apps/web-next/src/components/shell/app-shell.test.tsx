@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MEDIA } from "@/lib/breakpoints";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
 import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
@@ -146,6 +147,15 @@ describe("AppShellFrame", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
     });
     expect(screen.queryByRole("dialog", { name: "Sök i Eneo" })).toBeNull();
+  });
+});
+
+describe("AppShellFrame breakpoint", () => {
+  it("switches to the phone layout below MEDIA.md, the breakpoint of Tailwind's md: classes", () => {
+    const matchMedia = vi.spyOn(window, "matchMedia");
+    renderShell();
+    expect(matchMedia.mock.calls.map(([query]) => query)).toContain(`not all and ${MEDIA.md}`);
+    matchMedia.mockRestore();
   });
 });
 

@@ -12,7 +12,6 @@ import { AppContextProvider, type AppContextData } from "./app-context";
  * env and the backend version it read; runtime config in the Vite app.
  */
 export type AppContextEnv = {
-  showWebSearch: boolean;
   links: AppContextData["links"];
   frontendVersion: string;
   backendVersion: string;
@@ -48,7 +47,6 @@ export function QueryAppContextProvider({
       settings,
       federationStatus,
       limits,
-      featureFlags: { showWebSearch: env.showWebSearch },
       links: env.links,
       versions: { frontend: env.frontendVersion, backend: env.backendVersion }
     }),
