@@ -143,7 +143,7 @@ test.describe("an editor on a tablet", () => {
   test("keeps the section strip and every section on one page", async ({ page }) => {
     const { editor } = await assistantEditor(page);
     await page.goto(editor);
-    await expect(page.locator(".astryx-tab-strip")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Avsnitt", exact: true })).toBeVisible();
     await expect(page.locator("[data-editor-index]")).toBeHidden();
     await expect(page.locator("[data-phone-page-bar]")).toBeHidden();
     for (const id of ["general", "instructions", "ai"]) {

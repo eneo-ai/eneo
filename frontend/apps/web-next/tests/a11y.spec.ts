@@ -87,8 +87,9 @@ async function expectNoAxeViolations(
 ) {
   assertDocumented(exclude, (selector) => `Leaving "${selector}" out of the page scan`);
   assertDocumented(disableRules, (rule) => `Skipping the axe rule "${rule}"`);
-  // LoadingState skeletons are aria-busy: scan what loaded, not a skeleton.
-  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  // Wait for exposed loading regions. A queued run keeps a decorative skeleton
+  // under aria-hidden after the result page has loaded; that state is scanned too.
+  await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
 
   const rules = Object.fromEntries([
     ...PAGE_STRUCTURE_RULES.map((rule) => [rule, { enabled: true }]),
@@ -723,6 +724,13 @@ for (const colorScheme of ["light", "dark"] as const) {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
             ).toBeVisible();
+            await expect(
+              page.getByText(/^(Ditt resultat genereras\.|Your result is being generated\.)$/)
+            ).toBeVisible();
+            await expect(page.locator("[data-result-skeleton]")).toHaveAttribute(
+              "aria-hidden",
+              "true"
+            );
           });
         });
 
