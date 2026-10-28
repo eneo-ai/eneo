@@ -1,3 +1,15 @@
+import type { DateRange } from "@astryxdesign/core/DateRangeInput";
+
+/** A local calendar date as YYYY-MM-DD (Astryx's ISODateString). */
+export type IsoDate = DateRange["start"];
+
+/** The local calendar date of `date` (the viewer's day), as YYYY-MM-DD. */
+export function isoDate(date: Date): IsoDate {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}` as IsoDate;
+}
+
 /** Validate a date-input/URL calendar date without normalizing impossible dates. */
 export function calendarDate(value: string | null | undefined): string | undefined {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;

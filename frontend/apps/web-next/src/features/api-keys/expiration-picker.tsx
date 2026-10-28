@@ -1,15 +1,14 @@
 "use client";
 
-import { DateInput, type DateInputProps } from "@astryxdesign/core/DateInput";
+import { DateInput } from "@astryxdesign/core/DateInput";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FieldProblem } from "@/components/composites/field-problem";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { isoDate, type IsoDate } from "@/lib/calendar-date";
 import { getDaysUntilExpiration } from "./expiration-utils";
-
-type IsoDate = NonNullable<DateInputProps["value"]>;
 
 const PRESETS = [
   { days: 7, key: "api_keys_exp_7_days" },
@@ -19,13 +18,6 @@ const PRESETS = [
 ] as const;
 
 type Choice = `${(typeof PRESETS)[number]["days"]}` | "custom" | "none";
-
-/** A local calendar date as YYYY-MM-DD. */
-function localDate(date: Date): IsoDate {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}` as IsoDate;
-}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -56,8 +48,8 @@ function endOfDay(date: IsoDate, maxDays: number | null | undefined): string {
 
 function initialChoice(value: string | null): Choice {
   if (!value) return "none";
-  const day = localDate(new Date(value));
-  const preset = PRESETS.find((option) => localDate(daysFromNow(option.days)) === day);
+  const day = isoDate(new Date(value));
+  const preset = PRESETS.find((option) => isoDate(daysFromNow(option.days)) === day);
   return preset ? `${preset.days}` : "custom";
 }
 
@@ -90,8 +82,8 @@ export function ExpirationPicker({
     required && !value ? "" : initialChoice(value)
   );
   const presets = PRESETS.filter((preset) => !maxDays || preset.days <= maxDays);
-  const min = localDate(daysFromNow(1));
-  const max = maxDays ? localDate(daysFromNow(maxDays)) : undefined;
+  const min = isoDate(daysFromNow(1));
+  const max = maxDays ? isoDate(daysFromNow(maxDays)) : undefined;
   const expiresOn = useClientTimeText(value, "date_time");
   const daysLeft = getDaysUntilExpiration(value);
   const legendId = `${id}-legend`;
@@ -101,7 +93,7 @@ export function ExpirationPicker({
     if (next === "none") onChange(null);
     else if (next !== "custom") onChange(expiryInDays(Number(next)));
     else if (!value) {
-      const month = localDate(daysFromNow(30));
+      const month = isoDate(daysFromNow(30));
       onChange(endOfDay(max && max < month ? max : month, maxDays));
     }
   }
@@ -135,7 +127,7 @@ export function ExpirationPicker({
           weekStartsOn="mon"
           min={min}
           max={max}
-          value={value ? localDate(new Date(value)) : undefined}
+          value={value ? isoDate(new Date(value)) : undefined}
           onChange={(next) => {
             if (next) onChange(endOfDay(next, maxDays));
           }}
