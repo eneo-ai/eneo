@@ -470,6 +470,57 @@ class Settings(BaseSettings):
     # Used for sharepoint integration so dont remove if you restructure logic for OIDC
     public_origin: Optional[str] = None
 
+    # Web app served by the backend (web-next on Vite; plan §2.3, §3.6).
+    browser_session_enabled: bool = Field(
+        default=False,
+        description=(
+            "Accept the browser session cookie. Migration flag. "
+            "POST-retire-browser-flags removes it once the main host is served "
+            "by the backend."
+        ),
+    )
+    web_app_enabled: bool = Field(
+        default=False,
+        description=(
+            "Serve the web app from the backend (no consumer until the web app "
+            "serving lands). Migration flag. POST-retire-browser-flags removes it "
+            "once the main host is served by the backend."
+        ),
+    )
+    # Runtime links and switches, under the env names web-next reads today.
+    show_web_search: bool = False
+    show_help_center: bool = False
+    help_center_url: Optional[str] = None
+    legacy_app_url: Optional[str] = None
+    accessibility_statement_url: Optional[str] = None
+    request_integration_form_url: Optional[str] = None
+
+    @field_validator(
+        "help_center_url",
+        "legacy_app_url",
+        "accessibility_statement_url",
+        "request_integration_form_url",
+        mode="before",
+    )
+    @classmethod
+    def blank_link_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def validate_browser_session_host(self):
+        # A development cookie (eneo_web, not Secure) only on a local host.
+        if (
+            self.browser_session_enabled
+            and self.is_development
+            and urlparse(self.public_origin or "").hostname
+            not in {"localhost", "127.0.0.1", "::1"}
+        ):
+            raise ValueError(
+                "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "
+                "PUBLIC_ORIGIN set to a localhost origin"
+            )
+        return self
+
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
     mobilityguard_discovery_endpoint: Optional[str] = None
     mobilityguard_client_id: Optional[str] = None
