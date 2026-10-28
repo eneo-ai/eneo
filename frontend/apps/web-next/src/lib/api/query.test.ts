@@ -57,6 +57,15 @@ describe("pollWhile", () => {
     }
   );
 
+  it("keeps polling at the active cadence after a network error", async () => {
+    const query = poll({ status: "running" }, () =>
+      Promise.reject(new TypeError("Failed to fetch"))
+    );
+    await vi.advanceTimersByTimeAsync(6_100);
+    expect(query.requests()).toBe(4);
+    query.stop();
+  });
+
   it("polls an inactive state at the idle cadence, and not at all without one", async () => {
     const idle = poll({ status: "done" }, undefined, 15_000);
     await vi.advanceTimersByTimeAsync(14_000);

@@ -180,7 +180,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     queryKey: JOBS_KEY,
     queryFn: listJobs,
     refetchInterval: pollWhile(
-      // TanStack calls this after each fetch, never during render.
+      // Read to schedule the next fetch, never for what renders.
       // eslint-disable-next-line react-hooks/refs, react-hooks/purity
       (items) => !live && (Date.now() < fastPollUntil.current || !!items?.some(isJobActive)),
       FAST_POLL_MS,
