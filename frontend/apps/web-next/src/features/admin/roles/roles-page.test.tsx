@@ -161,7 +161,6 @@ describe("role administration", () => {
     const defaultRow = (await screen.findByText("Everyone")).closest("article");
     const customRow = screen.getByText("Manager").closest("article");
     if (!defaultRow || !customRow) throw new Error("Role row missing");
-    expect(within(defaultRow).queryByRole("button", { name: "ui_more_actions_for" })).toBeNull();
     const { menu } = openActions(customRow);
     expect(within(menu).getByRole("menuitem", { name: "reset_to_template" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "delete_role" })).toBeTruthy();
@@ -176,6 +175,22 @@ describe("role administration", () => {
       })
     );
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the default role's Delete disabled, with the reason in the menu", async () => {
+    show();
+    // The default role has no template, so Delete is its menu's only item.
+    const defaultRow = (await screen.findByText("Everyone")).closest("article");
+    if (!defaultRow) throw new Error("Role row missing");
+    const { menu } = openActions(defaultRow);
+
+    const remove = within(menu).getByRole("menuitem", { name: /^delete_role/ });
+    expect(remove.getAttribute("aria-disabled")).toBe("true");
+    expect(within(menu).getByText("roles_cannot_delete_default")).toBeTruthy();
+    expect(within(menu).queryByRole("menuitem", { name: "set_as_default_role" })).toBeNull();
+    fireEvent.click(remove);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await expectNoAxeViolations(document.body);
   });
 
   it("keeps user navigation as a link and returns focus to the role menu trigger", async () => {

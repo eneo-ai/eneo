@@ -27,6 +27,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
+import { UserGroupField } from "./user-group-field";
 import type { AdminUser } from "./users";
 
 function RolePicker({
@@ -75,7 +76,13 @@ function RolePicker({
 type Field = "username" | "email" | "policy";
 
 /** A password the backend has just set, for the one-time display. */
-type IssuedPassword = { password: string; email: string };
+type NewPassword = { password: string; email: string };
+
+/** What a save sends that the one-time display names: the password (if any) and the e-mail. */
+type Save = { password: string | null; email: string };
+
+/** A set password, for `IssuedPasswordDialog`: a new account's, or a replaced one. */
+export type IssuedPassword = NewPassword & { replaced: boolean };
 
 /**
  * Form body, mounted fresh each time the dialog opens so its initial values
@@ -89,10 +96,13 @@ type IssuedPassword = { password: string; email: string };
  */
 function UserEditorForm({
   user,
-  onDone
+  onDone,
+  onPendingChange
 }: {
   user?: AdminUser;
-  onDone: (issued?: IssuedPassword) => void;
+  onDone: (issued?: NewPassword) => void;
+  /** The save is running: the dialog holds still until it has landed. */
+  onPendingChange: (pending: boolean) => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -114,55 +124,67 @@ function UserEditorForm({
   const retryRef = useRef<HTMLButtonElement>(null);
 
   // A set password is handed over first; the list refreshes once it is closed.
-  function finish(password: string | null) {
+  // Both come from what the save sent, not from the fields, which can change
+  // while it runs.
+  function finish({ password, email }: Save) {
     if (password) {
-      onDone({ password, email: email.trim() });
+      onDone({ password, email });
     } else {
       void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       onDone();
     }
   }
 
+  const saveCallbacks = {
+    onMutate: () => onPendingChange(true),
+    onSettled: () => onPendingChange(false),
+    onSuccess: (_data: unknown, save: Save) => finish(save),
+    onError: (error: Error) => toastApiError(error, t)
+  };
+
   const create = useMutation({
-    mutationFn: (password: string) =>
+    mutationFn: ({ password, email }: Save & { password: string }) =>
       unwrap(
         browserApi.POST("/api/v1/admin/users/", {
           body: {
-            email: email.trim(),
+            email,
             username: username.trim() || null,
             password,
             roles: [...roleIds].map((id) => ({ id }))
           }
         })
       ),
-    onSuccess: (_, password) => finish(password),
-    onError: (error) => toastApiError(error, t)
+    ...saveCallbacks
   });
 
   const updateUser = useMutation({
-    mutationFn: (password: string | null) => {
+    mutationFn: ({ password, email }: Save) => {
       if (!user?.username) throw new Error("missing username");
       return unwrap(
         browserApi.POST("/api/v1/admin/users/{username}/", {
           params: { path: { username: user.username } },
           body: {
-            email: email.trim(),
+            email,
+            // Sent only when changed: a new username signs the user out.
+            username: username.trim() !== user.username ? username.trim() : undefined,
             password: password ?? undefined,
             roles: [...roleIds].map((id) => ({ id }))
           }
         })
       );
     },
-    onSuccess: (_, password) => finish(password),
-    onError: (error) => toastApiError(error, t)
+    ...saveCallbacks
   });
 
   const pending = create.isPending || updateUser.isPending;
   const needsPassword = mode === "create" || replacePassword;
   const policyUnavailable = !policyQuery.isPending && policy === null;
   const errors: Record<Field, string | undefined> = {
+    // A user without a username cannot be updated at all (see submit).
     username:
-      mode === "create" && !username.trim() ? t("admin_users_username_required") : undefined,
+      (mode === "create" || user?.username) && !username.trim()
+        ? t("admin_users_username_required")
+        : undefined,
     email: email.trim() ? undefined : t("admin_users_email_required"),
     // A password is drawn against the policy, so none can be set without it.
     policy: needsPassword && policyUnavailable ? t("password_policy_unavailable") : undefined
@@ -196,15 +218,17 @@ function UserEditorForm({
         return;
       }
     }
-    if (mode === "update") updateUser.mutate(password);
-    else if (password) create.mutate(password);
+    if (mode === "update") updateUser.mutate({ password, email: email.trim() });
+    else if (password) create.mutate({ password, email: email.trim() });
   }
 
   const usernameError = shown("username");
   const emailError = shown("email");
 
   return (
-    <DialogContent className="max-h-[85vh] overflow-y-auto">
+    // No close button while saving (Escape waits too, in the dialog): the
+    // password the save sets must reach its one-time view.
+    <DialogContent className="max-h-[85vh] overflow-y-auto" showCloseButton={!pending}>
       <DialogHeader>
         <DialogTitle>{mode === "create" ? t("create_a_new_user") : t("edit_user")}</DialogTitle>
         <DialogDescription>
@@ -221,8 +245,7 @@ function UserEditorForm({
           }
           value={username}
           onChange={setUsername}
-          isRequired={mode === "create"}
-          isDisabled={mode === "update"}
+          isRequired
           autoComplete="off"
           status={usernameError ? { type: "error", message: usernameError } : undefined}
         />
@@ -282,69 +305,102 @@ function UserEditorForm({
             })
           }
         />
-
-        <DialogFooter>
-          <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
-          <Button
-            type="submit"
-            variant="primary"
-            label={mode === "create" ? t("create_user") : t("save_changes")}
-            // Keeps focus while saving; a second press is ignored above.
-            isLoading={pending}
-            isInterruptible
-          />
-        </DialogFooter>
       </form>
+
+      {/* Outside the form: its changes save on their own, and Enter in its
+          search field must not submit the user. */}
+      {user ? <UserGroupField user={user} isDisabled={pending} /> : null}
+
+      <DialogFooter>
+        <Button label={t("cancel")} isDisabled={pending} onClick={() => onDone()} />
+        <Button
+          type="submit"
+          form={formId}
+          variant="primary"
+          label={mode === "create" ? t("create_user") : t("save_changes")}
+          // Keeps focus while saving; a second press is ignored above.
+          isLoading={pending}
+          isInterruptible
+        />
+      </DialogFooter>
     </DialogContent>
   );
 }
 
 /**
  * Create or edit a user. Update targets POST /api/v1/admin/users/{username}/
- * (username cannot change). User-groups assignment is dropped with the legacy
- * area (OQ-2); role assignment is kept.
+ * with the current username; a changed one goes in the body. Editing also
+ * assigns user groups, which save on their own as they change. While the
+ * save runs the dialog cannot be closed (Cancel, Escape, close button), as in
+ * the Svelte app. A password the save sets goes to `onIssued`, for an
+ * `IssuedPasswordDialog` owned by the page: an edit dialog lives in its table
+ * row, which a refetch may still drop mid-save (a renamed user under a
+ * username filter), taking the dialog with it.
  */
 export function UserEditorDialog({
   open,
   onOpenChange,
-  user
+  user,
+  onIssued
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Omitted → create mode. */
   user?: AdminUser;
+  onIssued: (issued: IssuedPassword) => void;
+}) {
+  // The save only; a group change (it saves on its own) does not hold it.
+  const [saving, setSaving] = useState(false);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next || !saving) onOpenChange(next);
+      }}
+    >
+      {open && (
+        <UserEditorForm
+          user={user}
+          onPendingChange={setSaving}
+          onDone={(next) => {
+            onOpenChange(false);
+            if (next) onIssued({ ...next, replaced: user !== undefined });
+          }}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * The one-time view of a password the user editor set. The users list is
+ * invalidated only once it closes, but a background refetch (window focus,
+ * a group change) can still change or drop rows while it is open, so the page
+ * owns this view, never a table row.
+ */
+export function IssuedPasswordDialog({
+  issued,
+  onClose
+}: {
+  issued: IssuedPassword | null;
+  onClose: () => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const [issued, setIssued] = useState<IssuedPassword | null>(null);
-
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        {open && (
-          <UserEditorForm
-            user={user}
-            onDone={(next) => {
-              onOpenChange(false);
-              if (next) setIssued(next);
-            }}
-          />
-        )}
-      </Dialog>
-      <SecretRevealDialog
-        title={user ? t("admin_password_replaced_title") : t("admin_user_created_title")}
-        secret={issued?.password ?? null}
-        warning={
-          issued
-            ? `${t("admin_issued_password_handover", { email: issued.email })} ${t("admin_password_one_time_hint")}`
-            : undefined
-        }
-        copyFailedMessage={t("admin_issued_password_copy_failed")}
-        onClose={() => {
-          setIssued(null);
-          void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
-        }}
-      />
-    </>
+    <SecretRevealDialog
+      title={issued?.replaced ? t("admin_password_replaced_title") : t("admin_user_created_title")}
+      secret={issued?.password ?? null}
+      warning={
+        issued
+          ? `${t("admin_issued_password_handover", { email: issued.email })} ${t("admin_password_one_time_hint")}`
+          : undefined
+      }
+      copyFailedMessage={t("admin_issued_password_copy_failed")}
+      onClose={() => {
+        onClose();
+        void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+      }}
+    />
   );
 }

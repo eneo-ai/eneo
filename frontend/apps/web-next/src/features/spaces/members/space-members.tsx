@@ -37,6 +37,7 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
+import { userGroupsQueryOptions } from "@/features/admin/user-groups/user-groups";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
@@ -363,14 +364,7 @@ function AddGroupMemberDialog() {
   const groupProblem = submitted && !selectedId ? t("form_problem_choose_user_group") : null;
 
   const groupMemberIds = new Set((space.group_members?.items ?? []).map((group) => group.id));
-  const { data: groups } = useQuery({
-    queryKey: ["user-groups"],
-    queryFn: async () => {
-      const result = await unwrap(browserApi.GET("/api/v1/user-groups/"));
-      return result.items;
-    },
-    enabled: open
-  });
+  const { data: groups } = useQuery({ ...userGroupsQueryOptions(browserApi), enabled: open });
 
   const addGroup = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
