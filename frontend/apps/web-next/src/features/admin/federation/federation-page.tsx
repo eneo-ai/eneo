@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { ClientSecretField } from "./client-secret-field";
 import {
   FEDERATION_KEY,
@@ -78,7 +79,14 @@ export function FederationPage() {
         >
           {(view) =>
             view.configured ? (
-              <FederationForm view={view} reload={async () => (await query.refetch()).data} />
+              <FederationForm
+                view={view}
+                reload={async () => {
+                  // A failed refetch keeps the cached (stale) data: no reload.
+                  const result = await query.refetch();
+                  return result.isSuccess ? result.data : undefined;
+                }}
+              />
             ) : (
               <NotConfigured />
             )
@@ -165,6 +173,8 @@ function FederationForm({
   const clientIdRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef<HTMLInputElement>(null);
   const domainsRef = useRef<HTMLTextAreaElement>(null);
+  const replaceSecretRef = useRef<HTMLButtonElement>(null);
+  const rescueFocus = useFocusRescue();
   // The body holds the secret, so it is never the mutation's variables
   // (React Query keeps those in its cache); it lives here until settled.
   const pendingBody = useRef<FederationPatch | null>(null);
@@ -208,6 +218,9 @@ function FederationForm({
       void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
       startFrom(saved);
       setConfirming(false);
+      // A save from the secret field removes it; the dialog's focus return
+      // then has nothing to go to. "Byt hemlighet" stands in its place.
+      rescueFocus(() => replaceSecretRef.current);
       announce(t("federation_admin_saved"));
     },
     onError: (error) => {
@@ -318,6 +331,7 @@ function FederationForm({
             onSecretChange={(secret) => edit("client_secret", { secret })}
             problem={problemFor("client_secret")}
             inputRef={secretRef}
+            replaceRef={replaceSecretRef}
           />
           <TextArea
             ref={domainsRef}

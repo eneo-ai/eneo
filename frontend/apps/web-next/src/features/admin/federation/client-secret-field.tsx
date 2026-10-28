@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Text } from "@astryxdesign/core/Text";
 import { useFormatter, useTranslations } from "next-intl";
-import { useId, useRef } from "react";
+import { useId } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
@@ -19,7 +19,8 @@ export function ClientSecretField({
   secret,
   onSecretChange,
   problem,
-  inputRef
+  inputRef,
+  replaceRef
 }: {
   view: FederationView;
   /** null while the stored secret is kept. */
@@ -27,11 +28,12 @@ export function ClientSecretField({
   onSecretChange: (secret: string | null) => void;
   problem: string | null;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  /** The "Byt hemlighet" button, where focus goes when the field closes. */
+  replaceRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   const t = useTranslations();
   const format = useFormatter();
   const labelId = useId();
-  const replaceRef = useRef<HTMLButtonElement>(null);
 
   if (secret !== null) {
     return (

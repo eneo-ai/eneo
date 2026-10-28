@@ -245,6 +245,26 @@ describe("saving", () => {
     expect(cached).not.toContain(SECRET);
   });
 
+  it("keeps focus on the page after a secret saved from its field with Enter", async () => {
+    api.PATCH.mockImplementation(() => ok({ ...view, revision: "rev-2" }));
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: "Byt hemlighet" }));
+    const input = screen.getByLabelText(/Klienthemlighet/);
+    fireEvent.change(input, { target: { value: SECRET } });
+    expect(document.activeElement).toBe(input);
+    fireEvent.submit(input.closest("form")!);
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Spara och använd"
+      })
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Byt hemlighet" }))
+    );
+  });
+
   it("shows a masked-looking secret's refusal at the secret", async () => {
     api.PATCH.mockImplementation(() =>
       refused(400, { code: "federation_secret_looks_masked", message: "masked" })
@@ -285,9 +305,17 @@ describe("saving", () => {
     const banner = await screen.findByText("Någon annan har ändrat inställningarna");
     expect(clientId().value).toBe("mine");
     await expectNoAxeViolations(container);
+    // A failed reload keeps the draft and the banner ...
+    api.GET.mockImplementation(() => refused(500, { message: "boom", eneo_error_code: 9024 }));
+    fireEvent.click(screen.getByRole("button", { name: "Ladda om" }));
+    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(2));
+    await screen.findByText(/Innehållet kunde inte uppdateras/);
+    expect(clientId().value).toBe("mine");
+    expect(banner.isConnected).toBe(true);
+
+    // ... and a successful one loads the other admin's values.
     api.GET.mockImplementation(() => ok({ ...view, client_id: "theirs", revision: "rev-2" }));
     fireEvent.click(screen.getByRole("button", { name: "Ladda om" }));
-
     await waitFor(() => expect(clientId().value).toBe("theirs"));
     expect(banner.isConnected).toBe(false);
     expect(screen.queryByText("Någon annan har ändrat inställningarna")).toBeNull();
