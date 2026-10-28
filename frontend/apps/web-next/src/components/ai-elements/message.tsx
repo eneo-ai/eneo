@@ -59,7 +59,7 @@ export const MessageResponse = memo(
     const copyFeedback = useMemo(
       () => ({
         onCopy: () => toast.success(t("copied")),
-        onError: () => toast.error(t("chat_copy_failed"))
+        onError: () => toast.error(t("copy_failed"))
       }),
       [t]
     );
