@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.application.retention_service import RetentionService
@@ -38,20 +39,37 @@ async def test_concurrent_first_reads_both_get_the_default_policy(
     async with sessionmanager.session() as first, sessionmanager.session() as second:
         await first.begin()
         await second.begin()
+        second_pid = await second.scalar(text("SELECT pg_backend_pid()"))
         # The first read inserts the default and holds it uncommitted, so the
         # second read also finds no policy and its insert waits for the first.
         first_policy = await RetentionService(first).get_policy(test_tenant.id)
         racing = asyncio.create_task(
             RetentionService(second).get_policy(test_tenant.id)
         )
-        await asyncio.sleep(0.2)
-        assert not racing.done()
-        await first.commit()
-        second_policy = await racing
+        try:
+            await _wait_until_waiting_for_a_lock(second_pid)
+            await first.commit()
+            second_policy = await asyncio.wait_for(racing, timeout=5)
+        finally:
+            racing.cancel()
         await second.commit()
 
     assert first_policy.retention_days == second_policy.retention_days == 365
     assert first_policy.created_at == second_policy.created_at
+
+
+async def _wait_until_waiting_for_a_lock(pid: int) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with sessionmanager.session() as session, session.begin():
+            wait_event_type = await session.scalar(
+                text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                {"pid": pid},
+            )
+        if wait_event_type == "Lock":
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Session {pid} never waited on the first read's insert")
 
 
 @pytest.mark.asyncio
