@@ -14889,7 +14889,7 @@ export interface components {
     GeneralError: {
       /** Message */
       message: string;
-      eneo_error_code: components["schemas"]["ErrorCodes"];
+      eneo_error_code?: components["schemas"]["ErrorCodes"] | null;
       /** Code */
       code?: string | null;
       /** Context */
@@ -14902,6 +14902,12 @@ export interface components {
       details?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Detail
+       * @deprecated
+       * @description Deprecated: the raised HTTPException detail (a string or an object), kept for one release for clients that read it. Read the top-level fields instead.
+       */
+      detail?: unknown;
     };
     /** GetModelsResponse */
     GetModelsResponse: {
@@ -52433,6 +52439,15 @@ export interface operations {
           "text/plain": string;
         };
       };
+      /** @description validationToken is longer than 1024 characters. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -52481,9 +52496,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            detail: string;
-          };
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

@@ -336,7 +336,10 @@ class TestRateLimiting:
             headers=auth_headers,
         )
         assert response.status_code == 429
-        assert "rate limit" in response.json()["detail"].lower()
+        payload = response.json()
+        assert payload["code"] == "rate_limit_exceeded"
+        assert "rate limit" in payload["message"].lower()
+        assert response.headers["Retry-After"] == str(payload["retry_after_seconds"])
 
         # Clean up
         await client.delete(

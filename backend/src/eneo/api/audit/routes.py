@@ -31,16 +31,18 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    build_rate_limit_key,
-    enforce_rate_limit,
-)
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    build_rate_limit_key,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -50,6 +52,10 @@ _AUDIT_ADMIN_ACCESS_REASON = (
 )
 
 logger = logging.getLogger(__name__)
+
+_AUDIT_SESSION_RATE_LIMIT = RateLimitConfig(
+    max_requests=5, window_seconds=3600, key_prefix="rate_limit:audit_session"
+)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -192,7 +198,9 @@ async def reset_rate_limit(
         raise HTTPException(status_code=404, detail="Not found")
 
     redis_client = get_redis()
-    rate_limit_key = build_rate_limit_key(current_user.id, current_user.tenant_id)
+    rate_limit_key = build_rate_limit_key(
+        current_user.id, current_user.tenant_id, _AUDIT_SESSION_RATE_LIMIT.key_prefix
+    )
 
     try:
         deleted = await redis_client.delete(rate_limit_key)
@@ -269,12 +277,13 @@ async def create_access_session(
             redis_client=redis_client,
             user_id=current_user.id,
             tenant_id=current_user.tenant_id,
+            config=_AUDIT_SESSION_RATE_LIMIT,
         )
         count = rate_limit_result.current_count
-    except RateLimitExceededError:
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
+    except RateLimitExceededError as exc:
+        raise_rate_limited(
+            exc.result,
+            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
         )
     except RateLimitServiceUnavailableError:
         raise HTTPException(

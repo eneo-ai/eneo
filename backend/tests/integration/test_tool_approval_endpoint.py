@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
 from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
+from eneo.redis.rate_limit import RateLimitServiceUnavailableError
 
 
 async def _create_space(client, bearer_token: str) -> str:
