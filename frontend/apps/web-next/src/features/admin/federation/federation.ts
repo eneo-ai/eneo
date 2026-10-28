@@ -21,12 +21,14 @@ export function patchFederation(api: EneoClient, body: FederationPatch): Promise
   return unwrap(api.PATCH("/api/v1/admin/federation", { body }));
 }
 
-/** The page's message for a refusal it explains itself (`EneoApiError.reason`). */
+/**
+ * The message for a refused save that reaches the page's save error. The
+ * refusals the form answers in place never get here: a conflict (banner with
+ * Reload), not configured (the page re-reads) and a masked secret (at the
+ * field).
+ */
 const ERROR_KEYS: Record<string, string> = {
-  federation_config_revision_conflict: "federation_admin_conflict_title",
-  federation_secret_looks_masked: "federation_admin_secret_masked",
   federation_encryption_unavailable: "federation_admin_encryption_unavailable",
-  federation_not_configured: "federation_admin_not_configured_title",
   federation_disabled: "federation_admin_not_configured_title"
 };
 

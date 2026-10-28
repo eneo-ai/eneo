@@ -265,6 +265,29 @@ describe("saving", () => {
     );
   });
 
+  it("says in its own words why a secret cannot be stored", async () => {
+    api.PATCH.mockImplementation(() =>
+      refused(503, {
+        code: "federation_encryption_unavailable",
+        message: "Encryption is not configured, so a client secret cannot be stored."
+      })
+    );
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: "Byt hemlighet" }));
+    fireEvent.change(screen.getByLabelText(/Klienthemlighet/), { target: { value: SECRET } });
+    fireEvent.click(save());
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Spara och använd"
+      })
+    );
+
+    const alert = (await screen.findByText(/kryptering inte är konfigurerad/)).closest(
+      '[role="alert"]'
+    );
+    expect(alert?.textContent).not.toContain("Encryption is not configured");
+  });
+
   it("shows a masked-looking secret's refusal at the secret", async () => {
     api.PATCH.mockImplementation(() =>
       refused(400, { code: "federation_secret_looks_masked", message: "masked" })
