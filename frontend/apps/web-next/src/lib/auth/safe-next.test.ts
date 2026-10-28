@@ -54,7 +54,24 @@ describe("safeNextPath", () => {
     "/auth/callback?code=x&state=y",
     "/_next/static/chunks/main.js",
     "/spaces/../api/v1/users/me/",
-    "/%61pi/v1/users/me/"
+    "/%61pi/v1/users/me/",
+    // Dot segments that leave an empty segment, which servers merge.
+    "/.//api/v1/users/me/",
+    "/x/..//api/v1/",
+    "/%2e//logout",
+    "/.%2F/api/v1",
+    "/.//login",
+    "/a/%2F../api/v1/",
+    // An encoded ? or # before a dot segment: only the decoded parsed path shows /api.
+    "/%3F/../%61pi/v1/users/me/",
+    "/%23/../%61pi/v1/users/me/",
+    "/%3F/../%6Cogout",
+    // Only the parsed path shows /api (the decoded value parses back to /spaces).
+    "/api/x%2F..%2F..%2Fspaces",
+    "/logout%2F..%2Fspaces",
+    // Only the parsed decoded value shows /api (a server that decodes, then
+    // resolves dot segments).
+    "/x/%2E%2E%2Fapi/v1/users/me/"
   ])("never continues to a route that is not a page: %s", (value) =>
     expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
   );

@@ -29,11 +29,17 @@ export function safeNextPath(next: string | null | undefined): string {
     // (an auth redirect loop). Never to a route that is not a page either: the
     // API (the BFF, and FastAPI itself under Vite), the SSO handlers or Next's
     // assets. The continuation is a same-origin navigation, so it would carry
-    // Sec-Fetch-Site: same-origin past the browser-session gate. Servers route
-    // on the decoded path (`/%61pi` is `/api`), so both forms are checked.
-    const pathnames = [url.pathname, new URL(decoded, origin).pathname];
-    for (const prefix of ["/login", "/logout", "/api", "/auth", "/_next"]) {
-      for (const pathname of pathnames) {
+    // Sec-Fetch-Site: same-origin past the browser-session gate. Both paths a
+    // server may route on are checked: the parsed path decoded (`/%61pi` is
+    // `/api`; `/%3F/../%61pi` parses to `/%61pi`), which keeps every literal
+    // prefix, and the decoded value parsed, for servers that decode before
+    // resolving dot segments (`/x/%2E%2E%2Fapi`). No page has an empty segment,
+    // and servers and proxies merge `//` (Next answers with a 308), so `/.//api`
+    // is refused too.
+    const pathnames = [decodeURIComponent(url.pathname), new URL(decoded, origin).pathname];
+    for (const pathname of pathnames) {
+      if (pathname.includes("//")) return DEFAULT_LANDING;
+      for (const prefix of ["/login", "/logout", "/api", "/auth", "/_next"]) {
         if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return DEFAULT_LANDING;
       }
     }
