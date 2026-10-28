@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { mapSessionMessages } from "@/lib/chat/map-session";
@@ -100,8 +101,8 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  // History is an inline panel from 768px up, an overlay drawer below.
-  const historyInline = useMediaQuery("(min-width: 768px)");
+  // History is an inline panel from Tailwind's `md` up, an overlay drawer below.
+  const historyInline = useMediaQuery(MEDIA.md);
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );

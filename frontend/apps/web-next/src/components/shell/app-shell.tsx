@@ -8,6 +8,7 @@ import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { MEDIA } from "@/lib/breakpoints";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
@@ -19,7 +20,7 @@ import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 const ShellCommandPalette = lazy(() => import("./command-palette"));
 
 /** Below Tailwind's `md` breakpoint the SideNav becomes a drawer. */
-const MOBILE_QUERY = "(width < 48rem)";
+const MOBILE_QUERY = `not all and ${MEDIA.md}`;
 
 /**
  * The app frame: skip link (first tab stop), the SideNav (desktop) or the top

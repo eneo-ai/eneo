@@ -5,7 +5,7 @@ import {
   diagnosticsFromUnknownError
 } from "@/lib/auth/login-diagnostics";
 import { completeAuthorization } from "@/lib/auth/oidc";
-import { safeNextPath } from "@/lib/auth/safe-next";
+import { signedInContinuation } from "@/lib/auth/safe-next";
 import { openTxn, type SessionPayload } from "@/lib/auth/session-codec";
 import { sealedSessionCookie, TXN_COOKIE } from "@/lib/auth/session";
 
@@ -76,8 +76,7 @@ export async function GET(request: NextRequest) {
     user: { email: tokens.claims.email, name: tokens.claims.name }
   };
 
-  const target = safeNextPath(txn.next);
-  const response = NextResponse.redirect(new URL(target, env.APP_ORIGIN));
+  const response = NextResponse.redirect(new URL(signedInContinuation(txn.next), env.APP_ORIGIN));
   const cookie = await sealedSessionCookie(session);
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   response.cookies.delete(TXN_COOKIE);

@@ -28,7 +28,8 @@ const TEXT_OPTIONS: Record<AbsoluteFormat, Intl.DateTimeFormatOptions> = {
  * absolute format is the full information, and a relative one ("för 3
  * minuter sedan", kept current) is read out as its absolute time. "auto" is
  * Astryx's choice for lists: relative for the last week, the date and time
- * after that.
+ * after that. A calendar date without a time (YYYY-MM-DD) is not an instant:
+ * it goes through formatCalendarDate (lib/calendar-date.ts).
  *
  * @example
  * {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}

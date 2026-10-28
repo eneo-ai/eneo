@@ -22,7 +22,8 @@ export const JOB_INVALIDATION_KEYS: readonly (readonly string[])[] = [
   ["integrations"],
   // Tenant storage figures shown to admins (every upload moves them).
   ["storage"],
-  // The signed-in user's quota, read by the upload dialog.
+  // The session's user (always mounted, so one GET per finished-job batch per
+  // tab): its quota, shown by the upload dialog.
   ["users", "me"]
 ];
 

@@ -27,6 +27,7 @@ import {
 import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { auditExportRequest, type AuditExportFormat, type AuditFilters } from "./audit";
 
@@ -74,7 +75,7 @@ export function ExportDialog({
   } = useQuery({
     queryKey: ["audit-export", jobId],
     enabled: jobId !== null,
-    refetchInterval: (query) => (RUNNING.has(query.state.data?.status ?? "") ? POLL_MS : false),
+    refetchInterval: pollWhile((job) => RUNNING.has(job?.status ?? ""), POLL_MS),
     queryFn: () =>
       unwrap(
         browserApi.GET("/api/v1/audit/logs/export/{job_id}/status", {
