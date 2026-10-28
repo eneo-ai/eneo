@@ -4,7 +4,7 @@ import { InternationalizationProvider, type MessagesByLocale } from "@astryxdesi
 import { LinkProvider } from "@astryxdesign/core/Link";
 import { Theme } from "@astryxdesign/core/theme";
 import astryxSv from "@astryxdesign/core/locales/sv-SE.json";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale } from "next-intl";
 import { eneoTheme } from "@/theme/eneo";
 

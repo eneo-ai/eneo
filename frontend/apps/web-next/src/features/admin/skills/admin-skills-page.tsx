@@ -3,7 +3,7 @@
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, RotateCcw } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";

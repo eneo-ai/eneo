@@ -9,7 +9,7 @@ import { makeSpace } from "../testing/space-fixture";
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space, state.routeId) };

@@ -7,6 +7,7 @@
  */
 import { Chat } from "@ai-sdk/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHAT_API } from "@/lib/api/base";
 import { loadFixtures, sseResponse, toSseBody, type StreamFixture } from "./contract-fixtures";
 import { createChatTransport } from "./transport";
 import type { EneoUIMessage } from "./types";
@@ -122,7 +123,7 @@ describe("request body", () => {
     await settle(fixtures.find((fixture) => fixture.name === "plain-text")!);
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/chat");
+    expect(url).toBe(CHAT_API);
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({
       question: "What is in a.txt?",

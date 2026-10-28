@@ -13,8 +13,8 @@ import { ProblemsView } from "./problems-view";
 
 /** The props next/link gets, Astryx's links included (the app's LinkProvider uses next/link). */
 const rendered = vi.hoisted(() => [] as Record<string, unknown>[]);
-vi.mock("next/link", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/link")>();
+vi.mock("@/lib/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/link")>();
   const { createElement } = await import("react");
   return {
     default: (props: Record<string, unknown>) => {
@@ -26,7 +26,7 @@ vi.mock("next/link", async (importOriginal) => {
     }
   };
 });
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();

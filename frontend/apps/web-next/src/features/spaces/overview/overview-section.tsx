@@ -1,7 +1,7 @@
 "use client";
 
 import { Heading } from "@astryxdesign/core/Heading";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { RemovalFocusScope } from "../removal";

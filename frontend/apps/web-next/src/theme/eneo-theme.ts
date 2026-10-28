@@ -176,7 +176,7 @@ export const eneoTheme = defineTheme({
       "0 24px 56px light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.6)), " +
       "inset 0 0 0 1px light-dark(transparent, rgba(255, 255, 255, 0.09))",
 
-    // Fonts are loaded by next/font in src/app/layout.tsx (CSS variables on <html>).
+    // Fonts are self-hosted by src/app/globals.css (CSS variables on :root).
     "--font-family-body": FONT_BODY,
     "--font-family-heading": FONT_BODY,
     "--font-family-code": FONT_CODE

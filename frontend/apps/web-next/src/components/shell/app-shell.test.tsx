@@ -9,7 +9,7 @@ import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
 import { useOwnMobileHeader } from "./shell-context";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins that show where the bells are placed (they have their own tests).
 vi.mock("@/features/jobs/job-indicator", () => ({
   JobIndicator: () => <button type="button">Jobbklockan</button>
@@ -21,6 +21,12 @@ vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
+// The real palette, with a spy on when its module is first imported.
+const paletteImported = vi.hoisted(() => vi.fn());
+vi.mock("./command-palette", async (importOriginal) => {
+  paletteImported();
+  return importOriginal();
+});
 
 function seededClient() {
   const queryClient = testQueryClient();
@@ -50,6 +56,18 @@ beforeEach(() => setRoute("/spaces/list"));
 afterEach(cleanup);
 
 describe("AppShellFrame", () => {
+  // First in the file: a test that opens the palette loads its module for the rest.
+  it("loads the command palette module only when it first opens", async () => {
+    renderShell();
+    expect(paletteImported).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    });
+    expect(await screen.findByRole("dialog", { name: "Sök i Eneo" })).toBeTruthy();
+    expect(paletteImported).toHaveBeenCalledOnce();
+  });
+
   it("puts the skip link first and the page in main#main-content", async () => {
     const { container } = renderShell();
     const focusable = container.querySelectorAll<HTMLElement>(

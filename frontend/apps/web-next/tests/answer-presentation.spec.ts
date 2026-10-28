@@ -1,5 +1,5 @@
 import { expect, test } from "./csp";
-import { askChatQuestion, conversationLog, uniqueName } from "./helpers";
+import { askChatQuestion, conversationLog, isChatStream, uniqueName } from "./helpers";
 
 const ANSWER =
   String.raw`## Formler och diagram
@@ -19,7 +19,7 @@ test("renders formulas and diagrams through the production CSP and follows theme
   await page.addInitScript(() => localStorage.setItem("theme", "light"));
   // Keep the real authenticated request and stream metadata. Replace only the
   // model's plain-text answer, as the activity tests enrich the same stream.
-  await page.route("**/api/chat", async (route) => {
+  await page.route(isChatStream, async (route) => {
     const response = await route.fetch();
     let inserted = false;
     const events = (await response.text()).split(/\r?\n\r?\n/).filter(Boolean);

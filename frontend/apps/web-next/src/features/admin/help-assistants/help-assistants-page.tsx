@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useId, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";

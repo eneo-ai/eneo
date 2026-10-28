@@ -2,7 +2,7 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -14,6 +14,7 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
+import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
@@ -116,7 +117,7 @@ function uploadInfoBlob(
     const xhr = new XMLHttpRequest();
     xhr.open(
       "POST",
-      `/api/eneo/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`
+      `${API_BASE}/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`
     );
     xhr.responseType = "json";
     xhr.upload.addEventListener("progress", (event) => {

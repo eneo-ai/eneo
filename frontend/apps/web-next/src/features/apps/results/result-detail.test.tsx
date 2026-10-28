@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { API_BASE } from "@/lib/api/base";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import type { AppRun } from "../apps";
@@ -84,7 +85,7 @@ describe("ResultDetail", () => {
     expect(screen.queryByText("Sammanfattning av intervjun")).toBeNull();
     await waitFor(() =>
       expect(transcriptionPanel.querySelector("audio")?.getAttribute("src")).toBe(
-        "/api/eneo/api/v1/files/file-1/download/?token=signed-value"
+        `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`
       )
     );
     await expectNoAxeViolations(container);
@@ -110,7 +111,7 @@ describe("ResultDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: 'Ladda ner "intervju.mp3"' }));
     await waitFor(() =>
       expect(open).toHaveBeenCalledWith(
-        "/api/eneo/api/v1/files/file-1/download/?token=signed-value",
+        `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`,
         "_blank"
       )
     );

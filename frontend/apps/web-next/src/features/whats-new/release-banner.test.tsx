@@ -10,7 +10,7 @@ import { WhatsNewBanner } from "./release-banner";
 import { TourProvider } from "./tour-provider";
 import { WhatsNewProvider } from "./whats-new-provider";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const put = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { PUT: put, DELETE: vi.fn() } }));
 // The tour itself needs the real pages; here it reports them as unavailable.

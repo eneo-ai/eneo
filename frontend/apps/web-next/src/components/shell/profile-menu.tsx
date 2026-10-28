@@ -21,7 +21,7 @@ import {
   Sparkles,
   User
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";

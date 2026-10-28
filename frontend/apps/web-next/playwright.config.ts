@@ -38,6 +38,17 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE }
-    }
+    },
+    // Performance baseline (tests/perf), only with PERF set so test:e2e is unchanged.
+    ...(process.env.PERF
+      ? [
+          {
+            name: "perf",
+            testMatch: /.*\.perf\.ts/,
+            dependencies: ["setup"],
+            use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE }
+          }
+        ]
+      : [])
   ]
 });

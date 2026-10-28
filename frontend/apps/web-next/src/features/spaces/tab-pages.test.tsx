@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   deleted: [] as string[]
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", () => ({
   useRouter: () => ({ push: (href: string) => state.pushed.push(href), prefetch: () => {} })
 }));
 vi.mock("@/features/spaces/use-space", async () => {

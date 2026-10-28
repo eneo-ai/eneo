@@ -12,7 +12,7 @@ import {
   Search,
   type LucideIcon
 } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";

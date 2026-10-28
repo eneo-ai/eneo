@@ -6,7 +6,7 @@ import { renderInApp, testAppContext } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { AdminOverviewPage } from "./overview-page";
 

@@ -128,6 +128,57 @@ async def test_cors_uses_request_origin_without_bypassing_api_keys(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("base_url", "origin", "extra_headers", "expected_status"),
+    [
+        ("http://eneo.example.se", "https://eneo.example.se", {}, 204),
+        ("http://eneo.example.se", "https://tenant-b.example.se", {}, 400),
+        (
+            "http://eneo.example.se",
+            "https://eneo.example.se",
+            {"X-Widget-Key": "invalid"},
+            400,
+        ),
+        ("http://eneo.example.se", "https://eneo.example.se:8443", {}, 400),
+        (
+            "http://eneo.example.se",
+            "https://evil.example",
+            {"X-Forwarded-Host": "evil.example"},
+            400,
+        ),
+        ("https://eneo.example.se", "http://eneo.example.se", {}, 400),
+    ],
+)
+async def test_same_host_origin_is_allowed_behind_tls_proxy(
+    monkeypatch, base_url, origin, extra_headers, expected_status
+):
+    """Gunicorn does not trust X-Forwarded-Proto, so behind Traefik the
+    backend sees http while the page is https on the same host."""
+    _install_common_fakes(monkeypatch)
+    settings = _settings()
+    settings.api_key_header_name = "X-Widget-Key"
+    monkeypatch.setattr(callback_module, "get_settings", lambda: settings)
+    reached_paths = []
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        reached_paths.append(scope["path"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    cors = CORSMiddleware(app, callback=callback_module.get_origin)
+    async with AsyncClient(
+        transport=ASGITransport(app=cors), base_url=base_url
+    ) as client:
+        response = await client.post(
+            "/api/v1/flows/",
+            headers={"Origin": origin, "X-Forwarded-Proto": "https", **extra_headers},
+        )
+
+    assert response.status_code == expected_status
+    assert reached_paths == (["/api/v1/flows/"] if expected_status == 204 else [])
+
+
+@pytest.mark.asyncio
 async def test_actual_request_cannot_use_preflight_origin_allowlist(monkeypatch):
     _install_common_fakes(monkeypatch)
     monkeypatch.setattr(callback_module, "get_settings", _settings)
