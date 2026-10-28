@@ -1,15 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { ConfirmKey } from "./policy-draft";
 
 export function PolicyConfirmDialog({
@@ -27,32 +19,21 @@ export function PolicyConfirmDialog({
   const t = useTranslations();
 
   return (
-    <Dialog open={pending !== null} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("governance_confirm_title")}</DialogTitle>
-          <DialogDescription>{t("governance_confirm_desc")}</DialogDescription>
-        </DialogHeader>
-        <ul className="list-disc space-y-1 pl-6 text-sm">
-          {(pending ?? []).map((key) => (
-            <li key={key}>{t(key)}</li>
-          ))}
-        </ul>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel} disabled={saving}>
-            {t("cancel")}
-          </Button>
-          {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-          <Button
-            aria-busy={saving || undefined}
-            onClick={() => {
-              if (!saving) onConfirm();
-            }}
-          >
-            {saving ? t("governance_saving") : t("governance_confirm_and_save")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialogControlled
+      open={pending !== null}
+      onOpenChange={(open) => !open && onCancel()}
+      title={t("governance_confirm_title")}
+      description={t("governance_confirm_desc")}
+      confirmLabel={saving ? t("governance_saving") : t("governance_confirm_and_save")}
+      variant="default"
+      pending={saving}
+      onConfirm={onConfirm}
+    >
+      <ul className="list-disc space-y-1 pl-6 text-sm">
+        {(pending ?? []).map((key) => (
+          <li key={key}>{t(key)}</li>
+        ))}
+      </ul>
+    </ConfirmDialogControlled>
   );
 }
