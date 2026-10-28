@@ -46,3 +46,16 @@ async def test_a_key_without_a_ttl_gets_the_window_back(redis_client, limit):
     assert result.current_count == 8
     assert result.retry_after_seconds == 60
     assert 0 < await redis_client.ttl(key) <= 60
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_last_moment_of_a_window_still_says_to_wait(redis_client, limit):
+    key = f"{limit.key_prefix}:edge"
+    await check_rate_limit(redis_client, key, limit)
+    await redis_client.pexpire(key, 400)  # TTL would round this to 0 s
+
+    result = await check_rate_limit(redis_client, key, limit)
+
+    assert not result.allowed
+    assert result.retry_after_seconds == 1

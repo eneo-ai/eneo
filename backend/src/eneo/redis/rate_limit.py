@@ -15,17 +15,18 @@ from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
-# Atomic INCR, then the seconds left in the window. A key without a TTL (the
-# first request of a window, or one whose EXPIRE was lost) gets the full
-# window, so no key outlives it.
+# Atomic INCR, then the seconds left in the window, rounded up so a refusal
+# never says "retry in 0 s" while its key still exists (TTL rounds to the
+# nearest second). A key without a TTL (the first request of a window, or one
+# whose EXPIRE was lost) gets the full window, so no key outlives it.
 RATE_LIMIT_SCRIPT = """
 local count = redis.call('INCR', KEYS[1])
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 0 then
+local pttl = redis.call('PTTL', KEYS[1])
+if pttl < 0 then
     redis.call('EXPIRE', KEYS[1], ARGV[1])
-    ttl = tonumber(ARGV[1])
+    return {count, tonumber(ARGV[1])}
 end
-return {count, ttl}
+return {count, math.max(1, math.ceil(pttl / 1000))}
 """
 
 
