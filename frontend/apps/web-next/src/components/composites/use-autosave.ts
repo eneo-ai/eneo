@@ -113,23 +113,20 @@ export function useAutosaveField<T, R = unknown>({
   const serverRef = useRef(serverValue);
   // The latest value sent and not yet settled: what the server will hold next.
   const inFlight = useRef<{ value: T } | null>(null);
-  // The latest value sent and not yet accepted, whether its save is pending or
-  // failed: the user's choice, which an earlier save landing must not replace.
-  const unacknowledged = useRef<{ value: T } | null>(null);
+  // The latest value whose save succeeded, until the next server value arrives.
+  const landed = useRef<{ value: T } | null>(null);
 
   useEffect(() => {
     if (equals(serverRef.current, serverValue)) return;
     const previousServer = serverRef.current;
     serverRef.current = serverValue;
-    const sent = unacknowledged.current;
-    if (sent && equals(sent.value, serverValue)) unacknowledged.current = null;
-    // A draft the user has not diverged from adopts the new value, unless it is
-    // a newer choice (one reverted while an earlier save was still landing).
-    setDraft((current) =>
-      equals(current, previousServer) && !(sent && equals(current, sent.value))
-        ? serverValue
-        : current
-    );
+    // A server value this hook's own save produced never replaces the draft:
+    // the draft is the user's latest choice (it may revert what just landed).
+    // Any other value is someone else's change, which a draft the user has not
+    // diverged from adopts, also after this hook's own saves failed.
+    const own = landed.current !== null && equals(landed.current.value, serverValue);
+    landed.current = null;
+    setDraft((current) => (!own && equals(current, previousServer) ? serverValue : current));
   }, [serverValue, equals]);
 
   const dirty = !equals(draft, serverValue);
@@ -152,6 +149,13 @@ export function useAutosaveField<T, R = unknown>({
   });
   const timer = useRef<number | undefined>(undefined);
 
+  // The draft differs from what the server will hold next. Measured at the
+  // moment of use, so a revert typed while a save is in flight counts.
+  const unsent = useCallback(() => {
+    const { draft, serverValue, equals } = latest.current;
+    return !equals(draft, inFlight.current ? inFlight.current.value : serverValue);
+  }, []);
+
   const commit = useCallback(async (override?: T) => {
     window.clearTimeout(timer.current);
     const { autosave, draft, serverValue, save, equals, validate, normalize, onSaved } =
@@ -165,10 +169,9 @@ export function useAutosaveField<T, R = unknown>({
     if (validate && !validate(next)) return;
     const flight = { value: next };
     inFlight.current = flight;
-    unacknowledged.current = flight;
     await autosave(async () => {
       const result = await save(next);
-      if (unacknowledged.current === flight) unacknowledged.current = null;
+      landed.current = flight;
       onSaved?.(result);
       return result;
     });
@@ -177,30 +180,33 @@ export function useAutosaveField<T, R = unknown>({
 
   const reset = useCallback(() => setDraft(serverValue), [serverValue]);
 
+  // Re-armed by edits only: a settling save (even a failed one) does not
+  // start another, so an outage is not retried in a loop.
   useEffect(() => {
-    if (!commitDebounceMs || !dirty) return;
-    const id = window.setTimeout(() => void commit(), commitDebounceMs);
+    if (!commitDebounceMs) return;
+    const id = window.setTimeout(() => {
+      if (unsent()) void commit();
+    }, commitDebounceMs);
     timer.current = id;
     return () => window.clearTimeout(id);
-  }, [commit, commitDebounceMs, dirty, draft]);
+  }, [commit, commitDebounceMs, draft, unsent]);
 
   useEffect(() => {
-    if (!commitOnVisibilityChange || !dirty) return;
+    if (!commitOnVisibilityChange) return;
     const handler = () => {
-      if (document.visibilityState === "hidden") void commit();
+      if (document.visibilityState === "hidden" && unsent()) void commit();
     };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
-  }, [commit, commitOnVisibilityChange, dirty]);
+  }, [commit, commitOnVisibilityChange, unsent]);
 
   // Flush unsaved intent only (fire-and-forget; the save still reports through
   // the page's save status): an untouched field is never written on unmount.
   useEffect(
     () => () => {
-      const { draft, serverValue, equals } = latest.current;
-      if (inFlight.current || !equals(draft, serverValue)) void commit();
+      if (unsent()) void commit();
     },
-    [commit]
+    [commit, unsent]
   );
 
   return { value: draft, setValue: setDraft, dirty, commit, reset };

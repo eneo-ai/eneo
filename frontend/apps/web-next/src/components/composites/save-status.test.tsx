@@ -245,16 +245,28 @@ it("commits an explicit value before the draft state settles and reports the res
 /** The server value is a prop, so a test decides when a landed save renders. */
 function ServerBackedProbe({
   server,
-  save
+  save,
+  commitDebounceMs
 }: {
   server: string;
   save: (value: string) => Promise<void>;
+  commitDebounceMs?: number;
 }) {
-  const field = useAutosaveField({ key: "server-backed-field", value: server, save });
+  const field = useAutosaveField({
+    key: "server-backed-field",
+    value: server,
+    save,
+    commitDebounceMs
+  });
 
   return (
     <>
       <output aria-label="Draft">{field.value}</output>
+      <input
+        aria-label="Text field"
+        value={field.value}
+        onChange={(event) => field.setValue(event.target.value)}
+      />
       {["A", "B"].map((value) => (
         <button
           key={value}
@@ -376,6 +388,46 @@ it("adopts a later server change after a revert whose saves both landed unrender
   await act(async () => {
     saves[0]?.done.resolve();
     saves[1]?.done.resolve();
+  });
+  rerender(withStatus(<ServerBackedProbe server="C" save={save} />));
+
+  expect(draftText()).toBe("C");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(save).toHaveBeenCalledTimes(2);
+});
+
+it("debounces a revert typed while the previous value is in flight, and keeps it", async () => {
+  vi.useFakeTimers();
+  try {
+    const { saves, save } = deferredSaves();
+    const { rerender } = renderWithStatus(
+      <ServerBackedProbe server="A" save={save} commitDebounceMs={100} />
+    );
+    const input = screen.getByRole("textbox", { name: "Text field" });
+
+    fireEvent.change(input, { target: { value: "B" } });
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.change(input, { target: { value: "A" } });
+    act(() => vi.advanceTimersByTime(100));
+    expect(saves.map((entry) => entry.value)).toEqual(["B", "A"]);
+
+    await act(async () => saves[0]?.done.resolve());
+    rerender(withStatus(<ServerBackedProbe server="B" save={save} commitDebounceMs={100} />));
+    expect(draftText()).toBe("A");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("adopts another editor's change after a revert whose saves both failed", async () => {
+  const { saves, save } = deferredSaves();
+  const { rerender } = renderWithStatus(<ServerBackedProbe server="A" save={save} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Pick B" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pick A" }));
+  await act(async () => {
+    saves[0]?.done.reject(new Error("refused"));
+    saves[1]?.done.reject(new Error("refused"));
   });
   rerender(withStatus(<ServerBackedProbe server="C" save={save} />));
 
