@@ -9,7 +9,7 @@ import { CreateSpaceDialog } from "./create-space-dialog";
 const router = vi.hoisted(() => ({ push: vi.fn() }));
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 

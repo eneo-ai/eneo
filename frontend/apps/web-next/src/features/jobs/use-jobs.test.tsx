@@ -31,7 +31,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => announce
 }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
 const api = vi.hoisted(() => ({

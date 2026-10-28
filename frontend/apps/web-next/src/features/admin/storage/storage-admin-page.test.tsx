@@ -7,7 +7,7 @@ import { renderInApp, testAppContext } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), PUT: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // The moves and the connection have their own tests.
 vi.mock("./storage-content", () => ({ StorageContent: () => null }));
 vi.mock("./storage-connection-section", () => ({ StorageConnectionSection: () => null }));

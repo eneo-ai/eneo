@@ -41,7 +41,9 @@ vi.mock("@/lib/api/query", () => ({
   })
 }));
 // Next's control flow throws; these stand-ins throw something a test can read.
-vi.mock("next/navigation", () => ({
+// The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   notFound: () => {
     throw new Error("not found");
   },

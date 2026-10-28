@@ -28,7 +28,7 @@ const api = vi.hoisted(() => ({
   )
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   return { useSpace: () => ({ space: makeSpace(), routeId: "space-1", can: () => true }) };

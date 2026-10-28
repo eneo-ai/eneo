@@ -10,7 +10,7 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const searchParams = vi.hoisted(() => ({ value: "role_id=custom" }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", () => ({
   useSearchParams: () => new URLSearchParams(searchParams.value)
 }));
 vi.mock("./user-editor", () => ({ UserEditorDialog: () => null }));

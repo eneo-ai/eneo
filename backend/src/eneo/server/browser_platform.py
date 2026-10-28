@@ -15,11 +15,16 @@ from fastapi import FastAPI
 from eneo.main.config import get_settings
 from eneo.server.middleware.api_response_headers import ApiResponseHeadersMiddleware
 from eneo.server.middleware.compression import SelectiveGZipMiddleware
+from eneo.server.runtime_config_router import log_unlinked_runtime_values
+from eneo.server.runtime_config_router import router as runtime_config_router
 
 
 def install_browser_platform(app: FastAPI) -> None:
-    app.add_middleware(
-        ApiResponseHeadersMiddleware, hsts=not get_settings().is_development
-    )
+    settings = get_settings()
+    app.include_router(runtime_config_router, prefix=settings.api_prefix)
+    if settings.browser_session_enabled or settings.web_app_enabled:
+        log_unlinked_runtime_values(settings)
+
+    app.add_middleware(ApiResponseHeadersMiddleware, hsts=not settings.is_development)
     # Added last, so it is outermost: it compresses the final headers and body.
     app.add_middleware(SelectiveGZipMiddleware)

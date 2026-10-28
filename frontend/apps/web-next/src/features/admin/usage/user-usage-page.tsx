@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, RotateCcw } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";

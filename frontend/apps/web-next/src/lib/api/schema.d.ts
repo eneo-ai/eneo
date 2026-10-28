@@ -9449,6 +9449,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/runtime-config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the web app runtime config
+     * @description Links, switches and the backend version the web app reads at boot. Public and never cached.
+     */
+    get: operations["get_runtime_config_api_v1_runtime_config_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -24686,6 +24706,25 @@ export interface components {
       type?: "text";
       /** Text */
       text: string;
+    };
+    /** WebRuntimeConfig */
+    WebRuntimeConfig: {
+      /** Version */
+      version: string;
+      /** Revision */
+      revision: string;
+      /** Show Web Search */
+      show_web_search: boolean;
+      /** Help Center Url */
+      help_center_url: string | null;
+      /** Legacy App Url */
+      legacy_app_url: string | null;
+      /** Accessibility Statement Url */
+      accessibility_statement_url: string | null;
+      /** Request Integration Form Url */
+      request_integration_form_url: string | null;
+      /** Mcp App Content Origin */
+      mcp_app_content_origin: string | null;
     };
     /**
      * WebsiteBulkActionError
@@ -57399,6 +57438,26 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  get_runtime_config_api_v1_runtime_config_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebRuntimeConfig"];
         };
       };
     };

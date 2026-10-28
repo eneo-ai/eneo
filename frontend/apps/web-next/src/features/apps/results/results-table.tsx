@@ -3,7 +3,7 @@
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { FileText, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

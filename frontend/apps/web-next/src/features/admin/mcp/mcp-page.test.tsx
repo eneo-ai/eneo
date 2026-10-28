@@ -25,7 +25,7 @@ const server = (id: string, name: string, tools: Tool[] = []) => ({
 
 const servers = vi.hoisted(() => ({ items: [] as unknown[] }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {

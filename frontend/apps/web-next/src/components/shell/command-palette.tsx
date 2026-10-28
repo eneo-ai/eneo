@@ -20,7 +20,7 @@ import {
   User,
   type LucideIcon
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
 import { ClientTime } from "@/components/composites/client-time";

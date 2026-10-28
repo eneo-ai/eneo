@@ -1404,6 +1404,14 @@ releases say when to turn them on.
 | `SHOW_WEB_SEARCH`, `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
 | `HELP_CENTER_URL`, `LEGACY_APP_URL`, `ACCESSIBILITY_STATEMENT_URL`, `REQUEST_INTEGRATION_FORM_URL` | unset | Same values as in `env_web_next.env`; blank counts as unset. |
 
+The backend gives these to the web app at `GET /api/v1/runtime-config`. When a
+release says to, set them in `env_backend.env` with the same values as in
+`env_web_next.env`; once the backend serves the main host, only the backend copy
+is used. Links must be absolute `http(s)` URLs: the backend drops any other and,
+with either flag on, names it in a startup warning. The web app frames MCP app
+views from the origin of `MCP_APP_CONTENT_BASE_URL`, so `MCP_APP_CONTENT_ORIGIN`
+is not needed in the backend.
+
 With `ENVIRONMENT=development`, the backend refuses to start with
 `BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
 `127.0.0.1` URL, so the development cookie, which is not marked Secure, never

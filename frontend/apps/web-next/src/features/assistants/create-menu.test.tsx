@@ -7,7 +7,7 @@ import { clearJustCreated, isJustCreated } from "@/features/spaces/just-created"
 
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   return { useSpace: () => ({ space: makeSpace(), routeId: "space-1", can: () => true }) };
