@@ -11,6 +11,7 @@ import { useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FileKindIcon } from "@/features/chat/attachments";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import {
   FilePreviewContent,
@@ -177,10 +178,9 @@ export function FilePanel({
     if (!file) return;
     setDownloading(true);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
-      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
-    } catch {
-      toast.error(t("attachment_error_loading_content"));
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    } catch (error) {
+      toastDownloadError(error, t);
     } finally {
       setDownloading(false);
     }

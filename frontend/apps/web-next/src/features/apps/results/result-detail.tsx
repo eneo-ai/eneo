@@ -15,7 +15,12 @@ import { browserApi } from "@/lib/api/browser";
 import { pollWhile } from "@/lib/api/query";
 import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
-import { signedFileUrl } from "@/features/files/signed-file-url";
+import {
+  saveBlob,
+  saveUrl,
+  signedFileUrl,
+  toastDownloadError
+} from "@/features/files/signed-file-url";
 import { appRunQueryOptions, getResultTitle, isRunActive, type AppRun } from "../apps";
 import { AppRunStatusBadge } from "../status-badge";
 
@@ -27,13 +32,8 @@ function resultTitleLabels(t: (key: string) => string) {
   return { inputPrefix: t("input"), empty: t("app_run_no_input_title") };
 }
 
-function downloadText(text: string, fileName: string) {
-  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-  const anchor = document.createElement("a");
-  anchor.href = URL.createObjectURL(blob);
-  anchor.download = fileName;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(anchor.href), 1500);
+function saveText(text: string, fileName: string) {
+  saveBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), fileName);
 }
 
 function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
@@ -61,7 +61,7 @@ function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
         size="sm"
         label={t("download")}
         icon={<Download className="size-4" aria-hidden="true" />}
-        onClick={() => downloadText(text, fileName)}
+        onClick={() => saveText(text, fileName)}
       />
     </div>
   );
@@ -91,8 +91,11 @@ function FailedFileDownloads({ run }: { run: AppRun }) {
           label={`${t("download")} "${file.name}"`}
           icon={<Download className="size-4" aria-hidden="true" />}
           onClick={async () => {
-            const url = await signedFileUrl(browserApi, file.id, "attachment");
-            window.open(url, "_blank");
+            try {
+              saveUrl(await signedFileUrl(browserApi, file.id, "attachment"), file.name);
+            } catch (error) {
+              toastDownloadError(error, t);
+            }
           }}
         />
       ))}
@@ -128,7 +131,7 @@ function TranscriptionTab({ run }: { run: AppRun }) {
                 size="sm"
                 label={t("download")}
                 icon={<Download className="size-4" aria-hidden="true" />}
-                onClick={() => downloadText(file.transcription ?? "", `${file.name}.txt`)}
+                onClick={() => saveText(file.transcription ?? "", `${file.name}.txt`)}
               />
             )}
           </div>

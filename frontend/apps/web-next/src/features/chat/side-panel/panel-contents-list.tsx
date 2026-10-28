@@ -7,11 +7,11 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { FileTypeTile } from "@/features/chat/attachments";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { fileExtension, formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
 import type { SidePanelStore } from "./side-panel-store";
@@ -122,10 +122,9 @@ export function PanelContentsList({
   async function download(file: PreviewFile) {
     setDownloading(file.id);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
-      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
-    } catch {
-      toast.error(t("attachment_error_loading_content"));
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    } catch (error) {
+      toastDownloadError(error, t);
     } finally {
       setDownloading(null);
     }
