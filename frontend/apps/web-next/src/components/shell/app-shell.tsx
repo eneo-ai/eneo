@@ -5,10 +5,9 @@ import {
   type AppShellMobileContextValue
 } from "@astryxdesign/core/AppShell";
 import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
-import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
@@ -17,7 +16,7 @@ import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell
 import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 
 // Loaded the first time the palette opens: nothing of it ships with page loads.
-const ShellCommandPalette = dynamic(() => import("./command-palette"), { ssr: false });
+const ShellCommandPalette = lazy(() => import("./command-palette"));
 
 /** Below Tailwind's `md` breakpoint the SideNav becomes a drawer. */
 const MOBILE_QUERY = "(width < 48rem)";
@@ -154,13 +153,16 @@ export function AppShellFrame({
           {isMobile && (
             <MobileNavDrawer variant={variant} isOpen={drawerOpen} onOpenChange={setNavOpen} />
           )}
+          {/* Mounts on the first open only, so it never renders on the server. */}
           {paletteMounted && (
-            <ShellCommandPalette
-              isOpen={paletteOpen}
-              onOpenChange={setPaletteOpen}
-              onCreateSpace={openCreateSpace}
-              onNavigate={closeNav}
-            />
+            <Suspense fallback={null}>
+              <ShellCommandPalette
+                isOpen={paletteOpen}
+                onOpenChange={setPaletteOpen}
+                onCreateSpace={openCreateSpace}
+                onNavigate={closeNav}
+              />
+            </Suspense>
           )}
           <CreateSpaceDialog open={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />
         </div>

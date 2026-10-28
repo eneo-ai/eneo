@@ -2,10 +2,9 @@
 
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -28,12 +27,10 @@ import {
 const NUMBER = new Intl.NumberFormat("sv-SE");
 const PRESET_DAYS = [7, 30, 90] as const;
 const CHART_HEIGHT = 320;
-const UsageAreaChart = dynamic(
-  () => import("./usage-area-chart").then((module) => module.UsageAreaChart),
-  {
-    loading: () => <LoadingState rows={1} height={CHART_HEIGHT} />,
-    ssr: false
-  }
+// recharts loads with the first chart. The series query stays in UsageChart,
+// so it runs in parallel with the chunk instead of after it.
+const UsageAreaChart = lazy(() =>
+  import("./usage-area-chart").then((module) => ({ default: module.UsageAreaChart }))
 );
 
 function presetRange(days: number): InsightsRange {
@@ -64,7 +61,11 @@ function UsageChart({ range }: { range: InsightsRange }) {
   const query = useQuery(insightAggregatedQueryOptions(browserApi, range));
   return (
     <QueryStateBoundary query={query} rows={1} height={CHART_HEIGHT}>
-      {(data) => <UsageAreaChart data={data} />}
+      {(data) => (
+        <Suspense fallback={<LoadingState rows={1} height={CHART_HEIGHT} />}>
+          <UsageAreaChart data={data} />
+        </Suspense>
+      )}
     </QueryStateBoundary>
   );
 }

@@ -76,3 +76,14 @@ test.describe("on a phone", () => {
     await expect(drawer).toBeHidden();
   });
 });
+
+test.describe("signed out", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // Public assets skip the session check (src/proxy.ts matcher), the same as in Vite.
+  test("serves the integration logos without a session", async ({ request }) => {
+    const response = await request.get("/integration-logos/sharepoint.png", { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe("image/png");
+  });
+});
