@@ -69,9 +69,14 @@ describe("safeNextPath", () => {
     // Only the parsed path shows /api (the decoded value parses back to /spaces).
     "/api/x%2F..%2F..%2Fspaces",
     "/logout%2F..%2Fspaces",
-    // Only the parsed decoded value shows /api (a server that decodes, then
-    // resolves dot segments).
-    "/x/%2E%2E%2Fapi/v1/users/me/"
+    // A server that decodes, then resolves dot segments, routes these to /api or
+    // /logout: a dot segment left after parsing comes from an encoded slash.
+    "/x/%2E%2E%2Fapi/v1/users/me/",
+    "/%3F/../x/%2E%2E%2Fapi/v1/users/me/",
+    "/%23/../x/%2E%2E%2Fapi/v1/users/me/",
+    "/x%3F/%2E%2E%2F%2E%2E%2Fapi/v1",
+    "/%3F/../x/%2E%2E%2F%2E%2E%2Flogout",
+    "/spaces/%2E%2F"
   ])("never continues to a route that is not a page: %s", (value) =>
     expect(safeNextPath(value)).toBe(DEFAULT_LANDING)
   );
