@@ -119,6 +119,12 @@ _CHAT_ACCESS_REASON = "Chat access is checked against the selected assistant, gr
 
 logger = get_logger(__name__)
 
+_BUNDLED_CATALOG_ON_GET = (
+    "Resolving the file-creation provider stores the bundled runtime's live tool "
+    "catalog when the stored rows differ (once per catalog and process, audited as "
+    "the system). The catalog comes from the runtime, not from the request."
+)
+
 router = APIRouter()
 
 RECENT_CONVERSATIONS_DEFAULT_LIMIT = 20
@@ -958,6 +964,7 @@ async def call_tool_from_app_view(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+    effect_on_get=_BUNDLED_CATALOG_ON_GET,
 )
 async def get_document_export_availability(
     session_id: UUID,
