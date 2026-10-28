@@ -23,8 +23,9 @@ links to the page that has the details.
 
 - The Core Maintainers at Sundsvalls kommun decide what is merged and
   released. Everyone else contributes from a fork.
-- Every change passes CI, dependency and secret checks and the merge queue.
-  Changes to a release also need a second Core Maintainer's approval.
+- Every change into `develop` passes CI, dependency and secret checks and the
+  merge queue. Pull requests into a release branch or `main` need an approval
+  from a second Core Maintainer.
 - In a running deployment, every endpoint declares who may call it, data is
   kept within its tenant, and code written by the model runs in a separate,
   isolated tool runtime.

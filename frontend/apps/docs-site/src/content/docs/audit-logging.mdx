@@ -8,7 +8,7 @@ The audit log records who did what, and when, in each tenant. This page explains
 - Logging is switched on or off per tenant with the `audit_logging_enabled` feature flag, with category and action overrides. Changes apply to new events only.
 - Reading the log requires an access justification session (`POST /api/v1/audit/access-session`). A session lasts one hour, and a user can open at most five per hour.
 - Retention is set per tenant; the default is 365 days (range 1–2555), and a daily job deletes older entries.
-- Exports up to 50,000 records are synchronous (at most 100,000 with `max_records`); larger exports run as async jobs whose files are kept for 24 hours.
+- A synchronous export stops at 50,000 records (at most 100,000 with `max_records`) and marks a cut-off result with the `X-Records-Truncated` header. For more, request an async export; its files are kept for 24 hours.
 
 ## High-level architecture
 

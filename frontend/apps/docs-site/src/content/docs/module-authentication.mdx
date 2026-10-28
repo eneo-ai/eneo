@@ -13,13 +13,15 @@ import { Callout } from "nextra/components";
 
 - Eneo is the only OIDC client. A module gets the user through a one-time
   ticket that is valid for 30 seconds (`MODULE_AUTH_TICKET_TTL_SECONDS`).
-- Every call from a module backend sends two credentials: the module user
-  token and the bound `sk_` key. Eneo checks the live state on every call, so
+- Every resource request and token refresh from a module backend sends two
+  credentials: the module user token and the bound `sk_` key. The first
+  exchange sends the ticket and the key instead. Eneo checks the live state on every call, so
   disabling the user, tenant, key or module assignment takes effect on the
   next request.
-- A module token lasts 60 minutes (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`) and can
-  be refreshed for up to 8 hours (`MODULE_AUTH_MAX_SESSION_HOURS`). After that
-  the module starts a new handoff.
+- A module token lasts 60 minutes (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`). A
+  still-valid token can be refreshed for up to 8 hours
+  (`MODULE_AUTH_MAX_SESSION_HOURS`); an expired token cannot, and the module
+  starts a new handoff.
 - The module must check `state` against its own cookie and accept each value
   once, and its `redirect_uri` must match a registered URI exactly.
 - One module deployment serves one tenant. The operator mints a service-owned

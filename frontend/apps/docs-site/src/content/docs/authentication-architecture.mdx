@@ -8,7 +8,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
 - Sign-in uses the OAuth 2.0 Authorization Code Flow through `/api/v1/auth/initiate` and `/api/v1/auth/callback`. The `state` is a JWT that the server signs (HS256) and that expires after 600 seconds (`oidc_state_ttl_seconds`).
 - An Eneo session needs `token_version` `2`, and Eneo finds the account by both `user_id` and `tenant_id`. After this upgrade every user signs in again; update all API instances and workers together.
-- A password that an administrator sets is a one-time password. Password expiry (`max_age_days`) is off by default.
+- A password set for another account normally has to be replaced at the account's next password sign-in ([exceptions](#local-password-lifecycle)). Password expiry (`max_age_days`) is off by default.
 - No account is created at sign-in by default (`tenant.provisioning: false`). When it is on, the tenant needs a domain allowlist, the email domain must match and the identity provider must send `email_verified: true`.
 - `ENCRYPTION_KEY` is required when `FEDERATION_ENABLED=true`. Back it up: without it, every tenant's identity provider must be registered again.
 

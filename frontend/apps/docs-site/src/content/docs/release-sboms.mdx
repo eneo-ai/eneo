@@ -54,12 +54,12 @@ completed release bundle, it starts the release SBOM workflow:
 5. It scans those digest references, not only the mutable image tags.
 6. It installs frontend dependencies with Bun's frozen lockfile and generates a
    frontend source dependency SBOM.
-7. It uploads the generated files to the same GitHub Release page.
-8. It verifies the SeaweedFS image provenance and both platform SBOM
+7. It verifies the SeaweedFS image provenance and both platform SBOM
    attestations against the expected repository, the SeaweedFS image workflow,
    and the `develop` branch that publishes it, and checks that each platform
    image carries the version label the release names.
-9. It attests the release SBOM assets with GitHub artifact attestations.
+8. It attests the release SBOM assets with GitHub artifact attestations.
+9. It uploads the generated files to the same GitHub Release page.
 
 Each release keeps its own SBOM files. Older release pages keep their original
 assets, so you can compare one version with the next. The backend, frontend,

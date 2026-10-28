@@ -16,9 +16,10 @@ and what the operator must provide.
   the model providers or the internet.
 - The model never holds a download link: the backend swaps each file handle
   for a short-lived signed URL, and only for files in the same conversation.
-- Each job runs in its own child process. On Linux 5.13 or later, Landlock
-  confines a job to its own files; set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true`
-  to refuse to run without it.
+- Each job runs in its own child process. When Landlock is available and not
+  blocked (Linux 5.13 or later, permitted by seccomp), it confines a job to its
+  own files. Set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run
+  without it; otherwise the runtime runs unconfined on such hosts.
 - Outside the reference Compose stack, the operator provides the container
   layer: no egress, a read-only root filesystem, no capabilities and resource
   limits.
