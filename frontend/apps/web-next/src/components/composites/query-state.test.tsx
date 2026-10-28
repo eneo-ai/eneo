@@ -343,4 +343,53 @@ describe("LoadMore", () => {
     expect(fetchPage).toHaveBeenCalledWith("page-2");
     expect(screen.queryByText("Det gick inte att läsa in fler.")).toBeNull();
   });
+
+  it("does not call a refresh failure a failed next page while the next page loads", async () => {
+    let phase: "ok" | "refresh-fails" | "next-pending" = "ok";
+    const fetchPage = vi.fn(async (cursor: string | undefined) => {
+      if (!cursor) {
+        if (phase === "refresh-fails") throw new Error("refresh failed");
+        return { items: ["Anna"], total_count: 2, next_cursor: "page-2" };
+      }
+      return new Promise(() => {});
+    });
+    const { queryClient } = renderInApp(<Names fetchPage={fetchPage} />);
+    await screen.findByText("Anna");
+
+    phase = "refresh-fails";
+    await queryClient.refetchQueries({ queryKey: ["names"] });
+    expect(await screen.findByText(/kunde inte uppdateras/)).toBeTruthy();
+
+    phase = "next-pending";
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler" }));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("page-2"));
+    expect(screen.queryByText("Det gick inte att läsa in fler.")).toBeNull();
+    expect(screen.getByText(/kunde inte uppdateras/)).toBeTruthy();
+  });
+
+  it("keeps a failed next page's error and focused retry while a refresh runs", async () => {
+    let phase: "ok" | "next-fails" | "refresh-pending" = "ok";
+    const fetchPage = vi.fn(async (cursor: string | undefined) => {
+      if (!cursor) {
+        if (phase === "refresh-pending") return new Promise(() => {});
+        return { items: ["Anna"], total_count: 2, next_cursor: "page-2" };
+      }
+      throw new Error("boom");
+    });
+    const { queryClient } = renderInApp(<Names fetchPage={fetchPage} />);
+
+    phase = "next-fails";
+    fireEvent.click(await screen.findByRole("button", { name: "Visa fler" }));
+    await screen.findByText("Det gick inte att läsa in fler.");
+    const retry = screen.getByRole("button", { name: /^Försök igen/ });
+    retry.focus();
+
+    phase = "refresh-pending";
+    void queryClient.refetchQueries({ queryKey: ["names"] });
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(undefined));
+    expect(screen.getByText("Det gick inte att läsa in fler.")).toBeTruthy();
+    expect(screen.queryByText(/kunde inte uppdateras/)).toBeNull();
+    expect(retry.isConnected).toBe(true);
+    expect(document.activeElement).toBe(retry);
+  });
 });

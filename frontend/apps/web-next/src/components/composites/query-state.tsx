@@ -4,7 +4,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { EneoApiError, errorReferenceLines, getErrorMessage } from "@/lib/api/errors";
 import { LoadingState, type LoadingStateProps } from "./loading-state";
 
@@ -64,8 +64,18 @@ export type ListErrorProps = {
  * (`errorReferenceLines`: error id and trace id) behind the banner's details
  * toggle. Keep errors as `unknown` in state and render them here.
  *
+ * A failed read goes through `QueryStateBoundary`, or `blockingError` plus
+ * `RefreshError` where content cannot sit in a boundary: a plain `isError`
+ * check drops the retry button under focus and hides data on a failed
+ * refetch. Use ListError directly for a failed save or other mutation.
+ *
  * @example
- * {query.isError ? <ListError error={query.error} onRetry={() => void query.refetch()} /> : …}
+ * {saveError != null && <ListError error={saveError} title={t("skills_bindings_save_error")} />}
+ *
+ * @example
+ * {blockingError(query) ? (
+ *   <ListError error={query.error} isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
+ * ) : …}
  */
 export function ListError({
   error,
@@ -190,6 +200,34 @@ export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
   );
 }
 
+type FailureKind = "refresh" | "next-page" | null;
+
+/** Which failure a query with data on screen holds: its refresh or its next page. */
+function failureKind(query: Pick<QueryLike, "data" | "isError" | "isFetchNextPageError">) {
+  if (!query.isError || query.data === undefined) return null;
+  return query.isFetchNextPageError ? "next-page" : "refresh";
+}
+
+/**
+ * The failure each query last settled with. While a fetch runs, React Query
+ * describes that fetch (its direction), not the failure on screen: a failed
+ * refresh would read as a failed next page once "Visa fler" is pressed, and a
+ * failed next page as a failed refresh once a focus refetch starts. The kind
+ * is kept until the fetch ends.
+ */
+function useSettledFailures(
+  queries: readonly Pick<QueryLike, "data" | "isError" | "isFetching" | "isFetchNextPageError">[]
+): FailureKind[] {
+  const [settled, setSettled] = useState<FailureKind[]>(() => queries.map(failureKind));
+  const kinds = queries.map((query, index) =>
+    query.isFetching ? (settled[index] ?? null) : failureKind(query)
+  );
+  if (kinds.length !== settled.length || kinds.some((kind, index) => kind !== settled[index])) {
+    setSettled(kinds);
+  }
+  return kinds;
+}
+
 /**
  * The compact error above content that stays on screen when a refetch of it
  * failed (focus, invalidation, polling): "could not be refreshed, the last
@@ -200,9 +238,8 @@ export function QueryStateBoundary<T>(props: QueryStateBoundaryProps<T>) {
  */
 export function RefreshError({ queries }: { queries: readonly QueryLike[] }) {
   const t = useTranslations();
-  const failed = queries.filter(
-    (query) => query.isError && query.data !== undefined && !query.isFetchNextPageError
-  );
+  const kinds = useSettledFailures(queries);
+  const failed = queries.filter((_, index) => kinds[index] === "refresh");
   if (failed.length === 0) return null;
   return (
     <ListError
@@ -219,6 +256,9 @@ export function RefreshError({ queries }: { queries: readonly QueryLike[] }) {
 
 /** The part of a `useInfiniteQuery` result `LoadMore` reads. */
 export type InfiniteQueryLike = {
+  data: unknown;
+  isError: boolean;
+  isFetching: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   isFetchNextPageError: boolean;
@@ -246,7 +286,9 @@ export function LoadMore({
   onLoad?: () => void;
 }) {
   const t = useTranslations();
-  if (!query.hasNextPage && !query.isFetchNextPageError) return null;
+  const [failure] = useSettledFailures([query]);
+  const failed = failure === "next-page";
+  if (!query.hasNextPage && !failed) return null;
   const load = () => {
     if (query.isFetchingNextPage) return;
     if (onLoad) onLoad();
@@ -255,7 +297,7 @@ export function LoadMore({
 
   return (
     <div className="flex flex-col items-center gap-2">
-      {query.isFetchNextPageError ? (
+      {failed ? (
         <ListError
           error={query.error}
           title={t("query_error_load_more_title")}
