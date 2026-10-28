@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/api/base";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 
@@ -20,5 +21,5 @@ export async function signedOriginalUrl(api: EneoClient, fileId: string): Promis
   ) {
     throw new Error("Unexpected signed file URL");
   }
-  return `/api/eneo${parsed.pathname}${parsed.search}`;
+  return `${API_BASE}${parsed.pathname}${parsed.search}`;
 }

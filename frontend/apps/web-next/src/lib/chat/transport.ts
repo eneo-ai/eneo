@@ -1,4 +1,5 @@
 import { DefaultChatTransport, type UIMessageChunk } from "ai";
+import { CHAT_API, onRawRefusal } from "@/lib/api/base";
 import { apiErrorFromResponse } from "@/lib/api/errors";
 import type { ConversationBody, EneoDataParts, EneoUIMessage } from "./types";
 
@@ -61,6 +62,7 @@ export function enforceStreamContract(): TransformStream<UIMessageChunk, UIMessa
 async function fetchOrThrow(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
   if (response.ok) return response;
+  await onRawRefusal(response.clone(), input instanceof Request ? input.url : String(input));
   let body: unknown;
   try {
     body = await response.json();
@@ -85,7 +87,7 @@ class EneoChatTransport extends DefaultChatTransport<EneoUIMessage> {
  */
 export function createChatTransport() {
   return new EneoChatTransport({
-    api: "/api/chat",
+    api: CHAT_API,
     fetch: fetchOrThrow,
     prepareSendMessagesRequest: ({ messages, body }) => {
       const lastMessage = messages[messages.length - 1];
