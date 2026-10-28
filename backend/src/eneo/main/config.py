@@ -37,6 +37,11 @@ URL_SIGNING_KEY_MINIMUM_BYTES = 32
 # would stay replayable for as long. 1440 (24 hours) is the recommended value.
 JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
+# The hosts that name this machine, as urlsplit reports them (lowercase, IPv6
+# without brackets). A request to them stays on the machine, and a page served
+# from them runs on the user's own machine.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
 
 def _same_origin(first: str, second: str) -> bool:
     """Whether two URLs share scheme, host and port (default ports included)."""

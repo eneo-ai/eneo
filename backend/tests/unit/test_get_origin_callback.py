@@ -4,12 +4,15 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from starlette.datastructures import Headers
 
 from eneo.allowed_origins import get_origin_callback as callback_module
 from eneo.authentication.auth_models import ApiKeyPolicyResponse
+from eneo.main.config import get_settings, set_settings
 from eneo.main.exceptions import ErrorCodes
+from eneo.server.main import get_application
 from eneo.server.middleware import cors as cors_module
 from eneo.server.middleware.cors import CORSMiddleware
 
@@ -42,6 +45,7 @@ def _settings():
         jwt_secret="test-jwt-secret",
         dev=False,
         testing=True,
+        is_development=False,
     )
 
 
@@ -207,6 +211,191 @@ async def test_same_host_origin_is_allowed_behind_tls_proxy(
 
     assert response.status_code == expected_status
     assert reached_paths == (["/api/v1/flows/"] if expected_status == 204 else [])
+
+
+def _environment(monkeypatch, environment):
+    """The real settings in ``environment``: the owner decides what is development."""
+    settings = get_settings().model_copy(update={"environment": environment})
+    monkeypatch.setattr(callback_module, "get_settings", lambda: settings)
+
+
+# Each loopback host with and without a port, over http and https, in the
+# case a browser sends and in the case a hand-written client might.
+_LOOPBACK_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost",
+    "https://localhost:8443",
+    "http://LocalHost:5173",
+    "HTTP://LOCALHOST",
+    "http://127.0.0.1",
+    "http://127.0.0.1:8123",
+    "http://[::1]:3000",
+    "http://[::1]",
+    "https://[::1]:8443",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("origin", _LOOPBACK_ORIGINS)
+@pytest.mark.parametrize(
+    ("environment", "allowed"),
+    [
+        ("production", False),
+        ("staging", False),
+        ("test", False),
+        ("development", True),
+        ("Development", True),
+        ("local", True),
+    ],
+)
+async def test_loopback_origin_passes_only_in_development(
+    monkeypatch, origin, environment, allowed
+):
+    """A page served from the user's own machine gets no credentialed CORS
+    outside development unless the allowlist names it."""
+    _install_common_fakes(monkeypatch)
+    _environment(monkeypatch, environment)
+    preflight = Headers({"Access-Control-Request-Method": "POST"})
+
+    assert await callback_module.get_origin(origin, Headers()) is allowed
+    assert (
+        await callback_module.get_origin(origin, preflight, is_preflight=True)
+        is allowed
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost.evil.example",
+        "http://127.0.0.1.evil.example",
+        "http://evil-localhost",
+        "http://[::ffff:127.0.0.1]",
+        "http://0.0.0.0:5173",
+        "null",
+    ],
+)
+async def test_development_trusts_only_the_exact_loopback_hosts(monkeypatch, origin):
+    _install_common_fakes(monkeypatch)
+    _environment(monkeypatch, "development")
+
+    assert not await callback_module.get_origin(origin, Headers())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("origin", "pattern", "allowed"),
+    [
+        ("http://localhost:5173", "http://localhost:*", True),
+        ("http://localhost", "http://localhost:*", True),
+        ("http://[::1]:3000", "http://[::1]:*", True),
+        ("http://127.0.0.1", "http://127.0.0.1:*", True),
+        # One loopback name does not stand in for another, nor http for https.
+        ("http://127.0.0.1:5173", "http://localhost:*", False),
+        ("http://[::1]:5173", "http://localhost:*", False),
+        ("https://localhost:5173", "http://localhost:*", False),
+    ],
+)
+async def test_production_accepts_the_loopback_origins_the_allowlist_names(
+    monkeypatch, origin, pattern, allowed
+):
+    _install_common_fakes(monkeypatch, tenant_origins=(pattern,))
+    _environment(monkeypatch, "production")
+
+    assert await callback_module.get_origin(origin, Headers()) is allowed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("environment", "base_url", "origin", "expected_status"),
+    [
+        # The host's own page is same-origin in every environment, also over
+        # the https retry for a TLS-terminating proxy.
+        ("production", "http://localhost:8123", "http://localhost:8123", 204),
+        ("production", "http://localhost:8123", "https://localhost:8123", 204),
+        ("production", "http://127.0.0.1:8123", "https://127.0.0.1:8123", 204),
+        ("production", "http://[::1]:8123", "https://[::1]:8123", 204),
+        # Another loopback port is another origin; only development admits it.
+        ("production", "http://localhost:8123", "http://localhost:5173", 400),
+        ("production", "http://localhost:8123", "https://localhost:5173", 400),
+        ("production", "http://localhost:8123", "https://127.0.0.1:8123", 400),
+        ("development", "http://localhost:8123", "http://localhost:5173", 204),
+        # The https retry never turns a loopback page into the proxied host.
+        ("production", "http://eneo.example.se", "https://localhost", 400),
+        ("production", "http://eneo.example.se", "https://127.0.0.1", 400),
+        ("production", "http://eneo.example.se", "https://[::1]", 400),
+        # An http page on an https request is not same-origin.
+        ("production", "https://localhost:8123", "http://localhost:8123", 400),
+        ("development", "https://localhost:8123", "http://localhost:8123", 204),
+    ],
+)
+async def test_loopback_origin_through_the_tls_proxy_retry(
+    monkeypatch, environment, base_url, origin, expected_status
+):
+    _install_common_fakes(monkeypatch)
+    _environment(monkeypatch, environment)
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    cors = CORSMiddleware(app, callback=callback_module.get_origin)
+    async with AsyncClient(
+        transport=ASGITransport(app=cors), base_url=base_url
+    ) as client:
+        response = await client.post(
+            "/api/v1/flows/",
+            headers={"Origin": origin, "X-Forwarded-Proto": "https"},
+        )
+
+    assert response.status_code == expected_status
+
+
+@pytest.fixture
+def app_in():
+    """The real application, with its CORS settings, in one environment."""
+    original = get_settings()
+
+    def build(environment: str) -> TestClient:
+        set_settings(original.model_copy(update={"environment": environment}))
+        return TestClient(get_application())
+
+    yield build
+    set_settings(original)
+
+
+@pytest.mark.parametrize(
+    ("environment", "accepted"), [("production", False), ("development", True)]
+)
+def test_credentialed_cors_headers_only_for_an_accepted_loopback_origin(
+    monkeypatch, app_in, environment, accepted
+):
+    _install_common_fakes(monkeypatch)
+    client = app_in(environment)
+    origin = "http://localhost:5173"
+
+    preflight = client.options(
+        "/api/v1/users/me/",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    actual = client.get("/api/livez", headers={"Origin": origin})
+
+    if accepted:
+        assert (preflight.status_code, actual.status_code) == (200, 200)
+        for response in (preflight, actual):
+            assert response.headers["access-control-allow-origin"] == origin
+            assert response.headers["access-control-allow-credentials"] == "true"
+    else:
+        assert (preflight.status_code, actual.status_code) == (400, 400)
+        assert actual.json()["code"] == "disallowed_cors_origin"
+        for response in (preflight, actual):
+            assert "access-control-allow-origin" not in response.headers
+        assert "access-control-allow-credentials" not in actual.headers
 
 
 @pytest.mark.asyncio

@@ -237,12 +237,16 @@ async def test_pk_origin_guardrail(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
-    client, default_user_token
+    client, db_container, default_user, default_user_token
 ):
     """A pk_ key whose allowed_origins doesn't include localhost rejects localhost requests.
 
     Localhost is no longer magic — it must be explicitly listed on the key.
     """
+    # Let CORS pass so this test exercises the key's origin allowlist.
+    await _add_allowed_origin(
+        db_container, default_user.tenant_id, "http://localhost:3000"
+    )
     allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
 
     create_response = await client.post(
@@ -273,9 +277,13 @@ async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_pk_localhost_origin_allowed_when_listed_on_key(
-    client, default_user_token
+    client, db_container, default_user, default_user_token
 ):
     """Localhost works iff the key creator put it on the per-key allowed_origins list."""
+    # Let CORS pass so this test exercises the key's origin allowlist.
+    await _add_allowed_origin(
+        db_container, default_user.tenant_id, "http://localhost:3000"
+    )
     create_response = await client.post(
         "/api/v1/api-keys",
         json={
@@ -1444,7 +1452,11 @@ async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_guardrail_allows_ipv6_localhost_origin(client, default_user_token):
+async def test_pk_guardrail_allows_ipv6_localhost_origin(
+    client, db_container, default_user, default_user_token
+):
+    # Let CORS pass so this test exercises the key's origin allowlist.
+    await _add_allowed_origin(db_container, default_user.tenant_id, "http://[::1]:5173")
     create_response = await client.post(
         "/api/v1/api-keys",
         json={
