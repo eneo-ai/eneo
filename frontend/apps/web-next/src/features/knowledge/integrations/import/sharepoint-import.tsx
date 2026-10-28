@@ -5,8 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -265,9 +268,7 @@ export function SharePointImportDialog({
             ? document.getElementById("sharepoint-wrapper-name")
             : null;
     if (noModels || siteProblem || itemsProblem || wrapperNameProblem) {
-      // Rendered before focus moves, so the target is read with its problem.
-      flushSync(() => setSubmitted(true));
-      target?.focus();
+      revealProblems(() => setSubmitted(true), target);
       return;
     }
     importBatch.mutate();

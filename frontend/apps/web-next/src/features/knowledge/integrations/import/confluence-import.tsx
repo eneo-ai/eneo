@@ -5,8 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -104,13 +107,13 @@ export function ConfluenceImportDialog({
   function submit() {
     if (importSpace.isPending) return;
     if (noModels || !selected) {
-      // Rendered before focus moves, so the target is read with its problem.
-      flushSync(() => setSubmitted(true));
-      const target = noModels
-        ? document.getElementById("confluence-no-models")
-        : (document.querySelector<HTMLElement>("#confluence-spaces button") ??
-          document.getElementById("confluence-space-search"));
-      target?.focus();
+      revealProblems(
+        () => setSubmitted(true),
+        noModels
+          ? "confluence-no-models"
+          : (document.querySelector<HTMLElement>("#confluence-spaces button") ??
+              "confluence-space-search")
+      );
       return;
     }
     importSpace.mutate();
