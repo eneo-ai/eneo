@@ -131,3 +131,58 @@ it("checks the quota against a fresh answer each time it opens", async () => {
 
   await waitFor(() => expect(full()).toBeNull());
 });
+
+it("starts each opening with an empty file list, however it was closed", () => {
+  api.GET.mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
+  const dialog = (open: boolean) => (
+    <UploadBlobsDialog
+      collectionId="collection-1"
+      collectionName="Protokoll"
+      open={open}
+      onOpenChange={() => {}}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true), { appContext });
+  fireEvent.change(screen.getByLabelText("Dra och släpp filer eller mappar här"), {
+    target: { files: [pdf("protokoll.pdf", 10)] }
+  });
+  expect(screen.getByText("protokoll.pdf")).toBeTruthy();
+
+  // Closed by its owner (not Cancel or Escape), then opened again.
+  rerender(dialog(false));
+  rerender(dialog(true));
+
+  expect(screen.queryByText("protokoll.pdf")).toBeNull();
+});
+
+it("asks before replacing files the collection already has, then queues them and closes", async () => {
+  api.GET.mockImplementation(async (path: string) => ({
+    data:
+      path === "/api/v1/users/me/"
+        ? appContext.user
+        : { items: [{ metadata: { title: "protokoll.pdf" } }] },
+    response: new Response("{}")
+  }));
+  const onOpenChange = vi.fn();
+  renderInApp(
+    <UploadBlobsDialog
+      collectionId="collection-1"
+      collectionName="Protokoll"
+      open
+      onOpenChange={onOpenChange}
+    />,
+    { appContext }
+  );
+  const protocol = pdf("protokoll.pdf", 10);
+  fireEvent.change(screen.getByLabelText("Dra och släpp filer eller mappar här"), {
+    target: { files: [protocol] }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Ladda upp filer" }));
+
+  const replace = await screen.findByRole("button", { name: "Ersätt filer" });
+  expect(queueUploads).not.toHaveBeenCalled();
+  fireEvent.click(replace);
+
+  expect(queueUploads).toHaveBeenCalledWith("collection-1", [protocol]);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});

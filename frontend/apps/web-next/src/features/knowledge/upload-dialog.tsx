@@ -80,18 +80,79 @@ export function UploadBlobsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const { queueUploads } = useJobs();
+  // Files whose titles the collection already has, waiting for "replace".
+  const [replacing, setReplacing] = useState<{ files: File[]; names: string[] } | null>(null);
+
+  function queue(files: File[]) {
+    queueUploads(collectionId, files);
+    setReplacing(null);
+    onOpenChange(false);
+  }
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("upload_files")}</DialogTitle>
+            <DialogDescription>
+              {t("upload_files_to_collection_description", { name: collectionName })}
+            </DialogDescription>
+          </DialogHeader>
+          <UploadBlobsForm
+            collectionId={collectionId}
+            onCancel={() => onOpenChange(false)}
+            onUpload={(files, duplicateNames) => {
+              if (duplicateNames.length > 0) setReplacing({ files, names: duplicateNames });
+              else queue(files);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialogControlled
+        open={replacing !== null}
+        onOpenChange={(next) => {
+          if (!next) setReplacing(null);
+        }}
+        title={t("duplicate_files_dialog_title")}
+        description={`${t("duplicate_files_dialog_description")} ${replacing?.names.join(", ") ?? ""}`}
+        confirmLabel={t("replace_files")}
+        variant="default"
+        onConfirm={() => {
+          if (replacing) queue(replacing.files);
+        }}
+      />
+    </>
+  );
+}
+
+/**
+ * The dialog's draft: the picked files and their problems. DialogContent
+ * mounts it afresh on each opening, so a closed dialog's files never return.
+ * Upload hands the files, with the titles the collection already has, to the
+ * dialog, which owns the queueing.
+ */
+function UploadBlobsForm({
+  collectionId,
+  onCancel,
+  onUpload
+}: {
+  collectionId: string;
+  onCancel: () => void;
+  onUpload: (files: File[], duplicateNames: string[]) => void;
+}) {
+  const t = useTranslations();
   const locale = useLocale();
   const { limits, user, tenant, can } = useAppContext();
-  const { queueUploads } = useJobs();
   const queryClient = useQueryClient();
   // The collection's files, for the duplicate-title warning (cached on its
   // page); loaded when the dialog opens, so Upload rarely waits for them.
-  useQuery({ ...collectionBlobsQueryOptions(browserApi, collectionId), enabled: open });
+  useQuery(collectionBlobsQueryOptions(browserApi, collectionId));
   const [checking, setChecking] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
-  const [duplicateFileNames, setDuplicateFileNames] = useState<string[]>([]);
   const { dragging, handlers } = useFileDrop(addSelectedFiles);
 
   const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
@@ -102,13 +163,13 @@ export function UploadBlobsDialog({
   const { data: storage } = useQuery({
     queryKey: ["storage", tenant.id],
     queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
-    enabled: open && can("admin")
+    enabled: can("admin")
   });
   // The quota needs a fresh answer: the backend computes it live, and deleted
   // files or uploads in another tab move it without touching this tab's cache.
   // Each opening refetches the session's user (the one ["users", "me"]
   // entry, which the app context shows too).
-  const { data: me = user } = useQuery({ ...session.me, staleTime: 0, enabled: open });
+  const { data: me = user } = useQuery({ ...session.me, staleTime: 0 });
   const quotaLimit = me.quota_limit;
   const quotaUsed = me.quota_used;
 
@@ -165,25 +226,10 @@ export function UploadBlobsDialog({
       .catch(() => []);
     setChecking(false);
     const existingTitles = new Set(currentBlobs.map((blob) => blob.metadata.title));
-    const duplicates = files.filter((file) => existingTitles.has(file.name));
-    if (duplicates.length > 0) {
-      setDuplicateFileNames(duplicates.map((file) => file.name));
-      return;
-    }
-    queueSelectedFiles();
-  }
-
-  function reset() {
-    setFiles([]);
-    setSkippedFiles([]);
-    setDuplicateFileNames([]);
-    setSubmitted(false);
-  }
-
-  function queueSelectedFiles() {
-    queueUploads(collectionId, files);
-    reset();
-    onOpenChange(false);
+    onUpload(
+      files,
+      files.filter((file) => existingTitles.has(file.name)).map((file) => file.name)
+    );
   }
 
   function addSelectedFiles(selected: File[]) {
@@ -208,128 +254,95 @@ export function UploadBlobsDialog({
 
   return (
     <>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          onOpenChange(next);
-          if (!next) reset();
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("upload_files")}</DialogTitle>
-            <DialogDescription>
-              {t("upload_files_to_collection_description", { name: collectionName })}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div
-              className={cn(
-                "rounded-lg border-2 border-dashed p-4",
-                dragging && "border-primary bg-primary/5"
-              )}
-              {...handlers}
-            >
-              <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
-                {t("upload_dropzone_prompt")}
-              </Label>
-              <Input
-                id={FILES_ID}
-                type="file"
-                multiple
-                accept={acceptedMimeTypes.join(",")}
-                onChange={(event) => {
-                  addSelectedFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }}
-                {...fieldProblemProps(
-                  FILES_ID,
-                  noFilesProblem,
-                  errors.length > 0 ? FILE_ERRORS_ID : undefined
-                )}
-                // Files it cannot take make the choice invalid as soon as they are added.
-                aria-invalid={noFilesProblem !== null || errors.length > 0 || undefined}
-              />
-              <FieldProblem id={FILES_ID} problem={noFilesProblem} />
-            </div>
-            <FileFormatDetails
-              formats={limits.info_blobs.formats.map((format) => ({
-                mimetype: format.mimetype,
-                extensions: format.extensions,
-                maxSize: format.size
-              }))}
-            />
-            {skippedFiles.length > 0 && (
-              <p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
-                {t("upload_skipped_unsupported_files", { fileList: skippedFiles.join(", ") })}
-              </p>
+      <div className="flex flex-col gap-3">
+        <div
+          className={cn(
+            "rounded-lg border-2 border-dashed p-4",
+            dragging && "border-primary bg-primary/5"
+          )}
+          {...handlers}
+        >
+          <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
+            {t("upload_dropzone_prompt")}
+          </Label>
+          <Input
+            id={FILES_ID}
+            type="file"
+            multiple
+            accept={acceptedMimeTypes.join(",")}
+            onChange={(event) => {
+              addSelectedFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+            {...fieldProblemProps(
+              FILES_ID,
+              noFilesProblem,
+              errors.length > 0 ? FILE_ERRORS_ID : undefined
             )}
-            {files.length > 0 && (
-              <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
-                {files.map((file, index) => (
-                  <li
-                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                    className="flex justify-between gap-4 truncate py-0.5"
-                  >
-                    <span className="truncate">{file.name}</span>
-                    <span className="text-muted-foreground shrink-0">
-                      {formatBytes(file.size, locale)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {errors.length > 0 && (
-              <div
-                id={FILE_ERRORS_ID}
-                className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+            // Files it cannot take make the choice invalid as soon as they are added.
+            aria-invalid={noFilesProblem !== null || errors.length > 0 || undefined}
+          />
+          <FieldProblem id={FILES_ID} problem={noFilesProblem} />
+        </div>
+        <FileFormatDetails
+          formats={limits.info_blobs.formats.map((format) => ({
+            mimetype: format.mimetype,
+            extensions: format.extensions,
+            maxSize: format.size
+          }))}
+        />
+        {skippedFiles.length > 0 && (
+          <p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
+            {t("upload_skipped_unsupported_files", { fileList: skippedFiles.join(", ") })}
+          </p>
+        )}
+        {files.length > 0 && (
+          <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
+            {files.map((file, index) => (
+              <li
+                key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                className="flex justify-between gap-4 truncate py-0.5"
               >
-                {errors.map((error, index) => (
-                  <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
-                ))}
-              </div>
-            )}
+                <span className="truncate">{file.name}</span>
+                <span className="text-muted-foreground shrink-0">
+                  {formatBytes(file.size, locale)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {errors.length > 0 && (
+          <div
+            id={FILE_ERRORS_ID}
+            className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+          >
+            {errors.map((error, index) => (
+              <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
+            ))}
           </div>
-          <DialogFooter>
-            {files.length > 0 && (
-              <Button
-                variant="ghost"
-                className="mr-auto"
-                onClick={() => {
-                  setFiles([]);
-                  setSkippedFiles([]);
-                }}
-              >
-                {t("clear_list")}
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => {
-                onOpenChange(false);
-                reset();
-              }}
-            >
-              {t("cancel")}
-            </Button>
-            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-            <Button aria-busy={checking || undefined} onClick={() => void startUpload()}>
-              {t("upload_files")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <ConfirmDialogControlled
-        open={duplicateFileNames.length > 0}
-        onOpenChange={(next) => {
-          if (!next) setDuplicateFileNames([]);
-        }}
-        title={t("duplicate_files_dialog_title")}
-        description={`${t("duplicate_files_dialog_description")} ${duplicateFileNames.join(", ")}`}
-        confirmLabel={t("replace_files")}
-        variant="default"
-        onConfirm={queueSelectedFiles}
-      />
+        )}
+      </div>
+      <DialogFooter>
+        {files.length > 0 && (
+          <Button
+            variant="ghost"
+            className="mr-auto"
+            onClick={() => {
+              setFiles([]);
+              setSkippedFiles([]);
+            }}
+          >
+            {t("clear_list")}
+          </Button>
+        )}
+        <Button variant="outline" onClick={onCancel}>
+          {t("cancel")}
+        </Button>
+        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+        <Button aria-busy={checking || undefined} onClick={() => void startUpload()}>
+          {t("upload_files")}
+        </Button>
+      </DialogFooter>
     </>
   );
 }
