@@ -4,9 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -244,9 +247,7 @@ function TemplateWizard({
                 variant="outline"
                 className="w-fit"
                 aria-busy={uploading || undefined}
-                onClick={() => {
-                  if (!uploading) fileInputRef.current?.click();
-                }}
+                onClick={() => fileInputRef.current?.click()}
               >
                 {!uploading && <Paperclip className="size-4" />}
                 {t("upload_files")}
@@ -350,12 +351,11 @@ export function TemplateGalleryDialog({
 
   // What is missing (a template, its name) shows on submit, and focus moves there.
   async function submit() {
-    if (pending) return;
     if (!selected || !name.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      if (!selected) templatesRef.current?.querySelector("button")?.focus();
-      else nameRef.current?.focus();
+      revealProblems(
+        () => setSubmitted(true),
+        selected ? nameRef.current : templatesRef.current?.querySelector("button")
+      );
       return;
     }
 

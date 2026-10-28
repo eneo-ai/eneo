@@ -3,11 +3,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import {
   Dialog,
   DialogContent,
@@ -213,9 +216,7 @@ function UploadBlobsForm({
   async function startUpload() {
     if (checking) return;
     if (files.length === 0 || errors.length > 0) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(FILES_ID)?.focus();
+      revealProblems(() => setSubmitted(true), FILES_ID);
       return;
     }
 

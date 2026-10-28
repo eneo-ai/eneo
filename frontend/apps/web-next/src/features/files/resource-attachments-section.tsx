@@ -528,9 +528,7 @@ export function ResourceAttachmentsSection({
               // Uploading, it stays enabled so it keeps focus (the busy
               // spinner replaces its icon); a press meanwhile is ignored.
               aria-busy={uploading || undefined}
-              onClick={() => {
-                if (!uploading) fileInput.current?.click();
-              }}
+              onClick={() => fileInput.current?.click()}
             >
               {!uploading && <Paperclip className="size-4" />}
               {t("attach_files")}
