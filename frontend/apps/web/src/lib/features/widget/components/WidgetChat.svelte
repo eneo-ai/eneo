@@ -404,17 +404,9 @@
     ]}
   >
     <div class="flex min-w-0 items-center gap-3">
-      <!-- The header is the organisation's: its logo when it has set one,
-           otherwise only the title, never Eneo's own mark. -->
-      {#if config.theme.logo_url && isHttpUrl(config.theme.logo_url)}
-        <img
-          class="h-8 w-8 shrink-0 rounded-md object-contain"
-          src={config.theme.logo_url}
-          alt=""
-          width="32"
-          height="32"
-        />
-      {/if}
+      <!-- The header is the organisation's: its title and disclosure, never
+           Eneo's own mark. Who answers is the persona's business, inside the
+           conversation. -->
       <div class="min-w-0">
         <h1 bind:this={title} tabindex="-1" class="text-base font-semibold break-words">
           {config.texts.title || config.name}

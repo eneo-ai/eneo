@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@c67b1c209f2a
+translationSource: guides/embed-widget.mdx@436e4edcb74f
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -101,7 +101,7 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
      (högst 30 tecken, börjar med en bokstav) och gärna en avatar: en
      kvadratisk illustration eller symbol som laddas upp som en
      assistentikon, eller kopieras från assistentens ikon. Headern behåller
-     er logotyp och titel; välkomsttexten blir personans första meddelande,
+     er titel; välkomsttexten blir personans första meddelande,
      under samma lilla avsändarrad (avatar, namn och ett **AI**-märke) som
      varje svar får, och den ligger kvar överst i samtalet. Märket är ingen
      inställning: en persona får vara vänlig, men besökaren får alltid veta
@@ -115,7 +115,8 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
    - **Utseende**: koppla gärna widgeten till en av organisationens mallar; de
      delar mallen låser är då skrivskyddade här tills du kopplar loss den. Här
      väljer du också primärfärg (en kontrastkontroll visar om den blir för
-     ljus), valfri rubrikfärg och logotyp, färgschema, placering och hörnradie.
+     ljus), valfri rubrikfärg, färgschema, placering och hörnradie. Headern
+     visar er titel; Eneos eget märke visas aldrig där.
      Textfärg väljs automatiskt för kontrast. **Mörkt läge** kan ha egna primär-
      och rubrikfärger, som kontrolleras mot den mörka panelen; tomma värden
      återanvänder färgerna för ljust läge. Chattknappen på webbplatsen får
@@ -357,8 +358,8 @@ behöver åtgärdas.
 
 ### Mallar [#templates]
 
-Mallar innehåller organisationens husstil: texter, färger, logotyp, form,
-språk och persona (namn, avatar och om avataren är chattknappen). Administratörer skapar dem under **Admin → Webbwidgetar →
+Mallar innehåller organisationens husstil: texter, färger, form, språk och
+persona (namn, avatar och om avataren är chattknappen). Administratörer skapar dem under **Admin → Webbwidgetar →
 Widgetmallar** och förhandsvisar dem i ljust och mörkt läge. Högst en mall kan
 vara standard och vara förvald för redaktörer; stängs det av är ingen mall
 förvald.
@@ -419,8 +420,8 @@ att ladda om när mallen har ändrat deras widget.
   visar meddelandet om att den inte är tillgänglig vid nästa anrop, och inga
   utmaningar eller besökartoken lämnas ut.
 - **Svar kan inte föra data vidare.** Chattsidans Content Security Policy
-  tillåter bara bilder från Eneo (personans avatar) och logotypens adress samt
-  anslutningar till Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
+  tillåter bara bilder från Eneo (personans avatar) och anslutningar till
+  Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
   fråga vidare till tredje part.
 - **Besökartoken** är JWT:er knutna till en widget och en pseudonym
   besökaridentitet. De gäller i 15 minuter och förnyas automatiskt. De

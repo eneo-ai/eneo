@@ -191,7 +191,7 @@ describe("the widget's pages", () => {
     public_id: ID,
     name: "Kaffe",
     texts: { title: "Kaffe", subtitle: "", welcome: "", suggested_questions: [] },
-    theme: { color_scheme: "auto", logo_url: "https://cdn.example.org/logo.png" },
+    theme: { color_scheme: "auto" },
     language: "en",
     frame_ancestors: ["https://www.sundsvall.se"]
   };
@@ -208,7 +208,7 @@ describe("the widget's pages", () => {
     expect(directive(csp, "frame-ancestors")).toBe(
       "frame-ancestors 'self' https://www.sundsvall.se"
     );
-    expect(directive(csp, "img-src")).toBe("img-src 'self' blob: data: https://cdn.example.org");
+    expect(directive(csp, "img-src")).toBe("img-src 'self' blob: data:");
     expect(directive(csp, "connect-src")).toBe("connect-src 'self'");
     expect(directive(csp, "worker-src")).toBe("worker-src 'self' blob:");
     expect(directive(csp, "frame-src")).toBe("frame-src 'none'");

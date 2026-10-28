@@ -1,5 +1,5 @@
 <!--
-  A static rendering of how a template's colours, logo and texts come
+  A static rendering of how a template's colours and texts come
   together: launcher, header, welcome, a sample bubble and the composer.
   Templates have no widget behind them, so there is nothing live to frame;
   the real embed page is previewed on the widget page after the template has
@@ -106,15 +106,6 @@
         style:background={header}
         style:color={header ? readableOn(header) : null}
       >
-        {#if theme.logo_url}
-          <img
-            class="h-8 w-8 shrink-0 rounded-md object-contain"
-            src={theme.logo_url}
-            alt=""
-            width="32"
-            height="32"
-          />
-        {/if}
         <div class="min-w-0">
           <p class="truncate text-base font-semibold">{texts.title || name}</p>
           <p class={["text-xs", header ? "opacity-85" : "text-secondary"]}>

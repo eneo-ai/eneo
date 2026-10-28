@@ -2,19 +2,15 @@
 
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Image as ImageIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Switch } from "@/components/astryx/switch";
-import { TextInput } from "@/components/astryx/text-input";
-import { DraftWrapper } from "./use-text-draft";
 import type { Schema } from "@/lib/api/models";
-import { isHttpUrl } from "../urls";
 import { ColorField } from "./color-field";
 
 type WidgetTheme = Schema<"WidgetTheme">;
 
-/** Appearance: colours, logo, shape and placement of the launcher. */
+/** Appearance: colours, shape and placement of the launcher. */
 export function WidgetThemeFields({
   theme,
   onChange,
@@ -30,35 +26,6 @@ export function WidgetThemeFields({
   const t = useTranslations();
   const disabledMessage = locked ? lockHint : undefined;
 
-  // The logo address is committed when the field is left, never per keystroke.
-  const savedLogo = theme.logo_url ?? "";
-  const [logoDraft, setLogoDraft] = useState(savedLogo);
-  const [logoInvalid, setLogoInvalid] = useState(false);
-  const [logoBroken, setLogoBroken] = useState(false);
-  // Follow a new saved value (template applied, other tab) without ever
-  // touching what is being typed. Adjusted during render.
-  const [seenLogo, setSeenLogo] = useState(savedLogo);
-  if (savedLogo !== seenLogo) {
-    setSeenLogo(savedLogo);
-    setLogoDraft(savedLogo);
-    setLogoInvalid(false);
-    setLogoBroken(false);
-  }
-  function commitLogo() {
-    const trimmed = logoDraft.trim();
-    if (trimmed === "") {
-      setLogoInvalid(false);
-      if (theme.logo_url) onChange({ logo_url: null });
-      return;
-    }
-    const bad = !isHttpUrl(trimmed);
-    setLogoInvalid(bad);
-    if (!bad && trimmed !== theme.logo_url) {
-      setLogoBroken(false);
-      onChange({ logo_url: trimmed });
-    }
-  }
-
   // Dark mode shows its own colour fields once switched on; switching off
   // clears them so dark mode falls back to the light-mode colours.
   const hasDarkColors = !!(theme.primary_color_dark || theme.header_color_dark);
@@ -68,12 +35,6 @@ export function WidgetThemeFields({
     setCustomDark(checked);
     if (!checked && hasDarkColors) onChange({ primary_color_dark: null, header_color_dark: null });
   }
-
-  const logoMessage = logoInvalid
-    ? t("widget_admin_url_invalid")
-    : logoBroken
-      ? t("widget_admin_logo_broken")
-      : undefined;
 
   return (
     <div className="flex flex-col gap-6">
@@ -135,46 +96,6 @@ export function WidgetThemeFields({
             />
           </div>
         )}
-      </div>
-
-      <div className="flex items-end gap-3">
-        <span
-          className="border-ax-border bg-ax-surface mb-1 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border"
-          aria-hidden="true"
-        >
-          {theme.logo_url && !logoBroken ? (
-            // The organisation's own logo at the address it gave.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className="size-8 object-contain"
-              src={theme.logo_url}
-              alt=""
-              width={32}
-              height={32}
-              onError={() => setLogoBroken(true)}
-              onLoad={() => setLogoBroken(false)}
-            />
-          ) : (
-            <ImageIcon className="text-ax-text-tertiary size-5" aria-hidden="true" />
-          )}
-        </span>
-        <DraftWrapper className="min-w-0 flex-1" onFocus={() => {}} onBlur={commitLogo}>
-          <TextInput
-            label={t("widget_admin_logo_url")}
-            description={
-              theme.logo_url
-                ? t("widget_admin_logo_url_description")
-                : t("widget_admin_logo_url_default")
-            }
-            value={logoDraft}
-            onChange={(next) => setLogoDraft(next.slice(0, 500))}
-            onEnter={commitLogo}
-            isDisabled={locked}
-            disabledMessage={disabledMessage}
-            status={logoMessage ? { type: "error", message: logoMessage } : undefined}
-            width="100%"
-          />
-        </DraftWrapper>
       </div>
 
       <hr className="border-ax-border" />

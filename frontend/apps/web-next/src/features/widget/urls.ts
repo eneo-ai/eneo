@@ -1,4 +1,4 @@
-/** What the backend accepts for logo and privacy links: an absolute http(s) URL. */
+/** What the backend accepts for the footer link: an absolute http(s) URL. */
 export function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());

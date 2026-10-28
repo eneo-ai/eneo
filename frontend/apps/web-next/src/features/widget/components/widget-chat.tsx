@@ -472,9 +472,6 @@ export function WidgetChat({
     }
   }
 
-  const logo =
-    config.theme.logo_url && isHttpUrl(config.theme.logo_url) ? config.theme.logo_url : null;
-
   return (
     <div
       className="widget-chat bg-ax-surface text-ax-text flex h-full min-h-0 flex-col"
@@ -488,19 +485,9 @@ export function WidgetChat({
         )}
       >
         <div className="flex min-w-0 items-center gap-3">
-          {/* The header is the organisation's: its logo when it has set one,
-              otherwise only the title, never Eneo's own mark. */}
-          {logo && (
-            // An external image the organisation hosts; next/image cannot optimise it.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className="h-8 w-8 shrink-0 rounded-md object-contain"
-              src={logo}
-              alt=""
-              width={32}
-              height={32}
-            />
-          )}
+          {/* The header is the organisation's: its title and disclosure, never
+              Eneo's own mark. Who answers is the persona's business, inside the
+              conversation. */}
           <div className="min-w-0">
             <h1 ref={title} tabIndex={-1} className="text-base font-semibold break-words">
               {config.texts.title || config.name}

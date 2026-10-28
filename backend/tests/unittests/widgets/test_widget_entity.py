@@ -204,16 +204,12 @@ def test_apply_update_bumps_generation_only_for_visitor_facing_fields():
         widget.apply_update({"name": "   "})
 
 
-def test_theme_header_colour_and_logo_are_validated():
+def test_theme_colours_are_validated():
     from eneo.widgets.domain.widget import WidgetTheme
 
-    theme = WidgetTheme(
-        header_color=" #abcdef ", logo_url=" https://kommun.se/logo.svg "
-    )
+    theme = WidgetTheme(header_color=" #abcdef ")
     assert theme.header_color == "#ABCDEF"
-    assert theme.logo_url == "https://kommun.se/logo.svg"
-    assert WidgetTheme(header_color="", logo_url="").header_color is None
-    assert WidgetTheme(header_color="", logo_url="").logo_url is None
+    assert WidgetTheme(header_color="").header_color is None
     dark = WidgetTheme(primary_color_dark="#abcdef", header_color_dark="")
     assert dark.primary_color_dark == "#ABCDEF"
     assert dark.header_color_dark is None
@@ -227,8 +223,18 @@ def test_theme_header_colour_and_logo_are_validated():
         WidgetTheme(primary_color_dark="red")
     with pytest.raises(ValueError):
         WidgetTheme(header_color="blue")
+
+
+def test_theme_refuses_the_retired_logo_keys():
+    """Stored themes are rehydrated through this model, so a row that still
+    carries the header-logo keys fails to load; revision 202610281000 strips
+    them before this model lands."""
+    from eneo.widgets.domain.widget import WidgetTheme
+
     with pytest.raises(ValueError):
-        WidgetTheme(logo_url="javascript:alert(1)")
+        WidgetTheme.model_validate({"logo_url": "https://kommun.se/logo.svg"})
+    with pytest.raises(ValueError):
+        WidgetTheme.model_validate({"logo_file_id": None})
 
 
 def test_persona_is_optional_and_its_parts_depend_on_each_other():

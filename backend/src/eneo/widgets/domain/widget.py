@@ -209,10 +209,6 @@ class WidgetTheme(BaseModel):
     # used in both modes.
     primary_color_dark: Optional[str] = None
     header_color_dark: Optional[str] = None
-    # Logo shown in the panel header, hosted by the organisation.
-    logo_url: Optional[str] = Field(default=None, max_length=500)
-    # Kept for stored rows from the first schema; never populated.
-    logo_file_id: Optional[UUID] = None
 
     @field_validator("primary_color")
     @classmethod
@@ -234,23 +230,10 @@ class WidgetTheme(BaseModel):
             raise ValueError(f"{info.field_name} must be a #RRGGBB hex colour.")
         return value.upper()
 
-    @field_validator("logo_url")
-    @classmethod
-    def _logo_url(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        parsed = urlparse(value)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError("logo_url must be an http(s) URL.")
-        return value
-
 
 class WidgetPersona(BaseModel):
     """The voice the visitor talks to: a name and a face shown inside the
-    conversation, while the header keeps the organisation's logo and title.
+    conversation, while the header keeps the organisation's title.
 
     An empty name is the neutral mode every widget starts in: answers carry
     no sender. The name is presentation only; the assistant's own prompt

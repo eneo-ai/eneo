@@ -25,7 +25,7 @@ function ChatGlyph({ className }: { className: string }) {
 }
 
 /**
- * A static rendering of how a template's colours, logo and texts come
+ * A static rendering of how a template's colours and texts come
  * together: launcher, header, welcome, a sample bubble and the composer.
  * Templates have no widget behind them, so there is nothing live to frame;
  * the real embed page is previewed on the widget page after the template has
@@ -129,17 +129,6 @@ export function WidgetMockPreview({
               color: header ? readableOn(header) : undefined
             }}
           >
-            {theme.logo_url && (
-              // The organisation's own host serves the logo; nothing fits next/image.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                className="size-8 shrink-0 rounded-md object-contain"
-                src={theme.logo_url}
-                alt=""
-                width="32"
-                height="32"
-              />
-            )}
             <div className="min-w-0">
               <p className="truncate text-base font-semibold">{texts.title || name}</p>
               <p className={`text-xs ${header ? "opacity-85" : "text-ax-text-secondary"}`}>

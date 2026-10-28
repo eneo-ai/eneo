@@ -81,17 +81,6 @@ export function TemplatePicker({
                       style={{ background: header(template) ?? undefined }}
                     />
                   )}
-                  {release.theme.logo_url && (
-                    // The organisation's own logo at the address it gave.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      className="size-6 rounded object-contain"
-                      src={release.theme.logo_url}
-                      alt=""
-                      width={24}
-                      height={24}
-                    />
-                  )}
                   <span className="text-ax-text-secondary text-xs">
                     {languageLabel(release.language)}
                   </span>

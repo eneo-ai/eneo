@@ -59,17 +59,6 @@ export function frameAncestorsFor(sources: readonly string[]): string {
   return cleaned.length > 0 ? `'self' ${cleaned.join(" ")}` : "'none'";
 }
 
-/** The origin of an absolute URL as a CSP source, or null when it has none. */
-export function originSource(url: string | null | undefined): string | null {
-  if (!url) return null;
-  try {
-    const origin = new URL(url).origin;
-    return origin !== "null" && isHostSource(origin) ? origin : null;
-  } catch {
-    return null;
-  }
-}
-
 export function parseScheme(raw: string | null): "light" | "dark" | "auto" | null {
   return raw === "light" || raw === "dark" || raw === "auto" ? raw : null;
 }
@@ -145,12 +134,10 @@ export async function embedPolicy(
         ? "'self'"
         : frameAncestorsFor(config.frame_ancestors);
 
-  // The page shows the organisation's logo from its own host, at most;
-  // answer Markdown must not be able to reach anything else (an injected
-  // image URL would ship the visitor's question to a third party). The
-  // preview has no configuration yet, so it accepts any https image.
-  const logoOrigin = originSource(config?.theme.logo_url);
-  const imgSources = preview ? ["https:"] : logoOrigin ? [logoOrigin] : [];
+  // No image comes from outside Eneo: answer Markdown must not be able to
+  // reach anything else (an injected image URL would ship the visitor's
+  // question to a third party). The preview is no exception.
+  const imgSources: string[] = [];
 
   const pinned = config?.theme.color_scheme;
   const scheme: EmbedScheme =

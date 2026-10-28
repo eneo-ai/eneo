@@ -207,7 +207,6 @@ def _house_style():
         primary_color="#ABCDEF",
         radius=4,
         header_color="#112233",
-        logo_url="https://x.se/l.png",
     )
     template.texts = template.texts.model_copy(
         update={
@@ -243,7 +242,7 @@ def test_linking_copies_every_templated_part_once():
 
     assert template.project_onto(widget, ALL_LOCK_GROUPS) is True
     assert widget.theme.primary_color == "#ABCDEF"
-    assert widget.theme.logo_url == "https://x.se/l.png"
+    assert widget.theme.header_color == "#112233"
     assert widget.texts.title == "Fråga oss"
     assert widget.texts.footer_text == "Läs om personuppgifter"
     # Suggested questions belong to the widget, not the template.

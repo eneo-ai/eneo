@@ -25761,7 +25761,7 @@ export interface components {
     /**
      * WidgetPersona
      * @description The voice the visitor talks to: a name and a face shown inside the
-     *     conversation, while the header keeps the organisation's logo and title.
+     *     conversation, while the header keeps the organisation's title.
      *
      *     An empty name is the neutral mode every widget starts in: answers carry
      *     no sender. The name is presentation only; the assistant's own prompt
@@ -26151,10 +26151,6 @@ export interface components {
       primary_color_dark?: string | null;
       /** Header Color Dark */
       header_color_dark?: string | null;
-      /** Logo Url */
-      logo_url?: string | null;
-      /** Logo File Id */
-      logo_file_id?: string | null;
     };
     /**
      * WidgetUpdate

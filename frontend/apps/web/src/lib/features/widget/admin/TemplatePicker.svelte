@@ -91,15 +91,6 @@
                 style:background={header(template)}
               ></span>
             {/if}
-            {#if templateRelease(template).theme.logo_url}
-              <img
-                class="h-6 w-6 rounded object-contain"
-                src={templateRelease(template).theme.logo_url}
-                alt=""
-                width="24"
-                height="24"
-              />
-            {/if}
             <span class="text-secondary text-xs"
               >{languageLabel(templateRelease(template).language)}</span
             >

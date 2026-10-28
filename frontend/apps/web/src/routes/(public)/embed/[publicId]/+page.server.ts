@@ -64,19 +64,11 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
   if (localized) redirect(307, localized);
 
   // The page fetches its API and the persona's avatar from the backend and
-  // the organisation's logo from its own host, at most; answer Markdown must
-  // not be able to reach anything else. The preview has no configuration
-  // yet, so it accepts any https image.
+  // nothing from anywhere else; answer Markdown must not be able to reach a
+  // third party. The preview is no exception.
   const backendOrigin = originSource(baseUrl);
-  const logoOrigin = originSource(config?.theme.logo_url);
   locals.embedSources = {
-    img: [
-      ...new Set(
-        (preview ? ["https:", backendOrigin] : [logoOrigin, backendOrigin]).filter(
-          (source): source is string => !!source
-        )
-      )
-    ],
+    img: backendOrigin ? [backendOrigin] : [],
     connect: backendOrigin ? [backendOrigin] : []
   };
 

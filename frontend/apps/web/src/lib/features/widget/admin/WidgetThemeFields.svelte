@@ -1,14 +1,12 @@
-<!-- Appearance: colours, logo, shape and placement of the launcher. -->
+<!-- Appearance: colours, shape and placement of the launcher. -->
 <script lang="ts">
   import type { WidgetTheme } from "@eneo/eneo-js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import ImageIcon from "@lucide/svelte/icons/image";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
-  import { isHttpUrl } from "../urls";
   import ColorField from "./ColorField.svelte";
 
   type Props = {
@@ -42,37 +40,6 @@
     "bottom-right": m.widget_admin_position_right(),
     "bottom-left": m.widget_admin_position_left()
   });
-
-  // The logo address is committed when the field is left, never per keystroke.
-  let logoDraft = $state(untrack(() => theme.logo_url ?? ""));
-  let logoInvalid = $state(false);
-  let logoBroken = $state(false);
-  let lastSavedLogo = untrack(() => theme.logo_url ?? "");
-  $effect(() => {
-    // Follow a new saved value (template applied, other tab) without ever
-    // touching what is being typed.
-    const saved = theme.logo_url ?? "";
-    if (saved !== lastSavedLogo) {
-      lastSavedLogo = saved;
-      logoDraft = saved;
-      logoInvalid = false;
-      logoBroken = false;
-    }
-  });
-
-  function commitLogo() {
-    const trimmed = logoDraft.trim();
-    if (trimmed === "") {
-      logoInvalid = false;
-      if (theme.logo_url) onChange({ logo_url: null });
-      return;
-    }
-    logoInvalid = !isHttpUrl(trimmed);
-    if (!logoInvalid && trimmed !== theme.logo_url) {
-      logoBroken = false;
-      onChange({ logo_url: trimmed });
-    }
-  }
 
   // Dark mode shows its own colour fields once switched on; switching off
   // clears them so dark mode falls back to the light-mode colours.
@@ -179,58 +146,6 @@
         </Field.Group>
       {/if}
     </Field.Set>
-
-    <Field.Field data-invalid={logoInvalid || undefined}>
-      <Field.Label for={id("logo-url")}>{m.widget_admin_logo_url()}</Field.Label>
-      <div class="flex items-center gap-3">
-        <span
-          class="border-default bg-primary flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md border"
-          aria-hidden="true"
-        >
-          {#if theme.logo_url && !logoBroken}
-            <img
-              class="h-8 w-8 object-contain"
-              src={theme.logo_url}
-              alt=""
-              width="32"
-              height="32"
-              onerror={() => (logoBroken = true)}
-              onload={() => (logoBroken = false)}
-            />
-          {:else}
-            <ImageIcon class="text-muted size-5" aria-hidden="true" />
-          {/if}
-        </span>
-        <Input
-          id={id("logo-url")}
-          type="url"
-          maxlength={500}
-          aria-invalid={logoInvalid}
-          aria-describedby={[
-            describedBy("logo-url-help"),
-            logoInvalid || logoBroken ? id("logo-url-error") : ""
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          bind:value={logoDraft}
-          onchange={commitLogo}
-          onkeydown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitLogo();
-            }
-          }}
-        />
-      </div>
-      <Field.Description id={id("logo-url-help")}>
-        {theme.logo_url ? m.widget_admin_logo_url_description() : m.widget_admin_logo_url_default()}
-      </Field.Description>
-      {#if logoInvalid}
-        <Field.Error id={id("logo-url-error")}>{m.widget_admin_url_invalid()}</Field.Error>
-      {:else if logoBroken}
-        <Field.Error id={id("logo-url-error")}>{m.widget_admin_logo_broken()}</Field.Error>
-      {/if}
-    </Field.Field>
 
     <Field.Separator />
 

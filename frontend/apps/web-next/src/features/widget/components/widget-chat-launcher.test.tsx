@@ -36,7 +36,7 @@ function config(persona: WidgetPublicConfig["persona"]): WidgetPublicConfig {
       footer_link_url: null,
       footer_link_label: null
     },
-    theme: { color_scheme: "auto", logo_url: null, primary_color: "#1F4E79", radius: 12 },
+    theme: { color_scheme: "auto", primary_color: "#1F4E79", radius: 12 },
     persona,
     language: "sv",
     bot_protection: "none",

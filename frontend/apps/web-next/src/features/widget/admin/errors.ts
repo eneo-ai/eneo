@@ -64,7 +64,6 @@ function refusedValueMessage(path: string, t: Translate): string {
     case "texts.suggested_questions":
       return t("widget_admin_questions_refused");
     case "texts.footer_link_url":
-    case "theme.logo_url":
       return t("widget_admin_url_invalid");
     default:
       return t("widget_admin_value_refused");

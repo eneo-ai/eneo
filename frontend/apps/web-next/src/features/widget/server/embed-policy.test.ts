@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   embedPolicy,
   frameAncestorsFor,
-  originSource,
   parseEmbedPath,
   resetEmbedPolicyCache
 } from "./embed-policy";
@@ -13,7 +12,7 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
     public_id: "wgt_aaaaaaaaaaaaaaaaaaaaaa",
     name: "Kaffe",
     texts: { title: "Kaffe", subtitle: "AI-assistent", welcome: "", suggested_questions: [] },
-    theme: { color_scheme: "auto", logo_url: null },
+    theme: { color_scheme: "auto" },
     language: "auto",
     frame_ancestors: ["https://www.sundsvall.se", "*.sundsvall.se"],
     ...overrides
@@ -40,23 +39,21 @@ describe("frame sources", () => {
       "'self' https://www.sundsvall.se *.sundsvall.se"
     );
     expect(frameAncestorsFor([])).toBe("'none'");
-    expect(originSource("https://cdn.example.org/logo.png?x=1")).toBe("https://cdn.example.org");
-    expect(originSource("not a url")).toBeNull();
   });
 });
 
 describe("embedPolicy", () => {
-  it("frames an active widget where its configuration allows, with its logo host", async () => {
+  it("frames an active widget where its configuration allows, with no outside image host", async () => {
     const fetchConfig = vi.fn(async () =>
       config({
-        theme: { color_scheme: "dark", logo_url: "https://cdn.example.org/logo.png" },
+        theme: { color_scheme: "dark" },
         language: "en"
       } as Partial<WidgetPublicConfig>)
     );
     const policy = await embedPolicy(embed, new URLSearchParams("scheme=light"), { fetchConfig });
     expect(policy).toEqual({
       frameAncestors: "'self' https://www.sundsvall.se *.sundsvall.se",
-      imgSources: ["https://cdn.example.org"],
+      imgSources: [],
       // Pinned settings win over the path and the host page.
       locale: "en",
       scheme: "dark"
@@ -84,8 +81,8 @@ describe("embedPolicy", () => {
     ).toBe("'self'");
     const preview = await embedPolicy(embed, new URLSearchParams("preview=1"), { fetchConfig });
     expect(preview.frameAncestors).toBe("'self'");
-    // The preview has no configuration yet, so it accepts any https image.
-    expect(preview.imgSources).toEqual(["https:"]);
+    // The preview shows no image from outside Eneo either.
+    expect(preview.imgSources).toEqual([]);
     expect(fetchConfig).toHaveBeenCalledTimes(1);
   });
 
