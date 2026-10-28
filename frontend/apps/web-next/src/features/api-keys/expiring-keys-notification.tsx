@@ -12,6 +12,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 import { summaryToDisplayItems, type ExpiringKeyDisplayItem } from "./expiration-utils";
+import { apiKeyNotificationSubscriptionsQueryOptions } from "./notification-follows";
 
 const MAX_VISIBLE = 5;
 
@@ -50,10 +51,8 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
     staleTime: 60_000
   });
   const subscriptions = useQuery({
-    queryKey: ["api-key-notification-subscriptions"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/api-keys/notification-subscriptions")),
-    enabled: featureEnabled,
-    staleTime: 60_000
+    ...apiKeyNotificationSubscriptionsQueryOptions(browserApi),
+    enabled: featureEnabled
   });
 
   const daysWindow = Math.max(...(preferences.data?.days_before_expiry ?? [30]), 1);

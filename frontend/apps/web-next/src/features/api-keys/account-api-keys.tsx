@@ -1,10 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { Bell } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { useAppContext } from "@/components/providers/app-context";
@@ -25,136 +24,18 @@ import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { RemovalFocusScope } from "@/features/spaces/removal";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { ApiKeyActions } from "./api-key-actions";
 import { CreateApiKeyDialog } from "./api-key-form";
 import {
   API_KEY_STATE_BADGE_VARIANT,
-  API_KEY_STATES,
+  API_KEY_STATE_FILTERS,
+  API_KEYS_KEY,
   formatApiKeyDate,
-  type ApiKey,
-  type ApiKeyState
+  stateFilterLabelKey,
+  type ApiKeyStateFilter
 } from "./api-keys";
-
-function KeyActions({
-  apiKey,
-  onRotated
-}: {
-  apiKey: ApiKey;
-  onRotated: (secret: string) => void;
-}) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-
-  const rotateKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/rotate", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: (rotated) => {
-      invalidate();
-      onRotated(rotated.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const revokeKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/revoke", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const suspendKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/suspend", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const reactivateKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/reactivate", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <div className="flex justify-end gap-1">
-      {apiKey.state === "active" && (
-        <>
-          <ConfirmDialog
-            trigger={
-              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_rotate")}>
-                <RefreshCw className="size-4" />
-              </Button>
-            }
-            title={t("api_keys_rotate_confirm_title")}
-            description={t("api_keys_rotate_confirm_description")}
-            confirmLabel={t("api_keys_action_rotate")}
-            pending={rotateKey.isPending}
-            onConfirm={() => rotateKey.mutateAsync().then(() => undefined)}
-          />
-          <ConfirmDialog
-            trigger={
-              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_suspend")}>
-                <Pause className="size-4" />
-              </Button>
-            }
-            title={t("api_keys_action_suspend_title")}
-            description={t("api_keys_action_suspend_description")}
-            confirmLabel={t("api_keys_action_suspend")}
-            pending={suspendKey.isPending}
-            onConfirm={() => suspendKey.mutateAsync().then(() => undefined)}
-          />
-        </>
-      )}
-      {apiKey.state === "suspended" && (
-        <ConfirmDialog
-          trigger={
-            <Button variant="ghost" size="icon" aria-label={t("api_keys_action_reactivate")}>
-              <Play className="size-4" />
-            </Button>
-          }
-          title={t("api_keys_action_reactivate_title")}
-          description={t("api_keys_action_reactivate_description")}
-          confirmLabel={t("api_keys_action_reactivate")}
-          pending={reactivateKey.isPending}
-          onConfirm={() => reactivateKey.mutateAsync().then(() => undefined)}
-        />
-      )}
-      <ConfirmDialog
-        trigger={
-          <Button variant="ghost" size="icon" aria-label={t("api_keys_action_revoke")}>
-            <Trash2 className="text-destructive size-4" />
-          </Button>
-        }
-        title={t("api_keys_action_revoke_title")}
-        description={t("api_keys_action_revoke_description")}
-        confirmLabel={t("api_keys_action_revoke")}
-        pending={revokeKey.isPending}
-        onConfirm={() => revokeKey.mutateAsync().then(() => undefined)}
-      />
-    </div>
-  );
-}
 
 function NotificationPreferencesPanel() {
   const t = useTranslations();
@@ -261,17 +142,24 @@ function NotificationPreferencesPanel() {
 export function ApiKeys() {
   const t = useTranslations();
   const { can } = useAppContext();
-  const [stateFilter, setStateFilter] = useState<ApiKeyState>("active");
+  const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
   const [secret, setSecret] = useState<string | null>(null);
   const [secretTitle, setSecretTitle] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const keys = usePaginatedQuery({
-    queryKey: ["api-keys", stateFilter],
+    queryKey: [...API_KEYS_KEY, stateFilter],
     limit: 25,
     fetchPage: async ({ cursor, limit }) => {
       const page = await unwrap(
         browserApi.GET("/api/v1/api-keys", {
-          params: { query: { state: stateFilter, cursor: cursor ?? null, limit } }
+          params: {
+            query: {
+              state: stateFilter === "all" ? null : stateFilter,
+              cursor: cursor ?? null,
+              limit
+            }
+          }
         })
       );
       return { ...page, items: page.items, total_count: page.total_count ?? 0 };
@@ -285,110 +173,108 @@ export function ApiKeys() {
     };
   }
 
-  const stateLabels: Record<ApiKeyState, string> = {
-    active: t("api_keys_status_active"),
-    suspended: t("api_keys_status_suspended"),
-    revoked: t("api_keys_status_revoked"),
-    expired: t("api_keys_status_expired")
-  };
-
   return (
     <div data-tour="account-api-keys" className="flex flex-col gap-4">
       <NotificationPreferencesPanel />
       <Tabs
         value={stateFilter}
-        onValueChange={(value) => setStateFilter(value as ApiKeyState)}
+        onValueChange={(value) => setStateFilter(value as ApiKeyStateFilter)}
         className="gap-4"
       >
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <TabsList>
-            {API_KEY_STATES.map((state) => (
+            {API_KEY_STATE_FILTERS.map((state) => (
               <TabsTrigger key={state} value={state}>
-                {stateLabels[state]}
+                {t(stateFilterLabelKey(state))}
               </TabsTrigger>
             ))}
           </TabsList>
-          {can("api_keys") && (
+          {can("api_keys") ? (
             <CreateApiKeyDialog
               idPrefix="account"
               trigger={<Button>{t("api_keys_create_short")}</Button>}
               onCreated={showSecret(t("api_keys_created_title"))}
             />
+          ) : (
+            <p className="text-muted-foreground text-sm">{t("api_keys_no_create_permission")}</p>
           )}
         </div>
 
         {/* The keys in the selected state: the state tabs' panel. */}
-        <TabsContent value={stateFilter} className="flex flex-col gap-4">
-          {keys.items.length === 0 && !keys.isPending ? (
-            <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
-          ) : (
-            <>
-              <Table aria-label={t("api_keys")}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("name")}</TableHead>
-                    <TableHead>{t("status")}</TableHead>
-                    <TableHead>{t("api_keys_permission_level")}</TableHead>
-                    <TableHead>{t("api_keys_expires")}</TableHead>
-                    <TableHead>{t("api_keys_created")}</TableHead>
-                    <TableHead className="w-24" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {keys.items.map((apiKey) => (
-                    <TableRow key={apiKey.id}>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{apiKey.name}</span>
-                          <code className="text-muted-foreground font-mono text-xs">
-                            {apiKey.key_prefix}…{apiKey.key_suffix}
-                          </code>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                          {stateLabels[apiKey.state]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                      <TableCell>
-                        {apiKey.expires_at
-                          ? formatApiKeyDate(apiKey.expires_at)
-                          : t("api_keys_never")}
-                      </TableCell>
-                      <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
-                      <TableCell>
-                        <KeyActions
-                          apiKey={apiKey}
-                          onRotated={showSecret(t("api_keys_rotated_title"))}
-                        />
-                      </TableCell>
+        <TabsContent ref={panelRef} value={stateFilter} className="flex flex-col gap-4">
+          <RemovalFocusScope target={panelRef}>
+            {keys.items.length === 0 && !keys.isPending ? (
+              <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
+            ) : (
+              <>
+                <Table aria-label={t("api_keys")}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("name")}</TableHead>
+                      <TableHead>{t("status")}</TableHead>
+                      <TableHead>{t("api_keys_permission_level")}</TableHead>
+                      <TableHead>{t("api_keys_expires")}</TableHead>
+                      <TableHead>{t("api_keys_created")}</TableHead>
+                      <TableHead className="w-14 min-w-14" />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {(keys.hasPreviousPage || keys.hasNextPage) && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasPreviousPage}
-                    onClick={keys.previousPage}
-                  >
-                    {t("previous")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasNextPage}
-                    onClick={keys.nextPage}
-                  >
-                    {t("next")}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
+                  </TableHeader>
+                  <TableBody>
+                    {keys.items.map((apiKey) => (
+                      <TableRow key={apiKey.id}>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{apiKey.name}</span>
+                            <code className="text-muted-foreground font-mono text-xs">
+                              {apiKey.key_prefix}…{apiKey.key_suffix}
+                            </code>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
+                            {t(`api_keys_status_${apiKey.state}`)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
+                        <TableCell>
+                          {apiKey.expires_at
+                            ? formatApiKeyDate(apiKey.expires_at)
+                            : t("api_keys_never")}
+                        </TableCell>
+                        <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
+                        <TableCell className="text-end">
+                          <ApiKeyActions
+                            apiKey={apiKey}
+                            mode="user"
+                            onRotated={showSecret(t("api_keys_rotated_title"))}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {(keys.hasPreviousPage || keys.hasNextPage) && (
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!keys.hasPreviousPage}
+                      onClick={keys.previousPage}
+                    >
+                      {t("previous")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!keys.hasNextPage}
+                      onClick={keys.nextPage}
+                    >
+                      {t("next")}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </RemovalFocusScope>
         </TabsContent>
       </Tabs>
 

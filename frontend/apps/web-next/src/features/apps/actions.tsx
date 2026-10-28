@@ -15,6 +15,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
 import type { AppSparse } from "./apps";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
 /** Edit/publish/delete menu for an app, shown on its tile. */
 export function AppActions({ app }: { app: AppSparse }) {
@@ -37,6 +38,7 @@ export function AppActions({ app }: { app: AppSparse }) {
       ),
     onSuccess: () => {
       void invalidate();
+      void invalidateExpiringApiKeys(queryClient);
       setShowPublish(false);
     },
     onError: (error) => toastApiError(error, t)

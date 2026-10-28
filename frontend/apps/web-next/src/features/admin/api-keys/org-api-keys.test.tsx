@@ -47,7 +47,6 @@ vi.mock("@/lib/api/browser", () => ({
 }));
 
 import { OrgApiKeysPage } from "./org-api-keys";
-import { ApiKeyUsageDialog } from "./usage-dialog";
 
 afterEach(cleanup);
 
@@ -72,15 +71,5 @@ describe("OrgApiKeysPage", () => {
     expect(screen.getByRole("tab", { name: "Aktiv" }).getAttribute("aria-controls")).toBe(panel.id);
     expect(await within(panel).findByText("Ärendesystemet")).toBeTruthy();
     await expectNoAxeViolations(container);
-  });
-});
-
-describe("ApiKeyUsageDialog", () => {
-  it("names the usage table", async () => {
-    renderInApp(<ApiKeyUsageDialog apiKey={apiKey} open onOpenChange={() => {}} />);
-
-    const dialog = await screen.findByRole("dialog", { name: "Ärendesystemet · Användning" });
-    const table = await within(dialog).findByRole("table", { name: "Användning" });
-    expect(within(table).getByText("api_key_used")).toBeTruthy();
   });
 });

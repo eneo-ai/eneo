@@ -20,14 +20,21 @@ const apiKey = {
 } as Schema<"ApiKeyV2">;
 
 const post = vi.hoisted(() => vi.fn());
+const put = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
       Promise.resolve({
-        data: path === "/api/v1/api-keys" ? { items: [apiKey], next_cursor: null } : {},
+        data:
+          path === "/api/v1/api-keys"
+            ? { items: [apiKey], next_cursor: null }
+            : path === "/api/v1/api-keys/notification-subscriptions"
+              ? { items: [] }
+              : {},
         response: new Response("{}")
       }),
-    POST: post
+    POST: post,
+    PUT: put
   }
 }));
 
@@ -36,6 +43,7 @@ import { ResourceApiKeysSection } from "./resource-api-keys-section";
 afterEach(() => {
   cleanup();
   post.mockReset();
+  put.mockReset();
 });
 
 describe("ResourceApiKeysSection", () => {
@@ -112,5 +120,42 @@ describe("ResourceApiKeysSection", () => {
         })
       })
     );
+  });
+
+  it("follows the space's expiry reminders, which then cover each of its keys", async () => {
+    put.mockResolvedValue({
+      data: { items: [{ target_type: "space", target_id: "space-1" }] },
+      response: new Response("{}")
+    });
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />,
+      { appContext: testAppContext({ permissions: ["api_keys"] }) }
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Följ scopepåminnelser" }));
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(
+        "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}",
+        { params: { path: { target_type: "space", target_id: "space-1" } } }
+      )
+    );
+    expect(await screen.findByRole("button", { name: "Avfölj scopepåminnelser" })).toBeTruthy();
+
+    const trigger = await screen.findByRole("button", {
+      name: "Fler åtgärder för Upphandlingsflödet"
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Följs via scope" })).toBeTruthy();
+  });
+
+  it("says why there is no Create button without the API key permission", async () => {
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />
+    );
+    expect(
+      await screen.findByText(/Din roll saknar behörighet att skapa API-nycklar/)
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skapa" })).toBeNull();
   });
 });

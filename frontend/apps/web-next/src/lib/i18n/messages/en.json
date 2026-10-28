@@ -6803,5 +6803,6 @@
   "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
   "api_keys_rate_limit_invalid": "Enter a whole number of requests per hour, 1 or more.",
   "api_keys_allowed_ips_placeholder": "10.0.0.0/8",
-  "api_keys_allowlist_unadded": "“{value}” is not added yet. Press Enter to add it, or clear the field."
+  "api_keys_allowlist_unadded": "“{value}” is not added yet. Choose it in the list below the field to add it, or clear the field.",
+  "api_keys_extend_saved": "The expiration date is saved."
 }

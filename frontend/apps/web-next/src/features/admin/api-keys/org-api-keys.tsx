@@ -1,21 +1,13 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { Plus, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -34,7 +26,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATES,
@@ -45,124 +36,10 @@ import {
   type ApiKeyType
 } from "@/features/api-keys/api-keys";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { ApiKeyActions } from "@/features/api-keys/api-key-actions";
 import { CreateApiKeyDialog } from "@/features/api-keys/api-key-form";
 import { NotificationPolicyDialog } from "./notification-policy-dialog";
 import { ApiKeyPolicyDialog } from "./policy-panel";
-import { ApiKeyUsageDialog } from "./usage-dialog";
-
-function KeyActions({
-  apiKey,
-  onRotated
-}: {
-  apiKey: ApiKey;
-  onRotated: (secret: string) => void;
-}) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [showRevoke, setShowRevoke] = useState(false);
-  const [showUsage, setShowUsage] = useState(false);
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin-api-keys"] });
-
-  const rotate = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/admin/api-keys/{id}/rotate", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: (rotated) => {
-      invalidate();
-      onRotated(rotated.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-  const suspend = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/admin/api-keys/{id}/suspend", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-  const reactivate = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/admin/api-keys/{id}/reactivate", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-  const revoke = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/admin/api-keys/{id}/revoke", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: () => {
-      invalidate();
-      setShowRevoke(false);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const canModify = apiKey.state === "active" || apiKey.state === "suspended";
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("ui_more_actions_for", { name: apiKey.name })}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setShowUsage(true)}>
-            {t("api_keys_admin_tab_usage")}
-          </DropdownMenuItem>
-          {apiKey.state === "active" && (
-            <>
-              <DropdownMenuItem onSelect={() => rotate.mutate()}>
-                <RefreshCw className="size-4" /> {t("api_keys_action_rotate")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => suspend.mutate()}>
-                {t("api_keys_action_suspend")}
-              </DropdownMenuItem>
-            </>
-          )}
-          {apiKey.state === "suspended" && (
-            <DropdownMenuItem onSelect={() => reactivate.mutate()}>
-              {t("api_keys_action_reactivate")}
-            </DropdownMenuItem>
-          )}
-          {canModify && (
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowRevoke(true)}>
-              {t("api_keys_action_revoke")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ConfirmDialogControlled
-        open={showRevoke}
-        onOpenChange={setShowRevoke}
-        title={t("api_keys_action_revoke_title")}
-        description={t("api_keys_action_revoke_description")}
-        confirmLabel={t("api_keys_action_revoke")}
-        pending={revoke.isPending}
-        onConfirm={() => revoke.mutate()}
-      />
-      <ApiKeyUsageDialog apiKey={apiKey} open={showUsage} onOpenChange={setShowUsage} />
-    </>
-  );
-}
 
 export function OrgApiKeysPage() {
   const t = useTranslations();
@@ -170,9 +47,17 @@ export function OrgApiKeysPage() {
   const [scopeType, setScopeType] = useState<ApiKeyScopeType | "all">("all");
   const [keyType, setKeyType] = useState<ApiKeyType | "all">("all");
   const [secret, setSecret] = useState<string | null>(null);
+  const [secretTitle, setSecretTitle] = useState("");
   const [showPolicy, setShowPolicy] = useState(false);
   const [showConstraintPolicy, setShowConstraintPolicy] = useState(false);
   const headingId = useId();
+
+  function showSecret(title: string) {
+    return (value: string) => {
+      setSecretTitle(title);
+      setSecret(value);
+    };
+  }
 
   const { items, hasNextPage, hasPreviousPage, nextPage, previousPage, isPending } =
     usePaginatedQuery<ApiKey>({
@@ -210,7 +95,7 @@ export function OrgApiKeysPage() {
               <Plus className="size-4" /> {t("api_keys_create_short")}
             </Button>
           }
-          onCreated={setSecret}
+          onCreated={showSecret(t("api_keys_created_title"))}
         />
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
@@ -295,7 +180,11 @@ export function OrgApiKeysPage() {
                       {formatApiKeyDate(apiKey.expires_at)}
                     </TableCell>
                     <TableCell>
-                      <KeyActions apiKey={apiKey} onRotated={setSecret} />
+                      <ApiKeyActions
+                        apiKey={apiKey}
+                        mode="admin"
+                        onRotated={showSecret(t("api_keys_rotated_title"))}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -314,11 +203,7 @@ export function OrgApiKeysPage() {
         </Button>
       </div>
 
-      <SecretRevealDialog
-        title={t("api_keys_created_title")}
-        secret={secret}
-        onClose={() => setSecret(null)}
-      />
+      <SecretRevealDialog title={secretTitle} secret={secret} onClose={() => setSecret(null)} />
     </div>
   );
 }

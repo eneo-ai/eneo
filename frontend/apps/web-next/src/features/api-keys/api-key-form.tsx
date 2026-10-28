@@ -38,6 +38,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import {
   createRequest,
+  draftFromApiKey,
   draftProblems,
   effectivePermission,
   ipProblem,
@@ -47,6 +48,7 @@ import {
   originProblem,
   RESOURCE_LEVELS,
   resourceLevel,
+  updateRequest,
   visibleResources,
   withKeyType,
   withScopeType,
@@ -57,11 +59,15 @@ import {
 import {
   apiKeyPolicyConstraintsQueryOptions,
   invalidateApiKeys,
+  updateApiKey,
   withoutSecret,
+  type ApiKey,
   type ApiKeyCreationConstraints,
+  type ApiKeyMode,
   type ApiKeyOwnership,
   type ApiKeyScopeType,
   type ApiKeyType,
+  type ApiKeyUpdateRequest,
   type ResourcePermissionLevel,
   type ResourceScopeType
 } from "./api-keys";
@@ -102,12 +108,18 @@ export function ApiKeyForm({
   description,
   pending,
   error,
+  guardrailsLocked = false,
   onSubmit,
   onCancel
 }: {
   /** Makes the field ids unique on the page. */
   idPrefix: string;
   mode: "create" | "edit";
+  /**
+   * A revoked or expired key: only its name and description can change (the
+   * backend refuses the rest).
+   */
+  guardrailsLocked?: boolean;
   initial: ApiKeyDraft;
   /** Shown instead of the scope choice (a resource's own keys). */
   lockedScope?: LockedScope;
@@ -134,13 +146,14 @@ export function ApiKeyForm({
   // Inside a sentence: "Välj assistent".
   const scopeNoun = scopeLabel.toLocaleLowerCase();
 
-  const problems = draftProblems(draft, { mode, constraints }, t);
+  const allProblems = draftProblems(draft, { mode, constraints }, t);
   // Typed but not added, a restriction would be dropped without a word: it
   // stops the submit until it is added or cleared.
   const allowlist = draft.keyType === "pk_" ? "origins" : "ips";
   if (unadded.trim()) {
-    problems[allowlist] = t("api_keys_allowlist_unadded", { value: unadded.trim() });
+    allProblems[allowlist] = t("api_keys_allowlist_unadded", { value: unadded.trim() });
   }
+  const problems = guardrailsLocked ? { name: allProblems.name } : allProblems;
   // An invalid origin or IP is named as soon as it is added; the rest on submit.
   const live: Partial<Record<DraftField, string>> = {
     origins: invalidEntry(draft.allowedOrigins, originProblem, t),
@@ -223,164 +236,178 @@ export function ApiKeyForm({
         )}
       </Section>
 
-      <Section title={t("api_keys_step_scope")}>
-        {can("admin") &&
-          (creating ? (
-            <ChoiceGroup
-              id={id("ownership")}
-              legend={t("api_keys_ownership_label")}
-              value={draft.ownership}
-              onChange={(ownership) => update({ ownership: ownership as ApiKeyOwnership })}
-              options={[
-                {
-                  value: "user",
-                  label: t("api_keys_ownership_user"),
-                  hint: t("api_keys_ownership_user_desc")
-                },
-                {
-                  value: "service",
-                  label: t("api_keys_ownership_service"),
-                  hint: t("api_keys_ownership_service_desc")
-                }
-              ]}
-            />
-          ) : (
-            <FixedValue
-              label={t("api_keys_ownership_label")}
-              value={
-                draft.ownership === "service"
-                  ? t("api_keys_ownership_service")
-                  : t("api_keys_ownership_user")
-              }
-            />
-          ))}
-        {draft.ownership === "service" && (
-          <p className="text-muted-foreground text-xs">
-            {t("api_keys_ownership_service_explainer")}
-          </p>
-        )}
-        {draft.ownership === "service" &&
-          scopeType === "tenant" &&
-          effectivePermission(draft) !== "read" && (
-            <p className="text-ax-warning text-xs">
-              {t("api_keys_ownership_service_guardrail_hint")}
-            </p>
-          )}
-
-        {!creating || lockedScope ? (
-          <FixedValue
-            label={t("api_keys_scope")}
-            value={lockedScope ? `${scopeLabel} · ${lockedScope.name}` : scopeLabel}
-            hint={creating ? t("api_keys_scope_locked") : t("api_keys_admin_edit_immutable_hint")}
-          />
-        ) : (
-          <>
-            <ChoiceGroup
-              id={id("scope-type")}
-              legend={t("api_keys_scope")}
-              value={scopeType}
-              onChange={(next) =>
-                setDraft((current) => withScopeType(current, next as ApiKeyScopeType))
-              }
-              options={SCOPE_TYPES.map((option) => ({
-                value: option,
-                label: t(`api_keys_scope_${option}`),
-                hint: t(`api_keys_scope_${option}_desc`)
-              }))}
-            />
-            {scopeType !== "tenant" && (
-              <div className="flex flex-col gap-3" data-field="scope">
-                <ScopeResourcePicker
-                  scopeType={scopeType}
-                  value={draft.scopeId}
-                  onChange={(scopeId) => update({ scopeId })}
-                  label={t("api_keys_select_resource", { scopeType: scopeNoun })}
-                  problem={shown("scope")}
+      {guardrailsLocked ? (
+        <p className="text-muted-foreground text-sm">
+          {t("api_keys_admin_edit_guardrails_disabled_hint")}
+        </p>
+      ) : (
+        <>
+          <Section title={t("api_keys_step_scope")}>
+            {can("admin") &&
+              (creating ? (
+                <ChoiceGroup
+                  id={id("ownership")}
+                  legend={t("api_keys_ownership_label")}
+                  value={draft.ownership}
+                  onChange={(ownership) => update({ ownership: ownership as ApiKeyOwnership })}
+                  options={[
+                    {
+                      value: "user",
+                      label: t("api_keys_ownership_user"),
+                      hint: t("api_keys_ownership_user_desc")
+                    },
+                    {
+                      value: "service",
+                      label: t("api_keys_ownership_service"),
+                      hint: t("api_keys_ownership_service_desc")
+                    }
+                  ]}
                 />
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor={id("scope-id")}>
-                    {t("api_keys_enter_id_manually", { scopeType: scopeNoun })}
-                  </Label>
-                  <Input
-                    id={id("scope-id")}
-                    className="font-mono"
-                    value={draft.manualScopeId}
-                    placeholder={t("api_keys_enter_uuid")}
-                    onChange={(event) => update({ manualScopeId: event.target.value })}
-                  />
-                </div>
+              ) : (
+                <FixedValue
+                  label={t("api_keys_ownership_label")}
+                  value={
+                    draft.ownership === "service"
+                      ? t("api_keys_ownership_service")
+                      : t("api_keys_ownership_user")
+                  }
+                />
+              ))}
+            {draft.ownership === "service" && (
+              <p className="text-muted-foreground text-xs">
+                {t("api_keys_ownership_service_explainer")}
+              </p>
+            )}
+            {draft.ownership === "service" &&
+              scopeType === "tenant" &&
+              effectivePermission(draft) !== "read" && (
+                <p className="text-ax-warning text-xs">
+                  {t("api_keys_ownership_service_guardrail_hint")}
+                </p>
+              )}
+
+            {!creating || lockedScope ? (
+              <FixedValue
+                label={t("api_keys_scope")}
+                value={lockedScope ? `${scopeLabel} · ${lockedScope.name}` : scopeLabel}
+                hint={
+                  creating ? t("api_keys_scope_locked") : t("api_keys_admin_edit_immutable_hint")
+                }
+              />
+            ) : (
+              <>
+                <ChoiceGroup
+                  id={id("scope-type")}
+                  legend={t("api_keys_scope")}
+                  value={scopeType}
+                  onChange={(next) =>
+                    setDraft((current) => withScopeType(current, next as ApiKeyScopeType))
+                  }
+                  options={SCOPE_TYPES.map((option) => ({
+                    value: option,
+                    label: t(`api_keys_scope_${option}`),
+                    hint: t(`api_keys_scope_${option}_desc`)
+                  }))}
+                />
+                {scopeType !== "tenant" && (
+                  <div className="flex flex-col gap-3" data-field="scope">
+                    <ScopeResourcePicker
+                      scopeType={scopeType}
+                      value={draft.scopeId}
+                      onChange={(scopeId) => update({ scopeId })}
+                      label={t("api_keys_select_resource", { scopeType: scopeNoun })}
+                      problem={shown("scope")}
+                    />
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor={id("scope-id")}>
+                        {t("api_keys_enter_id_manually", { scopeType: scopeNoun })}
+                      </Label>
+                      <Input
+                        id={id("scope-id")}
+                        className="font-mono"
+                        value={draft.manualScopeId}
+                        placeholder={t("api_keys_enter_uuid")}
+                        onChange={(event) => update({ manualScopeId: event.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            <ResourceAccess id={id("access")} draft={draft} onChange={update} />
+          </Section>
+
+          <Section title={t("api_keys_step_security")}>
+            {draft.keyType === "pk_" ? (
+              <AllowlistField
+                key="origins"
+                field="origins"
+                label={t("api_keys_allowed_origins")}
+                description={t("api_keys_allowed_origins_desc")}
+                placeholder={t("apikey_origins_placeholder")}
+                suggestions={ORIGIN_SUGGESTIONS}
+                values={draft.allowedOrigins}
+                onChange={(allowedOrigins) => update({ allowedOrigins })}
+                onUnaddedChange={setUnadded}
+                problem={shown("origins")}
+                isRequired
+              />
+            ) : (
+              <AllowlistField
+                key="ips"
+                field="ips"
+                label={t("api_keys_allowed_ips")}
+                description={t("api_keys_allowed_ips_desc")}
+                placeholder={t("api_keys_allowed_ips_placeholder")}
+                suggestions={IP_SUGGESTIONS}
+                values={draft.allowedIps}
+                onChange={(allowedIps) => update({ allowedIps })}
+                onUnaddedChange={setUnadded}
+                problem={shown("ips")}
+              />
+            )}
+            {creating && (
+              <div data-field="expiry">
+                <ExpirationPicker
+                  id={id("expiry")}
+                  value={draft.expiresAt}
+                  onChange={(expiresAt) => update({ expiresAt })}
+                  maxDays={constraints?.max_expiration_days}
+                  required={constraints?.require_expiration ?? false}
+                  problem={shown("expiry")}
+                />
               </div>
             )}
-          </>
-        )}
-
-        <ResourceAccess id={id("access")} draft={draft} onChange={update} />
-      </Section>
-
-      <Section title={t("api_keys_step_security")}>
-        {draft.keyType === "pk_" ? (
-          <AllowlistField
-            key="origins"
-            field="origins"
-            label={t("api_keys_allowed_origins")}
-            description={t("api_keys_allowed_origins_desc")}
-            placeholder={t("apikey_origins_placeholder")}
-            suggestions={ORIGIN_SUGGESTIONS}
-            values={draft.allowedOrigins}
-            onChange={(allowedOrigins) => update({ allowedOrigins })}
-            onUnaddedChange={setUnadded}
-            problem={shown("origins")}
-            isRequired
-          />
-        ) : (
-          <AllowlistField
-            key="ips"
-            field="ips"
-            label={t("api_keys_allowed_ips")}
-            description={t("api_keys_allowed_ips_desc")}
-            placeholder={t("api_keys_allowed_ips_placeholder")}
-            suggestions={IP_SUGGESTIONS}
-            values={draft.allowedIps}
-            onChange={(allowedIps) => update({ allowedIps })}
-            onUnaddedChange={setUnadded}
-            problem={shown("ips")}
-          />
-        )}
-        {creating && (
-          <div data-field="expiry">
-            <ExpirationPicker
-              id={id("expiry")}
-              value={draft.expiresAt}
-              onChange={(expiresAt) => update({ expiresAt })}
-              maxDays={constraints?.max_expiration_days}
-              required={constraints?.require_expiration ?? false}
-              problem={shown("expiry")}
-            />
-          </div>
-        )}
-        <div className="flex flex-col gap-2" data-field="rateLimit">
-          <Label htmlFor={id("rate-limit")}>{t("api_keys_rate_limit")}</Label>
-          <Input
-            id={id("rate-limit")}
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={constraints?.max_rate_limit ?? undefined}
-            className="w-48"
-            value={draft.rateLimit}
-            placeholder={t("api_keys_rate_limit_placeholder")}
-            onChange={(event) => update({ rateLimit: event.target.value })}
-            {...fieldProblemProps(id("rate-limit"), shown("rateLimit"), `${id("rate-limit")}-help`)}
-          />
-          <p id={`${id("rate-limit")}-help`} className="text-muted-foreground text-xs">
-            {t("api_keys_rate_limit_help")}
-            {constraints?.max_rate_limit != null
-              ? ` ${t("api_keys_rate_limit_max", { max: constraints.max_rate_limit })}`
-              : null}
-          </p>
-          <FieldProblem id={id("rate-limit")} problem={shown("rateLimit")} />
-        </div>
-      </Section>
+            <div className="flex flex-col gap-2" data-field="rateLimit">
+              <Label htmlFor={id("rate-limit")}>{t("api_keys_rate_limit")}</Label>
+              <Input
+                id={id("rate-limit")}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={constraints?.max_rate_limit ?? undefined}
+                className="w-48"
+                value={draft.rateLimit}
+                placeholder={t("api_keys_rate_limit_placeholder")}
+                onChange={(event) => update({ rateLimit: event.target.value })}
+                {...fieldProblemProps(
+                  id("rate-limit"),
+                  shown("rateLimit"),
+                  `${id("rate-limit")}-help`
+                )}
+              />
+              <p id={`${id("rate-limit")}-help`} className="text-muted-foreground text-xs">
+                {t("api_keys_rate_limit_help")}
+                {constraints?.max_rate_limit != null
+                  ? ` ${t("api_keys_rate_limit_max", { max: constraints.max_rate_limit })}`
+                  : null}
+              </p>
+              <FieldProblem id={id("rate-limit")} problem={shown("rateLimit")} />
+            </div>
+          </Section>
+        </>
+      )}
 
       {error != null && <ListError error={error} compact />}
 
@@ -688,7 +715,7 @@ export function CreateApiKeyDialog({
         }
       ),
     onSuccess: () => {
-      invalidateApiKeys(queryClient);
+      void invalidateApiKeys(queryClient);
       setOpen(false);
       if (secret.current) onCreated(secret.current);
       secret.current = null;
@@ -733,6 +760,79 @@ export function CreateApiKeyDialog({
             error={create.error}
             onSubmit={(draft) => create.mutate(draft)}
             onCancel={() => setOpen(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Edits a key from its actions menu (the user's or the admin's endpoint):
+ * name, description, access, allowed origins or IPs and rate limit; only the
+ * name and description of a revoked or expired key. Nothing changed, nothing
+ * is sent. A failed save keeps the dialog and its input.
+ */
+export function EditApiKeyDialog({
+  apiKey,
+  mode,
+  open,
+  onOpenChange
+}: {
+  apiKey: ApiKey;
+  mode: ApiKeyMode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const constraints = useQuery({
+    ...apiKeyPolicyConstraintsQueryOptions(browserApi),
+    enabled: open
+  });
+  const guardrailsLocked = apiKey.state === "revoked" || apiKey.state === "expired";
+
+  const save = useMutation({
+    mutationFn: (body: ApiKeyUpdateRequest) => updateApiKey(browserApi, mode, apiKey.id, body),
+    onSuccess: () => {
+      void invalidateApiKeys(queryClient);
+      onOpenChange(false);
+    }
+  });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        if (!next) save.reset();
+      }}
+    >
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        {constraints.isPending ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{t("api_keys_admin_edit_title")}</DialogTitle>
+            </DialogHeader>
+            <LoadingState rows={4} />
+          </>
+        ) : (
+          <ApiKeyForm
+            idPrefix={`edit-${apiKey.id}`}
+            mode="edit"
+            initial={draftFromApiKey(apiKey)}
+            constraints={constraints.data}
+            guardrailsLocked={guardrailsLocked}
+            title={t("api_keys_admin_edit_title")}
+            description={t("api_keys_admin_edit_description")}
+            pending={save.isPending}
+            error={save.error}
+            onSubmit={(draft) => {
+              const body = updateRequest(draft, apiKey, { metadataOnly: guardrailsLocked });
+              if (Object.keys(body).length === 0) onOpenChange(false);
+              else save.mutate(body);
+            }}
+            onCancel={() => onOpenChange(false)}
           />
         )}
       </DialogContent>

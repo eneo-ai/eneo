@@ -315,14 +315,20 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 
 /**
  * The update request for what the draft changed on `key`; empty when nothing
- * did. Type, ownership, scope and expiry are not edited here.
+ * did. Type, ownership, scope and expiry are not edited here, and with
+ * `metadataOnly` (a revoked or expired key) only the name and description.
  */
-export function updateRequest(draft: ApiKeyDraft, key: ApiKey): ApiKeyUpdateRequest {
+export function updateRequest(
+  draft: ApiKeyDraft,
+  key: ApiKey,
+  { metadataOnly = false }: { metadataOnly?: boolean } = {}
+): ApiKeyUpdateRequest {
   const update: ApiKeyUpdateRequest = {};
   const name = draft.name.trim();
   if (name !== key.name) update.name = name;
   const description = draft.description.trim();
   if (description !== (key.description ?? "")) update.description = description || null;
+  if (metadataOnly) return update;
   const rateLimit = rateLimitBody(draft);
   if (rateLimit !== (key.rate_limit ?? null)) update.rate_limit = rateLimit;
   const permissions = resourcePermissionsBody(draft);
