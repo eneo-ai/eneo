@@ -182,6 +182,39 @@ async def test_one_cookie_name_per_installation(
     assert await credential("GET", SAME_ORIGIN, {ignored: COOKIE}) is None
 
 
+@pytest.mark.parametrize(
+    ("cookie_headers", "expected"),
+    [
+        # A browser's own serialization, and the same pairs without spaces.
+        ([f"lang=sv; {SESSION}={COOKIE}; theme=dark"], COOKIE),
+        ([f"lang=sv;{SESSION}={COOKIE}"], COOKIE),
+        # HTTP/2 may split the Cookie header; every one of them is read.
+        (["lang=sv", f"{SESSION}={COOKIE}"], COOKIE),
+        # Two values: one may be planted, so neither counts.
+        ([f"{SESSION}={COOKIE}; {SESSION}=planted"], None),
+        ([f"{SESSION}={COOKIE}", f"{SESSION}=planted"], None),
+        # A name the browser does not treat as __Host- (a sibling host can set
+        # it) never reads as the session, though Starlette strips it to one.
+        ([f"\xa0{SESSION}=planted"], None),
+        ([f"\x85{SESSION}=planted"], None),
+        ([f"{SESSION}={COOKIE}; \xa0{SESSION}=planted"], COOKIE),
+        ([f"{SESSION}\xa0=planted"], None),
+        ([f"{SESSION.upper()}=planted"], None),
+        ([f"{SESSION}="], None),
+    ],
+)
+async def test_session_cookie_is_read_exactly(
+    cookie_headers: list[str], expected: str | None
+):
+    raw = [(b"cookie", header.encode("latin-1")) for header in cookie_headers]
+    raw.append((b"sec-fetch-site", b"same-origin"))
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/api/v1/users/me/", "headers": raw}
+    )
+
+    assert await OAUTH2_SCHEME(request) == expected
+
+
 @pytest.fixture
 def gate_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
     # SimpleLogger does not propagate to the root logger caplog listens on.

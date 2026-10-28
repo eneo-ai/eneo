@@ -2,7 +2,7 @@ import time
 from collections.abc import Mapping
 
 import jwt
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 from starlette.responses import Response
 
 from eneo.main.config import Settings, get_settings
@@ -75,6 +75,27 @@ def txn_cookie_name(settings: Settings) -> str:
     return DEV_TXN_COOKIE if settings.is_development else TXN_COOKIE
 
 
+def session_cookie(request: HTTPConnection, settings: Settings) -> str | None:
+    """The session cookie's value, read exactly from the raw Cookie headers.
+
+    Only a pair named exactly like the session counts, and only when it is the
+    only one. Starlette's parser strips names of any whitespace, including
+    U+00A0 and U+0085, and lets the last duplicate win, so a sibling host could
+    plant the name with a leading U+00A0, which the browser does not treat as
+    ``__Host-``, and have it read as the session.
+    """
+    name = session_cookie_name(settings)
+    pairs = (
+        pair.strip(" \t").partition("=")
+        for header in request.headers.getlist("cookie")
+        for pair in header.split(";")
+    )
+    values = [value for key, separator, value in pairs if separator and key == name]
+    if len(values) != 1:
+        return None
+    return values[0] or None
+
+
 def session_token_from_request(request: Request) -> str | None:
     """The session cookie's token, if the setting is on and the gate allows.
 
@@ -84,7 +105,7 @@ def session_token_from_request(request: Request) -> str | None:
     settings = get_settings()
     if not settings.browser_session_enabled:
         return None
-    token = request.cookies.get(session_cookie_name(settings))
+    token = session_cookie(request, settings)
     if not token:
         return None
     return token if gate_allows(request) else None
