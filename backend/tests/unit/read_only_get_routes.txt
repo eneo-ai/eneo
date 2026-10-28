@@ -18,6 +18,7 @@ GET /api/v1/admin/crawler/websites/
 GET /api/v1/admin/crawler/websites/{id}/matches/
 GET /api/v1/admin/crawler/websites/{id}/runs/
 GET /api/v1/admin/credentials/
+GET /api/v1/admin/federation
 GET /api/v1/admin/model-providers/
 GET /api/v1/admin/model-providers/capabilities/
 GET /api/v1/admin/model-providers/favorites/

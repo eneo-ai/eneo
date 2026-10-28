@@ -41,6 +41,8 @@ class WebRuntimeConfig(BaseModel):
     request_integration_form_url: str | None
     # The separate origin MCP app views are served from; the web app frames it.
     mcp_app_content_origin: str | None
+    # Per-tenant IdPs (FEDERATION_ENABLED): admins get the sign-in settings page.
+    federation_enabled: bool
 
 
 def _http_parts(value: str | None) -> SplitResult | None:
@@ -68,6 +70,7 @@ def build_runtime_config(settings: Settings) -> WebRuntimeConfig:
         version=settings.app_version,
         revision=settings.app_revision,
         mcp_app_content_origin=serialize_origin(content_base) if content_base else None,
+        federation_enabled=settings.federation_enabled,
         **links,
     )
 

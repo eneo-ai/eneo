@@ -76,6 +76,11 @@ class AuditMetadata:
     """Factory for standardized audit metadata structures."""
 
     @staticmethod
+    def actor(actor: Any) -> dict[str, Any]:
+        """The ``actor`` block alone, for metadata with its own target shape."""
+        return _actor_snapshot(actor)
+
+    @staticmethod
     def standard(
         actor: Any,
         target: Any,
