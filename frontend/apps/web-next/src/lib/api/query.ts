@@ -80,7 +80,9 @@ export function pollWhile<TData>(
  * How a route loader or guard reads data: three operations, never a bare
  * `queryClient.query` (whose meaning depends on the options' staleTime).
  * A failed background refetch marks a query invalidated (query-core 5.104),
- * so `isInvalidated` must never decide whether a read blocks.
+ * so `isInvalidated` must never decide whether a read blocks. None of them
+ * changes `retry`: a query keeps the options of the request that started
+ * it, so a reader's own retry would reach every other reader.
  */
 type ReadOptions<TQueryFnData, TError, TData, TQueryKey extends QueryKey> = QueryExecuteOptions<
   TQueryFnData,
@@ -111,7 +113,9 @@ export function readCached<
  * A guard's evidence (may this user open this page?): read again once older
  * than the options' staleTime or invalidated, so a revoked permission or a
  * deleted resource fails now, with its 403 or 404, instead of passing on
- * cached data. Navigation waits for it, so it fails at once, without retries.
+ * cached data. Retries follow the resource's options, which every reader of
+ * the query shares: a resource whose guard must fail at once says
+ * `retry: false` there.
  */
 export function readFresh<
   TQueryFnData,
@@ -122,7 +126,7 @@ export function readFresh<
   queryClient: QueryClient,
   options: ReadOptions<TQueryFnData, TError, TData, TQueryKey>
 ): Promise<TData> {
-  return queryClient.query({ ...options, retry: false });
+  return queryClient.query(options);
 }
 
 /**

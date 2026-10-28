@@ -281,14 +281,16 @@ layout.
   - `readCached`: session and display data, as cached, even when stale or
     after a failed background refresh (mounted observers refresh it);
   - `readFresh`: a guard's evidence (a permission, a resource that may be
-    gone), read again when stale or invalidated, without retries; the guard
-    keeps its 403/404 handling;
+    gone), read again when stale or invalidated; the guard keeps its 403/404
+    handling;
   - `warmQuery`: starts what the page will need without waiting, with the
     query's own retry policy.
 
-  `makeQueryClient` owns the default retry (never on a 4xx, three more tries
-  on a server or network failure). A query that must not retry sets
-  `retry: false` after spreading its options.
+  None of them changes `retry`: every reader of a query shares the options
+  of the request that started it. `makeQueryClient` owns the default (never
+  on a 4xx, three more tries on a server or network failure); a resource that
+  must not retry, such as a guard's that must fail at once, sets
+  `retry: false` in its own options, after any spread.
 
 - **`loaderDeps` hold no UI state** (`tab`, `page`, `search`, `role_id`,
   `session_id`, `step`): a tab or filter change must not show pending UI or

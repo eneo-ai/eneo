@@ -182,13 +182,31 @@ describe("readFresh", () => {
     expect(backend.requests()).toBe(asked + 1);
   });
 
-  it("fails a cold read at once, without retries", async () => {
+  it("fails at once for a resource that does not retry, also joining a warmed request", async () => {
     const backend = resource(503);
+    const client = makeQueryClient();
+    const options = { ...backend.options, retry: false as const };
 
-    const result = await settle(readFresh(makeQueryClient(), backend.options));
+    warmQuery(client, options);
+    const result = await settle(readFresh(client, options));
 
     expect(result).toMatchObject({ status: "rejected", reason: { status: 503 } });
     expect(backend.requests()).toBe(1);
+  });
+
+  it("leaves the resource's retries to its other readers", async () => {
+    const backend = resource("first", 503);
+    const client = makeQueryClient();
+    const observer = new QueryObserver(client, backend.options);
+    const unsubscribe = observer.subscribe(() => {});
+    await retriesRun();
+    await settle(readFresh(client, { ...backend.options, staleTime: 0 }));
+    const asked = backend.requests();
+
+    await settle(client.invalidateQueries({ queryKey: ["resource"] }));
+
+    expect(backend.requests()).toBe(asked + 4);
+    unsubscribe();
   });
 });
 
