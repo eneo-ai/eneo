@@ -149,3 +149,43 @@ it("reinitializes only for new page data, without resetting live conversation up
   `);
   expect(stdout).toContain("page initialization preserves live chat state");
 }, 20_000);
+
+it("removes a subscribed missing-conversation notice without restoring the stale page state", async () => {
+  const { stdout } = await runClientChatCheck(`
+    import assert from "node:assert/strict";
+    import { ChatService } from "./src/lib/features/chat/ChatService.svelte.ts";
+    import { effect_root, render_effect, state, get } from "svelte/internal/client";
+    import { flushSync } from "svelte";
+    const data = state({
+      eneo: { conversations: {
+        ask: async ({ callbacks }) => callbacks.onFirstChunk({
+          id: "message", session_id: "new-session", question: "Hello", answer: "Hi",
+          files: [], generated_files: [], references: [], tools: { assistants: [] }
+        }),
+        list: async () => ({ items: [], count: 0, total_count: 0 })
+      } },
+      chatPartner: { id: "assistant", type: "assistant" },
+      initialConversation: null,
+      missingConversation: true
+    });
+    const chat = new ChatService(get(data));
+    let initializations = 0;
+    let noticeVisible;
+    const cleanup = effect_root(() => {
+      render_effect(() => { chat.init(get(data)); initializations += 1; });
+      render_effect(() => { noticeVisible = chat.missingConversation; });
+    });
+    flushSync();
+    assert.equal(noticeVisible, true);
+
+    await chat.askQuestion("Hello");
+    flushSync();
+    assert.equal(noticeVisible, false);
+    assert.equal(initializations, 1);
+    assert.equal(chat.currentConversation.id, "new-session");
+    assert.equal(chat.currentConversation.messages[0].answer, "Hi");
+    cleanup();
+    console.log("missing-conversation recovery preserves live chat state");
+  `);
+  expect(stdout).toContain("missing-conversation recovery preserves live chat state");
+}, 20_000);

@@ -883,6 +883,7 @@ export class ChatService {
               mergeToolReferences(mcp_tool_references);
               this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
+              this.missingConversation = false;
               this.currentConversation.name = question;
             },
             onText: (text) => {
