@@ -151,7 +151,7 @@ it("shows the failed-login fallback", async () => {
 
 it("uses a document link for global SSO, without an app-router preload or interception", async () => {
   replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
-  const router = await route("/login?next=%2Fadmin");
+  const router = await route("/login?message=logout&next=%2Fadmin");
   const link = await screen.findByRole("link", { name: messages.login_with_sso });
   expect(link.getAttribute("href")).toBe("/api/v1/auth/browser/initiate?next=%2Fadmin");
   expect(link.closest("form")).toBeNull();
@@ -168,6 +168,131 @@ it("uses a document link for global SSO, without an app-router preload or interc
   fireEvent(link, event);
   expect(intercepted).toBe(false);
   expect(router.state.location.pathname).toBe("/login");
+});
+
+it.each(["has_global_oidc_config", "has_single_tenant_federation"])(
+  "starts %s once after mount and hides password fields",
+  async (flag) => {
+    replies.set("/api/v1/auth/federation-status", { [flag]: true });
+    await route("/login?next=%2Fspaces%2Fx%3Fa%3D1");
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledExactlyOnceWith(
+        "/api/v1/auth/browser/initiate?next=%2Fspaces%2Fx%3Fa%3D1"
+      )
+    );
+    expect(screen.queryByLabelText(messages.password, { exact: true })).toBeNull();
+    expect(screen.getByText(messages.redirecting_to_authentication)).toBeTruthy();
+  }
+);
+
+it("keeps explicit password login available on an SSO installation", async () => {
+  replies.set("/api/v1/auth/federation-status", { has_single_tenant_federation: true });
+  await route("/login?showUsernameAndPassword=true&next=%2Fadmin");
+  expect(await screen.findByRole("button", { name: messages.login })).toBeTruthy();
+  expect(screen.getByRole("link", { name: messages.hide_login_fields }).getAttribute("href")).toBe(
+    "/login?next=%2Fadmin"
+  );
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("does not flash password fields while SSO discovery is pending", async () => {
+  let resolve!: (value: unknown) => void;
+  replies.set(
+    "/api/v1/auth/federation-status",
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  await route("/login");
+  expect(screen.queryByRole("button", { name: messages.login })).toBeNull();
+  await act(async () => resolve({ has_global_oidc_config: true }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("button", { name: messages.login })).toBeNull();
+});
+
+it.each([
+  "message=logout",
+  "message=oidc_callback_failed",
+  "error=access_denied",
+  "detailCode=access_denied"
+])("does not auto-start SSO after %s", async (search) => {
+  replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
+  await route(`/login?${search}`);
+  expect(await screen.findByRole("link", { name: messages.login_with_sso })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: messages.login })).toBeNull();
+  expect(screen.getByRole("link", { name: messages.show_login_fields })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+function multiTenant() {
+  replies.set("/api/v1/auth/federation-status", { has_multi_tenant_federation: true });
+  replies.set("/api/v1/auth/tenants", {
+    tenants: [
+      { slug: "first", name: "First" },
+      { slug: "second", name: "Second" }
+    ]
+  });
+}
+
+it("starts and remembers an explicit tenant once with a safe continuation", async () => {
+  multiTenant();
+  await route("/login?tenant=second&next=%2Fadmin");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/api/v1/auth/browser/initiate?tenant=second&next=%2Fadmin"
+    )
+  );
+  expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBe("second");
+});
+
+it("starts a valid explicit tenant without depending on the public selector request", async () => {
+  multiTenant();
+  replies.set("/api/v1/auth/tenants", new Response(null, { status: 503 }));
+  await route("/login?tenant=second");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/api/v1/auth/browser/initiate?tenant=second")
+  );
+  expect(callsTo("/api/v1/auth/tenants")).toHaveLength(0);
+});
+
+it.each(["invalid%2Fslug", "first&tenant=second"])(
+  "ignores invalid tenant %s and shows choices instead of a remembered tenant",
+  async (tenant) => {
+    multiTenant();
+    sessionStorage.setItem("eneo-last-tenant-slug", "first");
+    await route(`/login?tenant=${tenant}`);
+    expect(await screen.findByRole("link", { name: "Second" })).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);
+
+it("retries the callback's remembered tenant or clears it to choose another organisation", async () => {
+  multiTenant();
+  sessionStorage.setItem("eneo-last-tenant-slug", "first");
+  const router = await route("/login?tenant=first&message=oidc_callback_failed&next=%2Fadmin");
+  const retry = await screen.findByRole("link", { name: messages.oidc_retry_login });
+  expect(retry.getAttribute("href")).toBe(
+    "/api/v1/auth/browser/initiate?tenant=first&next=%2Fadmin"
+  );
+  expect(navigate).not.toHaveBeenCalled();
+  const chooseAnother = screen.getByRole("button", { name: messages.oidc_choose_another_org });
+  chooseAnother.focus();
+  fireEvent.click(chooseAnother);
+  expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBeNull();
+  expect(screen.getByRole("link", { name: "Second" })).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByText(messages.select_your_organization))
+  );
+  await waitFor(() => expect(router.state.location.search).toEqual({ next: "/admin" }));
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("does not auto-select the sole tenant after a callback failure", async () => {
+  replies.set("/api/v1/auth/federation-status", { has_multi_tenant_federation: true });
+  replies.set("/api/v1/auth/tenants", { tenants: [{ slug: "first", name: "First" }] });
+  await route("/login?message=oidc_callback_failed");
+  expect(await screen.findByRole("link", { name: "First" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
 });
 
 it("shows tenant choices instead of global SSO and remembers only the chosen organisation", async () => {
@@ -224,6 +349,7 @@ it("never signs out or starts authentication while preloading", async () => {
   fetcher.mockClear();
   await router.preloadRoute({ to: "/logout" });
   await router.preloadRoute({ to: "/login/switch-organisation" });
+  await router.preloadRoute({ to: "/login", search: { tenant: "first" } });
   await router.preloadRoute({ to: "/deactivated" });
   await router.preloadRoute({ to: "/module-login" });
   await router.preloadRoute({ to: "/integrations/callback/token" });

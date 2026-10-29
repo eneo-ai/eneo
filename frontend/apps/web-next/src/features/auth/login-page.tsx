@@ -18,6 +18,7 @@ import { PublicPage } from "./public-page";
 import { ssoEntry } from "./sso-entry";
 import { TenantFederationLogin } from "./tenant-federation-login";
 import { DocumentLink } from "./document-link";
+import { FederationPending } from "./federation-pending";
 
 export const loginSearch = z.object({
   next: z.string().optional(),
@@ -26,7 +27,15 @@ export const loginSearch = z.object({
   info: z.string().optional(),
   detailCode: z.string().optional(),
   correlation: z.string().optional(),
-  rawDetail: z.string().optional()
+  rawDetail: z.string().optional(),
+  // Keep invalid input present in the flat URL serializer. Dropping the key
+  // would turn a bad tenant link into an automatic or remembered login.
+  tenant: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .catch("")
+    .optional(),
+  showUsernameAndPassword: z.string().catch("").optional()
 });
 
 type Props = { search: z.infer<typeof loginSearch>; accessibilityStatementUrl: string | null };
@@ -55,6 +64,31 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
   const diagnostics = loginDiagnosticsFromRecord(search);
   const ssoHref = ssoEntry(federation.data, search.next);
   const notice = search.message ? notices.get(search.message) : undefined;
+  // A failed discovery already exposed the form. Retrying must not discard
+  // credentials the user has since entered by starting SSO automatically.
+  const showCredentials =
+    search.showUsernameAndPassword !== undefined || federation.errorUpdatedAt > 0;
+  const suppressAuto =
+    showCredentials ||
+    search.message !== undefined ||
+    search.error !== undefined ||
+    search.detailCode !== undefined;
+  const autoSso = !bound && !suppressAuto && search.tenant === undefined ? ssoHref : null;
+  const ssoStarted = useRef(false);
+  useEffect(() => {
+    if (autoSso && !ssoStarted.current) {
+      ssoStarted.current = true;
+      navigateTo(autoSso);
+    }
+  }, [autoSso]);
+  const credentialSearch = new URLSearchParams();
+  for (const [key, value] of Object.entries(search)) {
+    if (value != null && key !== "showUsernameAndPassword")
+      credentialSearch.set(key, key === "next" ? safeNextPath(value) : value);
+  }
+  if (!showCredentials) credentialSearch.set("showUsernameAndPassword", "true");
+  const credentialHref = `/login${credentialSearch.size ? `?${credentialSearch}` : ""}`;
+  const credentials = <LoginForm next={search.next} />;
 
   return (
     <PublicPage
@@ -64,6 +98,8 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
     >
       {bound && (me.isPending || me.data) ? (
         <LoadingState rows={1} label={t("redirecting")} />
+      ) : autoSso ? (
+        <FederationPending href={autoSso} />
       ) : (
         <>
           {diagnostics ? <LoginDiagnosticsAlert diagnostics={diagnostics} /> : null}
@@ -76,17 +112,34 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
             {() => (
               <>
                 {federation.data?.has_multi_tenant_federation ? (
-                  <TenantFederationLogin next={search.next} />
+                  <TenantFederationLogin
+                    next={search.next}
+                    tenant={search.tenant}
+                    suppressAuto={suppressAuto}
+                    failed={diagnostics !== null}
+                  >
+                    {credentials}
+                  </TenantFederationLogin>
                 ) : ssoHref ? (
                   <Button label={t("login_with_sso")} href={ssoHref} as={DocumentLink} />
                 ) : null}
-                {ssoHref || federation.data?.has_multi_tenant_federation ? (
+                {showCredentials && ssoHref ? (
                   <p className="text-ax-text-secondary text-center text-xs uppercase">{t("or")}</p>
                 ) : null}
               </>
             )}
           </QueryStateBoundary>
-          <LoginForm next={search.next} />
+          {!federation.data?.has_multi_tenant_federation &&
+            (showCredentials || (!federation.isPending && !ssoHref)) &&
+            credentials}
+          {ssoHref ? (
+            <Button
+              as={DocumentLink}
+              href={credentialHref}
+              variant="ghost"
+              label={t(showCredentials ? "hide_login_fields" : "show_login_fields")}
+            />
+          ) : null}
         </>
       )}
     </PublicPage>
