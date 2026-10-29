@@ -4,7 +4,6 @@ import { PAGINATION } from "$lib/core/constants";
 import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
-import { waitFor } from "$lib/core/waitFor";
 import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
@@ -22,6 +21,7 @@ import {
   type SSE
 } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
+import { untrack } from "svelte";
 import type { Readable } from "svelte/store";
 import type { Attachment } from "$lib/features/attachments/AttachmentManager";
 import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
@@ -367,33 +367,26 @@ export class ChatService {
   init(data: {
     eneo: Eneo;
     chatPartner: ChatPartner;
-    initialConversation?: Promise<Conversation | null> | Conversation | null;
-    initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
+    initialConversation?: Conversation | null;
+    initialHistory?: Paginated<ConversationSparse>;
   }) {
-    this.#resetConversationDiagnostics();
-    this.#chatPartner = data.chatPartner;
+    // Page effects track their data argument, not the chat state read while
+    // applying it. Sending a message must not reapply the initial conversation.
+    untrack(() => {
+      this.#resetConversationDiagnostics();
+      this.#chatPartner = data.chatPartner;
 
-    waitFor(data.initialHistory, {
-      onLoaded: (initialHistory) => {
-        this.loadedConversations = initialHistory.items;
-        this.totalConversations = initialHistory.total_count;
-        this.#nextCursor = initialHistory.next_cursor ?? null;
-      }
-    });
+      this.loadedConversations = data.initialHistory?.items ?? [];
+      this.totalConversations = data.initialHistory?.total_count ?? 0;
+      this.#nextCursor = data.initialHistory?.next_cursor ?? null;
 
-    waitFor(data.initialConversation, {
-      onLoaded: (initialConversation) => {
-        this.#resetConversationDiagnostics();
-        this.currentConversation = initialConversation;
+      this.currentConversation = data.initialConversation ?? emptyConversation();
+      if (data.initialConversation) {
         this.#seedLockedFromHistory();
-        this.#clearPreflight();
-      },
-      onNull: () => {
-        this.#resetConversationDiagnostics();
-        this.currentConversation = emptyConversation();
+      } else {
         this.#resetLocked();
-        this.#clearPreflight();
       }
+      this.#clearPreflight();
     });
   }
 
