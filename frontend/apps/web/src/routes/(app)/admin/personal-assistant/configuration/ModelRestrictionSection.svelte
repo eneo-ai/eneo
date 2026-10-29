@@ -8,7 +8,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { IconCPU } from "@eneo/icons/CPU";
-  import { CircleAlert } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type ModelSelection = { selected: boolean; isDefault: boolean };

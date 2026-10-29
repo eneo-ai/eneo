@@ -8,8 +8,10 @@ its text and its original stay readable for historical citations.
 from __future__ import annotations
 
 import asyncio
+import math
+import signal
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -24,11 +26,14 @@ from eneo.database.tables.questions_table import InfoBlobReferences, Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs import replaced_versions
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository, ReplacedPage
 from eneo.info_blobs.replaced_versions import (
-    CleanupResult,
-    count_remaining,
+    CleanupProgress,
+    StatusProgress,
+    _execute,
     release_all,
+    scan_remaining,
 )
 from eneo.worker.crawl.persistence import (
     _publish_prepared_pages,
@@ -549,6 +554,23 @@ async def _website_with_history(db_session, admin_user, space_factory, count: in
     return ctx, active_id, replaced_ids
 
 
+async def _add_replaced_without_search_data(session, active, count: int) -> None:
+    """Replaced versions that already hold no chunks, as after a cleanup."""
+    session.add_all(
+        InfoBlobs(
+            text="Released",
+            size=8,
+            source_id=active.source_id,
+            version_state=InfoBlobVersionState.SUPERSEDED.value,
+            user_id=active.user_id,
+            tenant_id=active.tenant_id,
+            website_id=active.website_id,
+        )
+        for _ in range(count)
+    )
+    await session.flush()
+
+
 async def test_backlog_command_releases_history_from_earlier_releases(
     db_session,
     admin_user,
@@ -557,17 +579,24 @@ async def test_backlog_command_releases_history_from_earlier_releases(
     ctx, active_id, replaced_ids = await _website_with_history(
         db_session, admin_user, space_factory, count=3
     )
-    async with db_session() as session:
-        assert await InfoBlobRepository(session).count_replaced_with_search_data() == 3
+    before = await scan_remaining(sessionmanager, StatusProgress(), limit=2)
+    assert (before.versions_read, before.remaining_observed) == (3, 3)
+    assert before.pass_complete
 
-    result = await release_all(sessionmanager, limit=2, pause_seconds=0)
-
-    assert result == CleanupResult(
-        released_versions=3,
-        released_bytes=sum(len(f"Old text {i}".encode()) + 12 for i in range(3)),
-        skipped_busy=0,
-        remaining=0,
+    result = await release_all(
+        sessionmanager, CleanupProgress(), limit=2, pause_seconds=0
     )
+
+    assert (result.versions_read, result.released_versions) == (3, 3)
+    assert result.released_bytes == sum(
+        len(f"Old text {i}".encode()) + 12 for i in range(3)
+    )
+    assert (result.skipped_busy, result.pass_complete) == (0, True)
+    async with db_session() as session:
+        last_id = await session.scalar(
+            sa.select(InfoBlobs.id).order_by(InfoBlobs.id.desc()).limit(1)
+        )
+    assert result.last_confirmed_id == last_id
     async with db_session() as session:
         for index, replaced_id in enumerate(replaced_ids):
             assert await _chunk_count(session, replaced_id) == 0
@@ -577,8 +606,87 @@ async def test_backlog_command_releases_history_from_earlier_releases(
             assert replaced.size == len(f"Old text {index}".encode())
         assert await _chunk_count(session, active_id) == 1
 
-    rerun = await release_all(sessionmanager, limit=2, pause_seconds=0)
-    assert rerun == CleanupResult(0, 0, 0, 0)
+    rerun = await release_all(
+        sessionmanager, CleanupProgress(), limit=2, pause_seconds=0
+    )
+    assert (rerun.released_versions, rerun.pass_complete) == (0, True)
+    after = await scan_remaining(sessionmanager, StatusProgress(), limit=2)
+    assert (after.remaining_observed, after.pass_complete) == (0, True)
+
+
+async def _add_active_without_search_data(session, active, ids) -> None:
+    """Active versions of other pages, at chosen positions in the id order."""
+    session.add_all(
+        InfoBlobs(
+            id=id_,
+            text="Other page",
+            size=10,
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=active.user_id,
+            tenant_id=active.tenant_id,
+            website_id=active.website_id,
+        )
+        for id_ in ids
+    )
+    await session.flush()
+
+
+async def test_backlog_pages_are_bounded_by_versions_read(
+    db_session,
+    admin_user,
+    space_factory,
+    monkeypatch,
+) -> None:
+    _, active_id, _ = await _website_with_history(
+        db_session, admin_user, space_factory, count=2
+    )
+    async with db_session() as session:
+        active = await session.get(InfoBlobs, active_id)
+        assert active is not None
+        await _add_replaced_without_search_data(session, active, count=12)
+        # Long runs of active versions at both ends of the id order, where a
+        # page filtered by state would have to read on until the next match.
+        await _add_active_without_search_data(
+            session,
+            active,
+            [UUID(int=n) for n in range(1, 21)]
+            + [UUID(int=2**128 - n) for n in range(1, 21)],
+        )
+        total = await session.scalar(sa.select(sa.func.count()).select_from(InfoBlobs))
+    scans: list[int] = []
+    pauses: list[float] = []
+    original_scan = InfoBlobRepository.scan_replaced_page
+    original_sleep = asyncio.sleep
+    pause = 0.0125
+
+    async def recording_scan(self, *, after, limit):
+        page = await original_scan(self, after=after, limit=limit)
+        scans.append(len(page.with_search_data))
+        return page
+
+    async def recording_sleep(delay, *args, **kwargs):
+        if 0 < delay <= pause:
+            pauses.append(delay)
+        return await original_sleep(delay, *args, **kwargs)
+
+    monkeypatch.setattr(InfoBlobRepository, "scan_replaced_page", recording_scan)
+    monkeypatch.setattr(asyncio, "sleep", recording_sleep)
+
+    status = await scan_remaining(sessionmanager, StatusProgress(), limit=4)
+    status_scans = len(scans)
+    result = await release_all(
+        sessionmanager, CleanupProgress(), limit=4, pause_seconds=pause
+    )
+
+    # Every page reads four versions of any state, plus one empty page that
+    # ends the walk, so the number of pages follows from the table size.
+    assert status_scans == len(scans) - status_scans == math.ceil(total / 4) + 1
+    assert (status.versions_read, status.remaining_observed) == (14, 2)
+    assert (result.versions_read, result.released_versions) == (14, 2)
+    assert status.pass_complete and result.pass_complete
+    # Pauses follow the releases: a full page would wait `pause`.
+    assert sum(pauses) == pytest.approx(pause * result.released_versions / 4)
 
 
 async def test_backlog_command_skips_versions_another_transaction_holds(
@@ -595,13 +703,14 @@ async def test_backlog_command_skips_versions_another_transaction_holds(
         await holder.execute(
             sa.select(InfoBlobs.id).where(InfoBlobs.id == busy_id).with_for_update()
         )
-        result = await release_all(sessionmanager, limit=10, pause_seconds=0)
+        payload, exit_code = await _execute("run", sessionmanager)
 
-    assert result.released_versions == 1
-    assert result.skipped_busy == 1
-    assert result.remaining == 1
-    rerun = await release_all(sessionmanager, limit=10, pause_seconds=0)
-    assert (rerun.released_versions, rerun.remaining) == (1, 0)
+    assert exit_code == 2
+    assert payload["released_versions"] == 1
+    assert payload["skipped_busy"] == 1
+    assert payload["pass_complete"] is True
+    payload, exit_code = await _execute("run", sessionmanager)
+    assert (exit_code, payload["released_versions"]) == (0, 1)
 
 
 async def test_backlog_command_counts_only_versions_it_released(
@@ -617,31 +726,213 @@ async def test_backlog_command_counts_only_versions_it_released(
         await InfoBlobRepository(session).release_replaced_search_data(
             [replaced_ids[0]]
         )
-    # As if a concurrent run released that version after this run found it.
-    monkeypatch.setattr(
-        InfoBlobRepository,
-        "_replaced_with_search_data",
-        staticmethod(
-            lambda: InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value
-        ),
-    )
+    original = InfoBlobRepository.scan_replaced_page
 
-    result = await release_all(sessionmanager, limit=10, pause_seconds=0)
+    async def stale_scan(self, *, after, limit):
+        # As if a concurrent run released that version after this one read it.
+        page = await original(self, after=after, limit=limit)
+        if page.last_id is None:
+            return page
+        return ReplacedPage(
+            page.last_id,
+            page.versions_read,
+            sorted({*page.with_search_data, replaced_ids[0]}),
+        )
+
+    monkeypatch.setattr(InfoBlobRepository, "scan_replaced_page", stale_scan)
+
+    result = await release_all(
+        sessionmanager, CleanupProgress(), limit=10, pause_seconds=0
+    )
 
     assert (result.released_versions, result.skipped_busy) == (1, 0)
 
 
-async def test_backlog_command_stops_on_a_locked_table_instead_of_waiting(
+@pytest.mark.parametrize(
+    "stop",
+    [RuntimeError("injected failure"), asyncio.CancelledError()],
+    ids=["failure", "ctrl-c-or-sigterm"],
+)
+async def test_backlog_run_keeps_committed_batches_when_a_later_batch_stops(
+    db_session,
+    admin_user,
+    space_factory,
+    monkeypatch,
+    stop,
+) -> None:
+    _, _, replaced_ids = await _website_with_history(
+        db_session, admin_user, space_factory, count=2
+    )
+    first, second = sorted(replaced_ids)
+    monkeypatch.setattr(replaced_versions, "BATCH_SIZE", 1)
+    monkeypatch.setattr(replaced_versions, "PAUSE_SECONDS", 0)
+    release = InfoBlobRepository.release_replaced_search_data
+    calls = 0
+
+    async def fail_the_second_batch(self, info_blob_ids):
+        nonlocal calls
+        calls += 1
+        released = await release(self, info_blob_ids)
+        if calls == 2:
+            raise stop
+        return released
+
+    monkeypatch.setattr(
+        InfoBlobRepository, "release_replaced_search_data", fail_the_second_batch
+    )
+
+    payload, exit_code = await _execute("run", sessionmanager)
+
+    assert exit_code == 3
+    assert payload["outcome"] == "incomplete"
+    assert payload["released_versions"] == 1
+    assert payload["pass_complete"] is False
+    # The cursor stops at the last committed page, before the failed one; the
+    # active version may sit between the two replaced ones in id order.
+    assert first <= UUID(payload["last_confirmed_id"]) < second
+    async with db_session() as session:
+        assert await _chunk_count(session, first) == 0
+        assert await _chunk_count(session, second) == 1
+
+
+async def test_backlog_run_does_not_depend_on_the_status_walk(
+    db_session,
+    admin_user,
+    space_factory,
+    monkeypatch,
+) -> None:
+    await _website_with_history(db_session, admin_user, space_factory, count=1)
+
+    async def unavailable(*args, **kwargs):
+        raise sa.exc.OperationalError("count", {}, Exception("statement timeout"))
+
+    monkeypatch.setattr(replaced_versions, "scan_remaining", unavailable)
+
+    payload, exit_code = await _execute("run", sessionmanager)
+
+    assert (exit_code, payload["released_versions"]) == (0, 1)
+    assert payload["pass_complete"] is True
+
+
+async def test_backlog_commands_report_a_locked_table_instead_of_waiting(
     db_session,
 ) -> None:
     async with db_session() as holder:
         await holder.execute(sa.text("LOCK TABLE info_blobs IN ACCESS EXCLUSIVE MODE"))
-        with pytest.raises(sa.exc.DBAPIError, match="lock timeout"):
-            await asyncio.wait_for(count_remaining(sessionmanager), timeout=15)
-        with pytest.raises(sa.exc.DBAPIError, match="lock timeout"):
-            await asyncio.wait_for(
-                release_all(sessionmanager, pause_seconds=0), timeout=15
+        status, status_exit = await asyncio.wait_for(
+            _execute("status", sessionmanager), timeout=15
+        )
+        run, run_exit = await asyncio.wait_for(
+            _execute("run", sessionmanager), timeout=15
+        )
+
+    assert (status_exit, status["outcome"], status["pass_complete"]) == (
+        3,
+        "inconclusive",
+        False,
+    )
+    assert (run_exit, run["outcome"], run["released_versions"]) == (
+        3,
+        "incomplete",
+        0,
+    )
+
+
+async def test_backlog_transactions_set_their_own_limits(db_session) -> None:
+    settings = (
+        "lock_timeout",
+        "statement_timeout",
+        "max_parallel_workers_per_gather",
+    )
+    async with replaced_versions._bounded(sessionmanager) as repo:
+        inside = [
+            await repo.session.scalar(sa.text(f"SHOW {name}")) for name in settings
+        ]
+    async with db_session() as session:
+        outside = [await session.scalar(sa.text(f"SHOW {name}")) for name in settings]
+
+    assert inside == ["2s", "1min", "0"]
+    assert outside[2] != "0"
+    assert outside[:2] != inside[:2]
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [RuntimeError("injected failure"), asyncio.CancelledError()],
+    ids=["failure", "ctrl-c-or-sigterm"],
+)
+async def test_backlog_result_survives_a_stop_while_closing_the_database(
+    monkeypatch,
+    stop,
+) -> None:
+    sigterm_while_closing = []
+
+    class Database:
+        def init(self, url):
+            pass
+
+        async def close(self):
+            sigterm_while_closing.append(signal.getsignal(signal.SIGTERM))
+            raise stop
+
+    async def finished(command, database):
+        return {"pass_complete": True}, 0
+
+    monkeypatch.setattr("eneo.database.database.DatabaseSessionManager", Database)
+    monkeypatch.setattr(replaced_versions, "_execute", finished)
+
+    assert await replaced_versions._run("run") == ({"pass_complete": True}, 0)
+    # SIGTERM still reaches the command while it closes, and not after.
+    assert sigterm_while_closing[0] not in (signal.SIG_DFL, signal.SIG_IGN)
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+
+
+async def test_backlog_release_keeps_the_recorded_size_of_legacy_crawled_pages(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    # The 2.1 crawler recorded a page's size as its text and chunk sizes
+    # without embedding bytes; releasing its chunks leaves that size alone.
+    ctx, _, _ = await _website_with_history(
+        db_session, admin_user, space_factory, count=0
+    )
+    text = "Legacy page"
+    async with db_session() as session:
+        (active,) = await _versions_of(session, ctx.website_id)
+        legacy = InfoBlobs(
+            text=text,
+            size=len(text.encode()),
+            source_id=active.source_id,
+            version_state=InfoBlobVersionState.SUPERSEDED.value,
+            user_id=active.user_id,
+            tenant_id=active.tenant_id,
+            website_id=active.website_id,
+        )
+        session.add(legacy)
+        await session.flush()
+        session.add(
+            InfoBlobChunks(
+                info_blob_id=legacy.id,
+                tenant_id=active.tenant_id,
+                chunk_no=0,
+                text=text,
+                size=len(text.encode()),
+                embedding=[0.1, 0.2, 0.3],
             )
+        )
+        legacy_id = legacy.id
+
+    result = await release_all(
+        sessionmanager, CleanupProgress(), limit=10, pause_seconds=0
+    )
+
+    assert (result.released_versions, result.released_bytes) == (1, len(text.encode()))
+    async with db_session() as session:
+        assert await _chunk_count(session, legacy_id) == 0
+        released = await session.get(InfoBlobs, legacy_id)
+        assert released is not None
+        assert released.size == len(text.encode())
 
 
 async def _fill_tenant_quota(session, tenant_id) -> int:

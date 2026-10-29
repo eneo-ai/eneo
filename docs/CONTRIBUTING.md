@@ -2,6 +2,11 @@
 
 Welcome to the Eneo community! This guide provides everything needed to contribute to the democratic AI platform for the public sector.
 
+Anyone with a GitHub account can contribute: you do not need to belong to a team or an organisation. This file is the developer guide. Two companion pages on the documentation site follow the same steps:
+
+- **[Contributing to Eneo](https://docs.eneo.ai/contributing)**: every way to contribute, how to create an issue, and the contribution steps with best practices.
+- **[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)**: Core Maintainers and Collaborators, protected branches, releases, and an FAQ.
+
 ---
 
 ## 🌟 Our Mission
@@ -14,9 +19,19 @@ Eneo embodies the principle that **"Generative AI must not be a technology for t
 
 ### 1. Start With an Issue
 
-Every contribution starts with a GitHub issue, before any code is written. Search the [existing issues](https://github.com/eneo-ai/eneo/issues) first; if nothing matches, open one using the issue templates and describe what you want to change, why, and how you plan to approach it. New issues are picked up automatically by the project intake workflow, which labels them and adds them to the Eneo GitHub Project so maintainers can triage them. Wait for maintainer feedback before implementing: it avoids work that cannot be accepted, and the resulting pull request must reference the approved issue.
+Every contribution starts with a GitHub issue, before any code is written. Search the [existing issues](https://github.com/eneo-ai/eneo/issues?q=is%3Aissue), open and closed, first. If nothing matches, choose a template under [**Issues → New issue**](https://github.com/eneo-ai/eneo/issues/new/choose):
 
-### 2. Development Environment Setup
+- **Bug Report** for something that does not work as expected
+- **Feature Request** for a new capability or an improvement
+- **Finding** for a risk, problem or idea that is not yet a clear bug or feature
+
+**Epic** and **Development task** are planning templates for scheduled roadmap work. Blank issues are turned off.
+
+The project intake workflow labels each new issue from its template and Area, and adds it to the Eneo GitHub Project so maintainers can triage it. Comment that you would like to work on the issue and wait for a maintainer to confirm the approach: it avoids work that cannot be accepted, and your pull request must reference the issue.
+
+> **Issues are public.** Do not include personal data, credentials, internal hostnames or user content. Report vulnerabilities privately, as described in [Vulnerability Reporting](#vulnerability-reporting).
+
+### 2. Fork and Set Up the Development Environment
 
 **Prerequisites:**
 - Docker and VS Code with Dev Containers extension
@@ -24,9 +39,12 @@ Every contribution starts with a GitHub issue, before any code is written. Searc
 
 **Setup Steps:**
 ```bash
-# Fork and clone the repository
+# Fork on GitHub (https://github.com/eneo-ai/eneo/fork), then clone your fork
 git clone https://github.com/YOUR_USERNAME/eneo.git
 cd eneo
+
+# Track the main repository so you can branch from its develop
+git remote add upstream https://github.com/eneo-ai/eneo.git
 
 # Open in VS Code
 code .
@@ -98,34 +116,54 @@ to the operator-managed connection instead, and the admin dialog stops being the
 authority. See [docs/deployment/OBJECT_CONTENT.md](deployment/OBJECT_CONTENT.md)
 for the operator-managed path and for connecting an external endpoint.
 
-### 3. Make Your First Contribution
+### 3. Branch From the Latest `develop`
 
 ```bash
-# Create feature branch for the approved issue
-git checkout -b feature/your-feature-name
+# Start every branch from the main repository's develop
+git fetch upstream
+git switch -c feature/your-feature-name upstream/develop
 
 # Install local hooks once per clone
 pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
-
-# Make changes and test
-# ... your development work ...
-
-# Run tests
-cd backend && uv run pytest
-cd frontend && bun run test
-
-# Commit changes
-git add .
-git commit -m "feat: add your feature description"
-
-# Push and create a pull request that references the issue
-git push origin feature/your-feature-name
 ```
 
-For a WIP push or a CI rerun on a feature branch where local hooks are not
-useful, use `git push --no-verify`. Do not use it to bypass a real failure before
-opening or merging a PR, and do not use it for protected branches such as
-`develop` or `main`.
+Use a prefix that describes the work, as listed under [Branch Naming](#branch-strategy). The hooks run formatting, commit message and pre-push checks locally, so problems show up before CI.
+
+### 4. Make and Test Your Change
+
+```bash
+# Run the tests for what you changed
+(cd backend && uv run pytest)
+(cd frontend && bun run test)
+
+# Commit in small steps using Conventional Commits
+git add <files>
+git commit -m "feat(assistants): add system prompt validation"
+
+# Push to your fork
+git push -u origin feature/your-feature-name
+```
+
+Update tests and documentation in the same pull request when behaviour changes; see [Documentation Standards](#-documentation-standards). For a WIP push or a CI rerun where local hooks are not useful, use `git push --no-verify`. Do not use it to bypass a real failure before opening or merging a PR.
+
+### 5. Open a Pull Request Against `develop`
+
+Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fill in the [pull request template](../.github/pull_request_template.md):
+
+- Write the title as a Conventional Commit, for example `fix(spaces): resolve permission check bug`. It becomes the commit message on `develop`.
+- Link the issue under **Planning** with `Fixes #123`.
+- Fill in **Changes**, **Why**, **User-facing** and **Testing**, plus **Accessibility** for UI changes.
+- Leave **Allow edits by maintainers** ticked so a maintainer can push a small fix for you.
+- Open it as a **draft** if you want early feedback on the direction.
+
+### 6. Checks, Review and Merge
+
+- `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels` must pass. A first-time contributor's first workflow run may need a maintainer's approval before it starts.
+- If you cannot add labels yourself, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
+- A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing; a new commit dismisses an earlier approval, and every conversation must be resolved.
+- A Core Maintainer adds the approved pull request to the merge queue, which tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
+
+Only Core Maintainers can push to `develop`, `main` or `release/*` and merge pull requests, so contributors always work from a fork. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 ---
 
@@ -486,35 +524,19 @@ test(users): add integration tests for user creation
 
 ### Pull Request Process
 
-1. **Create Focused PRs**: One feature or fix per pull request
-2. **Write Clear Descriptions**: Explain what changes and why
-3. **Include Tests**: All new functionality requires tests
-4. **Update Documentation**: Keep docs synchronized with code changes
-5. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
-6. **Request Review**: At least one approval required from maintainers
+The step-by-step flow is in [Quick Start for Contributors](#-quick-start-for-contributors). These rules apply to every pull request:
 
-**PR Template:**
-```markdown
-## Description
-Brief description of changes and motivation.
+1. **Create Focused PRs**: One issue, one pull request. Split unrelated changes.
+2. **Use a Conventional Commit Title**: The title becomes the squash commit message on `develop`.
+3. **Link the Issue**: Write `Fixes #123` under **Planning** in the template.
+4. **Write Clear Descriptions**: Explain what changes and why.
+5. **Include Tests**: All new functionality requires tests.
+6. **Update Documentation**: Keep docs synchronized with code changes.
+7. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
+8. **Labels**: Every PR needs one change type and at least one area, as described in the [required-label policy](../.github/PROJECT_WORKFLOW.md#required-labels). If you cannot add labels, a maintainer adds them.
+9. **Review**: At least one approval from a member of `@eneo-ai/core-maintainers` is required. GitHub requests the review automatically through `.github/CODEOWNERS`, and only Core Maintainers can merge. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
-## Type of Change
-- [ ] Bug fix (non-breaking change fixing an issue)
-- [ ] New feature (non-breaking change adding functionality)
-- [ ] Breaking change (fix or feature causing existing functionality to change)
-- [ ] Documentation update
-
-## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Manual testing completed
-
-## Checklist
-- [ ] Code follows project style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated
-- [ ] No breaking changes without major version bump
-```
+**PR Template:** GitHub fills in the [pull request template](../.github/pull_request_template.md) when you open a PR. Its sections are **Changes**, **Why**, **Planning**, **User-facing**, **Testing**, **Accessibility** (for UI changes) and **Screenshots**.
 
 ---
 
@@ -616,30 +638,31 @@ import * as m from '$lib/paraglide/messages.js';
 - Implement proper access controls for all endpoints
 
 **Authentication & Authorization:**
+
+Every HTTP and WebSocket endpoint must declare who it accepts and who may call it with `@endpoint_access`, directly below the route decorator. The application refuses to start if a route is missing a declaration. Domain services still check space membership, tenant boundaries and ownership.
+
 ```python
-# Secure endpoint example
-@router.get("/assistants/{assistant_id}")
-async def get_assistant(
-    assistant_id: UUID,
-    current_user: User = Depends(get_current_user),
-    service: AssistantService = Depends()
-) -> AssistantResponse:
-    """Get assistant with proper authorization."""
-    # Verify user has access to the assistant's space
-    assistant = await service.get_assistant_with_auth_check(
-        assistant_id, 
-        current_user
-    )
-    return AssistantResponse.from_domain(assistant)
+@router.post("/{provider_id}/test/")
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Uses organization-managed provider credentials.",
+)
+async def test_provider(provider_id: UUID, user: CurrentUser):
+    ...
 ```
+
+See *Declare access on every endpoint* in [Security for Contributors](../frontend/apps/docs-site/src/content/contributing/security.mdx) for the rules and the tests to add.
 
 ### Vulnerability Reporting
 
 **Security Issues:**
-- Report security vulnerabilities privately to: security@sundsvall.se
+- Report security vulnerabilities privately, through [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new) on GitHub or by email to security@sundsvall.se. Never use a public issue, pull request or discussion.
 - Include detailed reproduction steps
 - Allow reasonable time for fix before public disclosure
 - Security fixes receive priority handling
+
+See [SECURITY.md](SECURITY.md) for what to include and the response targets.
 
 ---
 
@@ -793,7 +816,7 @@ All API endpoints automatically generate OpenAPI documentation. Ensure:
 
 ### Good First Issues
 
-New contributors should look for issues labeled `good-first-issue`:
+New contributors should look for issues labeled [`good first issue`](https://github.com/eneo-ai/eneo/labels/good%20first%20issue) or [`help wanted`](https://github.com/eneo-ai/eneo/labels/help%20wanted):
 - Documentation improvements
 - UI component enhancements
 - Test coverage improvements
@@ -821,8 +844,9 @@ Eneo follows the [Contributor Covenant Code of Conduct](https://www.contributor-
 - Pull Request comments for code review
 
 **Community Support:**
-- Email: digitalisering@sundsvall.se (public sector organizations)
-- GitHub Discussions for community questions
+- GitHub Discussions for community questions, open to everyone
+- [Forum](https://forum.eneo.ai) and [chat](https://chat.eneo.ai) for public-sector employees (both require a public-sector email address)
+- Email: digitalisering@sundsvall.se for organizations that want to join the collaboration; see [Samarbetsforum](https://eneo.ai/samarbetsforum.html) for how Eneo is governed
 
 ### Recognition
 
@@ -847,7 +871,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 - Feature freeze 1 week before minor releases
 - Critical bug fixes accepted during freeze
-- All changes require approval from maintainers
+- All changes require approval from Core Maintainers, who also cut release branches and publish releases
 - Changelog updated with each release
 
 ---
@@ -858,7 +882,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 
 **Getting Started:**
 1. Join the [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
-2. Look for `good-first-issue` labels
+2. Look for `good first issue` and `help wanted` labels
 3. Read through existing code to understand patterns
 4. Ask questions in discussions or issue comments
 

@@ -36,7 +36,11 @@
     type SkillSelectedAdvanceResult,
     type SkillBindingUpdateScope
   } from "$lib/features/skills/SkillAdoptionProjection.svelte";
-  import { Info, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { onDestroy, tick, untrack } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";

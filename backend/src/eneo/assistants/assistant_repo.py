@@ -1051,12 +1051,15 @@ class AssistantRepository:
                         )
                     )
 
-    async def delete(self, assistant_id: UUID, space_id: UUID) -> None:
-        await self.session.execute(
-            sa.delete(Assistants).where(
+    async def delete(self, assistant_id: UUID, space_id: UUID) -> UUID | None:
+        """Delete the assistant; returns the icon the deleted row showed."""
+        return await self.session.scalar(
+            sa.delete(Assistants)
+            .where(
                 Assistants.id == assistant_id,
                 Assistants.space_id == space_id,
             )
+            .returning(Assistants.icon_id)
         )
 
     async def move(

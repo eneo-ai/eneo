@@ -15,6 +15,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ResponseType,
 )
+from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     TOOL_RESULT_BUDGET_NOTICE,
@@ -26,6 +27,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
 )
 from eneo.files.model_file_references import file_handle
 from eneo.main import stream_lifecycle
+from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
@@ -1170,9 +1172,10 @@ async def test_iterate_stream_stops_at_max_rounds():
     # One follow-up per executed round, then one forced toolless final. The
     # mock keeps emitting tool calls even then; those are dropped and the
     # turn still ends cleanly.
-    assert mocked_acompletion.await_count == 11
+    max_rounds = get_settings().max_tool_rounds
+    assert mocked_acompletion.await_count == max_rounds + 1
     assert mocked_acompletion.await_args_list[-1].kwargs["tool_choice"] == "none"
-    assert len(mcp_proxy.calls) == 10
+    assert len(mcp_proxy.calls) == max_rounds
     assert any(chunk.stop for chunk in completions)
 
 
@@ -1635,10 +1638,18 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
     assert execution_events
 
 
-async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
+def _cap_tool_rounds(monkeypatch: pytest.MonkeyPatch, rounds: int) -> int:
+    settings = get_settings().model_copy(update={"max_tool_rounds": rounds})
+    monkeypatch.setattr(tenant_model_adapter, "get_settings", lambda: settings)
+    return rounds
+
+
+async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_completion_adapter()
     mcp_proxy = _FakeMCPProxy()
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     responses = [
         _response(
             tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
@@ -1677,11 +1688,13 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
-async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
+async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
         for i in range(1, max_rounds + 1)
@@ -1726,6 +1739,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     ]
     assert len(refusals) == 1
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
+    last_executed = next(
+        message
+        for message in messages
+        if message["role"] == "tool"
+        and message["tool_call_id"] == f"call_{max_rounds - 1}"
+    )
+    assert "No tool rounds remain" in last_executed["content"]
     streamed_text = "".join(c.text for c in completions if c.text)
     assert "partial answer" in streamed_text
     refused_events = [
@@ -1737,11 +1757,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     assert refused_events
 
 
-async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
+async def test_forced_final_drops_ignored_tool_calls_without_pending_events(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
         for i in range(1, max_rounds + 1)
@@ -1794,6 +1816,64 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+async def test_model_is_told_how_many_tool_rounds_remain_near_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    max_rounds = _cap_tool_rounds(monkeypatch, 4)
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+        for i in range(max_rounds)
+    ]
+    responses.append(_response(content="answer"))
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "answer"
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in completion_call.await_args_list[-1].kwargs["messages"]
+        if message.get("role") == "tool"
+    }
+    assert "tool round" not in results["call_0"]
+    assert "2 tool round(s) remain" in results["call_1"]
+    assert "1 tool round(s) remain" in results["call_2"]
+    assert "No tool rounds remain" in results["call_3"]
+    # The model finished inside the budget, so nothing was refused.
+    assert "tool_choice" not in completion_call.await_args_list[-1].kwargs
+
+
+async def test_completion_requests_carry_the_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    settings = get_settings().model_copy(
+        update={"completion_request_timeout_seconds": 12.5}
+    )
+    monkeypatch.setattr(tenant_model_adapter, "get_settings", lambda: settings)
+    transport = AsyncMock(return_value="response")
+    monkeypatch.setattr(
+        tenant_model_adapter.litellm_transport, "acompletion", transport
+    )
+
+    assert (
+        await tenant_model_adapter._acompletion_call(model="m", messages=[])
+        == "response"
+    )
+    assert transport.await_args.kwargs["timeout"] == 12.5
 
 
 async def _stream_rounds(rounds: list[list[SimpleNamespace]]):

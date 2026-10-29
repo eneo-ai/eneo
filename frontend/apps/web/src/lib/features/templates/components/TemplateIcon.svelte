@@ -1,6 +1,7 @@
 <script lang="ts">
   import { dynamicColour } from "$lib/core/colours";
-  import { loadLucideIconOrNull, type LucideIconComponent } from "../lucideIcons";
+  import { loadLucideIconOrNull, type LucideIconData } from "../lucideIcons";
+  import LucideSvg from "./LucideSvg.svelte";
 
   let {
     template,
@@ -13,15 +14,15 @@
   // The icon registry is fetched on demand (see lucideIcons.ts). The box keeps
   // its size while the icon is on its way, so nothing shifts when it lands;
   // the initial is shown when there is no icon to wait for, or none arrived.
-  let IconComponent = $state<LucideIconComponent | null>(null);
+  let icon = $state<LucideIconData | null>(null);
   let settled = $state(false);
   $effect(() => {
     const name = template.icon_name;
     let stale = false;
     settled = false;
-    void loadLucideIconOrNull(name).then((icon) => {
+    void loadLucideIconOrNull(name).then((loaded) => {
       if (stale) return;
-      IconComponent = icon;
+      icon = loaded;
       settled = true;
     });
     return () => {
@@ -34,8 +35,8 @@
   {...dynamicColour({ basedOn: template.category })}
   class="border-dynamic-stronger bg-dynamic-dimmer flex items-center justify-center rounded-lg border {size}"
 >
-  {#if IconComponent}
-    <IconComponent class="text-dynamic-stronger {size === 'large' ? 'h-5 w-5' : 'h-4 w-4'}" />
+  {#if icon}
+    <LucideSvg {icon} class="text-dynamic-stronger {size === 'large' ? 'h-5 w-5' : 'h-4 w-4'}" />
   {:else if !template.icon_name || settled}
     <span class="text-dynamic-stronger">{[...template.name][0]}</span>
   {/if}
