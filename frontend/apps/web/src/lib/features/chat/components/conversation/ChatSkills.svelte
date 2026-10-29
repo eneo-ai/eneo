@@ -29,16 +29,14 @@
   } from "$lib/features/skills/personalChatSkills";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
-  import {
-    Ban,
-    BookOpenCheck,
-    CirclePause,
-    LoaderCircle,
-    Lock,
-    Plus,
-    Search,
-    Settings2
-  } from "@lucide/svelte";
+  import Ban from "@lucide/svelte/icons/ban";
+  import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
+  import CirclePause from "@lucide/svelte/icons/circle-pause";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Lock from "@lucide/svelte/icons/lock";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Search from "@lucide/svelte/icons/search";
+  import Settings2 from "@lucide/svelte/icons/settings-2";
   import { RadioGroup as RadioGroupPrimitive, useId } from "bits-ui";
   import { untrack } from "svelte";
 
