@@ -121,6 +121,13 @@ dropped stays in develop's `next` for the following release. If develop has
 changed a feature since the cut, `port` names the entries whose text it
 replaced: describe the newer behaviour in a new `next` entry.
 
+Porting matches entries by their ids and aliases, preserving develop-only
+fields even after a rename or merge. Former ids and aliases remain aliases
+of the ported entry. If several matching entries disagree on another field
+absent from the release entry, the command stops without writing the file.
+Reconcile that metadata explicitly before running it again; permission
+requirements are never combined automatically.
+
 CI enforces the split (`--branch`, from the pull request's target branch):
 on `develop` every block except `next` must be a dated, final release; a
 `release/vX.Y` branch cannot carry `next` or notes for a later line; and no

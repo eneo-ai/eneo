@@ -226,15 +226,51 @@ def port(notes: Notes, version: str, ref: str) -> list[str]:
     rewritten: list[str] = []
     entries = []
     for entry in released["entries"]:
-        ours = develop.get(entry["id"])
-        if ours:
+        identities = _ids([entry])
+        matches = [ours for ours in develop.values() if _ids([ours]) & identities]
+        if matches:
+            # A merged entry may match several develop entries. Preserve their
+            # shared metadata, but never guess how conflicting requirements combine.
+            develop_only = [
+                {
+                    key: value
+                    for key, value in ours.items()
+                    if key not in entry and key != "aliases"
+                }
+                for ours in matches
+            ]
+            if any(fields != develop_only[0] for fields in develop_only[1:]):
+                matched_ids = ", ".join(ours["id"] for ours in matches)
+                raise Abort(
+                    f"{entry['id']} matches {matched_ids} with conflicting develop-only fields; "
+                    "reconcile their metadata before porting"
+                )
+            ours = matches[0]
             extra = sorted(set(ours) - set(entry))
             if extra:
                 kept.append(f"{entry['id']} ({', '.join(extra)})")
-            if (ours.get("title"), ours.get("body")) != (entry.get("title"), entry.get("body")):
+            if any(
+                (match.get("title"), match.get("body"))
+                != (entry.get("title"), entry.get("body"))
+                for match in matches
+            ):
                 rewritten.append(entry["id"])
+            aliases = list(
+                dict.fromkeys(
+                    identity
+                    for source in [entry, *matches]
+                    for identity in [source["id"], *source.get("aliases", [])]
+                    if identity != entry["id"]
+                )
+            )
             entry = {**ours, **entry}
-        entries.append({key: entry[key] for key in notes.vocab.entry_order if key in entry})
+            if aliases:
+                entry["aliases"] = aliases
+            else:
+                entry.pop("aliases", None)
+        entries.append(
+            {key: entry[key] for key in notes.vocab.entry_order if key in entry}
+        )
 
     shipped = _ids(entries)
     moved: list[str] = []

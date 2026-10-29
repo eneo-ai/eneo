@@ -155,8 +155,135 @@ class ReleaseNotesTests(_RepoCase):
         self.assertEqual(again.returncode, 0, again.stdout)
         self.assertEqual([r["version"] for r in self.read(root)], ["2.4.0", "2.3.1", "2.2.0"])
 
+    def test_port_preserves_develop_metadata_through_aliases(self) -> None:
+        identities = [
+            (entry("old-id"), entry("new-id", aliases=["old-id"])),
+            (entry("new-id", aliases=["old-id"]), entry("old-id")),
+            (
+                entry("develop-id", aliases=["shared-id"]),
+                entry("release-id", aliases=["shared-id"]),
+            ),
+        ]
+        for ours, released in identities:
+            with self.subTest(develop=ours["id"], released=released["id"]):
+                ours["permissions"] = {"allOf": ["assistants"]}
+                ours["body"] = {"en": "Develop text.", "sv": "Utvecklingstext."}
+                root = self.make_repo(
+                    {"releases": [{"version": "next", "entries": [ours]}, HISTORY]}
+                )
+                self.release_branch(
+                    root,
+                    [
+                        {
+                            "version": "2.3.0",
+                            "date": "2026-11-04",
+                            "entries": [released],
+                        },
+                        HISTORY,
+                    ],
+                )
+
+                result = self.run_notes(root, "port", "2.3.0", "--from", "release/v2.3")
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                releases = self.read(root)
+                self.assertEqual(
+                    [release["version"] for release in releases], ["2.3.0", "2.2.0"]
+                )
+                ported = releases[0]["entries"][0]
+                self.assertEqual(ported["permissions"], ours["permissions"])
+                self.assertEqual(ported["body"], released["body"])
+                self.assertEqual(ported["id"], released["id"])
+                self.assertEqual(
+                    {ported["id"], *ported.get("aliases", [])},
+                    {
+                        ours["id"],
+                        released["id"],
+                        *ours.get("aliases", []),
+                        *released.get("aliases", []),
+                    },
+                )
+
+    def test_port_merges_aliases_with_identical_develop_metadata(self) -> None:
+        permissions = {"allOf": ["assistants"]}
+        root = self.make_repo(
+            {
+                "releases": [
+                    {
+                        "version": "next",
+                        "entries": [
+                            entry("first", permissions=permissions),
+                            entry("second", permissions=permissions),
+                        ],
+                    },
+                    HISTORY,
+                ]
+            }
+        )
+        self.release_branch(
+            root,
+            [
+                {
+                    "version": "2.3.0",
+                    "date": "2026-11-04",
+                    "entries": [entry("merged", aliases=["first", "second"])],
+                },
+                HISTORY,
+            ],
+        )
+
+        result = self.run_notes(root, "port", "2.3.0", "--from", "release/v2.3")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual([r["version"] for r in self.read(root)], ["2.3.0", "2.2.0"])
+        self.assertEqual(self.read(root)[0]["entries"][0]["permissions"], permissions)
+
+    def test_port_refuses_conflicting_develop_metadata_without_writing(self) -> None:
+        for second_permissions in [None, {"allOf": ["websites"]}]:
+            with self.subTest(second_permissions=second_permissions):
+                second = entry("second")
+                if second_permissions:
+                    second["permissions"] = second_permissions
+                root = self.make_repo(
+                    {
+                        "releases": [
+                            {
+                                "version": "next",
+                                "entries": [
+                                    entry(
+                                        "first", permissions={"allOf": ["assistants"]}
+                                    ),
+                                    second,
+                                ],
+                            },
+                            HISTORY,
+                        ]
+                    }
+                )
+                self.release_branch(
+                    root,
+                    [
+                        {
+                            "version": "2.3.0",
+                            "date": "2026-11-04",
+                            "entries": [entry("merged", aliases=["first", "second"])],
+                        },
+                        HISTORY,
+                    ],
+                )
+                before = (root / NOTES).read_text(encoding="utf-8")
+
+                result = self.run_notes(root, "port", "2.3.0", "--from", "release/v2.3")
+
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn("conflicting develop-only fields", result.stdout)
+                self.assertIn("first, second", result.stdout)
+                self.assertEqual((root / NOTES).read_text(encoding="utf-8"), before)
+
     def test_port_refuses_undated_or_missing_releases(self) -> None:
-        root = self.make_repo({"releases": [{"version": "next", "entries": [ENTRY]}, HISTORY]})
+        root = self.make_repo(
+            {"releases": [{"version": "next", "entries": [ENTRY]}, HISTORY]}
+        )
         self.release_branch(root, [{"version": "2.3.0", "entries": [ENTRY]}, HISTORY])
         for version, fragment in [
             ("2.3.0", "run finalize there"),
