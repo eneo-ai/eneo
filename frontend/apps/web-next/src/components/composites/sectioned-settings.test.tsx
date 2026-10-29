@@ -10,7 +10,7 @@ import { setViewport } from "@/test/setup-dom";
 import { SaveStatusProvider, useSetSaveStatus } from "./save-status";
 import { SectionedSettings, type SettingsSection } from "./sectioned-settings";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();
