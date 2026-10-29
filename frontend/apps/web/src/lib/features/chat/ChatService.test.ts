@@ -5,7 +5,9 @@ import {
   EneoError,
   type Conversation,
   type ConversationSparse,
+  type Eneo,
   type Paginated,
+  type SSE,
   type UploadedFile
 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
@@ -130,6 +132,117 @@ describe("ChatService loaded page data", () => {
     chat.init({ eneo: {} as never, chatPartner: assistantPartner(), missingConversation: true });
     chat.init({ eneo: {} as never, chatPartner: assistantPartner() });
     expect(chat.missingConversation).toBe(false);
+  });
+});
+
+describe("ChatService missing-conversation recovery", () => {
+  type AskRequest = Parameters<Eneo["conversations"]["ask"]>[0];
+  const firstChunk: SSE.FirstChunk = {
+    id: "message-1",
+    session_id: "session-1",
+    question: "Hello",
+    answer: "Recovered",
+    files: [],
+    generated_files: [],
+    references: [],
+    tools: { assistants: [] }
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("clears the notice when a new session is confirmed, before the answer finishes", async () => {
+    let finish!: () => void;
+    const ask = vi.fn(async ({ callbacks }: AskRequest) => {
+      await callbacks?.onOpen?.(new Response());
+      callbacks?.onFirstChunk?.(firstChunk);
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const chat = chatService(vi.fn(), { ask, missingConversation: true });
+    const request = chat.askQuestion("Hello");
+
+    expect(chat.missingConversation).toBe(true);
+    try {
+      await vi.waitFor(() => expect(chat.currentConversation.id).toBe("session-1"));
+      expect(chat.askQuestion.isLoading).toBe(true);
+      expect(chat.missingConversation).toBe(false);
+      expect(chat.currentConversation.messages[0].answer).toBe("Recovered");
+    } finally {
+      finish();
+      await request;
+    }
+  });
+
+  it.each([
+    { outcome: "failed", failure: new EneoError("Unavailable", "SERVER", 503, 0) },
+    { outcome: "cancelled", failure: new DOMException("Send cancelled", "AbortError") }
+  ])(
+    "keeps the notice after a $outcome send and clears it on a successful retry",
+    async ({ failure }) => {
+      const ask = vi
+        .fn()
+        .mockRejectedValueOnce(failure)
+        .mockImplementationOnce(async ({ callbacks }: AskRequest) => {
+          callbacks?.onFirstChunk?.(firstChunk);
+        });
+      const chat = chatService(vi.fn(), { ask, missingConversation: true });
+
+      await expect(chat.askQuestion("Hello")).rejects.toBe(failure);
+      expect(chat.currentConversation.id).toBe("");
+      expect(chat.currentConversation.messages).toHaveLength(0);
+      expect(chat.missingConversation).toBe(true);
+
+      await chat.askQuestion("Hello");
+      expect(chat.currentConversation.id).toBe("session-1");
+      expect(chat.missingConversation).toBe(false);
+    }
+  );
+
+  it("does not restore the notice if an answer fails after creating the new session", async () => {
+    const ask = vi.fn(async ({ callbacks }: AskRequest) => {
+      await callbacks?.onOpen?.(new Response());
+      callbacks?.onFirstChunk?.(firstChunk);
+      throw new EneoError("Answer failed", "SERVER", 200, 0);
+    });
+    const chat = chatService(vi.fn(), { ask, missingConversation: true });
+
+    await chat.askQuestion("Hello");
+    expect(chat.currentConversation.id).toBe("session-1");
+    expect(chat.missingConversation).toBe(false);
+  });
+
+  it("ignores a late session confirmation after another missing conversation is opened", async () => {
+    let confirm!: () => void;
+    const ask = vi.fn(
+      ({ callbacks }: AskRequest) =>
+        new Promise<void>((resolve) => {
+          confirm = () => {
+            callbacks?.onFirstChunk?.(firstChunk);
+            resolve();
+          };
+        })
+    );
+    const chat = chatService(vi.fn(), { ask, missingConversation: true });
+    const request = chat.askQuestion("Hello");
+
+    chat.init({
+      eneo: {} as never,
+      chatPartner: assistantPartner({ id: "assistant-2" }),
+      missingConversation: true
+    });
+    confirm();
+    await request;
+
+    expect(chat.partner.id).toBe("assistant-2");
+    expect(chat.currentConversation.id).toBe("");
+    expect(chat.currentConversation.messages).toHaveLength(0);
+    expect(chat.missingConversation).toBe(true);
   });
 });
 
