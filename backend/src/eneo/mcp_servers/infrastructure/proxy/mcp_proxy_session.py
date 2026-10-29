@@ -288,7 +288,8 @@ class MCPProxySession:
         previous_owner = self._tool_key_owners.get(prefixed_name)
         if previous_owner is not None and previous_owner != owner:
             logger.warning(
-                "[MCPProxy] Tool collision: '%s' cannot change protocol identity during a session",
+                "[MCPProxy] Tool collision: '%s' skipped because its protocol identity "
+                "cannot change during a session",
                 prefixed_name,
             )
             return None
