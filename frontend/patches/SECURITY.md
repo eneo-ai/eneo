@@ -20,8 +20,9 @@ unbounded recursion this mitigates.
 `node --test scripts/security-patches.test.mjs` exercises the installed copy
 through Nextra → fast-glob → micromatch, including ordinary patterns, excessive
 brace/parenthesis nesting, direct AST inputs and cyclic parents. CI runs it
-before allowing exactly this advisory in the version-based audit. All other
-advisories still fail. Container scans retain the unmodified findings for review;
+before allowing exactly this advisory in the version-based audit. Other high or
+critical advisories still fail; lower severities produce warnings. Container
+scans retain the unmodified findings for review;
 the same tested patch is installed by the frozen Bun install in both Dockerfiles.
 
 The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes

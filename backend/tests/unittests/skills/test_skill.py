@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
@@ -22,11 +22,18 @@ from eneo.skills import (
     validate_skill_slug,
 )
 from eneo.skills.application.skill_service import SkillService
+from eneo.skills.domain.personal_chat_skill_layers import compose_layers
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
     NormalizedSkillContent,
+    PersonalSkillLayerDecision,
+    PersonalSkillLayerReason,
+    PersonalSkillLayerStatus,
     Skill,
+    SkillActivationEvidence,
     SkillActivationEvidenceV1,
+    SkillActivationEvidenceV2,
+    SkillActivationFallbackReason,
     SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
@@ -1050,3 +1057,85 @@ def test_runtime_policy_bounds_are_enforced_by_the_domain(field: str, value: int
             context_share_percent=int(values["context_share_percent"]),
             max_activations_per_turn=int(values["max_activations_per_turn"]),
         )
+
+
+def _layered_policy() -> SkillRuntimePolicy:
+    return SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=10,
+    )
+
+
+def test_a_plan_without_a_personal_layer_still_records_v1():
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(_binding(position=0),), blocked=()),
+        policy=_layered_policy(),
+    )
+
+    assert isinstance(_activation_evidence(plan), SkillActivationEvidenceV1)
+
+
+def test_an_applied_personal_layer_records_v2_with_its_catalogue_keys():
+    organisation = SkillRuntimeResolution(
+        eligible=(_binding(position=4, name="Klarsprak"),), blocked=()
+    )
+    personal = SkillRuntimeResolution(
+        eligible=(_binding(position=0, name="Svar"),), blocked=()
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=compose_layers(organisation=organisation, personal=personal),
+        policy=_layered_policy(),
+        personal_layer=PersonalSkillLayerDecision(
+            status=PersonalSkillLayerStatus.APPLIED, bindings=personal.eligible
+        ),
+    )
+
+    evidence = _activation_evidence(plan)
+
+    assert isinstance(evidence, SkillActivationEvidenceV2)
+    [reference] = evidence.personal_layer.references
+    assert reference.skill_id == personal.eligible[0].skill_id
+    assert reference.activation_key == "skill-2"
+    assert reference.position == 1
+    adapter = TypeAdapter(SkillActivationEvidence)
+    assert adapter.validate_json(evidence.model_dump_json()) == evidence
+
+
+def test_a_suspended_personal_layer_records_its_skills_outside_the_catalogue():
+    personal = (_binding(position=0, name="Svar"),)
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0, name="Klarsprak"),), blocked=()
+        ),
+        policy=_layered_policy(),
+        personal_layer=PersonalSkillLayerDecision(
+            status=PersonalSkillLayerStatus.SUSPENDED,
+            reason=PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE,
+            detail=SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING,
+            bindings=personal,
+        ),
+    )
+
+    evidence = _activation_evidence(plan)
+
+    assert isinstance(evidence, SkillActivationEvidenceV2)
+    layer = evidence.personal_layer
+    assert layer.reason is PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE
+    assert layer.detail == SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING
+    assert [r.skill_id for r in layer.references] == [personal[0].skill_id]
+    assert all(r.activation_key is None for r in layer.references)
+    assert personal[0].skill_id not in {r.skill_id for r in evidence.available}
+
+    dumped = evidence.model_dump(mode="json")
+    available_key = dumped["available"][0]
+    tampered = {
+        **dumped,
+        "personal_layer": {**dumped["personal_layer"], "references": [available_key]},
+    }
+    with pytest.raises(ValidationError):
+        SkillActivationEvidenceV2.model_validate(tampered)

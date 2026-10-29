@@ -61,6 +61,7 @@ from eneo.logging.logging import LoggingDetails
 from eneo.main.config import get_settings
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
+from eneo.main.stream_lifecycle import close_provider_stream
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -1873,6 +1874,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         Yields:
             Completion: Chunks of completion (yields error events for mid-stream failures)
         """
+        # The provider stream currently being read. Each tool round replaces
+        # it; whichever one is active when the loop ends is closed below.
+        active_provider_stream: AsyncIterator[_LiteLLMStreamChunk] | None = None
         try:
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration"
@@ -1884,6 +1888,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 if prepared
                 else cast(AsyncIterator[_LiteLLMStreamChunk], stream)
             )
+            active_provider_stream = source_stream
             mcp_proxy = prepared.mcp_proxy if prepared else None
             skill_runtime = prepared.skill_runtime if prepared else None
             activation_available = (
@@ -2312,6 +2317,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 **litellm_kwargs,
                             ),
                         )
+                        active_provider_stream = follow_up
                         async for comp in _drain_stream(
                             follow_up,
                             result,
@@ -2746,6 +2752,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                     # Drain follow-up stream
+                    active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,
                         result,
@@ -2826,6 +2833,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             **litellm_kwargs,
                         ),
                     )
+                    active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,
                         result,
@@ -2904,6 +2912,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
+        finally:
+            # A finished stream is already exhausted; an aborted one still holds
+            # the provider's HTTP response until it is closed.
+            await close_provider_stream(active_provider_stream)
 
     @override
     def get_model_route(self) -> str:

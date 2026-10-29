@@ -46,7 +46,10 @@ router = APIRouter(
     tags=["skills"],
 )
 
-_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+# Detail-page reads and chat selections must see a completed save immediately.
+_ContainerWithUser = Annotated[
+    Container, Depends(get_container(with_user=True, transaction_scope="function"))
+]
 _DEFAULT_REVISION_PAGE_LIMIT = 25
 _MAX_REVISION_PAGE_LIMIT = 100
 
