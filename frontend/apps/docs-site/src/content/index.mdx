@@ -2,6 +2,7 @@
 title: Eneo - Democratic AI Platform
 ---
 
+import Link from 'next/link'
 import { Callout, Tabs, Steps } from 'nextra/components'
 
 {/* ═══════════════════════════════════════════════════════════════════════════
@@ -38,19 +39,19 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
     {/* CTA Buttons */}
     <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-      <a href="/docs/getting-started" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-6 py-3 font-semibold text-white shadow-lg shadow-teal-500/25 transition-all hover:shadow-xl hover:shadow-teal-500/30 dark:shadow-teal-500/15 dark:hover:shadow-teal-500/20">
+      <Link href="/docs/getting-started" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-6 py-3 font-semibold text-white shadow-lg shadow-teal-500/25 transition-all hover:shadow-xl hover:shadow-teal-500/30 dark:shadow-teal-500/15 dark:hover:shadow-teal-500/20">
         <span className="relative z-10">Get Started</span>
         <svg className="relative z-10 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
           <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
         </svg>
         <div className="absolute inset-0 bg-gradient-to-r from-teal-500 to-cyan-500 opacity-0 transition-opacity group-hover:opacity-100" />
-      </a>
-      <a href="/docs/architecture" className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-6 py-3 font-semibold text-slate-700 backdrop-blur-sm transition-all hover:border-slate-400 hover:bg-white hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-900">
+      </Link>
+      <Link href="/docs/architecture" className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-6 py-3 font-semibold text-slate-700 backdrop-blur-sm transition-all hover:border-slate-400 hover:bg-white hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-900">
         View Architecture
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-      </a>
+      </Link>
     </div>
   </div>
 </div>
@@ -83,7 +84,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
   <div className="grid gap-6 md:grid-cols-3">
     {/* Card 1: Try Locally */}
-    <a href="/docs/getting-started" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
+    <Link href="/docs/getting-started" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
       {/* Gradient border effect on hover */}
       <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, transparent 50%, rgba(6,182,212,0.15) 100%)'}} />
 
@@ -107,10 +108,10 @@ import { Callout, Tabs, Steps } from 'nextra/components'
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>
       </div>
-    </a>
+    </Link>
 
     {/* Card 2: Production - Featured */}
-    <a href="/guides/deployment" className="group relative overflow-hidden rounded-2xl border-2 border-teal-500/50 bg-gradient-to-b from-slate-900 to-slate-800 p-6 shadow-lg shadow-teal-500/10 transition-all duration-300 hover:-translate-y-1 hover:border-teal-400 hover:shadow-xl hover:shadow-teal-500/20 dark:from-slate-950 dark:to-slate-900">
+    <Link href="/guides/deployment" className="group relative overflow-hidden rounded-2xl border-2 border-teal-500/50 bg-gradient-to-b from-slate-900 to-slate-800 p-6 shadow-lg shadow-teal-500/10 transition-all duration-300 hover:-translate-y-1 hover:border-teal-400 hover:shadow-xl hover:shadow-teal-500/20 dark:from-slate-950 dark:to-slate-900">
       {/* Featured badge */}
       <div className="absolute right-4 top-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-semibold text-white shadow-lg shadow-amber-500/30">
         <span>Recommended</span>
@@ -140,10 +141,10 @@ import { Callout, Tabs, Steps } from 'nextra/components'
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>
       </div>
-    </a>
+    </Link>
 
     {/* Card 3: Architecture */}
-    <a href="/docs/architecture" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
+    <Link href="/docs/architecture" className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/80">
       <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, transparent 50%, rgba(139,92,246,0.15) 100%)'}} />
 
       {/* Icon */}
@@ -166,7 +167,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>
       </div>
-    </a>
+    </Link>
   </div>
 </div>
 
@@ -348,7 +349,7 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
 
   <div className="grid gap-6 md:grid-cols-3">
     {/* Data Sovereignty */}
-    <a href="/guides/audit-logging" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-teal-300 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:hover:border-teal-700">
+    <Link href="/guides/audit-logging" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-teal-300 hover:shadow-xl hover:shadow-teal-500/10 dark:border-slate-800 dark:hover:border-teal-700">
       <div className="absolute inset-0 bg-gradient-to-br from-teal-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-teal-950/30 dark:to-slate-900" />
 
       <div className="relative">
@@ -372,10 +373,10 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
           </svg>
         </div>
       </div>
-    </a>
+    </Link>
 
     {/* Model Agnostic */}
-    <a href="/guides/ai-providers" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:hover:border-blue-700">
+    <Link href="/guides/ai-providers" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/10 dark:border-slate-800 dark:hover:border-blue-700">
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-blue-950/30 dark:to-slate-900" />
 
       <div className="relative">
@@ -399,10 +400,10 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
           </svg>
         </div>
       </div>
-    </a>
+    </Link>
 
     {/* Public Sector Ready */}
-    <a href="/guides/audit-logging" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-500/10 dark:border-slate-800 dark:hover:border-violet-700">
+    <Link href="/docs/security" className="group relative overflow-hidden rounded-2xl border border-slate-200 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-500/10 dark:border-slate-800 dark:hover:border-violet-700">
       <div className="absolute inset-0 bg-gradient-to-br from-violet-50 to-white opacity-0 transition-opacity group-hover:opacity-100 dark:from-violet-950/30 dark:to-slate-900" />
 
       <div className="relative">
@@ -420,13 +421,13 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
         </div>
 
         <div className="mt-4 flex items-center gap-2 text-sm font-medium text-violet-600 dark:text-violet-400">
-          Audit Logging Guide
+          Security at Eneo
           <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
           </svg>
         </div>
       </div>
-    </a>
+    </Link>
   </div>
 </div>
 
@@ -446,17 +447,17 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
         {"Common deployment and integration paths"}
       </div>
     </div>
-    <a href="/guides" className="hidden text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white md:inline-flex md:items-center md:gap-1">
+    <Link href="/guides" className="hidden text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white md:inline-flex md:items-center md:gap-1">
       View all guides
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
       </svg>
-    </a>
+    </Link>
   </div>
 
   <div className="grid gap-6 lg:grid-cols-12">
     {/* Featured Guide - Production Deployment */}
-    <a href="/guides/deployment" className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 shadow-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl lg:col-span-5">
+    <Link href="/guides/deployment" className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 shadow-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl lg:col-span-5">
       {/* Ambient effects */}
       <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-gradient-to-br from-teal-500/30 to-cyan-500/30 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 blur-3xl" />
@@ -490,12 +491,12 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
           </svg>
         </div>
       </div>
-    </a>
+    </Link>
 
     {/* Other Guides Grid */}
     <div className="grid gap-4 lg:col-span-7 md:grid-cols-2">
       {/* AI Provider Setup */}
-      <a href="/guides/ai-providers" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-700">
+      <Link href="/guides/ai-providers" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-700">
         <div className="mb-3 inline-flex rounded-lg bg-gradient-to-br from-amber-100 to-orange-100 p-2.5 dark:from-amber-900/30 dark:to-orange-900/30">
           <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
@@ -509,10 +510,10 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
         </div>
-      </a>
+      </Link>
 
       {/* Enterprise SSO */}
-      <a href="/guides/oidc-federation" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700">
+      <Link href="/guides/oidc-federation" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700">
         <div className="mb-3 inline-flex rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 p-2.5 dark:from-blue-900/30 dark:to-indigo-900/30">
           <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
@@ -526,10 +527,10 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
         </div>
-      </a>
+      </Link>
 
       {/* SharePoint Integration */}
-      <a href="/guides/sharepoint-integration" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-violet-700 md:col-span-2">
+      <Link href="/guides/sharepoint-integration" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-violet-700 md:col-span-2">
         <div className="flex gap-4">
           <div className="inline-flex h-fit rounded-lg bg-gradient-to-br from-violet-100 to-purple-100 p-2.5 dark:from-violet-900/30 dark:to-purple-900/30">
             <svg className="h-5 w-5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
@@ -547,7 +548,7 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
             </div>
           </div>
         </div>
-      </a>
+      </Link>
     </div>
   </div>
 </div>

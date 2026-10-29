@@ -109,9 +109,12 @@ git switch -c fix/short-description upstream/develop
 pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
-Use a prefix that describes the work: `feature/`, `fix/`, `docs/`, `refactor/`
-or `test/`. The hooks run formatting, commit message and pre-push checks
-locally, so problems show up before CI.
+Start the branch name with a prefix that describes the work, such as
+`feature/`, `fix/`, `docs/`, `refactor/` or `test/`. CI rejects a branch
+without an allowed prefix; the full list is `feature/`, `feat/`, `fix/`,
+`hotfix/`, `security/`, `chore/`, `deps/`, `docs/`, `test/`, `refactor/`,
+`remove/`, `ci/` and `perf/`. The hooks run formatting, commit message and
+pre-push checks locally, so problems show up before CI.
 
 ### Make the change
 
@@ -127,11 +130,15 @@ Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
 `develop` branch. Before you submit:
 
 - Write the title as a Conventional Commit, for example
-  `fix(spaces): resolve permission check bug`. It becomes the commit message
-  on `develop`.
+  `fix(spaces): resolve permission check bug`. A pull request with several
+  commits lands with its title as the commit title on `develop`; one with a
+  single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in the rest of the template: **Changes**, **Why**, **User-facing**,
-  **Testing**, and **Accessibility** for UI changes.
+  **Testing**, and **Accessibility** for UI changes. `CI / CI` fails when
+  **User-facing** is empty; write a sentence or `No`. CI does not rerun when
+  you only edit the description, so push a commit or ask a maintainer to rerun
+  it.
 - Leave **Allow edits by maintainers** ticked, so a maintainer can push a small
   fix for you.
 - Open it as a **draft** if you want early feedback on the direction.
@@ -139,23 +146,35 @@ Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
 ### Let the checks run
 
 `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels`
-must pass. If this is your first contribution, a maintainer may need to approve
-the first workflow run before it starts.
+must pass. If you are not a member of the `eneo-ai` organisation, a maintainer
+approves your workflow runs before they start.
 
 You may not be able to add labels yourself. A maintainer adds them during
-review, and the PR label check turns green when they do. If the pull request
-links no issue, it gets a `needs:task-link` label until you add `Fixes #123`.
+review, and the PR label check turns green when they do. A ready pull request
+into `develop` that links no issue gets a `needs:task-link` label until you
+add `Fixes #123`.
 
 ### Review and merge
 
 A Core Maintainer reviews the pull request. Answer the comments and push new
 commits to the same branch instead of force-pushing, so reviewers can see what
-changed. A new commit dismisses an earlier approval, and every conversation
-must be resolved before the merge.
+changed. Every conversation must be resolved before the merge.
 
-When the pull request is approved, a Core Maintainer adds it to the merge queue,
-which tests it against the latest `develop` and squash-merges it. You do not
-need to keep your branch up to date yourself unless GitHub reports a conflict.
+A maintainer can also run our [Review Agent](https://ccimen.github.io/review-agent/docs/how-reviews-work), which reviews the change
+for security and quality problems, by commenting `/review`. Each finding has a
+severity, the file and line, the impact and the smallest safe fix; fix or answer
+it. After new commits, `/review` again reviews the latest commit. If it missed
+something, comment `/review feedback missed because …`. The review is advisory,
+and a Core Maintainer still decides.
+
+When the change is ready, the Core Maintainer approves it and chooses **Merge
+when ready**. The pull request enters the merge queue as soon as the checks are
+green, and the queue tests it against the latest `develop` and squash-merges
+it. You do not need to keep your branch up to date yourself unless GitHub
+reports a conflict.
+
+If you push new commits after that, GitHub cancels **Merge when ready**, and a
+Core Maintainer looks at the change again before queueing it.
 
 </Steps>
 
@@ -224,14 +243,16 @@ Pull requests run CI and Dependency Review before merge. These checks keep
 dependency updates reviewable and prevent known high-severity vulnerable
 dependencies from entering `develop`. See
 [Security for Contributors](/contributing/security) for the required checks and
-how to handle a failing security check.
+how to handle a failing security check, and [Security at Eneo](/docs/security)
+for how the checks fit with the rest of Eneo's security work.
 
 ## Report a vulnerability
 
 Never report a vulnerability in a public issue, pull request or discussion.
 Report it privately, either through
 [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
-on GitHub or by email to `security@sundsvall.se`. The
+on GitHub, which is the preferred way, or, if you cannot use GitHub, by email to
+`security@sundsvall.se`. The
 [security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
 describes what to include and the response times.
 

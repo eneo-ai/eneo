@@ -1,26 +1,32 @@
 # API Key Management
 
-Eneo provides a comprehensive API key system for programmatic access. Keys support two ownership models (user and service), four scope levels (tenant, space, assistant, app), three permission tiers (read, write, admin), and layered security enforcement including rate limiting, IP/origin restrictions, and scope-based access control.
+API keys let other systems call the Eneo API without a browser session. Each key has a type, an owner, a scope and a permission, and Eneo checks every request against these, the key's IP or origin list and its rate limit. This page is part of the [Security at Eneo](/docs/security) documentation.
 
 import { Callout } from 'nextra/components'
+
+**In short**
+
+- There are two key types. `sk_` keys are for servers: up to `admin` permission, with an optional IP allowlist. `pk_` keys are for browsers: up to `read`, and they need at least one allowed origin.
+- A user key stops working when its owner is deactivated or loses access. A service key (`ownership: "service"`) does not depend on any user; only tenant administrators create them, and write or admin service keys need an IP allowlist or an expiry date.
+- Service keys cannot create user-owned resources or upload and delete files, and no API key can manage API keys; that needs a session login.
+- The secret is shown once. If it is lost, rotate the key; the old key keeps working for `rotation_grace_hours` (24 by default).
+- Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days`.
 
 ---
 
 ## Key Types
 
-Every API key has a type prefix that determines its intended use and security constraints.
+The prefix shows what the key is for and which limits apply.
 
 | Aspect | `sk_` (Secret Key) | `pk_` (Public Key) |
 |--------|--------------------|--------------------|
 | **Use case** | Server-to-server, backend integrations | Browser-based, frontend apps |
-| **Access restriction** | IP allowlist (CIDR notation) | Origin allowlist (scheme required) |
+| **Access restriction** | Optional IP allowlist (CIDR notation); origins not allowed | Origin allowlist with at least one origin (scheme required); IPs not allowed |
 | **Max permission** | `admin` | `read` |
 | **Resource permissions** | Supported | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
-| **Origin restrictions** | Not allowed | Required for creation (at least one) |
-| **IP restrictions** | Optional | Not allowed |
 
 <Callout type="info">
-The key prefix (`sk_` or `pk_`) is embedded in the key string itself and validated on every request. A `pk_` key that requests write or admin permission is rejected by policy validation.
+The prefix (`sk_` or `pk_`) is part of the key, and Eneo checks it on every request. A `pk_` key that requests write or admin permission is rejected by policy validation.
 </Callout>
 
 ---
@@ -60,7 +66,7 @@ Service keys are automation principals, not service accounts. They can read, upd
 
 Files are the important exception to "delete existing resources": files are user-owned today. Service keys cannot upload files and cannot delete files. File upload returns `403` with `code: "service_key_cannot_create_resources"`, and file delete returns `403` with `code: "service_key_cannot_delete_files"`. Use a user key for workflows that upload runtime files and clean them up after a run.
 
-Two related guardrails come from the same principle:
+Three related guardrails come from the same principle:
 
 - **Cannot use user-identity endpoints** (`/me`, info-blob updates): `403` with `code: "user_identity_required"`.
 - **Cannot manage other API keys**: API-key mutations require a session login; any API key, including a tenant-admin service key, is rejected.
@@ -426,3 +432,10 @@ Every key lifecycle event is logged to the audit system:
 ### Scope Enforcement
 
 Scope enforcement and strict mode are always active. API keys are always restricted to resources within their configured scope.
+
+## Related pages
+
+- [Audit Logging](/docs/audit-logging) for the key lifecycle events and how to search them
+- [Authentication Architecture](/docs/authentication-architecture) for session sign-in
+- [Module Authentication](/docs/module-authentication) for the bound `sk_` service key a module uses
+- [API Reference](/docs/api) for authentication headers and rate limits

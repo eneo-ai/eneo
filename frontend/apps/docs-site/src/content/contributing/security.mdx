@@ -4,9 +4,17 @@ title: Security for Contributors
 
 # Security for Contributors
 
-This page explains the security checks contributors see when they open a pull request. The canonical security policy is [`docs/SECURITY.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md).
+This page covers the security checks on pull requests, the access declaration every endpoint needs, and how dependencies, alerts and secrets are handled. For the overall picture, see [Security at Eneo](/docs/security). The canonical security policy is [`docs/SECURITY.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md).
 
-Do not report sensitive vulnerabilities in public issues, pull requests, or discussions. Email security reports to `security@sundsvall.se`.
+Do not report vulnerabilities in public issues, pull requests, or discussions. Report them privately on GitHub through [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new), the preferred way, or by email to `security@sundsvall.se` if you cannot use GitHub.
+
+**In short**
+
+- `develop` requires the checks `CI` and `Dependency Review`; `PR labels` is required on `develop`, `main` and `release/**`.
+- Dependency Review fails a pull request that adds a dependency with a known vulnerability of high severity or above. Update or remove the dependency; only a Core Maintainer can accept an unreachable advisory.
+- Every endpoint needs `@endpoint_access` with its authentication and authorization. A missing declaration stops the application from starting.
+- A maintainer may run the advisory [Review Agent](/contributing#review-and-merge) with `/review`; fix or answer each finding.
+- If a secret leaks, rotate it first, then clean up.
 
 ## Pull Request Checks
 
@@ -15,9 +23,9 @@ Pull requests into `develop` run the following security and quality gates:
 ### CI
 
 `CI / CI` is the main app check. Pull requests and merge-queue candidates run
-the checks selected by `.github/scripts/ci-change-scope.mjs`. Each merge
-candidate is classified by its own diff onto the preceding candidate; the whole
-candidate tree is still built and tested. Missing history, an empty diff,
+the checks selected by `.github/scripts/ci-change-scope.mjs`. In the merge
+queue, the checks for each candidate are chosen from its diff against the
+candidate ahead of it; the whole tree is still built and tested. Missing history, an empty diff,
 unknown runtime paths, and changes to CI workflows or local actions select full
 validation.
 
@@ -29,42 +37,41 @@ for documentation-only changes. The final gate rejects failed, cancelled,
 missing, or unexpectedly skipped jobs; only jobs excluded by the scope plan
 may be skipped.
 
-Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
+Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This proves that the committed lockfiles still install and the app still builds.
 
 The Docker matrix contains only the affected backend, Svelte frontend, Next
 frontend, or devcontainer images, built without pushing them. This catches
-Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+Dockerfile and base-image update problems before they merge.
 The Svelte production build runs in E2E and Docker; there is no additional
 standalone build of the same app. The web-next E2E and accessibility checks are
 part of the required aggregate when selected.
 
 Pushes to `develop` run the full suite once, through **Build and Push Docker
 Images**, before the completed release bundle can be published. Release-branch
-pushes still run full CI directly; tag and manual publication callers also run
-the full suite. Publication and its release checks are not scoped away.
+pushes, tags and manual publication always run the full suite.
 
 See the [CI operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CODE_QUALITY.md#ci-execution-and-recovery)
 for time limits, build diagnostics, validation commands, and recovery.
 
-Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate yet.
+Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate.
 
 ### Dependency Review
 
-`Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
+`Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests into `develop`. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
 
-When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
+When this check fails, update the dependency to a safe version, remove it, or, if the vulnerable code is genuinely unreachable, ask a Core Maintainer to add the advisory to `allow-ghsas` in `.github/workflows/dependency-review.yml` with the reason recorded in the PR. Do not dismiss the warning just to make the PR green.
 
 ### Source, dependency and secret scanning
 
-The reusable `Security` workflow is part of the CI aggregate. It runs a complete
-lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
-added Git history.
+The reusable `Security` workflow is part of the CI aggregate. It audits the
+backend's runtime Python lock and the frontend lock, runs Semgrep's
+security-audit and GitHub Actions rules, and runs Gitleaks on added Git
+history.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 
-The release review also scans full Git history, verifies credential revocation,
-and exercises both frontends in staging with the actual authentication and
-integration providers. Automated scanning does not replace those checks.
+Gitleaks scans only newly added history. If a real credential is found,
+revoke or rotate it; a scan cannot prove that it was revoked.
 
 ### Code scanning
 
@@ -132,9 +139,9 @@ permission before the handler executes. Generated documentation and internal
 MCP transport routes have explicit declarations at their registration sites;
 MCP tools still authorize each tool invocation.
 
-`scripts/check_route_metadata.py --all` checks declarations and rejects duplicate
+`scripts/check_route_metadata.py --repo-root . --all` checks declarations and rejects duplicate
 endpoint permission/session gates without importing the application. CI also runs
-`tests/unit/test_endpoint_access.py` and `tests/unit/test_endpoint_access_matrix.py`.
+`backend/tests/unit/test_endpoint_access.py` and `backend/tests/unit/test_endpoint_access_matrix.py`.
 The matrix exercises the shipped user-authentication dependency graphs, rejecting
 anonymous callers, users missing the declared permission and API keys on session-only
 endpoints before handler dispatch. When adding an endpoint, add behavior tests showing
@@ -149,52 +156,19 @@ the nested-router and mounted-API tests when upgrading FastAPI.
 
 ## Required Checks in Branch Protection
 
-The `develop` ruleset requires these checks:
-
-- `CI / CI`
-- `Dependency Review / Dependency Review`
-
-A separate `PR label classification` ruleset requires `PR label policy / PR labels` on `develop`, `main` and `release/**`.
+The `develop` ruleset requires the checks `CI` and `Dependency Review` (shown on a pull request as `CI / CI` and `Dependency Review / Dependency Review`). A separate `PR label classification` ruleset requires `PR labels` on `develop`, `main` and `release/**`.
 
 Who can approve, merge and release, and how branches and tags are protected, is described in [Governance and Roles](/contributing/governance).
 
-Remove older or paused required status checks if they appear as `Expected` and never report:
-
-- `CodeQL gate`
-- `Backend checks (Ruff)`
-- `Frontend basic checks`
-- `Run unit tests`
-- `Run integration tests`
-- `Test Docker builds`
-
-Those names belonged to the previous PR workflows. They are not queued work; GitHub is waiting for checks that no longer exist on this branch.
-
-The old `Test Docker builds` check is replaced by Docker build subjobs inside `CI / CI`.
-
 ## Dependency Updates
 
-Dependabot opens weekly PRs for:
-
-- backend Python dependencies in `backend`
-- frontend Bun dependencies in `frontend`
-- GitHub Actions
-- Dockerfiles
-- devcontainer configuration
-
-Routine minor and patch updates are grouped to reduce PR noise. Do not enable auto-merge until CI and Dependency Review have been stable for long enough that failures are rare and understandable.
+Dependabot alerts report vulnerable dependencies, and the `Security` workflow audits the lockfiles on pull requests into `develop` and the release branches, and every week. Maintainers triage what they find, patch it in focused `fix(deps)` pull requests and backport applicable fixes to the supported release lines. Automatic Dependabot version-update pull requests are paused: every ecosystem in `.github/dependabot.yml` has `open-pull-requests-limit: 0`.
 
 For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
 
 ## Handling Alerts
 
-Use this order when triaging security alerts:
-
-1. Same day: malware, exposed secrets, critical runtime vulnerabilities, authentication or authorization issues, file parsing issues, SSRF, RCE, deserialization, and LLM provider credential exposure.
-2. Within 48-72 hours: high runtime vulnerabilities, vulnerable production Docker base images, and vulnerable GitHub Actions in trusted workflows.
-3. Within 1-2 weeks: medium runtime vulnerabilities and critical or high build-time vulnerabilities.
-4. Monthly: low severity findings, dev-only issues without a practical exploit path, and major version update backlog.
-
-If a fix cannot be merged quickly, create a GitHub issue or security tracking item with an owner, risk, mitigation, target date, and review date.
+Triage security alerts in the order and within the response targets set by the [security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md#alert-triage): malware, exposed secrets and critical runtime vulnerabilities come first. If a fix cannot be merged quickly, record it as the policy describes, with an owner, risk, mitigation, target date and review date.
 
 ## Secrets
 

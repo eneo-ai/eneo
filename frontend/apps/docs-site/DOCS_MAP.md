@@ -109,6 +109,7 @@ result guards.
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`, `.github/ISSUE_TEMPLATE/**` (template choice and contact links), `.github/pull_request_template.md`                                     | `contributing/index.mdx`            |
 | `.github/CODEOWNERS`, team roles and repository rulesets (GitHub settings), the "Repository Access and Change Control" section of `docs/SECURITY.md`                                                                   | `contributing/governance.mdx`       |
+| A change to any control summarised there: roles and rulesets, required checks, release publication, SBOMs and attestations, runtime isolation, vulnerability handling                                                  | `docs/security.mdx` (overview only) |
 | `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
 
 Bundled runtime lifecycle and diagnostics (`mcp_servers/application/runtime_status.py`,

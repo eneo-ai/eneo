@@ -5,23 +5,41 @@ import { Callout } from "nextra/components";
 The bundled tool runtime is the one place in Eneo where code the model wrote
 runs, where SQL the model wrote is executed, and where files users uploaded
 are parsed and rendered. It is also one container shared by every tenant and
-every conversation of a deployment. This page describes the assumptions the
-runtime is built on, the layers that keep jobs, tenants and the deployment
-apart, where each layer is enforced, and what remains for the operator to
-provide.
+every conversation of a deployment. This page explains what the runtime
+treats as untrusted, the layers that separate jobs, tenants and the deployment,
+and what the operator must provide.
+
+**In short**
+
+- The runtime runs JavaScript and SQL that the model wrote and parses files
+  that users uploaded. In the reference Compose stack it has no route to the
+  database, Redis, the signing key,
+  the model providers or the internet.
+- The model never holds a download link: the backend swaps each file handle
+  for a short-lived signed URL, and only for files in the same conversation.
+- Each job runs in its own child process. When Landlock is available and not
+  blocked (Linux 5.13 or later, permitted by seccomp), it confines a job to its
+  own files. Set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run
+  without it; otherwise the runtime runs unconfined on such hosts.
+- Outside the reference Compose stack, the operator provides the container
+  layer: no egress, a read-only root filesystem, no capabilities and resource
+  limits.
+- Before raising the security classification of the built-in server, work
+  through the [isolation checklist](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md#isolation-checklist).
 
 <Callout type="info">
   [Tools and MCP Architecture](/docs/tool-architecture) explains why this work
   runs outside the backend at all. Operators configure, upgrade and diagnose the
   runtime with the [operator
   guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md)
-  in the repository; this page is the rationale behind its settings.
+  in the repository; this page is the rationale behind its settings. For how the
+  runtime fits with Eneo's other security controls, see [Security at
+  Eneo](/docs/security).
 </Callout>
 
 ## Design assumptions
 
-The runtime treats everything it is given as data to be contained, not as
-instructions to be trusted:
+The runtime treats all its input as untrusted:
 
 | Input                                                | Comes from                      | Handled as                                                                             |
 | ---------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
@@ -30,22 +48,34 @@ instructions to be trusted:
 | CSV, XLSX and DOCX files                             | Users, or tools acting for them | Bounded packages parsed in a separate process, with saved values only                  |
 | Document content, templates and chart specifications | The model and users             | Validated specifications rendered by engines that are kept out of the backend          |
 
-The separation it maintains:
+The runtime protects four things:
 
 - **One conversation's files from another.** The runtime processes files for
-  every tenant, so a job can only see the files it was given, never the
-  attachments, parsed sheets or outputs of another job.
+  every tenant. A job sees only the files it was given, never the attachments,
+  parsed sheets or outputs of another job; this is fully enforced with
+  Landlock (see below).
 - **Eneo's credentials and data.** The runtime has no path to the database,
-  Redis, the signing key, the model providers or the internet.
+  Redis, the signing key, the model providers or the internet, given the
+  network isolation described in [Layer 5](#layer-5-the-container).
 - **The host and the rest of the deployment.** One job's resource use stays
   within the runtime's own limits and cannot affect the backend or other
   containers.
 - **The user who receives the output.** A file the runtime produced is safe
   to open: no macros, scripts or externally loaded content.
 
+The separation between jobs is strongest on a host whose kernel supports
+Landlock (Linux 5.13 or later). On a host without it, the other layers remain
+but jobs are not confined to their own files; see
+[Layer 3](#layer-3-one-confined-process-per-job) and set
+`TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run there.
+
 The runtime's own code and the engines it bundles are part of the Eneo release
-and are kept current through its normal dependency process. The layers below
-are about what those engines are fed, not about the release itself.
+and are updated by the maintainers in dependency pull requests. The runtime's
+lockfile is not covered by Dependabot or by the lockfile audit in CI. A
+candidate image is scanned for fixable high and critical vulnerabilities
+before publication, and the published digest is scanned again before the
+release bundle is completed. The layers below are about what those engines are
+fed, not about the release itself.
 
 ## The layers, from the outside in
 
@@ -338,17 +368,12 @@ URLs or tokens.
 
 Setting a security classification on the built-in server under
 **Admin > Tools** is the administrator's statement that this deployment may
-handle files of that level. Before raising it:
-
-1. Read the start-up line and confirm `"confinement":{"files":true,...}`, or
-   set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` so the runtime refuses to run
-   without it.
-2. Confirm the runtime is on an internal network with no egress, and that the
-   container is read-only with no capabilities. **Admin > Tools** reports
-   connectivity, version, confinement and file-origin state.
-3. Confirm `FILE_REFERENCE_BASE_URL` points at an address only the runtime and
-   trusted servers can reach, and that `TOOL_RUNTIME_FILE_ORIGINS` pins it.
-4. Decide on the cache lifetime for the data involved.
+handle files of that level. The level only means something if jobs are
+confined to their own files ([Layer 3](#layer-3-one-confined-process-per-job))
+and the container is isolated ([Layer 5](#layer-5-the-container)). Before you
+raise it, work through the [isolation checklist](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md#isolation-checklist) in
+the operator guide; **Admin > Tools** reports connectivity, version,
+confinement and file-origin state.
 
 ## Security-relevant settings
 

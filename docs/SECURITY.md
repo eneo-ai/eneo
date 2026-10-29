@@ -6,13 +6,13 @@ public GitHub issues, pull requests, or discussions.
 
 ## Reporting a Vulnerability
 
-Report a vulnerability privately in one of two ways:
+Report a vulnerability privately. GitHub is the preferred way:
 
-- On GitHub, through **Security → Report a vulnerability**
+- **Preferred: on GitHub**, through **Security → Report a vulnerability**
   (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
-  visible only to you and the maintainers, and the fix can be coordinated in a
-  private advisory.
-- By email to `security@sundsvall.se`.
+  visible only to you, the maintainers and anyone they invite to help, and the
+  fix is coordinated with you in the same private advisory.
+- **If you cannot use GitHub**, by email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
 
@@ -27,6 +27,55 @@ Include as much of the following as possible:
 
 Please do not publicly disclose the issue until a fix or mitigation is
 available and maintainers have had a reasonable coordination window.
+
+## What Happens After You Report
+
+1. **Triage.** A report made through GitHub opens a private security advisory
+   that only you, the maintainers and anyone they invite can see. A Core
+   Maintainer aims to respond within the first-response targets below. Triage
+   decides whether the report is accepted or closed with an explanation, for
+   example when it is out of scope or a duplicate. For an e-mail report, the
+   maintainers can open a private advisory and add you to it if you have a
+   GitHub account.
+2. **Fix.** The maintainers rate the severity and prepare a fix or mitigation
+   for the affected supported release lines. The conversation stays in the
+   advisory, where you can follow the work and check the fix.
+3. **Publish.** When the fix has landed and the patch releases are out, the
+   advisory is published as soon as practical. It names the affected and
+   patched versions and credits you as the reporter, unless you ask not to be
+   named.
+
+## Scope
+
+In scope:
+
+- the code in this repository and the container images Eneo publishes
+  (`ghcr.io/eneo-ai/eneo-*`)
+- the build, release and publication workflows in `.github/`
+- the reference deployment configuration in `docs/deployment/`
+
+Out of scope here:
+
+- a vulnerability in a specific organisation's Eneo deployment that comes from
+  how it is hosted or configured: report it to that organisation
+- a vulnerability in a third-party dependency that is already public: open an
+  ordinary issue or pull request so the dependency can be updated
+- findings without a security impact, such as an outdated software version
+  without a reachable vulnerability
+
+When in doubt, report it privately; the maintainers will tell you where it
+belongs.
+
+## Testing Guidelines
+
+- Test against your own local or test installation, never against a
+  deployment you do not operate.
+- Use your own accounts and test data. Do not access, change or keep data that
+  belongs to other users or tenants; if you reach it by accident, stop and say
+  so in the report.
+- Do not degrade the service: no denial-of-service, load or spam tests.
+- Stop at the smallest proof of concept that shows the impact.
+- Keep the details private until the advisory is published.
 
 ## Response Targets
 
@@ -43,26 +92,68 @@ handling, LLM provider credentials, SSRF, RCE, or deserialization take priority.
 
 ## Supported Versions
 
-Security fixes land on `develop` first. Supported release branches are any
-release branches that are currently deployed or explicitly maintained by the
-Eneo maintainers. Older tags and inactive branches are not guaranteed to receive
-security fixes.
+Supported release branches are any release branches that are currently deployed
+or explicitly maintained by the Eneo maintainers. Older tags and inactive
+branches are not guaranteed to receive security fixes. This section is the
+canonical support policy; other guides link here.
 
-If a fix affects users outside the hosted/deployed environments, maintainers
-should publish upgrade or mitigation guidance through a GitHub Security Advisory.
+## Fixing a Vulnerability
+
+Our policy is to prepare a fix or mitigation for `develop` and each affected
+supported `release/vX.Y` branch, and to record any delayed fix or accepted risk
+under [Tracking and Exceptions](#tracking-and-exceptions). How the fix is
+prepared depends on whether the vulnerability is already public.
+
+- **Reported privately.** Keep the work private until it is ready. Confirm and
+  rate the report in a private GitHub Security Advisory, and prepare and review
+  the fix for every affected line in the advisory's temporary private fork or
+  on unpublished local branches. Then land it the normal way: ordinary pull
+  requests into `develop` (required checks and merge queue) and into each
+  release branch (second Core Maintainer approval), followed by the patch
+  releases and the advisory, naming the affected and patched versions. The
+  first public pull request discloses the fix, so open them only when every
+  line is ready, and keep the time from the first public pull request to the
+  published advisory as short as the checks allow. Do not use the advisory's
+  **Merge** button: it merges into `develop` without status checks, rulesets
+  or the merge queue.
+- **Already public**, such as a published advisory for a dependency. Fix it in
+  ordinary pull requests on `develop` and backport it to the supported release
+  lines.
+
+Publish upgrade or mitigation guidance through a GitHub Security Advisory
+whenever operators need to act.
 
 ## Security Tooling
 
 The repository uses GitHub security features and CI to prevent regressions:
 
-- Dependabot creates weekly dependency update pull requests for backend,
-  frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
+- Dependabot alerts are enabled. Dependabot version updates are configured for
+  backend, frontend, GitHub Actions, Dockerfiles, and devcontainer
+  configuration, but paused (`open-pull-requests-limit: 0`). Dependabot
+  security updates are off, so maintainers triage alerts and patch vulnerable
+  dependencies in focused `fix(deps)` pull requests. The tool runtime
+  (`tool-runtime/`) has no Dependabot entry.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
+- The self-hosted [Review Agent](https://github.com/CCimen/review-agent) gives
+  a second opinion from another AI model on security and code quality when a
+  maintainer comments `/review` on a pull request. It reads the exact commits
+  through bounded read tools and tries to disprove each candidate finding
+  before reporting it; findings can still be wrong. It has no write access or
+  merge authority, does not gate the merge and is not a full security audit
+  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work)). Our rule is to fix or answer its findings before
+  merging.
 - The reusable `Security` workflow audits the complete runtime Python lock and
-  frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
-  added Git history with Gitleaks. It is included in the required CI aggregate
-  and runs before image publication. Reports are retained as CI artifacts.
+  frontend lock, runs Semgrep security-audit/GitHub Actions rules over
+  `backend/src`, both frontends' sources and `.github`, and scans the added Git
+  history with Gitleaks. It runs inside CI on pull requests into `develop` and
+  `release/**` and on merge-queue candidates, and weekly on a schedule. CI is a
+  required check only on `develop`; on release branches it runs but does not
+  block the merge, and pull requests into `main` do not run it.
+  On `develop` and tag builds, component images are pushed while the checks
+  run; only the completed release bundle waits for them, so deployments must
+  consume the bundle. The tool runtime's `bun.lock` is not part of the audit.
+  Reports are retained as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -71,15 +162,15 @@ The repository uses GitHub security features and CI to prevent regressions:
   only to the named rule, survive squash commits and line moves, and do not
   exclude entire files, directories or rules. The security workflow tests that
   changed values and values outside their reviewed files are still detected.
-  Release review includes a full-history audit and confirmation that any real
-  historical credentials have been revoked; a diff scan cannot prove revocation.
+  The scan covers newly added history only. Revoke or rotate any real
+  credential that is found; a scan cannot prove that a credential was revoked.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
-  SeaweedFS container
-  image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
+- Release SBOMs are generated from the published backend, Svelte frontend, Next
+  frontend, tool runtime, and bundled SeaweedFS container image digests and
+  attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
   CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
   released backend image. The frontend release also includes a source dependency
@@ -87,8 +178,11 @@ The repository uses GitHub security features and CI to prevent regressions:
   checked-out release tag with the frozen Bun lockfile, so JavaScript
   dependencies remain visible even when the runtime image only contains the
   bundled build output. Release SBOM assets are attested through GitHub artifact
-  attestations, and the pushed backend, frontend, and SeaweedFS images include
-  provenance attestations in GHCR.
+  attestations, and the pushed backend, frontend, web-next, tool runtime, and
+  SeaweedFS images include provenance attestations in GHCR. Fixable HIGH and
+  CRITICAL image vulnerabilities block the frontend, web-next, and tool runtime
+  images; the backend image has no image scan and relies on the audit of
+  its Python lock.
   `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
   exact image digests scanned by platform and records the bundled store's
   multi-platform manifest reference for deployment.
@@ -122,25 +216,26 @@ The repository uses GitHub security features and CI to prevent regressions:
   module/version/license-file hashes in `docker/seaweedfs/verify-supply-chain.sh`.
   Any dependency, version, license content, or unknown-package drift fails the
   job for review. This is not a general allowlist or vulnerability waiver.
-- Configure the `object-content-supply-chain` GitHub Environment as a protected
-  trusted-publication boundary with a deployment branch policy that allows
+- The `object-content-supply-chain` GitHub Environment is the protected
+  trusted-publication boundary, with a deployment branch policy that allows
   only `develop`; the workflow enforces the same rule in code, and the
-  environment policy is the backstop. Do not grant package write, OIDC, or
-  attestation permissions to pull-request workflows, and do not make the
+  environment policy is the backstop. No pull-request workflow publishes
+  images. Fork pull requests get a read-only token; the tool runtime image job
+  still requests package write, OIDC, and attestation permissions on
+  same-repository pull requests although it publishes only when the
+  coordinator calls it. Do not make the
   path-filtered SeaweedFS workflow a required status check. The canonical
   image/SBOM owners remain `.github/workflows/build_and_push_images.yml`,
   `.github/workflows/seaweedfs_image.yml`, and
   `.github/workflows/release_sbom.yml`; do not create a parallel signing system.
-- Secret scanning and push protection should remain enabled for provider keys,
-  tokens, credentials, and other repository secrets.
+- Secret scanning and push protection are enabled for provider keys, tokens,
+  credentials, and other repository secrets. Keep them enabled.
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
 The `develop` ruleset requires `CI` and `Dependency Review`, and the PR label
 classification ruleset requires `PR labels` on `develop`, `main` and
-`release/**`. While code scanning is paused, remove `CodeQL gate` from the
-GitHub ruleset; otherwise pull requests can wait for a check that no longer
-runs.
+`release/**`. No ruleset requires a CodeQL check while code scanning is paused.
 
 ## Repository Access and Change Control
 
@@ -149,35 +244,47 @@ Access to the `eneo-ai` organisation follows least privilege. Core Maintainers
 for what is merged and released. Collaborators from partner municipalities and
 agencies contribute through pull requests. The contributor-facing explanation,
 including the role table, diagrams and an FAQ, is
-[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+[Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
 on the documentation site.
 
 - **Roles.** `@eneo-ai/core-maintainers` is the only team with write-level
-  (Maintain) access. It also holds the organisation's Security manager and
-  CI/CD admin roles. Collaborators (`@eneo-ai/collaborators`) have Triage
-  access and contribute from forks. A small number of organisation owners hold
+  (Maintain) access. It also holds the organisation's Security manager role.
+  Collaborators (`@eneo-ai/collaborators`) and individual outside
+  collaborators have Triage access and contribute from forks. A small number of organisation owners hold
   Admin rights for rulesets, team access and repository settings. The
   organisation base permission is read.
-- **`develop`.** Changes arrive only through pull requests. At least one
-  approval from `@eneo-ai/core-maintainers` is required, enforced by the
-  ruleset and requested automatically through `.github/CODEOWNERS`. New
-  commits dismiss earlier approvals, review conversations must be resolved,
-  and merges go through the merge queue.
+- **`develop`.** Changes arrive only through pull requests, and only people
+  with write access (the Core Maintainers and the organisation owners) can add
+  a pull request to the merge queue; the Core Maintainers do the ordinary
+  merges. Required checks must
+  pass and review conversations must be resolved. A Core Maintainer reviews
+  and approves contributions from outside the team before queueing them;
+  `.github/CODEOWNERS` requests that review automatically. If someone without
+  write access pushes new commits afterwards, GitHub cancels the pending
+  merge. Core Maintainers agree on their own changes as a team and may queue
+  them without a formal approval.
 - **Releases.** Only Core Maintainers can create, update or delete
   `release/**` branches and `v*` tags. A `v*` tag starts image publication,
-  so this restriction controls who can publish a release.
-- **`main`.** Protected against deletion and force pushes.
-- **Bypass.** Core Maintainers can bypass the `develop` ruleset for a single
-  pull request when a fix is urgent or no second Core Maintainer can review.
-  A bypass also skips the merge queue and required checks, so use it only when
-  every check has passed on the pull request, record the reason in the pull
-  request, and have another Core Maintainer review the change afterwards.
-  Repository administrators are not exempt from rulesets unless they are on
-  the bypass list.
+  so this restriction controls who can publish a release. Every pull request
+  into a release branch needs an approval from a Core Maintainer other than its
+  author: the `Release and main review` ruleset requires one approval and
+  code-owner review, has no bypass actors, and dismisses an approval when new
+  commits are pushed. Each release branch therefore needs `.github/CODEOWNERS`.
+- **`main`.** The same review rule applies, and `main` is protected against
+  deletion and force pushes.
+- **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
+  no ordinary pull request can skip the required checks or the merge queue.
+  Merging from a security advisory's private fork would skip them, so our
+  procedure is not to use it. Repository
+  administrators are not exempt from rulesets unless they are on a bypass
+  list. If GitHub itself blocks a critical fix, an organisation owner may
+  change the ruleset temporarily; restore it straight away and record the
+  change in a GitHub issue. The release branch and tag rulesets keep Core
+  Maintainers as bypass actors because cutting releases requires it.
 - **Workflow trust.** Pull requests from forks run with a read-only
   `GITHUB_TOKEN` and without repository secrets. Workflows started from
   branches in this repository can request package write permissions, which is
-  why write access is not granted outside Core Maintainers. Keep repository
+  why write access stays with the Core Maintainers and the organisation owners. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
   secret is no longer used, delete it and revoke it at its source.
 - **Changes to access.** Only organisation owners change team roles, rulesets
@@ -231,8 +338,8 @@ For each new alert:
    Docker image, GitHub Action, or code scanning.
 2. Check whether it is reachable in Eneo and whether it touches user input,
    files, prompts, credentials, authentication, network calls, or deployment.
-3. Prefer the Dependabot security PR. If Dependabot cannot create one, manually
-   bump, pin, replace, or remove the dependency.
+3. Bump, pin, replace, or remove the dependency in a focused `fix(deps)` pull
+   request, and backport it to the supported release lines that ship it.
 4. Review the diff. For AI and LLM packages, check changelogs for telemetry,
    callback behavior, environment variable handling, proxy behavior, logging
    changes, and changed defaults.
@@ -253,8 +360,8 @@ library updates.
 Immediate response:
 
 - check whether Eneo uses the affected package and version
-- use the Dependabot security PR if GitHub has an advisory
-- manually bump, pin, or temporarily remove the package if no advisory exists yet
+- bump, pin, or temporarily remove the package, whether or not an advisory
+  exists yet
 - rotate any potentially exposed provider keys
 - review application logs, CI artifacts, Sentry events, build logs, and package
   install logs
