@@ -61,7 +61,7 @@ it("performs the permission redirect as internal navigation", async () => {
 });
 
 it("keeps a draft for search changes and flushes it only to its original entity on ID changes", async () => {
-  const save = vi.fn(async (_id: string, _value: string) => {});
+  const save = vi.fn<(id: string, value: string) => Promise<void>>().mockResolvedValue(undefined);
   const { router } = await renderWithRouter(null, {
     route: "/assistants/a",
     routes: (root) => {
