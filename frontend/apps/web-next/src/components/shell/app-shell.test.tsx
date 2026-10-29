@@ -21,7 +21,6 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 // The real palette, with a spy on when its module is first imported.
 const paletteImported = vi.hoisted(() => vi.fn());
 vi.mock("./command-palette", async (importOriginal) => {

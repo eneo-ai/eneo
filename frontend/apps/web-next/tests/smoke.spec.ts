@@ -69,6 +69,26 @@ test("preloads only Figtree and renders with it", async ({ page }) => {
 
 // App shell (SideNav, ⌘K palette, phone drawer).
 
+test("profile language selection reloads the document in either language", async ({ page }) => {
+  await page.goto("/spaces/list");
+  for (const selection of [
+    { profile: /: konto och inställningar$/, menu: "Språk", label: "English", locale: "en" },
+    { profile: /: account and settings$/, menu: "Language", label: "Svenska", locale: "sv" }
+  ]) {
+    await page.evaluate(() => Reflect.set(window, "__localeSmokeDocument", true));
+    await page.getByRole("button", { name: selection.profile }).click();
+    await page.getByRole("menuitem", { name: selection.menu, exact: true }).click();
+    await page.getByRole("menuitemradio", { name: selection.label, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", selection.locale);
+    await expect
+      .poll(() => page.evaluate(() => Reflect.get(window, "__localeSmokeDocument")))
+      .toBeUndefined();
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", selection.locale);
+  }
+  await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toBeVisible();
+});
+
 test("the side navigation reaches the assistant catalog", async ({ page }) => {
   await page.goto("/spaces/list");
   const navigation = page.getByRole("navigation", { name: /huvudmeny|main menu/i });

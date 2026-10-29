@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
-import { AppIntlProvider } from "@/components/providers/intl-provider";
+import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
@@ -83,7 +83,7 @@ export default async function RootLayout({
         </style>
       </head>
       <body className="min-h-svh">
-        <AppIntlProvider locale={locale} messages={messages}>
+        <NextIntlClientProvider messages={messages}>
           {/* .light/.dark drive the legacy `dark:` variant and color-scheme
               (globals.css); data-theme is the attribute Astryx reads. */}
           <ThemeProvider
@@ -97,7 +97,7 @@ export default async function RootLayout({
             <Toaster />
             <ThemeColor />
           </ThemeProvider>
-        </AppIntlProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

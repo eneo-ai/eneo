@@ -19,7 +19,6 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
 beforeEach(() => {
   setRoute("/spaces/list");

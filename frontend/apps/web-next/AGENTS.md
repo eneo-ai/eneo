@@ -562,7 +562,7 @@ production build shows these violations. Never loosen the policy.
 
 ## Text and i18n
 
-- use-intl, locales `sv` (default) and `en`. `AppIntlProvider` owns live language changes, the `NEXT_LOCALE` preference cookie and the viewer’s resolved time zone. Calendar dates and backend day aggregates keep their own semantics.
+- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. The frozen Next layout keeps its existing provider until removal; changing its context during partial hydration can discard server-rendered pages. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs
