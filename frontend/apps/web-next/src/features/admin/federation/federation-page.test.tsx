@@ -306,7 +306,12 @@ describe("saving", () => {
 
     const secret = screen.getByLabelText(/Klienthemlighet/);
     await waitFor(() => expect(secret.getAttribute("aria-invalid")).toBe("true"));
-    expect(screen.getByText(/ser ut som en maskerad hemlighet/)).toBeTruthy();
+    await waitFor(() => expect(announced()).toContain(sv.federation_admin_secret_masked));
+    const describedBy = (secret.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(describedBy).toContain(sv.federation_admin_secret_masked);
   });
 
   it("reports another admin's save, and Reload loads their values", async () => {
