@@ -17,6 +17,24 @@
       "package": "filelock",
       "rationale": "Windows-only: a local account holding an oplock on a soft-lock marker stalls acquire(). The backend runs on Linux, where FileLock uses fcntl and the soft-lock oplock path does not exist. Fix (4.2.1) blocked by litellm's filelock<4.0 requirement, as for CVE-2026-112940.",
       "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112936",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. The symlink-to-SQLite flaw requires ReadWriteLock/AsyncReadWriteLock. Eneo has no filelock calls; its locked runtime dependents (huggingface-hub 1.21.0 and litellm 1.104.7) use only FileLock/SoftFileLock, never those SQLite classes. Fixed in 4.0.9, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess if dependency versions or lock call sites change.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112910",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. WindowsFileLock ignores mode and inherits directory ACLs. The packaged backend/worker use the Debian Linux image in backend/Dockerfile, so the affected Windows lock implementation is not selected. This exception does not cover a native Windows deployment. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess before changing the production platform.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112915",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. A crafted SQLite lock database can stall ReadWriteLock/AsyncReadWriteLock beyond its timeout. Eneo has no filelock calls; its locked runtime dependents (huggingface-hub 1.21.0 and litellm 1.104.7) use FileLock/SoftFileLock and do not open SQLite lock databases. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess if dependency versions or lock call sites change.",
+      "expires": "2026-11-24"
     }
   ]
 }
