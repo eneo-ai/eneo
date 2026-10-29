@@ -2,17 +2,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionKeys } from "@/lib/api/session";
 import { expectNoAxeViolations } from "@/test/axe";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const remove = vi.hoisted(() => vi.fn());
-const refresh = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post, DELETE: remove } }));
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { default_role_id: "default" } })
 }));
-vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
@@ -61,6 +60,7 @@ function show() {
       <RolesPage />
     </QueryClientProvider>
   );
+  return vi.spyOn(client, "invalidateQueries");
 }
 
 function openActions(row: HTMLElement) {
@@ -157,7 +157,7 @@ describe("role administration", () => {
   });
 
   it("requires confirmation before changing the default and prevents deleting it", async () => {
-    show();
+    const invalidate = show();
     const defaultRow = (await screen.findByText("Everyone")).closest("article");
     const customRow = screen.getByText("Manager").closest("article");
     if (!defaultRow || !customRow) throw new Error("Role row missing");
@@ -174,7 +174,7 @@ describe("role administration", () => {
         params: { path: { role_id: "custom" } }
       })
     );
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: sessionKeys.tenant });
   });
 
   it("shows the default role's Delete disabled, with the reason in the menu", async () => {

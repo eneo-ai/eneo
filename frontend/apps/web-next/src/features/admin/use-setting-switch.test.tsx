@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { act, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { router } from "@/test/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { sessionKeys } from "@/lib/api/session";
 import { renderHookInApp, testQueryClient } from "@/test/render";
 
 const toastApiError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/toast", () => ({ toastApiError }));
-vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { useSettingSwitch, type SettingSwitchOptions } from "./use-setting-switch";
 
@@ -36,7 +36,8 @@ function render(
 
 it("shows a press at once, says it is saving, and keeps it once saved", async () => {
   const save = deferred();
-  const { result } = render(false, () => save.promise);
+  const { result, queryClient } = render(false, () => save.promise);
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
   act(() => result.current[1](true));
   await waitFor(() => expect(result.current[0]).toBe(true));
@@ -44,17 +45,19 @@ it("shows a press at once, says it is saving, and keeps it once saved", async ()
 
   await act(async () => save.resolve());
   expect(result.current).toEqual([true, expect.any(Function), false]);
-  // A tenant setting refreshes the server layout by default.
-  expect(router.refresh).toHaveBeenCalledTimes(1);
+  expect(invalidate).toHaveBeenCalledExactlyOnceWith({ queryKey: sessionKeys.settings });
 });
 
 it("refreshes a query-backed setting its own way, and follows the server's value", async () => {
   const onSaved = vi.fn();
-  const { result, rerender, server } = render(false, () => Promise.resolve(), { onSaved });
+  const { result, rerender, server, queryClient } = render(false, () => Promise.resolve(), {
+    onSaved
+  });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
   act(() => result.current[1](true));
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith(true));
-  expect(router.refresh).not.toHaveBeenCalled();
+  expect(invalidate).not.toHaveBeenCalled();
   expect(result.current[0]).toBe(true);
 
   // The refetch brings the saved value, then a change made elsewhere (another
@@ -71,7 +74,8 @@ it("falls back to the saved value and reports a failed save its own way", async 
   const onError = vi.fn();
   const failure = new Error("nope");
   const save = deferred();
-  const { result } = render(true, () => save.promise, { onError });
+  const { result, queryClient } = render(true, () => save.promise, { onError });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
   act(() => result.current[1](false));
   await waitFor(() => expect(result.current[0]).toBe(false));
@@ -80,6 +84,34 @@ it("falls back to the saved value and reports a failed save its own way", async 
   await waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
   expect(result.current[0]).toBe(true);
   expect(toastApiError).not.toHaveBeenCalled();
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+it("refetches the held settings query after saving without fetching unrelated session data", async () => {
+  let settings = { using_templates: false };
+  const getSettings = vi.fn(async () => settings);
+  const getTenant = vi.fn(async () => ({ name: "sundsvall" }));
+  const { result } = renderHookInApp(() => {
+    const current = useQuery({
+      queryKey: sessionKeys.settings,
+      queryFn: getSettings,
+      staleTime: Infinity
+    });
+    useQuery({ queryKey: sessionKeys.tenant, queryFn: getTenant, staleTime: Infinity });
+    const [, save] = useSettingSwitch(
+      "templates",
+      current.data?.using_templates ?? false,
+      async (enabled) => {
+        settings = { using_templates: enabled };
+      }
+    );
+    return { current: current.data, save };
+  });
+  await waitFor(() => expect(result.current.current?.using_templates).toBe(false));
+  act(() => result.current.save(true));
+  await waitFor(() => expect(result.current.current?.using_templates).toBe(true));
+  expect(getSettings).toHaveBeenCalledTimes(2);
+  expect(getTenant).toHaveBeenCalledTimes(1);
 });
 
 it("queues saves that share a queue behind each other", async () => {

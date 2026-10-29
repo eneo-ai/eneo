@@ -19,7 +19,7 @@ import {
   Users
 } from "lucide-react";
 import Link from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
+import { sessionKeys } from "@/lib/api/session";
 import { useLocale, useTranslations } from "use-intl";
 import { useRef, useState, type SubmitEvent } from "react";
 import {
@@ -98,7 +98,6 @@ type PendingAction = { kind: "delete" | "reset" | "default"; role: Role };
 export function RolesPage() {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { tenant } = useAppContext();
   const [defaultRoleId, setDefaultRoleId] = useState(tenant.default_role_id ?? null);
@@ -236,7 +235,7 @@ export function RolesPage() {
           })
         );
         setDefaultRoleId(role.id);
-        router.refresh();
+        await queryClient.invalidateQueries({ queryKey: sessionKeys.tenant });
         toast.success(t("roles_default_toast", { name: role.name }));
       }
       setPending(null);
