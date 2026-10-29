@@ -1,18 +1,16 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
-  import {
-    CircleAlert,
-    Ban,
-    Bell,
-    BellOff,
-    CalendarClock,
-    Eye,
-    EllipsisVertical,
-    Pencil,
-    RefreshCw,
-    RotateCcw,
-    Trash2
-  } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Ban from "@lucide/svelte/icons/ban";
+  import Bell from "@lucide/svelte/icons/bell";
+  import BellOff from "@lucide/svelte/icons/bell-off";
+  import CalendarClock from "@lucide/svelte/icons/calendar-clock";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";

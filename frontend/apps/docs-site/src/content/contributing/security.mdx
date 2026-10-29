@@ -14,11 +14,37 @@ Pull requests into `develop` run the following security and quality gates:
 
 ### CI
 
-`CI / CI` is the main app check. It runs backend quality checks, backend tests, frontend checks, package lint, and the frontend production build.
+`CI / CI` is the main app check. Pull requests and merge-queue candidates run
+the checks selected by `.github/scripts/ci-change-scope.mjs`. Each merge
+candidate is classified by its own diff onto the preceding candidate; the whole
+candidate tree is still built and tested. Missing history, an empty diff,
+unknown runtime paths, and changes to CI workflows or local actions select full
+validation.
+
+Backend changes require backend quality checks, all six test shards, schema
+checks, and both frontend E2E suites. Each frontend's changes require that
+app's checks, E2E tests, and Docker build. Shared frontend packages and lockfiles
+select both apps. Security scanning and repository checks remain required even
+for documentation-only changes. The final gate rejects failed, cancelled,
+missing, or unexpectedly skipped jobs; only jobs excluded by the scope plan
+may be skipped.
 
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
-The CI workflow also builds the backend, Svelte frontend, Next frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The Docker matrix contains only the affected backend, Svelte frontend, Next
+frontend, or devcontainer images, built without pushing them. This catches
+Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The Svelte production build runs in E2E and Docker; there is no additional
+standalone build of the same app. The web-next E2E and accessibility checks are
+part of the required aggregate when selected.
+
+Pushes to `develop` run the full suite once, through **Build and Push Docker
+Images**, before the completed release bundle can be published. Release-branch
+pushes still run full CI directly; tag and manual publication callers also run
+the full suite. Publication and its release checks are not scoped away.
+
+See the [CI operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CODE_QUALITY.md#ci-execution-and-recovery)
+for time limits, build diagnostics, validation commands, and recovery.
 
 Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate yet.
 
@@ -123,10 +149,14 @@ the nested-router and mounted-API tests when upgrading FastAPI.
 
 ## Required Checks in Branch Protection
 
-The `develop` ruleset should require these checks:
+The `develop` ruleset requires these checks:
 
 - `CI / CI`
 - `Dependency Review / Dependency Review`
+
+A separate `PR label classification` ruleset requires `PR label policy / PR labels` on `develop`, `main` and `release/**`.
+
+Who can approve, merge and release, and how branches and tags are protected, is described in [Governance and Roles](/contributing/governance).
 
 Remove older or paused required status checks if they appear as `Expected` and never report:
 

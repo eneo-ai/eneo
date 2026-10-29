@@ -430,16 +430,19 @@ A normalized source URL identifies each website document. Files at different
 URLs remain separate even when their names match; a title change at the same URL
 keeps the source's version history. Migration preserves existing metadata and
 citation IDs. Unknown or ambiguous legacy URLs remain available and require
-resolution before publication can replace them. Changed content retains previous
-versions, while removal of an absent source removes its history and citation
-references. There is no automatic age-based retention policy. Crawl history is
-paginated, and the UI loads older runs on request.
+resolution before publication can replace them. Changed content retains the
+text and metadata of previous versions so citations stay readable; their chunks
+and embeddings are removed once the replacement is published, because retrieval
+reads only the active version. Removal of an absent source removes its history
+and citation references. There is no automatic age-based retention policy.
+Crawl history is paginated, and the UI loads older runs on request.
 
 Uploads and crawl downloads share extraction subprocesses with time, output,
 archive and PDF bounds; Linux also enforces address-space limits and parent-death
 cleanup. HTML parsing and text splitting use a bounded thread pool so they do not
-run directly on the worker's event loop. Quota checks include retained versions
-and serialize the final commit after provider work, rolling back an over-limit
+run directly on the worker's event loop. Quota checks include what retained
+versions keep, credit the chunks a replacement releases, and serialize the
+final commit after provider work, rolling back an over-limit
 publication. Stored knowledge also prevents changes to embedding model semantics
 or provider routing; those changes require a new model and reindexing.
 
@@ -553,11 +556,13 @@ retrieval modes.
 1. User uploads a File; its bytes follow the deployment's selected storage policy.
 2. Backend enqueues document processing.
 3. Worker extracts text, creates chunks, and generates embeddings.
-4. One short transaction publishes the new `InfoBlobs` version and every
-   `InfoBlobChunks` vector, then supersedes the previous version.
-5. Retrieval reads only the active version. Exact historical references remain
-   readable until the document is deleted.
-6. A failed replacement rolls back; the previous complete version remains active.
+4. One short transaction supersedes the previous version, publishes the new
+   `InfoBlobs` version and every `InfoBlobChunks` vector, and removes the
+   previous version's chunks.
+5. Retrieval reads only the active version. Exact historical references and
+   the previous text remain readable until the document is deleted.
+6. A failed replacement rolls back; the previous complete version, chunks
+   included, remains active.
 7. The job records `COMPLETE` or `FAILED` for the frontend.
 
 PostgreSQL owns searchable text, version state, and pgvector data regardless of

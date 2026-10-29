@@ -14,7 +14,7 @@ from eneo.model_providers.domain.model_provider_service import ModelProviderServ
 
 
 def _build_service_with_provider(
-    provider_type: str, endpoint: str = ""
+    provider_type: str, endpoint: str = "", api_key: str = "test-key"
 ) -> tuple[ModelProviderService, Any]:
     """Build a service whose repository returns a stub provider matching the
     given type. Credentials decryption is bypassed so we don't need real keys."""
@@ -30,7 +30,7 @@ def _build_service_with_provider(
     encryption = MagicMock()
     service = ModelProviderService(repository=repository, encryption=encryption)
     # Bypass real decryption — return the api_key field as-is.
-    service._decrypt_credentials = lambda creds: {"api_key": "test-key"}  # type: ignore[method-assign]
+    service._decrypt_credentials = lambda creds: {"api_key": api_key}  # type: ignore[method-assign]
     return service, provider
 
 
@@ -208,6 +208,60 @@ async def test_openai_compatible_endpoint_uses_bearer() -> None:
     # Trailing slash on endpoint should be stripped, no double slash in path.
     assert captured["url"] == "https://api.example.com/v1/models"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_auth_is_listed_without_a_key() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+        captured["headers"] = headers
+        return httpx.Response(
+            200, json={"data": [{"id": "my-model"}]}, request=httpx.Request("GET", url)
+        )
+
+    service, _ = _build_service_with_provider(
+        "hosted_vllm", endpoint="https://llm.example.se", api_key=""
+    )
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        result = await service.list_available_models(uuid4())
+
+    assert "Authorization" not in captured["headers"]
+    assert [model["name"] for model in result] == ["my-model"]
+
+
+@pytest.mark.asyncio
+async def test_a_whitespace_only_key_is_listed_without_a_key() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+        captured["headers"] = headers
+        return httpx.Response(200, json={"data": []}, request=httpx.Request("GET", url))
+
+    service, _ = _build_service_with_provider(
+        "hosted_vllm", endpoint="https://llm.example.se", api_key=" \n"
+    )
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        await service.list_available_models(uuid4())
+
+    assert "Authorization" not in captured["headers"]
+
+
+@pytest.mark.asyncio
+async def test_a_key_pasted_with_a_trailing_newline_is_sent_clean() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+        captured["headers"] = headers
+        return httpx.Response(200, json={"data": []}, request=httpx.Request("GET", url))
+
+    service, _ = _build_service_with_provider(
+        "hosted_vllm", endpoint="https://llm.example.se", api_key="sk-abc\n"
+    )
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        await service.list_available_models(uuid4())
+
+    assert captured["headers"]["Authorization"] == "Bearer sk-abc"
 
 
 @pytest.mark.asyncio

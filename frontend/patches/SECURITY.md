@@ -41,3 +41,19 @@ cover rendering, size limits and untrusted formulas, including inherited
 `trust` and `processor` properties. Both apps retain the shared
 `@eneo/markdown-math` options. KaTeX 0.18 prefixes internal CSS classes;
 application styles use the stable outer `.katex` and `.katex-display` classes.
+
+## Seroval resolution — CVE-2026-116582 / CVE-2026-116583
+
+Reviewed 2026-10-29. The root resolution selects Seroval 1.6.11, including the
+upstream fixes for [RegExp script injection](https://github.com/advisories/GHSA-9wx9-5pv9-3349)
+and [typed array constructor injection](https://github.com/advisories/GHSA-f86p-h4j2-7qgj).
+There is no audit exception. The installed chain is the beta's
+`@tanstack/react-query-devtools` → `@tanstack/query-devtools` → `solid-js` →
+`seroval`. Remove the override once the parents require a fixed version.
+
+The existing `scripts/security-patches.test.mjs` suite resolves Seroval through
+that chain. It checks synchronous and asynchronous serialization of typed
+arrays with an untrusted own `constructor`, with and without compact buffer
+views, and prevents RegExp sources from ending an HTML script element. It also
+checks typed array contents, RegExp flags, named groups and lookbehinds survive
+the round trip. CI runs these regressions before the dependency audit.

@@ -130,7 +130,13 @@ class RerankService:
                 exc,
             )
             return None
-        return RerankSpec(reranker=reranker, query=query, model_name=model.name)
+        return RerankSpec(
+            reranker=reranker,
+            query=query,
+            model_name=model.name,
+            candidate_factor=model.candidate_factor,
+            max_candidates=model.max_candidates,
+        )
 
     def _allowed(
         self,

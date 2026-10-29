@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, List, Literal, TypeVar
 from urllib.parse import quote
@@ -64,6 +65,33 @@ class InfoBlobOriginal:
 class InfoBlobPublication:
     info_blob: InfoBlobInDB
     original: InfoBlobOriginal | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplacedPage:
+    """A page of replaced versions in id order, and which still hold chunks."""
+
+    last_id: UUID | None
+    versions_read: int
+    with_search_data: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplacedBatch:
+    last_scanned_id: UUID | None
+    versions_read: int
+    released_versions: int
+    released_bytes: int
+    skipped_busy: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveUpload:
+    """The active version an upload to a collection would refresh or replace."""
+
+    info_blob_id: UUID
+    embedding_model_id: UUID | None
+    original_sha256: bytes | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,17 +505,17 @@ class InfoBlobRepository:
             original=await self.get_original(published.id),
         )
 
-    async def has_matching_active_upload_original(
+    async def find_active_upload(
         self,
         *,
         group_id: UUID,
         title: str,
-        embedding_model_id: UUID,
         original_sha256: bytes,
-    ) -> bool:
+    ) -> ActiveUpload | None:
         rows = (
             await self.session.execute(
                 sa.select(
+                    InfoBlobs.id,
                     InfoBlobs.embedding_model_id,
                     ObjectContents.sha256,
                 )
@@ -517,11 +545,12 @@ class InfoBlobRepository:
                 "Knowledge publication identity is ambiguous"
             )
         if not rows:
-            return False
+            return None
         row = rows[0]
-        return (
-            row.embedding_model_id == embedding_model_id
-            and row.sha256 == original_sha256
+        return ActiveUpload(
+            info_blob_id=row.id,
+            embedding_model_id=row.embedding_model_id,
+            original_sha256=row.sha256,
         )
 
     async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:
@@ -689,16 +718,12 @@ class InfoBlobRepository:
         record = await self.delegate.update(info_blob)
         return InfoBlobInDB.model_validate(record)
 
-    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
+    @staticmethod
+    def _stored_size() -> ColumnElement[int]:
+        """Bytes a version retains: its text, its chunks and its original."""
         chunks_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobChunks.size), 0))
-            .where(InfoBlobChunks.info_blob_id == info_blob_id)
-            .scalar_subquery()
-        )
-
-        text_size_subquery = (
-            sa.select(sa.func.coalesce(sa.func.octet_length(InfoBlobs.text), 0))
-            .where(InfoBlobs.id == info_blob_id)
+            .where(InfoBlobChunks.info_blob_id == InfoBlobs.id)
             .scalar_subquery()
         )
         original_size_subquery = (
@@ -708,20 +733,147 @@ class InfoBlobRepository:
                 ObjectContents,
                 ObjectContents.id == InfoBlobContentReferences.content_id,
             )
-            .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
+            .where(InfoBlobContentReferences.info_blob_id == InfoBlobs.id)
             .scalar_subquery()
         )
+        return sa.func.coalesce(
+            chunks_size_subquery
+            + sa.func.coalesce(sa.func.octet_length(InfoBlobs.text), 0)
+            + sa.func.coalesce(original_size_subquery, 0),
+            0,
+        )
 
+    async def releasable_search_bytes(
+        self, info_blob_ids: Sequence[UUID]
+    ) -> dict[UUID, int]:
+        """Chunk bytes that replacing these versions releases, per owner."""
+        if not info_blob_ids:
+            return {}
+        rows = await self.session.execute(
+            sa.select(InfoBlobs.user_id, sa.func.sum(InfoBlobChunks.size))
+            .select_from(InfoBlobs)
+            .join(InfoBlobChunks, InfoBlobChunks.info_blob_id == InfoBlobs.id)
+            .where(InfoBlobs.id.in_(info_blob_ids))
+            .group_by(InfoBlobs.user_id)
+        )
+        return {user_id: int(size) for user_id, size in rows.tuples()}
+
+    async def release_replaced_search_data(
+        self, info_blob_ids: Sequence[UUID]
+    ) -> dict[UUID, int]:
+        """Delete replaced versions' chunks and shrink their size to match.
+
+        Only the active version of a source is searched, so a replaced version
+        needs its text, metadata and original for citations but not its chunks.
+        Active and missing versions are left untouched. Parent rows are locked
+        before their chunks, the same order as deleting a source family.
+        Returns the released bytes per owner.
+        """
+        if not info_blob_ids:
+            return {}
+        replaced = (
+            await self.session.scalars(
+                sa.select(InfoBlobs.id)
+                .where(
+                    InfoBlobs.id.in_(info_blob_ids),
+                    InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
+                )
+                .order_by(InfoBlobs.id)
+                .with_for_update()
+            )
+        ).all()
+        if not replaced:
+            return {}
+        released = await self.releasable_search_bytes(replaced)
+        await self.session.execute(
+            sa.delete(InfoBlobChunks).where(InfoBlobChunks.info_blob_id.in_(replaced))
+        )
+        await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(InfoBlobs.id.in_(replaced))
+            .values(size=self._stored_size())
+        )
+        return released
+
+    async def scan_replaced_page(
+        self, *, after: UUID | None, limit: int
+    ) -> ReplacedPage:
+        """Read the next `limit` versions of any state after `after`, in id order.
+
+        One page reads at most `limit` rows through the primary key, however
+        few of them are replaced versions; `versions_read` counts the replaced
+        ones and `with_search_data` those of them that still hold chunks.
+        """
+        replaced = InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value
+        holds_chunks = sa.case(
+            (
+                replaced,
+                sa.exists().where(InfoBlobChunks.info_blob_id == InfoBlobs.id),
+            ),
+            else_=sa.false(),
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(InfoBlobs.id, replaced, holds_chunks)
+                .where(InfoBlobs.id > after if after is not None else sa.true())
+                .order_by(InfoBlobs.id)
+                .limit(limit)
+            )
+        ).all()
+        if not rows:
+            return ReplacedPage(None, 0, [])
+        return ReplacedPage(
+            last_id=rows[-1][0],
+            versions_read=sum(1 for _, is_replaced, _ in rows if is_replaced),
+            with_search_data=[id_ for id_, _, holding in rows if holding],
+        )
+
+    async def release_next_replaced_batch(
+        self, *, after: UUID | None, limit: int
+    ) -> ReplacedBatch:
+        """Release the replaced versions in the next page after `after`.
+
+        Versions another transaction holds, for example one deleting their
+        source, are skipped rather than waited for.
+        """
+        page = await self.scan_replaced_page(after=after, limit=limit)
+        if page.last_id is None:
+            return ReplacedBatch(None, 0, 0, 0, 0)
+        if not page.with_search_data:
+            return ReplacedBatch(page.last_id, page.versions_read, 0, 0, 0)
+        available = (
+            await self.session.scalars(
+                sa.select(InfoBlobs.id)
+                .where(
+                    InfoBlobs.id.in_(page.with_search_data),
+                    InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
+                )
+                .order_by(InfoBlobs.id)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        # Holding the parent locks, recheck which versions still have chunks:
+        # a concurrent run may have released some since they were found.
+        holding = (
+            await self.session.scalars(
+                sa.select(InfoBlobChunks.info_blob_id)
+                .where(InfoBlobChunks.info_blob_id.in_(available))
+                .distinct()
+            )
+        ).all()
+        released = await self.release_replaced_search_data(holding)
+        return ReplacedBatch(
+            last_scanned_id=page.last_id,
+            versions_read=page.versions_read,
+            released_versions=len(holding),
+            released_bytes=sum(released.values()),
+            skipped_busy=len(page.with_search_data) - len(available),
+        )
+
+    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
         stmt = (
             sa.update(InfoBlobs)
-            .values(
-                size=sa.func.coalesce(
-                    chunks_size_subquery
-                    + text_size_subquery
-                    + sa.func.coalesce(original_size_subquery, 0),
-                    0,
-                )
-            )
+            .values(size=self._stored_size())
             .where(InfoBlobs.id == info_blob_id)
             .returning(InfoBlobs)
         )
