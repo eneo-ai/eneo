@@ -13,8 +13,12 @@ export const Route = createFileRoute("/_app/spaces/$spaceId")({
     if (params.spaceId === "organization")
       await requirePermission(context, "admin", DEFAULT_LANDING);
   },
-  loader: ({ context, params }) =>
-    notFoundOn404(readFresh(context.queryClient, spaceQueryOptions(browserApi, params.spaceId))),
+  loader: {
+    // The router must await the existence check even when it has an older successful match.
+    staleReloadMode: "blocking",
+    handler: ({ context, params }) =>
+      notFoundOn404(readFresh(context.queryClient, spaceQueryOptions(browserApi, params.spaceId)))
+  },
   head: ({ matches, match }) => spaceTitle(matches, match.context.t),
   component: SpaceLayout
 });

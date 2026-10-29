@@ -191,6 +191,10 @@ it.each([false, true])(
     });
     await screen.findByRole("heading", { name: messages.page_not_found });
     expect(router.state.location.pathname).toBe("/spaces/missing");
+    expect(
+      router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId")?.status
+    ).toBe("notFound");
+    expect(screen.queryAllByText("Upphandling")).toHaveLength(0);
     expect(requestedPaths().filter((path) => path === "/api/v1/spaces/missing/")).toHaveLength(1);
     expect(navigate).not.toHaveBeenCalled();
   }
@@ -258,6 +262,61 @@ it("preloads the session using only GET requests", async () => {
     expect(input instanceof Request ? input.method : (init?.method ?? "GET")).toBe("GET");
   }
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it("waits for a fresh existence check before re-entering a cached space route", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  const { router, queryClient } = await renderRoute(
+    "/spaces/space-1",
+    undefined,
+    ({ queryClient }) => {
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    }
+  );
+  expect(
+    router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId")?.status
+  ).toBe("success");
+  await act(() => router.navigate({ to: "/account" }));
+  await screen.findByRole("heading", { name: messages.my_account, level: 1 });
+  await queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"], refetchType: "none" });
+  let release!: (response: Response) => void;
+  replies.set(
+    "/api/v1/spaces/space-1/",
+    new Promise<Response>((resolve) => {
+      release = resolve;
+    })
+  );
+  const previousReads = requestedPaths().filter(
+    (path) => path === "/api/v1/spaces/space-1/"
+  ).length;
+  let navigation!: Promise<void>;
+  await act(async () => {
+    navigation = router.navigate({ to: "/spaces/$spaceId", params: { spaceId: "space-1" } });
+  });
+  try {
+    await waitFor(() =>
+      expect(requestedPaths().filter((path) => path === "/api/v1/spaces/space-1/")).toHaveLength(
+        previousReads + 1
+      )
+    );
+    expect(router.state.status).toBe("pending");
+    expect(screen.queryAllByText("Upphandling")).toHaveLength(0);
+  } finally {
+    await act(async () => {
+      release(
+        new Response(JSON.stringify({ message: "Not found" }), {
+          status: 404,
+          headers: { [GENERATION]: "document-session", "content-type": "application/json" }
+        })
+      );
+      await navigation;
+    });
+  }
+  expect(
+    router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId")?.status
+  ).toBe("notFound");
+  expect(screen.queryAllByText("Upphandling")).toHaveLength(0);
+  expect(screen.getByRole("heading", { name: messages.page_not_found })).toBeTruthy();
 });
 
 it("starts the other five session resources together without blocking the route gate", async () => {
