@@ -21,8 +21,13 @@ import {
 export type MessageResponseProps = Omit<ComponentProps<typeof Streamdown>, "urlTransform">;
 
 // Streamdown sanitizes HTML; content URL schemes follow the app's shared policy.
-const sanitizeMarkdownUrl: UrlTransform = (url, key) =>
-  key === "src" ? sanitizeImageSrc(url) : sanitizeLinkHref(url);
+const sanitizeMarkdownUrl: UrlTransform = (url, key, node) => {
+  // The default image component renders this sentinel as an inert loading placeholder.
+  if (key === "src" && node.tagName === "img" && url === "streamdown:incomplete-image") {
+    return url;
+  }
+  return key === "src" ? sanitizeImageSrc(url) : sanitizeLinkHref(url);
+};
 
 /**
  * Typography of assistant answers (and quoted source snippets): the app's

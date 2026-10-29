@@ -214,6 +214,17 @@ describe("MessageResponse", () => {
     );
   });
 
+  it("keeps the inert image loading placeholder until the image URL arrives", () => {
+    const { container, rerender } = renderAnswer(vi.fn(), "![Bildtext](");
+    expect(container.querySelector('[data-streamdown="image-placeholder"]')).not.toBeNull();
+    expect(container.querySelector("img[src]")).toBeNull();
+    rerender(<Answer text="![Bildtext](https://example.com/image.png)" onOpenSource={vi.fn()} />);
+    expect(container.querySelector('[data-streamdown="image-placeholder"]')).toBeNull();
+    expect(screen.getByRole("img", { name: "Bildtext" }).getAttribute("src")).toBe(
+      "https://example.com/image.png"
+    );
+  });
+
   it("matches only this message's markers within its sources", () => {
     expect(citationNumber("#msg-1-cite-2", "msg-1", 2)).toBe(2);
     expect(citationNumber("#msg-1-cite-3", "msg-1", 2)).toBeNull();
