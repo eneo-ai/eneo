@@ -225,16 +225,15 @@ def test_theme_colours_are_validated():
         WidgetTheme(header_color="blue")
 
 
-def test_theme_refuses_the_retired_logo_keys():
-    """Stored themes are rehydrated through this model, so a row that still
-    carries the header-logo keys fails to load; revision 202610281000 strips
-    them before this model lands."""
+def test_theme_refuses_unknown_keys():
+    """Stored themes are rehydrated through this model, so a key the model has
+    dropped must be stripped from the rows by a migration, not ignored."""
     from eneo.widgets.domain.widget import WidgetTheme
 
     with pytest.raises(ValueError):
-        WidgetTheme.model_validate({"logo_url": "https://kommun.se/logo.svg"})
+        WidgetTheme.model_validate({"banner_url": "https://kommun.se/banner.svg"})
     with pytest.raises(ValueError):
-        WidgetTheme.model_validate({"logo_file_id": None})
+        WidgetTheme.model_validate({"banner_file_id": None})
 
 
 def test_persona_is_optional_and_its_parts_depend_on_each_other():

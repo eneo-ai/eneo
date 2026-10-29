@@ -21,9 +21,9 @@ transaction: they take their locks with NOWAIT and retry for a bounded time.
 Every step can be re-run: an interrupted or timed-out upgrade is completed by
 running it again.
 
-Revision ID: 202609231701
-Revises: 202609231700
-Create Date: 2026-09-23 17:01:00.000000
+Revision ID: 202610291001
+Revises: 202610291000
+Create Date: 2026-10-29 10:01:00.000000
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ from sqlalchemy.exc import DBAPIError
 
 from alembic import op
 
-revision: str = "202609231701"
-down_revision: str | None = "202609231700"
+revision: str = "202610291001"
+down_revision: str | None = "202610291000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

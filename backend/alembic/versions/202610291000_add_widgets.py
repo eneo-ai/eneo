@@ -1,16 +1,16 @@
 """add embeddable widgets
 
 Creates the widget feature's own schema in its released shape: templates,
-widgets, daily usage with durable budget reservations, and the tenant widget
-policy. Existing Owner roles receive the `widgets` permission that
-predefined_roles.yml grants new tenants.
+widgets with their texts, theme and persona, daily usage with durable budget
+reservations, and the tenant widget policy. Existing Owner roles receive the
+`widgets` permission that predefined_roles.yml grants new tenants.
 
-Nothing here touches the chat tables. 202609231701 changes `sessions` and
+Nothing here touches the chat tables. 202610291001 changes `sessions` and
 `questions` separately because it has to run outside a transaction.
 
-Revision ID: 202609231700
-Revises: 202609231001
-Create Date: 2026-09-23 17:00:00.000000
+Revision ID: 202610291000
+Revises: 202610261300
+Create Date: 2026-10-29 10:00:00.000000
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision: str = "202609231700"
-down_revision: str | None = "202609231001"
+revision: str = "202610291000"
+down_revision: str | None = "202610261300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -66,6 +66,7 @@ def upgrade() -> None:
         sa.Column("description", sa.String(), server_default="", nullable=False),
         _jsonb("texts", "{}"),
         _jsonb("theme", "{}"),
+        _jsonb("persona", "{}"),
         sa.Column("language", sa.String(), server_default="auto", nullable=False),
         sa.Column(
             "is_default", sa.Boolean(), server_default=sa.false(), nullable=False
@@ -109,6 +110,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=False),
         _jsonb("texts", "{}"),
         _jsonb("theme", "{}"),
+        _jsonb("persona", "{}"),
         _jsonb("limits", "{}"),
         _jsonb("privacy", "{}"),
         sa.Column("language", sa.String(), server_default="auto", nullable=False),

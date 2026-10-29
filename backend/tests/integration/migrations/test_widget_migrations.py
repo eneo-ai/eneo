@@ -1,6 +1,6 @@
 """Widget revisions: online on the chat tables and reversible to develop's head.
 
-202609231701 changes `sessions` and `questions`, two of the largest tables in a
+202610291001 changes `sessions` and `questions`, two of the largest tables in a
 deployment. Chat writes must keep flowing while it scans them, and a downgrade
 must restore develop's schema exactly.
 """
@@ -30,8 +30,8 @@ seed_default_models = expand.seed_default_models
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-DEVELOP_HEAD = "202609231001"
-WIDGET_HEAD = "202609231701"
+DEVELOP_HEAD = "202610261300"
+WIDGET_HEAD = "202610291001"
 _MIGRATION_APPLICATION = "widget-migration-under-test"
 
 
