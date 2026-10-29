@@ -13,8 +13,8 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202610161000"
-GRANT_REVISION = "202610221000"
+PRE_REVISION = "202610261300"
+GRANT_REVISION = "202610291800"
 
 
 def _alembic_cfg(database_url: str) -> Config:
