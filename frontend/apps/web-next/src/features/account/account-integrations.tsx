@@ -77,7 +77,14 @@ function IntegrationCard({
           onConfirm={() => disconnect.mutateAsync(connectionId)}
         />
       ) : (
-        <Button label={t("connect")} isLoading={connecting} onClick={onConnect} />
+        <Button
+          label={t("connect")}
+          isLoading={connecting}
+          isInterruptible
+          onClick={() => {
+            if (!connecting) onConnect();
+          }}
+        />
       )}
     </Card>
   );
