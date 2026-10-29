@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -941,6 +941,11 @@ class SkillBindingIntent:
 class AssistantSkillBindingReplacement:
     bindings: tuple[ResolvedSkillBinding, ...]
     on_demand_skill_ids_requiring_validation: frozenset[UUID]
+    # True when the new set only drops existing bindings (no addition, mode,
+    # revision or order change); the personal chat always accepts such a save.
+    removal_only: bool = False
+    # True when the submitted list is exactly what is already stored.
+    unchanged: bool = False
 
 
 @dataclass(frozen=True)
@@ -959,6 +964,10 @@ class AssistantSkillRuntimeProjection:
 class AssistantSkillConfigurationProjection:
     bindings: tuple[SkillBindingProjection, ...]
     runtime: AssistantSkillRuntimeProjection | None
+    # Personal chat only: the organisation layer (read-only) and whether the
+    # person's own Skills (``bindings``) run.
+    organisation_bindings: tuple[SkillBindingProjection, ...] = ()
+    personal_layer: PersonalSkillLayerDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -1092,6 +1101,40 @@ class SkillActivationReference(BaseModel):
         )
 
 
+class PersonalSkillLayerStatus(str, Enum):
+    """Whether the personal chat's own Skills run (see personal_chat_skill_layers)."""
+
+    EMPTY = "empty"
+    APPLIED = "applied"
+    SUSPENDED = "suspended"
+
+
+class PersonalSkillLayerReason(str, Enum):
+    """Why a personal layer is suspended; the first failing check wins."""
+
+    PERMISSION_MISSING = "permission_missing"
+    ATTACHMENT_LIMIT_EXCEEDED = "attachment_limit_exceeded"
+    MODEL_CONTEXT_EXCEEDED = "model_context_exceeded"
+    ON_DEMAND_UNAVAILABLE = "on_demand_unavailable"
+    PERSONAL_SKILL_DOES_NOT_FIT = "personal_skill_does_not_fit"
+    ORGANISATION_SKILL_CROWDED_OUT = "organisation_skill_crowded_out"
+
+
+@dataclass(frozen=True)
+class PersonalSkillLayerDecision:
+    status: PersonalSkillLayerStatus
+    reason: PersonalSkillLayerReason | None = None
+    # The existing activation reason behind an on-demand or fit failure.
+    detail: SkillActivationFallbackReason | SkillActivationRejectionReason | None = None
+    # The personal layer's eligible bindings, also when it is suspended, so
+    # evidence and configuration can name what did not run.
+    bindings: tuple[ResolvedSkillBinding, ...] = ()
+
+    @property
+    def applies(self) -> bool:
+        return self.status is PersonalSkillLayerStatus.APPLIED
+
+
 class SkillActivationRejection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -1099,12 +1142,47 @@ class SkillActivationRejection(BaseModel):
     reason: SkillActivationRejectionReason
 
 
-class SkillActivationEvidenceV1(BaseModel):
-    """Strict, versioned, body-free facts retained with one Question."""
+_PERSONAL_SKILL_LAYER_MESSAGES = {
+    PersonalSkillLayerReason.PERMISSION_MISSING: (
+        "Your role does not allow your own Skills in the personal chat"
+    ),
+    PersonalSkillLayerReason.ATTACHMENT_LIMIT_EXCEEDED: (
+        "Together with the organisation's Skills, your Skills exceed the "
+        "number of Skills allowed"
+    ),
+    PersonalSkillLayerReason.MODEL_CONTEXT_EXCEEDED: (
+        "Your Skills and the organisation's do not fit this model's context window"
+    ),
+    PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE: (
+        "Skills on demand are not available with this model or policy; "
+        "choose Always or another model"
+    ),
+    PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT: (
+        "One of your on-demand Skills is too large to activate with this model"
+    ),
+    PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT: (
+        "Your Skills would leave no room for one of the organisation's on-demand Skills"
+    ),
+}
+
+
+class PersonalSkillLayerRejectedError(Exception):
+    """A personal chat save whose own Skills would not run as configured."""
+
+    def __init__(self, decision: PersonalSkillLayerDecision) -> None:
+        assert decision.reason is not None
+        self.details = {
+            "reason": decision.reason.value,
+            "detail": decision.detail.value if decision.detail is not None else None,
+        }
+        super().__init__(_PERSONAL_SKILL_LAYER_MESSAGES[decision.reason])
+
+
+class _SkillActivationEvidenceFields(BaseModel):
+    """Strict, body-free facts retained with one Question; versions below."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = 1
     effective_mode: SkillTurnEffectiveMode
     fallback_reason: SkillActivationFallbackReason | None = None
     available: tuple[SkillActivationReference, ...]
@@ -1125,7 +1203,7 @@ class SkillActivationEvidenceV1(BaseModel):
     selection_latency_ms: int = Field(default=0, ge=0, strict=True)
 
     @model_validator(mode="after")
-    def validate_reference_catalogue(self) -> "SkillActivationEvidenceV1":
+    def validate_reference_catalogue(self) -> "_SkillActivationEvidenceFields":
         available_revision_ids = [
             reference.skill_revision_id for reference in self.available
         ]
@@ -1171,6 +1249,67 @@ class SkillActivationEvidenceV1(BaseModel):
         return self
 
 
+class SkillActivationEvidenceV1(_SkillActivationEvidenceFields):
+    version: Literal[1] = 1
+
+
+class PersonalSkillLayerEvidence(BaseModel):
+    """What happened to the personal chat's own Skills on one turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal[
+        PersonalSkillLayerStatus.APPLIED, PersonalSkillLayerStatus.SUSPENDED
+    ]
+    reason: PersonalSkillLayerReason | None = None
+    detail: SkillActivationFallbackReason | SkillActivationRejectionReason | None = None
+    references: tuple[SkillActivationReference, ...]
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> "PersonalSkillLayerEvidence":
+        if (self.status is PersonalSkillLayerStatus.SUSPENDED) != (
+            self.reason is not None
+        ):
+            raise ValueError("Only a suspended personal layer carries a reason")
+        if not self.references:
+            raise ValueError("A recorded personal layer names its Skills")
+        return self
+
+
+class SkillActivationEvidenceV2(_SkillActivationEvidenceFields):
+    """V1 plus the personal layer; written only for turns that have one."""
+
+    version: Literal[2] = 2
+    personal_layer: PersonalSkillLayerEvidence
+
+    @model_validator(mode="after")
+    def validate_personal_layer(self) -> "SkillActivationEvidenceV2":
+        available = {
+            reference.skill_revision_id: reference.activation_key
+            for reference in self.available
+        }
+        for reference in self.personal_layer.references:
+            offered = reference.skill_revision_id in available
+            if self.personal_layer.status is PersonalSkillLayerStatus.APPLIED:
+                if (
+                    not offered
+                    or reference.activation_key
+                    != available[reference.skill_revision_id]
+                ):
+                    raise ValueError("An applied personal Skill must be available")
+            elif offered or reference.activation_key is not None:
+                raise ValueError("A suspended personal Skill cannot be available")
+        return self
+
+
+# A plain union on purpose: V1 forbids extra fields and V2 requires version 2,
+# so each payload matches exactly one, and the OpenAPI schema keeps `version`
+# an integer (a discriminator would publish it as a string key).
+SkillActivationEvidence: TypeAlias = (
+    SkillActivationEvidenceV1 | SkillActivationEvidenceV2
+)
+
+
 @dataclass(frozen=True)
 class SkillTurnBinding:
     activation_key: str
@@ -1187,6 +1326,8 @@ class SkillTurnPlan:
     blocked: tuple[SkillTurnBinding, ...]
     initially_active_keys: tuple[str, ...]
     composition: SkillComposition
+    # Set for the personal chat only: whether its own Skills run this turn.
+    personal_layer: PersonalSkillLayerDecision | None = None
 
     @classmethod
     def create(
@@ -1195,6 +1336,7 @@ class SkillTurnPlan:
         base_instructions: str,
         resolution: SkillRuntimeResolution,
         policy: SkillRuntimePolicy,
+        personal_layer: PersonalSkillLayerDecision | None = None,
     ) -> "SkillTurnPlan":
         ordered = tuple(
             sorted(resolution.eligible, key=lambda binding: binding.position)
@@ -1230,6 +1372,7 @@ class SkillTurnPlan:
                 base_instructions=base_instructions,
                 bindings=[binding.binding for binding in initially_active],
             ),
+            personal_layer=personal_layer,
         )
 
     def for_full_save_validation(self) -> "SkillTurnPlan":
@@ -1254,6 +1397,7 @@ class SkillTurnPlan:
                 blocked=(),
             ),
             policy=self.policy,
+            personal_layer=self.personal_layer,
         )
 
     def to_activation_runtime(
@@ -1307,7 +1451,7 @@ class SkillTurnPlan:
         selected_model_id: UUID,
         selected_model_route: str,
         snapshot: "SkillActivationSnapshot",
-    ) -> SkillActivationEvidenceV1:
+    ) -> SkillActivationEvidenceV1 | SkillActivationEvidenceV2:
         available = tuple(
             SkillActivationReference.from_binding(
                 binding.binding,
@@ -1315,7 +1459,7 @@ class SkillTurnPlan:
             )
             for binding in self.available
         )
-        return SkillActivationEvidenceV1(
+        evidence = SkillActivationEvidenceV1(
             effective_mode=snapshot.effective_mode,
             fallback_reason=snapshot.fallback_reason,
             available=available,
@@ -1343,4 +1487,37 @@ class SkillTurnPlan:
             token_count_source=snapshot.measurement.source.value,
             activation_rounds=snapshot.activation_rounds,
             selection_latency_ms=snapshot.selection_latency_ms,
+        )
+        personal_layer = self._personal_layer_evidence()
+        if personal_layer is None:
+            return evidence
+        return SkillActivationEvidenceV2(
+            **evidence.model_dump(exclude={"version"}),
+            personal_layer=personal_layer,
+        )
+
+    def _personal_layer_evidence(self) -> PersonalSkillLayerEvidence | None:
+        decision = self.personal_layer
+        if decision is None or decision.status is PersonalSkillLayerStatus.EMPTY:
+            return None
+        personal_ids = {binding.skill_id for binding in decision.bindings}
+        if decision.applies:
+            # Applied Skills run under their composed position and key.
+            references = tuple(
+                SkillActivationReference.from_binding(
+                    binding.binding, activation_key=binding.activation_key
+                )
+                for binding in self.available
+                if binding.binding.skill_id in personal_ids
+            )
+        else:
+            references = tuple(
+                SkillActivationReference.from_binding(binding)
+                for binding in decision.bindings
+            )
+        return PersonalSkillLayerEvidence(
+            status=decision.status,
+            reason=decision.reason,
+            detail=decision.detail,
+            references=references,
         )

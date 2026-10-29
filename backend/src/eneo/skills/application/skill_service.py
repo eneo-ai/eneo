@@ -3,6 +3,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.files.file_models import File
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -10,6 +11,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_PAGE_LIMIT,
     MAX_SKILL_CATALOG_QUERY_LENGTH,
@@ -393,6 +395,10 @@ class SkillService:
             raise BadRequestException(
                 f"A resource cannot use more than {policy.max_attached_skills} Skills"
             )
+        self._validate_reference_uniqueness(references)
+
+    @staticmethod
+    def _validate_reference_uniqueness(references: list[SkillBindingReference]) -> None:
         if len({reference.skill_id for reference in references}) != len(references):
             raise BadRequestException("A Skill can only be attached once")
         if len(set(references)) != len(references):
@@ -523,8 +529,17 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
         requested_modes: dict[UUID, SkillActivationMode] | None = None,
+        personal_chat_layer: bool = False,
     ) -> list[ResolvedSkillBinding]:
-        await self._validate_reference_count(tenant_id=tenant_id, references=references)
+        # The personal chat's own layer takes only the owner's personal-space
+        # Skills, and its count is the layer assessment's: organisation plus
+        # own Skills together, where removing Skills must always be possible.
+        if personal_chat_layer:
+            self._validate_reference_uniqueness(references)
+        else:
+            await self._validate_reference_count(
+                tenant_id=tenant_id, references=references
+            )
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=tenant_id,
             parent_space_id=space_id,
@@ -547,6 +562,10 @@ class SkillService:
             for reference in new_references
             if reference not in local_references
         ]
+        if catalogue_references and personal_chat_layer:
+            raise BadRequestException(
+                "The personal chat can only use Skills from your personal space"
+            )
         # Reading the destination space's Skills is not enough: PERSONAL_SKILLS
         # opens your own personal space without granting Use Skills, which
         # alone covers organisation Skills, new or retained.
@@ -647,6 +666,15 @@ class SkillService:
         space = await self._space(space_id)
         assistant = space.get_assistant(assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
+        if space.is_personal() and assistant.is_default:
+            # The personal chat's own Skills belong to its owner: readable
+            # through the personal chat, as a revoked owner still needs to see
+            # what is paused.
+            if not actor.can_read_default_assistant():
+                raise UnauthorizedException(
+                    "You do not have permission to read this personal chat"
+                )
+            return await self.repo.list_assistant_bindings(assistant_id=assistant_id)
         if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
                 "You do not have permission to read this Assistant"
@@ -655,14 +683,7 @@ class SkillService:
             raise UnauthorizedException(
                 "You do not have permission to read Skills in this Space"
             )
-        bindings = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
-        if space.is_personal() and assistant.is_default:
-            if bindings:
-                raise BadRequestException(
-                    "Personal default Assistant has invalid direct Skill bindings"
-                )
-            return []
-        return bindings
+        return await self.repo.list_assistant_bindings(assistant_id=assistant_id)
 
     async def list_assistant_binding_projections(
         self,
@@ -691,18 +712,29 @@ class SkillService:
         space = await self._space(space_id)
         assistant = space.get_assistant(assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_assistants():
-            raise UnauthorizedException(
-                "You do not have permission to edit this Assistant"
-            )
-        if not actor.can_use_skills():
-            raise UnauthorizedException(
-                "You do not have permission to attach Skills in this Space"
-            )
-        if space.is_personal() and assistant.is_default:
-            raise BadRequestException(
-                "Personal default Assistant Skills are controlled by tenant governance"
-            )
+        personal_chat = space.is_personal() and assistant.is_default
+        if personal_chat:
+            # Organisation Skills reach the personal chat only through its
+            # policy; the person may add only their own personal-space Skills,
+            # and only with PERSONAL_SKILLS, whatever else the role allows.
+            if not actor.can_edit_default_assistant():
+                raise UnauthorizedException(
+                    "You do not have permission to edit this personal chat"
+                )
+            if Permission.PERSONAL_SKILLS not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Choosing your own Skills for the personal chat needs the "
+                    "Own Skills permission"
+                )
+        else:
+            if not actor.can_edit_assistants():
+                raise UnauthorizedException(
+                    "You do not have permission to edit this Assistant"
+                )
+            if not actor.can_use_skills():
+                raise UnauthorizedException(
+                    "You do not have permission to attach Skills in this Space"
+                )
         locked_space_id = await self.repo.lock_assistant_space_for_update(
             assistant_id=assistant_id
         )
@@ -724,6 +756,23 @@ class SkillService:
             references=references,
             existing=existing,
             requested_modes=requested_modes,
+            personal_chat_layer=personal_chat,
+        )
+        # Compare what is actually stored with what will be, so resubmitting
+        # the same list counts as no change rather than as a removal.
+        existing_identities = [
+            (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
+            for binding in sorted(existing, key=lambda binding: binding.position)
+        ]
+        resolved_identities = [
+            (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
+            for binding in resolved
+        ]
+        unchanged = resolved_identities == existing_identities
+        removal_only = (
+            not unchanged
+            and len(resolved_identities) < len(existing_identities)
+            and set(resolved_identities) <= set(existing_identities)
         )
         on_demand_skill_ids_requiring_validation = frozenset(
             binding.skill_id
@@ -746,6 +795,8 @@ class SkillService:
             on_demand_skill_ids_requiring_validation=(
                 on_demand_skill_ids_requiring_validation
             ),
+            removal_only=removal_only,
+            unchanged=unchanged,
         )
 
     async def list_app_bindings(
@@ -1049,6 +1100,37 @@ class SkillService:
             base_instructions=base_instructions,
             resolution=resolution,
             policy=policy,
+        )
+
+    async def create_personal_chat_turn_plan(
+        self,
+        *,
+        base_instructions: str,
+        organisation: SkillRuntimeResolution,
+        personal: SkillRuntimeResolution,
+        model_route: str,
+        max_input_tokens: int,
+        supports_tool_calling: bool,
+        prompt_files: Sequence[File],
+    ) -> SkillTurnPlan:
+        """The personal chat's plan: organisation Skills, then admitted own Skills.
+
+        PERSONAL_SKILLS is read from the caller on every plan, so removing it
+        suspends the person's own Skills from the next turn.
+        """
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=self.user.tenant_id
+        )
+        return plan_personal_chat_turn(
+            base_instructions=base_instructions,
+            organisation=organisation,
+            personal=personal,
+            policy=policy,
+            holds_permission=Permission.PERSONAL_SKILLS in self.user.permissions,
+            model_route=model_route,
+            max_input_tokens=max_input_tokens,
+            supports_tool_calling=supports_tool_calling,
+            prompt_files=prompt_files,
         )
 
     async def compose_for_app(

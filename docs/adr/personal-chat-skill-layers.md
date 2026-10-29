@@ -76,6 +76,10 @@ A new tenant permission, labelled "Egna skills" / "Own skills".
 - **Revocation:** checked on every turn. Without the permission, the personal
   layer is suspended with reason `permission_missing`; the saved choices stay.
   (Product owner, 2026-10-21.)
+- **Enforced prompt.** An enforced personal chat prompt does not suspend the
+  own layer. Own "always" Skills add the person's instructions after it, as
+  the person could in a message. Administrators who want the enforced prompt
+  alone leave `personal_skills` off that role.
 
 Rejected: no new permission, with administrators granting `skills` and
 `skills_management` to User instead. That also grants Skill authoring in shared
@@ -237,7 +241,8 @@ reviewed. Saving an edit never rewrites bindings
 (`skill_repo_impl.py:1800`), and the Skill editor never tries the move on its
 own. After saving a Skill that is in the personal chat, the Skill page shows
 "Din personliga chatt använder version 3" with the same explicit action. The
-action also appears on the composer row and in the Skills list. If the new
+action also appears on the composer row; the Skills list only marks the
+Skills the chat uses ("Personlig chatt · Alltid"). If the new
 revision is not admissible, the edit is kept, the chat stays on the earlier
 version, and the action's error says why.
 
