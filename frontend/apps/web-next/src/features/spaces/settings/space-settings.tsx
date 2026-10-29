@@ -53,7 +53,7 @@ import {
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import type { Space } from "@/features/spaces/space";
+import { invalidateSpaces, invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
 import {
@@ -127,7 +127,7 @@ function useUpdateSpace() {
       // replace it while the detail query is being refreshed.
       await queryClient.cancelQueries({ queryKey: ["spaces", routeId], exact: true });
       queryClient.setQueryData(["spaces", routeId], saved);
-      void queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
+      void invalidateSpacesList(queryClient);
     }
   });
 }
@@ -717,7 +717,7 @@ function DangerSection() {
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id: space.id } } })),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["spaces"] });
+      invalidateSpaces(queryClient);
       router.push("/spaces/list");
     },
     onError: (error) => toastApiError(error, t)

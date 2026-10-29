@@ -6,6 +6,8 @@ import { createTranslator } from "use-intl";
 import { Profiler, useState, type ProfilerOnRenderCallback, type ReactNode } from "react";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { setViewport } from "@/test/setup-dom";
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
@@ -35,7 +37,8 @@ beforeEach(() => {
     ["/api/v1/auth/federation-status", context.federationStatus],
     ["/api/v1/limits/", context.limits],
     ["/api/v1/whats-new/state/", { seen_version: null, announced_version: null }],
-    ["/api/v1/spaces/", { items: [] }]
+    ["/api/v1/spaces/", { items: [] }],
+    ["/api/v1/spaces/type/personal/", makeSpace({ overrides: { personal: true } })]
   ]);
   fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
@@ -95,9 +98,11 @@ async function createRouteRouter(path = "/does-not-exist") {
 
 async function renderRoute(
   path = "/does-not-exist",
-  onRender: ProfilerOnRenderCallback = () => {}
+  onRender: ProfilerOnRenderCallback = () => {},
+  prepare?: (state: Awaited<ReturnType<typeof createRouteRouter>>) => void
 ) {
   const state = await createRouteRouter(path);
+  prepare?.(state);
   const { router, BootContext } = state;
   render(
     <BootContext value={{ locale: "sv", messages, nonce: undefined }}>
@@ -115,6 +120,113 @@ it("renders an authenticated unknown path inside the shared shell", async () => 
   const heading = await screen.findByRole("heading", { name: messages.page_not_found });
   expect(heading.closest("main")?.id).toBe("main-content");
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it("renders the spaces list with its document title and keeps list distinct from a space ID", async () => {
+  await renderRoute("/spaces/list");
+  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
+  await waitFor(() => expect(document.title).toBe(`${messages.spaces} · Eneo`));
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/list/");
+});
+
+it("keeps a cached spaces list visible when its background refresh fails", async () => {
+  replies.set(
+    "/api/v1/spaces/",
+    new Response("Unavailable", { status: 503, headers: { [GENERATION]: "document-session" } })
+  );
+  const { queryClient } = await renderRoute("/spaces/list", undefined, ({ queryClient }) => {
+    queryClient.setQueryData(["spaces"], []);
+  });
+  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
+  await waitFor(() => expect(queryClient.getQueryState(["spaces"])?.status).toBe("error"));
+  expect(screen.getByRole("heading", { name: messages.spaces, level: 1 })).toBeTruthy();
+});
+
+function requestedPaths() {
+  return fetcher.mock.calls.map(
+    ([input]) =>
+      new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname
+  );
+}
+
+it("renders the existing account profile and local password form in the Vite shell", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", {
+    ...context.user,
+    password_change: {
+      source: "eneo",
+      policy: {
+        min_length: 12,
+        max_bytes: 72,
+        requires_uppercase: false,
+        requires_lowercase: false,
+        requires_number: false,
+        requires_symbol: false
+      }
+    }
+  });
+  await renderRoute("/account");
+  await screen.findByRole("heading", { name: messages.my_account, level: 1 });
+  expect(screen.getByLabelText(messages.current_password, { selector: "input" })).toBeTruthy();
+  expect(screen.getByLabelText(messages.new_password, { selector: "input" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: messages.save })).toBeTruthy();
+  await waitFor(() => expect(document.title).toBe(`${messages.my_account} · Eneo`));
+});
+
+it.each([false, true])(
+  "shows not-found for a missing space, including an invalidated cached copy (%s)",
+  async (cached) => {
+    replies.set(
+      "/api/v1/spaces/missing/",
+      new Response(JSON.stringify({ message: "Not found" }), {
+        status: 404,
+        headers: { [GENERATION]: "document-session", "content-type": "application/json" }
+      })
+    );
+    const { router } = await renderRoute("/spaces/missing", undefined, ({ queryClient }) => {
+      if (cached) {
+        queryClient.setQueryData(["spaces", "missing"], makeSpace());
+        void queryClient.invalidateQueries({ queryKey: ["spaces", "missing"] });
+      }
+    });
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(router.state.location.pathname).toBe("/spaces/missing");
+    expect(requestedPaths().filter((path) => path === "/api/v1/spaces/missing/")).toHaveLength(1);
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);
+
+it("uses a fresh space already in the query cache and sets the layout title", async () => {
+  const { router } = await renderRoute("/spaces/space-1", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+  });
+  const layout = router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId");
+  expect(layout?.meta).toContainEqual({ title: "Upphandling · Eneo" });
+  // The space index is ported separately; its fallback owns the document title for now.
+  await waitFor(() => expect(document.title).toBe(`${messages.page_not_found} · Eneo`));
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/space-1/");
+});
+
+it("redirects a non-admin organization child route before requesting the organization space", async () => {
+  const { router } = await renderRoute("/spaces/organization/knowledge");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
+});
+
+it("lets an administrator load the organization space", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set(
+    "/api/v1/spaces/type/organization/",
+    makeSpace({ overrides: { organization: true } })
+  );
+  const { router } = await renderRoute("/spaces/organization");
+  const layout = router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId");
+  expect(layout?.loaderData).toMatchObject({ organization: true });
+  expect(layout?.meta).toContainEqual({ title: `${messages.organization} · Eneo` });
+  expect(
+    requestedPaths().filter((path) => path === "/api/v1/spaces/type/organization/")
+  ).toHaveLength(1);
 });
 
 it("uses the stored collapsed preference on the first shell commit", async () => {
@@ -150,7 +262,7 @@ it("preloads the session using only GET requests", async () => {
 
 it("starts the other five session resources together without blocking the route gate", async () => {
   const paths = [...replies.keys()].filter(
-    (path) => path !== "/api/v1/users/me/" && path !== "/api/v1/spaces/"
+    (path) => path !== "/api/v1/users/me/" && !path.startsWith("/api/v1/spaces/")
   );
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {

@@ -13,9 +13,14 @@ import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AppRouteImport } from "./routes/_app"
 import { Route as LogoutRouteImport } from "./routes/logout"
 import { Route as AppSplatRouteImport } from "./routes/_app/$"
+import { Route as AppAccountRouteImport } from "./routes/_app/account"
 import { Route as LoginIndexRouteImport } from "./routes/login/index"
 import { Route as LoginFailedRouteImport } from "./routes/login/failed"
 import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/switch-organisation"
+import { Route as AppAccountIndexRouteImport } from "./routes/_app/account/index"
+import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
+import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
+import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -36,6 +41,11 @@ const AppSplatRoute = AppSplatRouteImport.update({
   path: "/$",
   getParentRoute: () => AppRoute,
 } as any)
+const AppAccountRoute = AppAccountRouteImport.update({
+  id: "/account",
+  path: "/account",
+  getParentRoute: () => AppRoute,
+} as any)
 const LoginIndexRoute = LoginIndexRouteImport.update({
   id: "/login/",
   path: "/login/",
@@ -51,14 +61,39 @@ const LoginSwitchOrganisationRoute = LoginSwitchOrganisationRouteImport.update({
   path: "/login/switch-organisation",
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppAccountIndexRoute = AppAccountIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppSpacesSpaceIdRoute = AppSpacesSpaceIdRouteImport.update({
+  id: "/spaces/$spaceId",
+  path: "/spaces/$spaceId",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSpacesListRoute = AppSpacesListRouteImport.update({
+  id: "/spaces/list",
+  path: "/spaces/list",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSpacesSpaceIdSplatRoute = AppSpacesSpaceIdSplatRouteImport.update({
+  id: "/$",
+  path: "/$",
+  getParentRoute: () => AppSpacesSpaceIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/logout": typeof LogoutRoute
   "/$": typeof AppSplatRoute
+  "/account": typeof AppAccountRouteWithChildren
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
   "/login/": typeof LoginIndexRoute
+  "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
+  "/spaces/list": typeof AppSpacesListRoute
+  "/account/": typeof AppAccountIndexRoute
+  "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -67,6 +102,10 @@ export interface FileRoutesByTo {
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
   "/login": typeof LoginIndexRoute
+  "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
+  "/spaces/list": typeof AppSpacesListRoute
+  "/account": typeof AppAccountIndexRoute
+  "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -74,9 +113,14 @@ export interface FileRoutesById {
   "/_app": typeof AppRouteWithChildren
   "/logout": typeof LogoutRoute
   "/_app/$": typeof AppSplatRoute
+  "/_app/account": typeof AppAccountRouteWithChildren
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
   "/login/": typeof LoginIndexRoute
+  "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
+  "/_app/spaces/list": typeof AppSpacesListRoute
+  "/_app/account/": typeof AppAccountIndexRoute
+  "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -84,9 +128,14 @@ export interface FileRouteTypes {
     | "/"
     | "/logout"
     | "/$"
+    | "/account"
     | "/login/failed"
     | "/login/switch-organisation"
     | "/login/"
+    | "/spaces/$spaceId"
+    | "/spaces/list"
+    | "/account/"
+    | "/spaces/$spaceId/$"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -95,15 +144,24 @@ export interface FileRouteTypes {
     | "/login/failed"
     | "/login/switch-organisation"
     | "/login"
+    | "/spaces/$spaceId"
+    | "/spaces/list"
+    | "/account"
+    | "/spaces/$spaceId/$"
   id:
     | "__root__"
     | "/"
     | "/_app"
     | "/logout"
     | "/_app/$"
+    | "/_app/account"
     | "/login/failed"
     | "/login/switch-organisation"
     | "/login/"
+    | "/_app/spaces/$spaceId"
+    | "/_app/spaces/list"
+    | "/_app/account/"
+    | "/_app/spaces/$spaceId/$"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -145,6 +203,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
     }
+    "/_app/account": {
+      id: "/_app/account"
+      path: "/account"
+      fullPath: "/account"
+      preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
     "/login/": {
       id: "/login/"
       path: "/login"
@@ -166,15 +231,72 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof LoginSwitchOrganisationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/_app/account/": {
+      id: "/_app/account/"
+      path: "/"
+      fullPath: "/account/"
+      preLoaderRoute: typeof AppAccountIndexRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/spaces/$spaceId": {
+      id: "/_app/spaces/$spaceId"
+      path: "/spaces/$spaceId"
+      fullPath: "/spaces/$spaceId"
+      preLoaderRoute: typeof AppSpacesSpaceIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/spaces/list": {
+      id: "/_app/spaces/list"
+      path: "/spaces/list"
+      fullPath: "/spaces/list"
+      preLoaderRoute: typeof AppSpacesListRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/spaces/$spaceId/$": {
+      id: "/_app/spaces/$spaceId/$"
+      path: "/$"
+      fullPath: "/spaces/$spaceId/$"
+      preLoaderRoute: typeof AppSpacesSpaceIdSplatRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
   }
 }
 
+interface AppAccountRouteChildren {
+  AppAccountIndexRoute: typeof AppAccountIndexRoute
+}
+
+const AppAccountRouteChildren: AppAccountRouteChildren = {
+  AppAccountIndexRoute: AppAccountIndexRoute,
+}
+
+const AppAccountRouteWithChildren = AppAccountRoute._addFileChildren(
+  AppAccountRouteChildren,
+)
+
+interface AppSpacesSpaceIdRouteChildren {
+  AppSpacesSpaceIdSplatRoute: typeof AppSpacesSpaceIdSplatRoute
+}
+
+const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
+  AppSpacesSpaceIdSplatRoute: AppSpacesSpaceIdSplatRoute,
+}
+
+const AppSpacesSpaceIdRouteWithChildren =
+  AppSpacesSpaceIdRoute._addFileChildren(AppSpacesSpaceIdRouteChildren)
+
 interface AppRouteChildren {
   AppSplatRoute: typeof AppSplatRoute
+  AppAccountRoute: typeof AppAccountRouteWithChildren
+  AppSpacesSpaceIdRoute: typeof AppSpacesSpaceIdRouteWithChildren
+  AppSpacesListRoute: typeof AppSpacesListRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppSplatRoute: AppSplatRoute,
+  AppAccountRoute: AppAccountRouteWithChildren,
+  AppSpacesSpaceIdRoute: AppSpacesSpaceIdRouteWithChildren,
+  AppSpacesListRoute: AppSpacesListRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

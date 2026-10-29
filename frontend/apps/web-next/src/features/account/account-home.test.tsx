@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { AccountHome } from "./account-home.client";
+import { AccountHome } from "@/features/account/account-home";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const whatsNew = vi.hoisted(() => ({ enabled: true, hasUnseen: true }));
 vi.mock("@/features/whats-new/whats-new-provider", () => ({ useWhatsNew: () => whatsNew }));
 const navigateTo = vi.hoisted(() => vi.fn());

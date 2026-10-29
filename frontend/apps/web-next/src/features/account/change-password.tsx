@@ -5,9 +5,9 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { revealProblems } from "@/components/composites/field-problem";
 import { ConfirmedSecretInput } from "@/components/composites/confirmed-secret-input";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
@@ -51,8 +51,8 @@ export function ChangePasswordForm({
   const nextRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLInputElement>(null);
   const checklistId = useId();
-  const focusField = (field: Field) =>
-    ({ current: currentRef, next: nextRef, confirm: confirmRef })[field].current?.focus();
+  const fieldRef = (field: Field) =>
+    ({ current: currentRef, next: nextRef, confirm: confirmRef })[field].current;
 
   const pair = newPasswordErrors(t, { password: next, confirmation: confirm, policy });
   const errors: Record<Field, string | undefined> = {
@@ -64,11 +64,6 @@ export function ChangePasswordForm({
   const shown = (field: Field) =>
     submitted || (field !== "confirm" && serverErrors[field]) ? errors[field] : undefined;
   const currentError = shown("current");
-
-  function focusFirst(problems: Record<Field, string | undefined>) {
-    const field = (["current", "next", "confirm"] as const).find((name) => problems[name]);
-    if (field) focusField(field);
-  }
 
   const change = useMutation({
     mutationFn: () =>
@@ -95,8 +90,10 @@ export function ChangePasswordForm({
               ? { next: t("password_policy_rejected") }
               : null;
       if (atField) {
-        flushSync(() => setServerErrors(atField));
-        focusField(atField.current ? "current" : "next");
+        revealProblems(
+          () => setServerErrors(atField),
+          fieldRef(atField.current ? "current" : "next")
+        );
       } else if (status === 429) {
         // The rate limit answers without a code of its own.
         toast.error(t("password_change_rate_limited"));
@@ -115,9 +112,8 @@ export function ChangePasswordForm({
         event.preventDefault();
         if (change.isPending) return;
         if (Object.values(errors).some(Boolean)) {
-          // Rendered before focus moves, so the field is read with its error.
-          flushSync(() => setSubmitted(true));
-          focusFirst(errors);
+          const first = (["current", "next", "confirm"] as const).find((field) => errors[field]);
+          revealProblems(() => setSubmitted(true), first && fieldRef(first));
           return;
         }
         change.mutate();

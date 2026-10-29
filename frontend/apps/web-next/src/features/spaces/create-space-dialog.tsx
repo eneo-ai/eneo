@@ -1,5 +1,7 @@
 "use client";
 
+import { invalidateSpaces } from "@/features/spaces/space";
+
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
@@ -41,7 +43,7 @@ export function CreateSpaceDialog({
   const createSpace = useMutation({
     mutationFn: (body: { name: string }) => unwrap(browserApi.POST("/api/v1/spaces/", { body })),
     onSuccess: (space) => {
-      void queryClient.invalidateQueries({ queryKey: ["spaces"] });
+      void invalidateSpaces(queryClient);
       close();
       router.push(`/spaces/${space.id}/overview`);
     },

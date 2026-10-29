@@ -1,13 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { sessionKeys } from "@/lib/api/session";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import {
@@ -38,7 +39,7 @@ export function useCopyFormatLabel(): string {
 export function CopyFormatChoice() {
   const t = useTranslations();
   const { settings } = useAppContext();
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const serverCopyFormat = getPreferredAssistantCopyFormat(settings);
   const [optimisticCopyFormat, setOptimisticCopyFormat] = useState<AssistantCopyFormat | null>(
     null
@@ -62,7 +63,7 @@ export function CopyFormatChoice() {
         })
       );
       toast.success(t("preferred_copy_format_updated"));
-      router.refresh();
+      await queryClient.invalidateQueries({ queryKey: sessionKeys.settings });
     } catch (error) {
       setOptimisticCopyFormat(previous);
       toastApiError(error, t);

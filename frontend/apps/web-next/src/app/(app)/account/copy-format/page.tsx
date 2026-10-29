@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { pageTitle } from "@/lib/page-metadata";
-import { CopyFormatChoice } from "../copy-format.client";
+import { CopyFormatChoice } from "@/features/account/copy-format";
 
 export const generateMetadata = pageTitle("account_copy_format");
 

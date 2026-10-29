@@ -1,5 +1,5 @@
 import { pageTitle } from "@/lib/page-metadata";
-import { ChangePasswordCard } from "../change-password.client";
+import { ChangePasswordCard } from "@/features/account/change-password";
 
 export const generateMetadata = pageTitle("change_password");
 

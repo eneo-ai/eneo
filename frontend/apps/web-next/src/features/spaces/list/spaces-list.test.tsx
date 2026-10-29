@@ -14,9 +14,9 @@ const api = vi.hoisted(() => ({
   created: [] as unknown[]
 }));
 
-// The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
-vi.mock("next/navigation", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("next/navigation")>()),
+// Preserve the seam exports; this list only needs a navigation action.
+vi.mock("@/lib/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/navigation")>()),
   useRouter: () => ({ push: () => {}, prefetch: () => {} })
 }));
 vi.mock("@/lib/api/browser", () => ({
@@ -40,7 +40,7 @@ vi.mock("@/lib/api/browser", () => ({
   }
 }));
 
-import { SpacesList } from "./spaces-list.client";
+import { SpacesList } from "@/features/spaces/list/spaces-list";
 
 afterEach(() => {
   cleanup();

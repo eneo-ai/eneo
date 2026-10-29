@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -91,4 +91,14 @@ export function spacesListQueryOptions(api: EneoClient) {
       return page.items;
     }
   });
+}
+
+/** Refresh the list without invalidating space details or their resources. */
+export function invalidateSpacesList(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
+}
+
+/** Refresh every space query, including the list and nested resources. */
+export function invalidateSpaces(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ["spaces"] });
 }

@@ -6,13 +6,13 @@ import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { revealProblems } from "@/components/composites/field-problem";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useRemovalMutation } from "@/features/spaces/removal";
-import type { SpaceSparse } from "@/features/spaces/space";
+import { invalidateSpaces, type SpaceSparse } from "@/features/spaces/space";
 
 /**
  * Confirms deleting a space by typing its name (irreversible, WCAG 3.3.4).
@@ -38,7 +38,7 @@ export function DeleteSpaceDialog({
   const deleteSpace = useRemovalMutation({
     mutationFn: (id: string) =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id } } })),
-    refresh: () => queryClient.invalidateQueries({ queryKey: ["spaces"] }),
+    refresh: () => invalidateSpaces(queryClient),
     onRemoved: () => close()
   });
 
@@ -79,9 +79,7 @@ export function DeleteSpaceDialog({
                   event.preventDefault();
                   if (deleteSpace.isPending) return;
                   if (!matches) {
-                    // Rendered before focus moves, so the field is read with its error.
-                    flushSync(() => setSubmitted(true));
-                    inputRef.current?.focus();
+                    revealProblems(() => setSubmitted(true), inputRef.current);
                     return;
                   }
                   deleteSpace.mutate(space.id);

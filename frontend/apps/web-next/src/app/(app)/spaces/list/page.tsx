@@ -4,7 +4,7 @@ import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { pageTitle } from "@/lib/page-metadata";
 import { spacesListQueryOptions } from "@/features/spaces/space";
-import { SpacesList } from "./spaces-list.client";
+import { SpacesList } from "@/features/spaces/list/spaces-list";
 
 export const generateMetadata = pageTitle("spaces");
 

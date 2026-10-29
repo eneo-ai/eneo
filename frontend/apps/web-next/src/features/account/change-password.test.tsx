@@ -14,7 +14,7 @@ const toast = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
-import { ChangePasswordCard } from "./change-password.client";
+import { ChangePasswordCard } from "@/features/account/change-password";
 
 /** The backend's local policy, with two character classes switched on. */
 const eneo = {

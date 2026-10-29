@@ -1,21 +1,21 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { AccountNav } from "./account-nav.client";
+import { AccountNav } from "@/features/account/account-nav";
 
 const pathname = vi.hoisted(() => ({ current: "/account/api-keys" }));
-vi.mock("next/navigation", () => ({ usePathname: () => pathname.current }));
+vi.mock("@/lib/navigation", () => ({ usePathname: () => pathname.current }));
 
 afterEach(cleanup);
 
 it("is a named navigation of account pages with the current one marked", async () => {
   const { container } = render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <AccountNav />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   const nav = screen.getByRole("navigation", { name: "Kontoinställningar" });
   const links = within(nav).getAllByRole("link");
@@ -34,9 +34,9 @@ it("is a named navigation of account pages with the current one marked", async (
 it("marks Profil on Konto's own pages, which hold what Profil holds", () => {
   pathname.current = "/account/appearance";
   render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <AccountNav />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   expect(screen.getByRole("link", { name: "Profil" }).getAttribute("aria-current")).toBe("true");
   pathname.current = "/account/api-keys";

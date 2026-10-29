@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ChangePasswordForm } from "@/app/(app)/account/change-password.client";
+import { ChangePasswordForm } from "@/features/account/change-password";
 import { passwordCapability } from "@/features/auth/password-policy";
 import { passwordChangedLogoutUrl } from "@/lib/auth/password-change-path";
 import { safeNextPath } from "@/lib/auth/safe-next";

@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { usePathname } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { PageBar } from "@/components/shell/page-bar";
 
 /** Konto's pages, by the label of their row on Konto. */

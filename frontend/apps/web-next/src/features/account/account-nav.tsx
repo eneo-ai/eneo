@@ -1,8 +1,8 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { usePathname } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 
 const PROFILE_PAGES = ["/account/appearance", "/account/copy-format", "/account/password"];
 

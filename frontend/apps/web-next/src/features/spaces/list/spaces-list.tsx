@@ -5,7 +5,7 @@ import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { LayoutGrid, SearchX, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
@@ -20,7 +20,7 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { spaceRouteId, spacesListQueryOptions, type SpaceSparse } from "@/features/spaces/space";
-import { DeleteSpaceDialog } from "./delete-space-dialog";
+import { DeleteSpaceDialog } from "@/features/spaces/list/delete-space-dialog";
 
 /** "3 assistenter · 1 app", from the counts the list endpoint includes. */
 function spaceMeta(space: SpaceSparse, t: ReturnType<typeof useTranslations>): string[] {

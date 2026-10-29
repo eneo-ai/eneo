@@ -4,9 +4,9 @@ import { expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { switchLocale } from "@/lib/i18n/switch-locale";
 import { renderInApp, testAppContext } from "@/test/render";
-import { AccountProfile } from "./account-profile.client";
+import { AccountProfile } from "@/features/account/account-profile";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/i18n/switch-locale", () => ({ switchLocale: vi.fn() }));
 
 it("shows the current language as the selected value, named by the row title", async () => {

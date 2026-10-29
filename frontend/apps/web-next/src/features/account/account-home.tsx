@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Building2, LogOut } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { IndexGroup, IndexRow } from "@/components/composites/index-rows";
@@ -17,9 +17,9 @@ import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { MOBILE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { LOCALE_LABELS } from "@/lib/i18n/locales";
 import { navigateTo } from "@/lib/navigate-to";
-import { AccountProfile } from "./account-profile.client";
-import { ChangePasswordCard } from "./change-password.client";
-import { useCopyFormatLabel } from "./copy-format.client";
+import { AccountProfile } from "@/features/account/account-profile";
+import { ChangePasswordCard } from "@/features/account/change-password";
+import { useCopyFormatLabel } from "@/features/account/copy-format";
 
 /**
  * /account: below 1024 px, where the drawer is, Konto as one page (decision

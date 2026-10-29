@@ -1,5 +1,7 @@
 "use client";
 
+import { invalidateSpaces } from "@/features/spaces/space";
+
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Plus, ShieldCheck, TriangleAlert } from "lucide-react";
@@ -187,7 +189,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: MCP_KEY }),
       queryClient.invalidateQueries({ queryKey: BUNDLED_KEY }),
-      queryClient.invalidateQueries({ queryKey: ["spaces"] })
+      invalidateSpaces(queryClient)
     ]);
   };
   const activate = useMutation({

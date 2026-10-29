@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
-import { SpacesList } from "@/app/(app)/spaces/list/spaces-list.client";
+import { SpacesList } from "@/features/spaces/list/spaces-list";
 import { setRoute } from "@/test/navigation";
 import { renderToHtml, testQueryClient } from "@/test/render";
 import { AppShellFrame } from "./app-shell";

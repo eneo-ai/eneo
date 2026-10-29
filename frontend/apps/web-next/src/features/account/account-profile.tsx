@@ -1,13 +1,13 @@
 "use client";
 
 import { Selector } from "@astryxdesign/core/Selector";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
 import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
-import { CopyFormatChoice } from "./copy-format.client";
+import { CopyFormatChoice } from "@/features/account/copy-format";
 
 const LOCALE_OPTIONS = locales.map((value) => ({ value, label: LOCALE_LABELS[value] ?? value }));
 

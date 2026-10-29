@@ -7,7 +7,7 @@ vi.mock("next-intl/server", () => ({
   getTranslations: async () => (key: string) => key
 }));
 const { ChangePasswordForm } = vi.hoisted(() => ({ ChangePasswordForm: vi.fn(() => null) }));
-vi.mock("@/app/(app)/account/change-password.client", () => ({ ChangePasswordForm }));
+vi.mock("@/features/account/change-password", () => ({ ChangePasswordForm }));
 
 import PasswordChangePage from "./page";
 

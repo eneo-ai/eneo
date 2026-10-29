@@ -1,5 +1,7 @@
 "use client";
 
+import { invalidateSpaces } from "@/features/spaces/space";
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
@@ -172,7 +174,7 @@ export function CapabilitySourceDialog({
       onSaved(!server && draft.source === "external");
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-        queryClient.invalidateQueries({ queryKey: ["spaces"] })
+        invalidateSpaces(queryClient)
       ]).catch((cause) => toastApiError(cause, t));
     } catch (cause) {
       setError(cause);
