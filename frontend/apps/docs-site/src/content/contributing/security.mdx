@@ -33,6 +33,13 @@ When this check fails, update the dependency to a safe version, remove it, or do
 The reusable `Security` workflow is part of the CI aggregate. It runs a complete
 lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
 added Git history.
+The dependency audit blocks `high` and `critical` findings, including those
+without a fixed version. `low` and `moderate` findings produce warning
+annotations and remain in the reports. Python audit severities come from the
+GitHub Advisory Database; the fetched ratings are retained with the raw audit
+report. Unknown severity, failed scans and invalid reports still fail CI.
+Existing exact, unexpired exceptions remain valid; expired exceptions still
+require review and fail the check.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 
