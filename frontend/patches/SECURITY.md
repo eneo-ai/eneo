@@ -39,3 +39,19 @@ resolution would run them against a version they have not released for.
 No patch is installed; `scripts/audit-dependencies.mjs` accepts exactly this
 advisory until the dependents move or the date passes. All other advisories
 still fail.
+
+## Seroval resolution — CVE-2026-116582 / CVE-2026-116583
+
+Reviewed 2026-10-29. The root resolution selects Seroval 1.6.11, including the
+upstream fixes for [RegExp script injection](https://github.com/advisories/GHSA-9wx9-5pv9-3349)
+and [typed array constructor injection](https://github.com/advisories/GHSA-f86p-h4j2-7qgj).
+There is no audit exception. The installed chain is the beta's
+`@tanstack/react-query-devtools` → `@tanstack/query-devtools` → `solid-js` →
+`seroval`. Remove the override once the parents require a fixed version.
+
+The existing `scripts/security-patches.test.mjs` suite resolves Seroval through
+that chain. It checks synchronous and asynchronous serialization of typed
+arrays with an untrusted own `constructor`, with and without compact buffer
+views, and prevents RegExp sources from ending an HTML script element. It also
+checks typed array contents, RegExp flags, named groups and lookbehinds survive
+the round trip. CI runs these regressions before the dependency audit.
