@@ -599,7 +599,9 @@ jobs:
           E2E_BASE_URL: http://localhost:8124
           E2E_USER: e2e@example.com
           E2E_PASSWORD: E2ePassword123!
-        run: bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
+        run: |
+          bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
+          bun run test:e2e tests/a11y.spec.ts --grep 'Skills: create'
 
       - name: Capture E2E stack diagnostics
         if: ${{ failure() }}
