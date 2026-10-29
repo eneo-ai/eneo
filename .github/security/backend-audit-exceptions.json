@@ -35,6 +35,24 @@
       "package": "filelock",
       "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. A crafted SQLite lock database can stall ReadWriteLock/AsyncReadWriteLock beyond its timeout. Eneo has no filelock calls; its locked runtime dependents (huggingface-hub 1.21.0 and litellm 1.104.7) use FileLock/SoftFileLock and do not open SQLite lock databases. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess if dependency versions or lock call sites change.",
       "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112909",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. UnixFileLock can truncate/chmod a file another local account renames or hard-links onto the lock path. Hugging Face's FileLock path is reachable, but the operator confirmed Linux containers with the cache accessible only to Eneo backend/worker, not shared with unrelated users or processes. Uploads use server-generated staging filenames; the bundled tool runtime has a separate filesystem. The required attacker-controlled cache entry is therefore absent in this deployment. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112939",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. SoftFileLock can accept a forged PID in a writable marker and remove a live lock. Hugging Face's FileLock uses mode 0664 and may fall back to a soft lock, so Linux alone does not exclude this flaw. The operator confirmed that only Eneo backend/worker can access the cache in the Linux deployment; unrelated users/processes cannot rewrite its markers. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112935",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. A local attacker able to create/remove soft-lock markers can exploit inode reuse during stale-lock cleanup to admit two holders. Hugging Face's soft-lock fallback remains possible, but the operator confirmed Linux containers with the cache accessible only to Eneo backend/worker, not shared with unrelated users or processes. The attacker cannot plant or remove cache markers, including when backend/worker contend for the same lock. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
     }
   ]
 }
