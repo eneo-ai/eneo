@@ -1,8 +1,11 @@
 "use client";
 
 import { Bot, Pencil, Plus, Trash2 } from "lucide-react";
+import { Button as FormButton } from "@astryxdesign/core/Button";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { revealProblems } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -19,25 +22,46 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
 import { useSpace } from "@/features/spaces/use-space";
 import type { GroupChatAssistant } from "./use-group-chat";
 
-function EditDescriptionDialog({
+function AssistantDescriptionDialog({
   assistant,
+  mode,
   open,
   onOpenChange,
   onSave
 }: {
   assistant: GroupChatAssistant;
+  mode: "add" | "edit";
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (userDescription: string | null) => void;
 }) {
   const t = useTranslations();
   const [description, setDescription] = useState(assistant.user_description ?? "");
+  const [submitted, setSubmitted] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const required = !assistant.default_description;
+  const problem =
+    required && !description.trim()
+      ? t(
+          mode === "add"
+            ? "description_required_to_add_assistant"
+            : "description_required_for_assistant"
+        )
+      : null;
+
+  function submit(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (problem) {
+      revealProblems(() => setSubmitted(true), field.current);
+      return;
+    }
+    onSave(description.trim() || null);
+    onOpenChange(false);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,29 +69,31 @@ function EditDescriptionDialog({
         <DialogHeader>
           <DialogTitle>{assistant.handle}</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="assistant-user-description">{t("description")}</Label>
-          <Textarea
-            id="assistant-user-description"
+        <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+          <TextArea
+            ref={field}
+            label={t(mode === "add" ? "describe_responsibilities" : "description")}
+            description={t(
+              mode === "add" ? "add_description_to_help_determine" : "will_help_determine_assistant"
+            )}
             value={description}
             rows={4}
-            placeholder={assistant.default_description ?? ""}
-            onChange={(event) => setDescription(event.target.value)}
+            placeholder={assistant.default_description ?? t("enter_a_description")}
+            onChange={setDescription}
+            isRequired={required}
+            status={submitted && problem ? { type: "error", message: problem } : undefined}
+            statusVariant="detached"
+            width="100%"
           />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("cancel")}
-          </Button>
-          <Button
-            onClick={() => {
-              onSave(description.trim() === "" ? null : description.trim());
-              onOpenChange(false);
-            }}
-          >
-            {t("save")}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <FormButton label={t("cancel")} onClick={() => onOpenChange(false)} />
+            <FormButton
+              type="submit"
+              variant="primary"
+              label={t(mode === "add" ? "add_to_group" : "save")}
+            />
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -87,7 +113,11 @@ export function GroupChatAssistantList({
   const t = useTranslations();
   const { space } = useSpace();
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [editing, setEditing] = useState<GroupChatAssistant | null>(null);
+  const pickerTrigger = useRef<HTMLButtonElement>(null);
+  const [editing, setEditing] = useState<{
+    assistant: GroupChatAssistant;
+    mode: "add" | "edit";
+  } | null>(null);
 
   const available = (space.applications?.assistants.items ?? [])
     .filter((assistant) => !selected.some((entry) => entry.id === assistant.id))
@@ -108,7 +138,7 @@ export function GroupChatAssistantList({
             variant="ghost"
             size="icon"
             aria-label={t("edit")}
-            onClick={() => setEditing(assistant)}
+            onClick={() => setEditing({ assistant, mode: "edit" })}
           >
             <Pencil className="size-4" />
           </Button>
@@ -126,6 +156,7 @@ export function GroupChatAssistantList({
       <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
         <PopoverTrigger asChild>
           <button
+            ref={pickerTrigger}
             type="button"
             className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors"
           >
@@ -144,7 +175,9 @@ export function GroupChatAssistantList({
                     key={assistant.id}
                     value={assistant.handle}
                     onSelect={() => {
-                      onChange([...selected, assistant]);
+                      // The picker disappears; give the dialog a lasting focus-return target.
+                      pickerTrigger.current?.focus();
+                      setEditing({ assistant, mode: "add" });
                       setPickerOpen(false);
                     }}
                   >
@@ -159,18 +192,23 @@ export function GroupChatAssistantList({
       </Popover>
 
       {editing && (
-        <EditDescriptionDialog
-          key={editing.id}
-          assistant={editing}
+        <AssistantDescriptionDialog
+          key={`${editing.mode}:${editing.assistant.id}`}
+          assistant={editing.assistant}
+          mode={editing.mode}
           open
           onOpenChange={(open) => {
             if (!open) setEditing(null);
           }}
           onSave={(userDescription) =>
             onChange(
-              selected.map((entry) =>
-                entry.id === editing.id ? { ...entry, user_description: userDescription } : entry
-              )
+              editing.mode === "add"
+                ? [...selected, { ...editing.assistant, user_description: userDescription }]
+                : selected.map((entry) =>
+                    entry.id === editing.assistant.id
+                      ? { ...entry, user_description: userDescription }
+                      : entry
+                  )
             )
           }
         />
