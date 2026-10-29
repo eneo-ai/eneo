@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
-import { defaultLocale, isLocale, LOCALE_COOKIE } from "./locales";
+import { defaultLocale, isLocale, loadMessages, LOCALE_COOKIE } from "./locales";
 
 // Locale is a persisted preference (cookie), not a URL segment, matching the
 // behavior of the SvelteKit app.
@@ -11,6 +11,6 @@ export default getRequestConfig(async () => {
 
   return {
     locale,
-    messages: (await import(`./messages/${locale}.json`)).default
+    messages: await loadMessages(locale)
   };
 });

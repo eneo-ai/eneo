@@ -5,12 +5,12 @@ import { LinkProvider } from "@astryxdesign/core/Link";
 import { Theme } from "@astryxdesign/core/theme";
 import astryxSv from "@astryxdesign/core/locales/sv-SE.json";
 import Link from "@/lib/link";
-import { useLocale } from "next-intl";
+import { useLocale } from "use-intl";
 import { eneoTheme } from "@/theme/eneo";
 
 // Astryx's own component strings (aria labels, pagination, close buttons…).
 // English ships built in; Swedish comes from Astryx's catalog, keyed by our
-// next-intl locale code.
+// use-intl locale code.
 const ASTRYX_MESSAGES: MessagesByLocale = { sv: astryxSv };
 
 /**
@@ -25,7 +25,7 @@ function NextLink({ children, ...props }: React.ComponentProps<typeof Link> & { 
 
 /**
  * Root of the Astryx component library: the (pre-built) Eneo theme, Astryx
- * strings in the active next-intl locale, and next/link for Astryx links.
+ * strings in the active use-intl locale, and next/link for Astryx links.
  *
  * next-themes owns the colour mode: its blocking script sets .light/.dark and
  * data-theme on <html> before first paint, and globals.css (section 5) pins

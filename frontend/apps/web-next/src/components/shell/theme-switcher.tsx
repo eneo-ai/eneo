@@ -6,7 +6,7 @@ import {
   DropdownMenuSubMenu
 } from "@astryxdesign/core/DropdownMenu";
 import { Monitor, Moon, Sun, SunMoon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 
 /** The colour modes next-themes takes, as the profile menu and Konto offer them. */

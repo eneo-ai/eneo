@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, ChevronRight, Info, Plug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";

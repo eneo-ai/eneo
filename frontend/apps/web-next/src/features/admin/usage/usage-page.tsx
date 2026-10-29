@@ -15,7 +15,7 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Search } from "lucide-react";
 import Link from "@/lib/link";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { Table } from "@/components/astryx/table";
@@ -68,7 +68,6 @@ import {
   useCostRates
 } from "@/features/admin/usage/usage-parts";
 
-const NUMBER = new Intl.NumberFormat("sv-SE");
 /** Rows the model and space tables show until "show all" (apps/web's page size). */
 const SHORT_LIST = 10;
 /** Provider segments take the categorical hues in order, so neighbours never share one. */
@@ -131,6 +130,7 @@ function ShowAllToggle({
 /** The last 30 days by provider, as apps/web's token overview shows them. */
 function TokenOverview({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const format = useFormatter();
   const compact = useCompact();
   const totals = new Map<string, number>();
   for (const model of data.models) {
@@ -151,9 +151,9 @@ function TokenOverview({ data }: { data: TokenUsage }) {
     <Card className="flex flex-col gap-4 p-4">
       <SectionHeading title={t("token_summary")} description={t("token_summary_description")} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_token_usage)} />
-        <Stat label={t("input")} value={NUMBER.format(data.total_input_token_usage)} />
-        <Stat label={t("output")} value={NUMBER.format(data.total_output_token_usage)} />
+        <Stat label={t("usage_total_tokens")} value={format.number(data.total_token_usage)} />
+        <Stat label={t("input")} value={format.number(data.total_input_token_usage)} />
+        <Stat label={t("output")} value={format.number(data.total_output_token_usage)} />
       </div>
       {segments.length > 0 ? <UsageBar segments={segments} total={data.total_token_usage} /> : null}
     </Card>
@@ -170,6 +170,7 @@ function ModelTable({
   labelledBy: string;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const collator = useCollator();
   const [showAll, setShowAll] = useState(false);
   // apps/web lists the models by organisation until a column is sorted.
@@ -208,7 +209,7 @@ function ModelTable({
     return <p className="text-muted-foreground text-sm">{t("usage_no_model_data_available")}</p>;
   }
 
-  const number = (value: number) => <span className="tabular-nums">{NUMBER.format(value)}</span>;
+  const number = (value: number) => <span className="tabular-nums">{format.number(value)}</span>;
   const columns: TableColumn<ModelRow>[] = [
     {
       key: "model",
@@ -336,6 +337,7 @@ function UserLevels({
   range: UsageRange;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const compact = useCompact();
   const { high, medium } = usageThresholds(range);
   const names: Record<UsageIntensity, string> = {
@@ -350,7 +352,7 @@ function UserLevels({
       return {
         key: level,
         name: names[level],
-        detail: `${NUMBER.format(members.length)} ${t("users")}, ${compact(tokens)} ${t("tokens")}`,
+        detail: `${format.number(members.length)} ${t("users")}, ${compact(tokens)} ${t("tokens")}`,
         value: tokens,
         count: members.length,
         className: USAGE_LEVEL_CLASSES[level].bar
@@ -384,6 +386,7 @@ function UserTable({
   onSort: (sortBy: UserSortBy, sortOrder: UsageView["sortOrder"]) => void;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   // The user's page leads back to this view.
   const back = usageViewSearch(view);
   const sortPlugin = useTableSortable<UserUsageRow, UserSortBy>({
@@ -403,7 +406,7 @@ function UserTable({
       }
     }
   });
-  const number = (value: number) => <span className="tabular-nums">{NUMBER.format(value)}</span>;
+  const number = (value: number) => <span className="tabular-nums">{format.number(value)}</span>;
   const columns: TableColumn<UserUsageRow>[] = [
     {
       key: "username",

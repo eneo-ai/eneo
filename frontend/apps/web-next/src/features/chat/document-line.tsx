@@ -2,7 +2,7 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Download, FileText } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";

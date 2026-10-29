@@ -4,7 +4,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, CircleAlert, TriangleAlert } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useId, useMemo } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { modelDisplayName } from "@/lib/models/model-display-name";

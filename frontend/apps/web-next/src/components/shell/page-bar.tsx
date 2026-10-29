@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChevronLeft } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useLayoutEffect, useRef, useState } from "react";
 import { SamePageLink, type InPlaceLink } from "@/components/composites/in-place-link";
 import { cn } from "@/lib/utils";

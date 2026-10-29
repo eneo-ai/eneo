@@ -18,7 +18,7 @@ import {
   TextQuote,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useId,
   useRef,

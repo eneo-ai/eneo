@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Circle } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 import { type PasswordPolicy, policyChecks, policyRuleText } from "./password-policy";
 

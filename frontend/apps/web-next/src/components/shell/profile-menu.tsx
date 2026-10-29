@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";

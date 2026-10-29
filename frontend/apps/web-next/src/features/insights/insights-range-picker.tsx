@@ -1,7 +1,7 @@
 "use client";
 
 import { DateRangeInput, type DateRangePreset } from "@astryxdesign/core/DateRangeInput";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo } from "react";
 import { isoDate } from "@/lib/calendar-date";
 import { INSIGHT_PRESET_DAYS, insightRangeOfDays, type InsightRange } from "./insights-range";

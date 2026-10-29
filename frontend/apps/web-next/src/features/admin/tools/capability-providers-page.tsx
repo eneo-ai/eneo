@@ -4,7 +4,7 @@ import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Plus, ShieldCheck, TriangleAlert } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";

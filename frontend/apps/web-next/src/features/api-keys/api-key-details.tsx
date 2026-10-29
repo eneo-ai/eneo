@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ReactNode } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";

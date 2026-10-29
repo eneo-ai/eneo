@@ -13,7 +13,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { EmptyState } from "@/components/composites/empty-state";

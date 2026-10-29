@@ -3,7 +3,7 @@
 import { Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button as FormButton } from "@astryxdesign/core/Button";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";

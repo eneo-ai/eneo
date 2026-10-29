@@ -2,7 +2,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo } from "react";
 import { blockingError, ListError } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";

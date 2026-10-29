@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Upload, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";

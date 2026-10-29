@@ -3,7 +3,7 @@
 import { Card } from "@astryxdesign/core/Card";
 import { useQuery } from "@tanstack/react-query";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

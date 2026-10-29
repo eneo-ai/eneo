@@ -7,7 +7,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useMutation } from "@tanstack/react-query";
 import { ChevronRight, ShieldAlert, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

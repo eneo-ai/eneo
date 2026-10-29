@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";

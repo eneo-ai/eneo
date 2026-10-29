@@ -3,7 +3,7 @@
 import { List, ListItem } from "@astryxdesign/core/List";
 import { ChevronRight, Settings2, Sparkles, Users, Webhook, type LucideIcon } from "lucide-react";
 import { useId } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { phoneSections, spaceSections, type SpaceSectionId } from "../frame/space-sections";
 import { useSpace } from "../use-space";
 import { OverviewSection } from "./overview-section";

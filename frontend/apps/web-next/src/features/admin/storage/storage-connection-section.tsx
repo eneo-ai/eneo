@@ -9,7 +9,7 @@ import {
   KeyRound,
   RefreshCw
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import {

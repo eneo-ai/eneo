@@ -10,7 +10,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { revealProblems } from "@/components/composites/field-problem";

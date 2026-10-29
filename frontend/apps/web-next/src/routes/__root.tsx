@@ -1,6 +1,6 @@
 import { createRootRouteWithContext, HeadContent, Outlet } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
-import { IntlProvider } from "use-intl";
+import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { useBoot } from "@/boot-context";
 import { Providers } from "@/components/providers";
 import { BrowserSessionBoundary } from "@/components/providers/browser-session";
@@ -9,10 +9,6 @@ import { RouteAnnouncer } from "@/components/shell/route-announcer";
 import { Toaster } from "@/components/ui/sonner";
 import { rootHead } from "@/lib/route-head";
 import type { RouterContext } from "@/router";
-
-// The viewer's own zone, set explicitly (plan §2.2). P3-intl's AppIntlProvider
-// becomes its one owner and replaces this IntlProvider.
-const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: rootHead,
@@ -23,7 +19,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function Root() {
   const { locale, messages, nonce } = useBoot();
   return (
-    <IntlProvider locale={locale} messages={messages} timeZone={timeZone}>
+    <AppIntlProvider locale={locale} messages={messages}>
       {/* .light/.dark drive the legacy `dark:` variant and color-scheme
           (globals.css); data-theme is the attribute Astryx reads. */}
       <ThemeProvider
@@ -43,6 +39,6 @@ function Root() {
         <Toaster />
         <ThemeColor />
       </ThemeProvider>
-    </IntlProvider>
+    </AppIntlProvider>
   );
 }

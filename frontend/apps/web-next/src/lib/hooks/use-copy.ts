@@ -1,5 +1,5 @@
 import { useClipboard } from "@astryxdesign/core/hooks";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback } from "react";
 import { toast } from "@/lib/toast";
 

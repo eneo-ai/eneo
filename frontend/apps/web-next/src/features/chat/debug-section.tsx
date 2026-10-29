@@ -3,7 +3,7 @@
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Copy } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
 import { useCopy } from "@/lib/hooks/use-copy";
 

@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import {

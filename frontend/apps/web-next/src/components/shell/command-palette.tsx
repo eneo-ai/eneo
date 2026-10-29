@@ -23,7 +23,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { usePathname, useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { ClientTime } from "@/components/composites/client-time";

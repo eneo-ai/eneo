@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 
 /**

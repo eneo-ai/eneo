@@ -8,7 +8,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Trash2, UserPlus, Users, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { DockedActions } from "@/components/shell/docked-actions";

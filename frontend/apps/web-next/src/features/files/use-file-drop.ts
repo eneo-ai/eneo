@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { toast } from "@/lib/toast";
 import { collectDroppedFiles } from "./collect-dropped-files";

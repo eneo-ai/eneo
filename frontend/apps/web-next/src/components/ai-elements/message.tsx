@@ -5,7 +5,7 @@ import { toast } from "@/lib/toast";
 import { cjk } from "@streamdown/cjk";
 import { createCodePlugin } from "@streamdown/code";
 import type { ComponentProps, ComponentType } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { CodeBlock, Streamdown, type CustomRendererProps } from "streamdown";
 import { answerRehypePlugins, answerRemarkPlugins } from "./answer-markdown";

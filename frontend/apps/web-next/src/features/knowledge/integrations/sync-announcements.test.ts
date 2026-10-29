@@ -1,4 +1,4 @@
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import type { IntegrationKnowledge } from "../knowledge";

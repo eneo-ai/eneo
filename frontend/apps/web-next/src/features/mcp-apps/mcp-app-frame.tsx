@@ -4,7 +4,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
 import { autoAcceptToolsPreference } from "@/features/chat/use-tool-choices";

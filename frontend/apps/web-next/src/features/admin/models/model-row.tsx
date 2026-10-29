@@ -24,7 +24,7 @@ import {
   Star,
   Trash2
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

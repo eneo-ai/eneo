@@ -19,7 +19,7 @@ vi.mock("@/features/spaces/use-space", () => ({
   })
 }));
 vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));

@@ -4,7 +4,7 @@ import { releases, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Sparkles } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";

@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "@/lib/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -41,8 +41,6 @@ import {
   useCostRates
 } from "@/features/admin/usage/usage-parts";
 
-const NUMBER = new Intl.NumberFormat("sv-SE");
-
 function Stat({ label, value, subvalue }: { label: string; value: string; subvalue?: string }) {
   return (
     <Card className="flex flex-col gap-1 p-4">
@@ -71,6 +69,7 @@ function UserSummary({
   cost: number | null;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const locale = useLocale();
   const averageTokens =
     user.total_requests > 0 ? user.total_tokens / user.total_requests : user.total_tokens;
@@ -97,25 +96,25 @@ function UserSummary({
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label={t("usage_total_tokens")} value={NUMBER.format(user.total_tokens)} />
+        <Stat label={t("usage_total_tokens")} value={format.number(user.total_tokens)} />
         <Stat
           label={t("usage_input_tokens")}
-          value={NUMBER.format(user.total_input_tokens)}
+          value={format.number(user.total_input_tokens)}
           subvalue={`${percent(share(user.total_input_tokens, user.total_tokens), locale)} ${t(
             "usage_of_total"
           )}`}
         />
         <Stat
           label={t("usage_output_tokens")}
-          value={NUMBER.format(user.total_output_tokens)}
+          value={format.number(user.total_output_tokens)}
           subvalue={`${percent(share(user.total_output_tokens, user.total_tokens), locale)} ${t(
             "usage_of_total"
           )}`}
         />
         <Stat
           label={t("usage_total_requests")}
-          value={NUMBER.format(user.total_requests)}
-          subvalue={`${NUMBER.format(Math.round(averageTokens))} ${t(
+          value={format.number(user.total_requests)}
+          subvalue={`${format.number(Math.round(averageTokens))} ${t(
             "usage_tokens_avg_per_request"
           )} · ${formatCost(cost)}`}
         />
@@ -126,6 +125,7 @@ function UserSummary({
 
 function ProviderBreakdown({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const format = useFormatter();
   const locale = useLocale();
   const unknown = t("unknown");
   const labelId = useId();
@@ -157,7 +157,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
                 {provider.provider}
               </span>
               <span className="text-muted-foreground tabular-nums">
-                {NUMBER.format(provider.tokens)} ·{" "}
+                {format.number(provider.tokens)} ·{" "}
                 {percent(share(provider.tokens, data.total_token_usage), locale)}
               </span>
             </div>
@@ -174,6 +174,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
 
 function TopModels({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const format = useFormatter();
   const labelId = useId();
   const topModels = useMemo(
     () => [...data.models].sort((a, b) => b.total_token_usage - a.total_token_usage).slice(0, 5),
@@ -193,7 +194,7 @@ function TopModels({ data }: { data: TokenUsage }) {
                 {modelDisplayName(model)}
               </span>
               <span className="text-muted-foreground shrink-0 tabular-nums">
-                {NUMBER.format(model.total_token_usage)} · {NUMBER.format(model.request_count)}{" "}
+                {format.number(model.total_token_usage)} · {format.number(model.request_count)}{" "}
                 {t("usage_requests_label")}
               </span>
             </div>
@@ -216,6 +217,7 @@ function ModelBreakdownTable({
   costRates: CostRates;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const unknown = t("unknown");
   const headingId = useId();
 
@@ -257,16 +259,16 @@ function ModelBreakdownTable({
                   {modelProvider(model, unknown)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.request_count)}
+                  {format.number(model.request_count)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.input_token_usage)}
+                  {format.number(model.input_token_usage)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.output_token_usage)}
+                  {format.number(model.output_token_usage)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.total_token_usage)}
+                  {format.number(model.total_token_usage)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-right tabular-nums">
                   {formatCost(cost)}

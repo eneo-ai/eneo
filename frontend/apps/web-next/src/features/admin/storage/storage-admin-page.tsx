@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { revealProblems } from "@/components/composites/field-problem";
 import { useRouter } from "@/lib/navigation";
 import { useCallback, useState } from "react";

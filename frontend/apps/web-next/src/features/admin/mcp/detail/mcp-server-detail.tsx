@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "@/lib/link";
 import { usePathname, useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";

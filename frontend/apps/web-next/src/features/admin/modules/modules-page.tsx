@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import {
   FieldProblem,

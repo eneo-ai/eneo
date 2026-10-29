@@ -8,7 +8,6 @@ import { setViewport } from "@/test/setup-dom";
 import { AccountHome } from "./account-home.client";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 const whatsNew = vi.hoisted(() => ({ enabled: true, hasUnseen: true }));
 vi.mock("@/features/whats-new/whats-new-provider", () => ({ useWhatsNew: () => whatsNew }));
 const navigateTo = vi.hoisted(() => vi.fn());

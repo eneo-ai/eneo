@@ -3,7 +3,7 @@
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/files/signed-file-url";

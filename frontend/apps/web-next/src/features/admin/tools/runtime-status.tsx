@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { runtimeMessageKeys, type RuntimeStatus } from "./bundled";
 
 /** The state of the tool runtime shipped with Eneo, as the backend last saw it. */

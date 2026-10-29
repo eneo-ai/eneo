@@ -1,3 +1,5 @@
+import type { AbstractIntlMessages } from "use-intl";
+
 export const locales = ["sv", "en"] as const;
 export type Locale = (typeof locales)[number];
 export const defaultLocale: Locale = "sv";
@@ -8,4 +10,8 @@ export const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "Engli
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (locales as readonly string[]).includes(value);
+}
+
+export async function loadMessages(locale: Locale): Promise<AbstractIntlMessages> {
+  return (await import(`./messages/${locale}.json`)).default;
 }

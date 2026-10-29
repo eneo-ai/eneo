@@ -15,7 +15,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText, Search } from "lucide-react";
 import Link from "@/lib/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { TextInput } from "@/components/astryx/text-input";

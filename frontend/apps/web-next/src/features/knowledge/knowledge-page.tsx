@@ -3,7 +3,7 @@
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useSearchParams } from "@/lib/navigation";
 import { useId, useRef, useState } from "react";
 import type { TableName } from "@/components/astryx/table";

@@ -1,7 +1,7 @@
 "use client";
 
 import { Info } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /**
  * Why there is no create button: shown as text, not hidden in a tooltip, so

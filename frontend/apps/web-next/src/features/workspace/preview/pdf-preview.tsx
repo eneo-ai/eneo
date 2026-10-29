@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect } from "react";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 

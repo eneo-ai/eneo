@@ -1,7 +1,7 @@
 "use client";
 
 import { ExternalLink, FileText, Globe2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
 import { McpSnippetButton } from "./message-parts";

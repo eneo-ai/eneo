@@ -2,7 +2,7 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { SearchX, Wrench } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";

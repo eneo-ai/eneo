@@ -11,7 +11,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Globe, RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";

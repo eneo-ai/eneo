@@ -12,7 +12,7 @@ import {
   type TableSelectionState
 } from "@astryxdesign/core/Table";
 import { TextQuote } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import type { PreviewCell, PreviewSheet } from "./load-preview";

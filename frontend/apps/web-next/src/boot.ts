@@ -1,7 +1,7 @@
-import type { AbstractIntlMessages } from "use-intl";
 import { defaultLocale, isLocale, LOCALE_COOKIE, type Locale } from "./lib/i18n/locales";
 
 export { readCspNonce } from "./lib/csp-nonce";
+export { loadMessages } from "./lib/i18n/locales";
 
 export function resolveLocale(doc: Document): Locale {
   if (isLocale(doc.documentElement.lang)) return doc.documentElement.lang;
@@ -11,10 +11,6 @@ export function resolveLocale(doc: Document): Locale {
     .find((part) => part.startsWith(`${LOCALE_COOKIE}=`));
   const value = cookie?.slice(LOCALE_COOKIE.length + 1);
   return isLocale(value) ? value : defaultLocale;
-}
-
-export async function loadMessages(locale: Locale): Promise<AbstractIntlMessages> {
-  return (await import(`./lib/i18n/messages/${locale}.json`)).default;
 }
 
 /** Works even when the locale catalogue or the React renderer cannot load. */

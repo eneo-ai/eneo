@@ -2,7 +2,7 @@
 
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { AvatarGroup, AvatarGroupOverflow } from "@astryxdesign/core/AvatarGroup";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { memberDisplayName, personToneClass } from "./member-avatar";
 
 const VISIBLE_MEMBERS = 3;

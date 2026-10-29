@@ -20,7 +20,7 @@ vi.mock("@/components/composites/use-autosave", () => ({
     return (operation: () => Promise<unknown>) => operation().catch(() => undefined);
   }
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 import { RerankerRow } from "./reranker-row";
 

@@ -3,7 +3,7 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, screen } from "@testing-library/react";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAppContext } from "@/components/providers/app-context";
 import { useShell } from "@/components/shell/shell-context";

@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Plug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import type { TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";

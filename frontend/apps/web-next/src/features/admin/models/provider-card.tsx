@@ -12,7 +12,7 @@ import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";

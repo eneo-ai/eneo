@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useId, useMemo } from "react";
 import {
   Area,
@@ -18,8 +18,6 @@ import {
 } from "@/features/admin/insights/insights";
 import { formatCalendarDate } from "@/lib/calendar-date";
 
-const NUMBER = new Intl.NumberFormat("sv-SE");
-
 const SERIES = [
   { key: "sessions", color: "var(--chart-1)", labelKey: "conversations_started" },
   { key: "questions", color: "var(--chart-2)", labelKey: "questions_asked" },
@@ -28,6 +26,7 @@ const SERIES = [
 
 export function UsageAreaChart({ data }: { data: MetadataStatisticsAggregated }) {
   const t = useTranslations();
+  const format = useFormatter();
   const locale = useLocale();
   const descriptionId = useId();
   const series = useMemo(() => mergeInsightSeries(data), [data]);
@@ -79,7 +78,7 @@ export function UsageAreaChart({ data }: { data: MetadataStatisticsAggregated })
           />
           <Tooltip
             labelFormatter={(label) => formatDay(String(label))}
-            formatter={(value, name) => [NUMBER.format(Number(value)), name]}
+            formatter={(value, name) => [format.number(Number(value)), name]}
             contentStyle={{
               background: "var(--popover)",
               border: "1px solid var(--border)",
@@ -119,7 +118,7 @@ export function UsageAreaChart({ data }: { data: MetadataStatisticsAggregated })
             <tr key={point.date}>
               <th scope="row">{formatDay(point.date)}</th>
               {SERIES.map((s) => (
-                <td key={s.key}>{NUMBER.format(Number(point[s.key] ?? 0))}</td>
+                <td key={s.key}>{format.number(Number(point[s.key] ?? 0))}</td>
               ))}
             </tr>
           ))}

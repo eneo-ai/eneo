@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { useRemovalMutation } from "@/features/spaces/removal";

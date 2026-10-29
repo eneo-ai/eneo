@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight, CircleAlert, CircleCheck, LoaderCircle } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 import { currentStep, type Activity } from "./activity";
 import { ACTIVITY_PANEL_ID } from "./activity-panel";

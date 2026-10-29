@@ -4,7 +4,7 @@ import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQuery } from "@tanstack/react-query";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

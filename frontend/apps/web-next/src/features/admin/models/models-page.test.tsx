@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
@@ -185,11 +185,11 @@ function renderPage() {
   });
   api.POST.mockImplementation(() => ok({}));
   render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <QueryClientProvider client={client}>
         <ModelsPage />
       </QueryClientProvider>
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 

@@ -3,7 +3,7 @@
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import {
   FieldProblem,

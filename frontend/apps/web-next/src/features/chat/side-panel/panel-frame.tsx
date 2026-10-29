@@ -3,7 +3,7 @@
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";

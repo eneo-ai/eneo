@@ -17,6 +17,7 @@ export default defineConfig({
     // What jsdom lacks and Astryx needs (modal <dialog>, CSS.escape, …).
     setupFiles: ["./src/test/setup-dom.ts"],
     env: {
+      TZ: "Asia/Kolkata",
       // env.ts validates at import time; give tests a valid baseline
       ENEO_BACKEND_URL: "http://localhost:8123",
       SESSION_SECRET: "vitest-session-secret-32-chars-min!!"

@@ -6,7 +6,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, Download } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { LoadingState } from "@/components/composites/loading-state";

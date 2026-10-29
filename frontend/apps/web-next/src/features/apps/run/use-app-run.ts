@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
 import {

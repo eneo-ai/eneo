@@ -1,7 +1,7 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { McpServersPage } from "../mcp/mcp-page";
 import { CapabilityProvidersPage } from "./capability-providers-page";

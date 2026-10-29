@@ -10,7 +10,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Bot, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
 import { usePathname } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";

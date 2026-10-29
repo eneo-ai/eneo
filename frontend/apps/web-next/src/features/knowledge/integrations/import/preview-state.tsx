@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 

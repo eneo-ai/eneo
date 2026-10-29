@@ -3,7 +3,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { RefreshCw } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState, type ReactNode } from "react";
 import { EneoApiError, errorReferenceLines, getErrorMessage } from "@/lib/api/errors";
 import { LoadingState, type LoadingStateProps } from "./loading-state";

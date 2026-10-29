@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, screen } from "@testing-library/react";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { toast as sonner } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster } from "@/components/ui/sonner";

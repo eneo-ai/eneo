@@ -11,7 +11,7 @@ import {
   SendHorizontal,
   Sparkles
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";

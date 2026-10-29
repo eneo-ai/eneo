@@ -5,7 +5,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { UserActions } from "./user-actions";
 import type { IssuedPassword } from "./user-editor";

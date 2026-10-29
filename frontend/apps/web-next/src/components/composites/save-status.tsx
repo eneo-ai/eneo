@@ -2,7 +2,7 @@
 
 import { CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { SuccessMark } from "./success-mark";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";

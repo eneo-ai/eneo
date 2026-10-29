@@ -5,7 +5,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { useReturnFocus } from "@/components/ui/dialog-focus";

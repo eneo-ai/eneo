@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";

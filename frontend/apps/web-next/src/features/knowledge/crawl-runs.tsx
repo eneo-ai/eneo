@@ -10,7 +10,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { SearchX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";

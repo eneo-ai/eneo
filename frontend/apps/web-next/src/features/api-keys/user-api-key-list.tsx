@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { QuietBanner } from "@/components/astryx/banner";

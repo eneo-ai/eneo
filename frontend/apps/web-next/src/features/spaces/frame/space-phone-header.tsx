@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { SquarePen } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { PageBar } from "@/components/shell/page-bar";
 import { useSpace } from "../use-space";

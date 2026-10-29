@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
@@ -130,11 +130,11 @@ describe("CrawlRunsTable", () => {
   it("renders dates only after hydration, in the viewer's time zone", () => {
     const html = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
+        <IntlProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
           <AstryxProvider>
             <CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />
           </AstryxProvider>
-        </NextIntlClientProvider>
+        </IntlProvider>
       </QueryClientProvider>
     );
     // The server does not know the viewer's zone: no date in its HTML to mismatch.

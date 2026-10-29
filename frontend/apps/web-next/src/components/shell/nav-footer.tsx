@@ -2,7 +2,7 @@
 
 import { SideNavItem, useSideNavRenderMode } from "@astryxdesign/core/SideNav";
 import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ComponentProps } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";

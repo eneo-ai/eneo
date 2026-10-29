@@ -3,7 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft, Info } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";

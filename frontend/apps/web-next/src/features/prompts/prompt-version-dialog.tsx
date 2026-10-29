@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ClientTime } from "@/components/composites/client-time";

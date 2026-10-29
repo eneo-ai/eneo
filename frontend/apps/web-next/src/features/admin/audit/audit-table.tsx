@@ -4,7 +4,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Check, Copy } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";

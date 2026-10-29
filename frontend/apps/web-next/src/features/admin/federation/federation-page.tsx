@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

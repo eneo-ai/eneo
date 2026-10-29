@@ -10,7 +10,7 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";

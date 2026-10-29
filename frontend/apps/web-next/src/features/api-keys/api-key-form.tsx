@@ -2,7 +2,7 @@
 
 import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Tokenizer } from "@/components/astryx/tokenizer";
 import {

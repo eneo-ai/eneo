@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";

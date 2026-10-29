@@ -5,7 +5,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { History, SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";

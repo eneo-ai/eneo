@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 import {
   crawlRunFailureMessageKey,

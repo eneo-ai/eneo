@@ -7,8 +7,6 @@ import { renderInApp, testAppContext } from "@/test/render";
 import { AccountProfile } from "./account-profile.client";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
-const setLocale = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale }));
 
 it("shows the current language as the selected value, named by the row title", async () => {
   const { container } = renderInApp(<AccountProfile />);
@@ -18,14 +16,15 @@ it("shows the current language as the selected value, named by the row title", a
   await expectNoAxeViolations(container);
 });
 
-it("saves the chosen language and refreshes the page", async () => {
+it("saves the chosen language and updates the mounted page", async () => {
   renderInApp(<AccountProfile />);
 
   fireEvent.click(screen.getByRole("combobox", { name: "Språk" }));
   fireEvent.click(await screen.findByRole("option", { name: "English" }));
 
-  await waitFor(() => expect(setLocale).toHaveBeenCalledWith("en"));
   await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  expect(screen.getByRole("combobox", { name: "Language" }).textContent).toContain("English");
+  expect(document.cookie).toContain("NEXT_LOCALE=en");
 });
 
 it("shows the frontend's and the backend's version", () => {

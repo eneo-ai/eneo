@@ -2,7 +2,7 @@
 
 import { ChevronRight, ExternalLink, type LucideIcon } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Children, type ComponentProps, type ReactNode } from "react";
 
 /**

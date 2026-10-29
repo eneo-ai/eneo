@@ -6,7 +6,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Diff, Download, FileText, History, RotateCcw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

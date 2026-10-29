@@ -2,7 +2,7 @@
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Brain, ChevronDown, ChevronRight, Eye, Wrench } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Button } from "@/components/ui/button";

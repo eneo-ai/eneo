@@ -13,7 +13,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import Link from "@/lib/link";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Table, type TableName } from "@/components/astryx/table";

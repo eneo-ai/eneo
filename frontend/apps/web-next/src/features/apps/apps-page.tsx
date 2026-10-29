@@ -2,7 +2,7 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { AppWindow, SearchX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";

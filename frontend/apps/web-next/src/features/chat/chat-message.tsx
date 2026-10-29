@@ -11,7 +11,7 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useRef, type ReactNode } from "react";
 
 import {

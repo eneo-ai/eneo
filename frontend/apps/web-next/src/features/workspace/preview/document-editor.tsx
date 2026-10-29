@@ -7,7 +7,7 @@ import { CellSelection } from "@tiptap/pm/tables";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { TextQuote } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useCallback,
   useEffect,

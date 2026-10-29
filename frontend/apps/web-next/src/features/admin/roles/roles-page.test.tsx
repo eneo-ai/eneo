@@ -13,7 +13,7 @@ vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { default_role_id: "default" } })
 }));
 vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));

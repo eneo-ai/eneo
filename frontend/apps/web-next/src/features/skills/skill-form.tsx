@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useState, type SubmitEvent } from "react";
 import {
   FieldProblem,

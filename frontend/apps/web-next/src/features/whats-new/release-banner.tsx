@@ -4,7 +4,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { visibleEntries, type Release } from "@eneo/whats-new";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRouter } from "@/lib/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";

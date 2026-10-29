@@ -1,4 +1,4 @@
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import { followServiceAccountSignIn, SignInAddressError } from "./service-account-sign-in";

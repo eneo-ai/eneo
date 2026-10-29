@@ -65,7 +65,12 @@ const frameworkSeamImports = [
     ],
     message: 'Use "@/lib/navigation" (Next now, TanStack Router in the Vite build).'
   },
-  { name: "next/link", message: 'Use "@/lib/link".' }
+  { name: "next/link", message: 'Use "@/lib/link".' },
+  {
+    name: "next-intl",
+    message:
+      'Use "use-intl" for client hooks. Next server owners keep "next-intl/server" until their routes are ported.'
+  }
 ];
 
 const eslintConfig = defineConfig([
@@ -113,7 +118,7 @@ const eslintConfig = defineConfig([
   },
   {
     // Block hardcoded human-facing JSX text in app code; route copy through
-    // next-intl messages instead. Accessible names and descriptions in
+    // use-intl messages instead. Accessible names and descriptions in
     // attributes (aria-label, title, alt, placeholder, label, tooltip, …)
     // belong to eneo/no-literal-accessible-name below, so each literal is
     // reported once; this rule checks the text between tags and the other
@@ -189,7 +194,7 @@ const eslintConfig = defineConfig([
       // keyboard (2.1.1), so tabIndex={0} is allowed on role="region" (with an
       // accessible name) and on role="tabpanel" (WAI-ARIA tabs pattern).
       "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"], tags: [] }],
-      // Accessible names and descriptions come from next-intl, never literals.
+      // Accessible names and descriptions come from use-intl, never literals.
       "eneo/no-literal-accessible-name": "error"
     }
   },

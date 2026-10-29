@@ -14,7 +14,7 @@ import { Token } from "@astryxdesign/core/Token";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { Typeahead } from "@/components/astryx/typeahead";

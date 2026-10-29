@@ -3,7 +3,7 @@
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleHelp } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import {

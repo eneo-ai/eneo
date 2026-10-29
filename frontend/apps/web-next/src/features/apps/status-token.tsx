@@ -2,7 +2,7 @@
 
 import { Token, type TokenColor } from "@astryxdesign/core/Token";
 import { Check, Circle, Clock, Hourglass, X, type LucideIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { AppRunStatus } from "./apps";
 
 const TOKENS: Partial<

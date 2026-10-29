@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Text } from "@astryxdesign/core/Text";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useId } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";

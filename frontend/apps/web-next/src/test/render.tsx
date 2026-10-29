@@ -1,13 +1,13 @@
 /**
  * Test-only: renders UI inside the app's providers, in Swedish (the default
- * locale), so tests query what users see and hear: next-intl with the real
+ * locale), so tests query what users see and hear: use-intl with the real
  * catalog, the Astryx provider (its Swedish strings, the app's link), React Query,
  * the Radix tooltip provider, the signed-in app context and the app shell's
  * context. Not imported by app code.
  */
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, renderHook } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { renderToString } from "react-dom/server";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
@@ -124,7 +124,7 @@ function providers({
 
   function Providers({ children }: { children: React.ReactNode }) {
     return (
-      <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
+      <AppIntlProvider locale="sv" messages={messages}>
         <AstryxProvider>
           <QueryClientProvider client={queryClient}>
             <TooltipProvider>
@@ -134,7 +134,7 @@ function providers({
             </TooltipProvider>
           </QueryClientProvider>
         </AstryxProvider>
-      </NextIntlClientProvider>
+      </AppIntlProvider>
     );
   }
   return { queryClient, Providers };

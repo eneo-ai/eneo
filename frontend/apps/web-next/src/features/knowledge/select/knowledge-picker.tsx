@@ -3,7 +3,7 @@
 import { LoadingState } from "@/components/composites/loading-state";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Database, FileText, Globe, Plus, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { BlobPreviewDialog } from "@/features/knowledge/blobs";
 import { Badge } from "@/components/ui/badge";

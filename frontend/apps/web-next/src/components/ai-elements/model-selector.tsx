@@ -8,7 +8,7 @@ import {
   type SelectorOptionType
 } from "@astryxdesign/core/Selector";
 import { Lock } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { cn } from "@/lib/utils";

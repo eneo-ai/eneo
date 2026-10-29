@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";

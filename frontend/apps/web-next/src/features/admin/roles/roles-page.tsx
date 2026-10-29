@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useRef, useState, type SubmitEvent } from "react";
 import {
   FieldProblem,

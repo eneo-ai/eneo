@@ -4,7 +4,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";

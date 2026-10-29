@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, BellOff, KeyRound } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";

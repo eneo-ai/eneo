@@ -23,7 +23,7 @@ import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { use, useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";

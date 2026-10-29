@@ -3,7 +3,7 @@
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { Switch } from "@/components/astryx/switch";
 import { Typeahead } from "@/components/astryx/typeahead";

@@ -3,7 +3,7 @@
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Check, Copy } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";

@@ -9,7 +9,7 @@ import {
   type QueryClient
 } from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { use, useId, useRef, useState, type RefObject } from "react";
 import {
   FieldProblem,

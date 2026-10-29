@@ -4,7 +4,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";

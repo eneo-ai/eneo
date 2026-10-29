@@ -3,7 +3,7 @@
 import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { SideNav, SideNavRenderContext } from "@astryxdesign/core/SideNav";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { AdminSections, AdminTopContent } from "./admin-nav";

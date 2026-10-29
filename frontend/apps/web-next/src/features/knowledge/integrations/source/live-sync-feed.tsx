@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Equal, Loader2, TriangleAlert } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { describeSkipReason } from "../skip-reasons";
 import type { IntegrationSyncProgress, SyncProgressFile } from "../sync-progress";
 

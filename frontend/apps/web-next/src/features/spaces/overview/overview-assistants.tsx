@@ -2,7 +2,7 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Bot, Plus } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";

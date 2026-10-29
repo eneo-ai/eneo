@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Switch } from "@/components/astryx/switch";
 import { Plug, ShieldCheck } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";

@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect } from "react";
 import { errorReferenceLines } from "@/lib/api/errors";
 

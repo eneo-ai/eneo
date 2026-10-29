@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { SettingsRow } from "@/components/composites/settings-rows";
 import { Input } from "@/components/ui/input";

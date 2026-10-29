@@ -6,7 +6,7 @@ import {
 } from "@astryxdesign/core/AppShell";
 import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
 import { usePathname } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MOBILE_QUERY } from "@/lib/hooks/use-media-match";

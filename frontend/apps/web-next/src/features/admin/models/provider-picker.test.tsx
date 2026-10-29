@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -29,14 +29,14 @@ function renderPicker(favorites = new Set(["anthropic"])) {
   const onSelect = vi.fn();
   const onToggleFavorite = vi.fn();
   render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <ProviderPicker
         options={options}
         favorites={favorites}
         onSelect={onSelect}
         onToggleFavorite={onToggleFavorite}
       />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return { onSelect, onToggleFavorite };
 }

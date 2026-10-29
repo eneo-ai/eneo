@@ -2,7 +2,7 @@
 
 import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo } from "react";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi, type EneoClient } from "@/lib/api/browser";

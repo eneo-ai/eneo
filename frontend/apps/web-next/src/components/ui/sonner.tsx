@@ -7,7 +7,7 @@ import {
   OctagonXIcon,
   TriangleAlertIcon
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { useRef } from "react";
 import { createPortal } from "react-dom";

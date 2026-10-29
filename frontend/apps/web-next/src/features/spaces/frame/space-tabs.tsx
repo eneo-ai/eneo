@@ -1,7 +1,7 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { SpaceSection, SpaceSectionId } from "./space-sections";
 
 // Links navigate; the TabList only needs the value to mark the current tab.

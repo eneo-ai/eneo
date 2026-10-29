@@ -1,4 +1,4 @@
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import type { StatusTone } from "@/components/composites/status-label";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import { useHydrated } from "@/lib/hooks/use-hydrated";

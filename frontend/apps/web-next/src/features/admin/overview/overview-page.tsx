@@ -10,7 +10,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { Activity, ChevronRight, Cpu, Globe, History, Users, type LucideIcon } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";

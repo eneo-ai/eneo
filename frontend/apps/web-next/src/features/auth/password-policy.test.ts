@@ -1,5 +1,5 @@
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import {

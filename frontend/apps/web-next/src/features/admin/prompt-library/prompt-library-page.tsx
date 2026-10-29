@@ -20,7 +20,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookText, History, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

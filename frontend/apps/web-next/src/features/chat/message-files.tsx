@@ -3,7 +3,7 @@
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ArrowUpRight, Check, ChevronDown, ChevronUp, Files } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { fileExtension, formatBytes } from "@/lib/format";

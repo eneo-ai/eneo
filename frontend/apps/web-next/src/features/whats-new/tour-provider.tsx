@@ -1,7 +1,7 @@
 "use client";
 
 import type { Locale, ReleaseEntry } from "@eneo/whats-new";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { usePathname, useRouter } from "@/lib/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { runTour, type TourOutcome } from "./tour";

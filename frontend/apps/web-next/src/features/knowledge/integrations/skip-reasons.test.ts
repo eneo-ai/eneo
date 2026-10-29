@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import sv from "@/lib/i18n/messages/sv.json";
 import {
   describeErrorDetail,

@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -36,7 +36,8 @@ const PROMPT_AUTOSAVE_DEBOUNCE_MS = 1500;
 /** Right-aligned muted line: character count + a markdown hint. */
 function PromptMeta({ text }: { text: string }) {
   const t = useTranslations();
-  const characters = new Intl.NumberFormat(undefined).format(Math.round(text.length));
+  const format = useFormatter();
+  const characters = format.number(text.length);
 
   return (
     <span className="text-muted-foreground inline-flex items-center gap-3 text-xs">

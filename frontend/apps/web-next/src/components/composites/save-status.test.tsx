@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SaveStatusIndicator, SaveStatusProvider } from "./save-status";
@@ -20,12 +20,12 @@ afterEach(() => {
 
 function withStatus(children: ReactNode) {
   return (
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       <SaveStatusProvider>
         {children}
         <SaveStatusIndicator />
       </SaveStatusProvider>
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 
@@ -92,12 +92,12 @@ it("surfaces dirty drafts and guards unload", async () => {
   expect(screen.getByText("All changes saved!")).toBeDefined();
 
   rerender(
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       <SaveStatusProvider>
         <DirtyProbe dirty />
         <SaveStatusIndicator />
       </SaveStatusProvider>
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 
   expect(screen.getByText("1 unsaved change")).toBeDefined();

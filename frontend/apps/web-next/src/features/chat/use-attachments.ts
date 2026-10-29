@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploads";
 export { releasePreviews } from "@/features/files/use-file-uploads";

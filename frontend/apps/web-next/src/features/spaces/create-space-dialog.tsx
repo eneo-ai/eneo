@@ -9,7 +9,7 @@ import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

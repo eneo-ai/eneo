@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createRoute, useRouterState } from "@tanstack/react-router";
 import { screen } from "@testing-library/react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAppContext } from "@/components/providers/app-context";
 import { renderWithRouter } from "./router";

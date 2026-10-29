@@ -1,7 +1,7 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import type { Activity } from "./activity";
 import { SourceList, sourceAnchorId } from "./activity-sources";

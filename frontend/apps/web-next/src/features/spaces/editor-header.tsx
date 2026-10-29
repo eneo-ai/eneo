@@ -1,7 +1,7 @@
 "use client";
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator } from "@/components/composites/save-status";

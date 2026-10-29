@@ -7,7 +7,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,

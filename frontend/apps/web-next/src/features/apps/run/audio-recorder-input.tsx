@@ -1,7 +1,7 @@
 "use client";
 
 import { Mic, Square, Trash2 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";

@@ -7,7 +7,7 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";

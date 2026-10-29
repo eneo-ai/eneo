@@ -2,7 +2,7 @@
 
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { API_BASE, apiFetch } from "@/lib/api/base";

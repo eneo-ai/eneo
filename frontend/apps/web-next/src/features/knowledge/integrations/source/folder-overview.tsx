@@ -6,7 +6,7 @@ import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table"
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { Table } from "@/components/astryx/table";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { cn } from "@/lib/utils";

@@ -6,7 +6,7 @@ import { Popover } from "@astryxdesign/core/Popover";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Bell, BellDot, ChevronDown } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isCancelledCrawl, isCrawlWithWarnings, jobFailureMessage } from "./job-failure-message";

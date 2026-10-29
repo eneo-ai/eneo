@@ -9,7 +9,7 @@ import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { History } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useReturnFocus } from "@/components/ui/dialog-focus";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { useOnline } from "@/lib/hooks/use-online";

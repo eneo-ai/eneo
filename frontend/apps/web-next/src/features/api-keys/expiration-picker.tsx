@@ -1,7 +1,7 @@
 "use client";
 
 import { DateInput } from "@astryxdesign/core/DateInput";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { FieldProblem } from "@/components/composites/field-problem";
 import { useClientTimeText } from "@/components/composites/client-time";

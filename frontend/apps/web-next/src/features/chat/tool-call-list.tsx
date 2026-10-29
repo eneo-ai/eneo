@@ -8,7 +8,7 @@ import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CircleCheck, CircleX, Clock, Copy, LoaderCircle, Square, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";

@@ -3,7 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { AppWindow, Play } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import {
   FieldProblem,

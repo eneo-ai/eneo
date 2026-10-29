@@ -5,7 +5,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { MobileNavToggle } from "@astryxdesign/core/MobileNav";
 import { Search, SquarePen } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EneoIcon, EneoWordMark } from "./eneo-logo";
 import { NotificationBells } from "./notification-bells";
 import { NEW_CONVERSATION_HREF } from "./routes";

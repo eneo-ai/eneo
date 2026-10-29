@@ -8,7 +8,7 @@ import { revealProblems } from "@/components/composites/field-problem";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";

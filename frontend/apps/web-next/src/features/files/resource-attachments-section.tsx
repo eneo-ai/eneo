@@ -23,7 +23,7 @@ import {
   UploadCloud,
   type LucideIcon
 } from "lucide-react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
@@ -82,12 +82,6 @@ function attachmentTypeLabel(file: Attachment): string {
   if (extension) return extension.toUpperCase().slice(0, 5);
   const subtype = file.mimetype.split("/").pop() ?? file.mimetype;
   return (subtype.split(/[.+]/).pop() ?? subtype).toUpperCase().slice(0, 5);
-}
-
-function compactTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
-    Math.round(value)
-  );
 }
 
 async function deleteUploadedFile(id: string): Promise<void> {
@@ -325,7 +319,9 @@ export function ResourceAttachmentsSection({
     return [
       attachmentTypeLabel(file),
       formatBytes(file.size, locale),
-      file.token_count != null ? `${compactTokens(file.token_count)} ${t("tokens")}` : null,
+      file.token_count != null
+        ? `${format.number(Math.round(file.token_count), { notation: "compact", maximumFractionDigits: 1 })} ${t("tokens")}`
+        : null,
       file.created_at
         ? format.dateTime(new Date(file.created_at), { day: "numeric", month: "short" })
         : null

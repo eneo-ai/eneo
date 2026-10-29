@@ -35,7 +35,7 @@ auto-merge on a pull request.
 - **Layout** with Astryx `VStack`/`HStack`/`Layout` or Tailwind utilities.
 - **Tokens only**: no raw colours, no `dark:` variants (both are lint errors in
   TS/TSX). Every colour, radius and shadow flips with the colour mode by itself.
-- **Every UI string goes through next-intl** (Swedish is the default locale).
+- **Every UI string goes through use-intl** (Swedish is the default locale).
 - **Accessibility is a requirement: WCAG 2.2 AA.** Follow the section below
   and [ACCESSIBILITY.md](ACCESSIBILITY.md).
 - **Reuse before you build.** If an Astryx component or hook already does it,
@@ -54,7 +54,7 @@ manual test protocol and the exceptions process. Read it before building UI.
 - Everything works with the keyboard, in visual order, with a visible 3:1
   focus indicator that sticky headers and the docked chat composer never cover
   (`scroll-pt-*` / `scroll-pb-*` on the scroll container).
-- Accessible names, `alt`, `title` and `placeholder` come from next-intl, never
+- Accessible names, `alt`, `title` and `placeholder` come from use-intl, never
   literals (`eneo/no-literal-accessible-name`). Icon-only controls get a
   translated `aria-label`; decorative images get `alt=""`.
 - Every form control has a visible label; errors are text at the field with a
@@ -562,7 +562,7 @@ production build shows these violations. Never loosen the policy.
 
 ## Text and i18n
 
-- next-intl, locales `sv` (default) and `en`, chosen by the `NEXT_LOCALE` cookie.
+- use-intl, locales `sv` (default) and `en`. `AppIntlProvider` owns live language changes, the `NEXT_LOCALE` preference cookie and the viewer’s resolved time zone. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs
@@ -598,7 +598,7 @@ production build shows these violations. Never loosen the policy.
   opt into jsdom (`// @vitest-environment jsdom`) and use one harness in
   `src/test/`:
   - `renderInApp(ui, { queryClient?, appContext?, shell?, route? })` renders
-    with the app's providers (next-intl in Swedish, Astryx, React Query with the
+    with the app's providers (use-intl in Swedish, Astryx, React Query with the
     app's 30 s staleTime and no retries, app and shell context); also
     `renderHookInApp` and `renderToHtml` (server render). Build app context with
     `testAppContext({ permissions: ["admin"], settings: { … } })`; don't mock

@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { ChevronRight, FolderClosed, Globe, Plug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Fragment, useRef, type ReactNode } from "react";
 import type { TableName } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";

@@ -4,7 +4,7 @@ import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Building2, SquarePen, User } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";

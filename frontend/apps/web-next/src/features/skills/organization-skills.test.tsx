@@ -14,7 +14,7 @@ vi.mock("@/lib/navigation", () => ({
   useRouter: () => ({ push }),
   useSearchParams: () => new URLSearchParams()
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));

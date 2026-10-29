@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Trash2
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { useAppContext } from "@/components/providers/app-context";

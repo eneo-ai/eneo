@@ -21,7 +21,7 @@ import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Table } from "@/components/astryx/table";

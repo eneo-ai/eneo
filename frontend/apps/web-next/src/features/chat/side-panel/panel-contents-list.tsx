@@ -3,7 +3,7 @@
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { FileTypeTile } from "@/features/chat/attachments";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { lazy, Suspense, useState, type ComponentType } from "react";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { messageAppViewCalls, type McpAppCall } from "./mcp-apps";

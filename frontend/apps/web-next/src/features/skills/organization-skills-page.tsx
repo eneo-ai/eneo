@@ -4,7 +4,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useRouter, useSearchParams } from "@/lib/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,

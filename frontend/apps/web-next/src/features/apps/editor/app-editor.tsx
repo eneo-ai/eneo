@@ -13,7 +13,7 @@ import {
   TextCursorInput
 } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,

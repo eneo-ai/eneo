@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState, type Ref } from "react";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Input } from "@/components/ui/input";

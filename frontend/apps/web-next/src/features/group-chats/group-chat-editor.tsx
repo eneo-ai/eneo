@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Bot, Play, Send, SlidersHorizontal, Wrench } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SaveStatusProvider } from "@/components/composites/save-status";

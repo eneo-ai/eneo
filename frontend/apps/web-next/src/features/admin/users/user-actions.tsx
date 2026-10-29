@@ -7,7 +7,7 @@ import {
 } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Trash2, UserMinus, UserPlus } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

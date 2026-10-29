@@ -6,7 +6,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle, TriangleAlert, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { blockingError, RefreshError } from "@/components/composites/query-state";
