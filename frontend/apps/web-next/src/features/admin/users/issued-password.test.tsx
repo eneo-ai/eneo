@@ -12,9 +12,7 @@ const toast = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
-vi.mock("@/lib/navigation", () => ({
-  useSearchParams: () => new URLSearchParams("search_name=bo.e")
-}));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { AdminUsersPage } from "./users-page";
 
@@ -85,7 +83,8 @@ describe("AdminUsersPage issued password", () => {
     const backend = serve();
     api.POST.mockImplementation(() => ok({}));
     const { queryClient } = renderInApp(<AdminUsersPage />, {
-      appContext: testAppContext({ user: { id: "me" } })
+      appContext: testAppContext({ user: { id: "me" } }),
+      route: "/admin/users?search_name=bo.e"
     });
     const trigger = await screen.findByRole("button", {
       name: "Fler åtgärder för bo.ek@kommun.se"
@@ -128,7 +127,8 @@ describe("AdminUsersPage issued password", () => {
         })
     );
     const { queryClient } = renderInApp(<AdminUsersPage />, {
-      appContext: testAppContext({ user: { id: "me" } })
+      appContext: testAppContext({ user: { id: "me" } }),
+      route: "/admin/users?search_name=bo.e"
     });
     const trigger = await screen.findByRole("button", {
       name: "Fler åtgärder för bo.ek@kommun.se"
@@ -173,7 +173,8 @@ describe("AdminUsersPage issued password", () => {
         })
     );
     const { queryClient } = renderInApp(<AdminUsersPage />, {
-      appContext: testAppContext({ user: { id: "me" } })
+      appContext: testAppContext({ user: { id: "me" } }),
+      route: "/admin/users?search_name=bo.e"
     });
 
     const trigger = await screen.findByRole("button", {

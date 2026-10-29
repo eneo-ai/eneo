@@ -8,6 +8,35 @@ export type PasswordLifecyclePolicy = Schema<"PasswordLifecyclePolicy">;
 export type UserState = Schema<"UserState">;
 export type StateFilter = "active" | "inactive";
 
+export type UsersFilters = {
+  stateFilter: StateFilter;
+  search: string;
+  searchName: string;
+  page: number;
+  roleId: string | null;
+};
+
+export function readUsersFilters(params: Pick<URLSearchParams, "get">): UsersFilters {
+  const page = Number(params.get("page"));
+  return {
+    stateFilter: params.get("tab") === "inactive" ? "inactive" : "active",
+    search: params.get("search")?.trim() ?? "",
+    searchName: params.get("search_name")?.trim() ?? "",
+    page: Number.isSafeInteger(page) && page > 0 ? page : 1,
+    roleId: params.get("role_id")?.trim() || null
+  };
+}
+
+export function usersFiltersSearchParams(filters: UsersFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.stateFilter !== "active") params.set("tab", filters.stateFilter);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.searchName) params.set("search_name", filters.searchName);
+  if (filters.page > 1) params.set("page", String(filters.page));
+  if (filters.roleId) params.set("role_id", filters.roleId);
+  return params;
+}
+
 export const USERS_PAGE_SIZE = 100;
 /** Backend rejects 1–2 char searches; only query at 0 or ≥3 chars. */
 export const MIN_SEARCH_LENGTH = 3;

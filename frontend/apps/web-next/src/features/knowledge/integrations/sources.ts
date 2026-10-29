@@ -20,6 +20,15 @@ export type IntegrationSource = {
 
 export type SourceTab = "content" | "problems" | "activity";
 
+export type SourceView = { tab: SourceTab; folder: string | null };
+
+export function readSourceView(search: Pick<URLSearchParams, "get">): SourceView {
+  return {
+    tab: sourceTabParam(search.get("tab") ?? undefined) ?? "content",
+    folder: search.get("folder")
+  };
+}
+
 export type SourceState = "syncing" | "queued" | "attention" | "never" | "empty" | "ok";
 
 export type ItemState = "syncing" | "queued" | "error" | "never" | "empty" | "ok";

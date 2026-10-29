@@ -2,7 +2,14 @@
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import type { LucideIcon } from "lucide-react";
-import { usePathname, useSearchParams } from "@/lib/navigation";
+import {
+  pushUrl,
+  readUrlState,
+  replaceUrl,
+  usePathname,
+  useRouter,
+  useSearchParams
+} from "@/lib/navigation";
 import {
   useEffect,
   useLayoutEffect,
@@ -103,9 +110,7 @@ type FocusNext = { section: string } | { row: string } | { element: HTMLElement 
  * pops it rather than adding one. Kept in the entry itself (Next keeps it
  * beside its own state), so a reload or the system's forward still knows.
  */
-const OPENED_FROM_INDEX = "settingsSectionFromIndex";
-
-const openedFromIndex = () => window.history.state?.[OPENED_FROM_INDEX] === true;
+const openedFromIndex = () => readUrlState().settingsSectionFromIndex === true;
 
 /**
  * Focus what a view shows: an element in it if it takes focus, else its
@@ -133,53 +138,43 @@ function focusIn(root: HTMLElement, next: Exclude<FocusNext, null>) {
  * Which view a phone shows: the index (null) or one section. The address
  * keeps it (`?section=`), so a reload or a shared link opens the same view,
  * and opening a section from the index pushes an entry the system back pops.
- * The address is read on arrival; after that the view changes by these
- * controls and by the system's back and forward.
+ * Every committed address chooses the view, including browser Back/Forward
+ * and other links to this same route.
  */
 function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   const pathname = usePathname();
-  const requested = useSearchParams()?.get("section") ?? null;
+  const router = useRouter();
+  const requested = useSearchParams().get("section");
   const valid = (id: string | null) => (id !== null && ids.includes(id) ? id : null);
-  const [chosen, setChosen] = useState(() => valid(requested) ?? valid(openFirst ?? null));
-  // A section gone since (a permission changed) shows the index, and is
-  // forgotten, so it does not come back by itself (adjusted during render).
-  if (chosen !== null && valid(chosen) === null) setChosen(null);
-  const view = valid(chosen);
+  // Creation keeps its fields visible for mount-focus while the URL catches up.
+  // Subsequent views belong to the URL.
+  const [initialSection, setInitialSection] = useState(() =>
+    requested === null ? valid(openFirst ?? null) : null
+  );
+  if (initialSection !== null && requested !== null) setInitialSection(null);
+  const view = valid(requested ?? initialSection);
   const focusNext = useRef<FocusNext>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  // The view in the last commit, and the address it stands for: the system's
-  // back and forward compare against them.
   const shownRef = useRef(view);
-  const addressRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (initialSection)
+      replaceUrl(`?section=${encodeURIComponent(initialSection)}`, {
+        state: { settingsSectionFromIndex: false }
+      });
+  }, [initialSection]);
+
+  // Forget a removed or invalid section so restoring permissions does not reopen it.
   useEffect(() => {
-    shownRef.current = view;
-  });
+    if (requested !== null && view === null) {
+      replaceUrl(pathname, { state: { settingsSectionFromIndex: false } });
+    }
+  }, [requested, view, pathname]);
 
-  const href = (id: string | null) => (id ? `${pathname}?section=${id}` : pathname);
-
-  // The system back and forward move between the index and a section: follow
-  // the address they land on, focus included. A move that only changes the
-  // hash (a skip link, a link to a field) is not one. (Next applies history
-  // changes to its search params after the fact, so those could still name a
-  // section just left.)
-  useEffect(() => {
-    addressRef.current = window.location.pathname + window.location.search;
-    const follow = () => {
-      const address = window.location.pathname + window.location.search;
-      if (address === addressRef.current) return;
-      addressRef.current = address;
-      const section = new URLSearchParams(window.location.search).get("section");
-      const left = shownRef.current;
-      focusNext.current = section ? { section } : left ? { row: left } : null;
-      setChosen(section);
-    };
-    window.addEventListener("popstate", follow);
-    return () => window.removeEventListener("popstate", follow);
-  }, []);
-
-  const go = (method: "pushState" | "replaceState", id: string | null, fromIndex: boolean) => {
-    window.history[method](fromIndex ? { [OPENED_FROM_INDEX]: true } : null, "", href(id));
-    addressRef.current = window.location.pathname + window.location.search;
+  const href = (id: string | null) =>
+    id ? `${pathname}?section=${encodeURIComponent(id)}` : pathname;
+  const go = (replace: boolean, id: string | null, fromIndex: boolean) => {
+    (replace ? replaceUrl : pushUrl)(href(id), { state: { settingsSectionFromIndex: fromIndex } });
   };
   // For the listeners below, which outlive a render.
   const goRef = useRef(go);
@@ -188,18 +183,15 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   });
 
   const open = (id: string, focus?: HTMLElement | null) => {
-    // From a section, another one replaces it: Back still leads to the index.
-    if (view === null) go("pushState", id, true);
-    else go("replaceState", id, openedFromIndex());
     focusNext.current = focus ? { element: focus } : { section: id };
-    setChosen(id);
+    // From a section, another one replaces it: Back still leads to the index.
+    go(view !== null, id, view === null || openedFromIndex());
   };
 
   const back = () => {
-    if (openedFromIndex()) window.history.back();
-    else go("replaceState", null, false);
     focusNext.current = view ? { row: view } : null;
-    setChosen(null);
+    if (openedFromIndex()) router.back();
+    else go(true, null, false);
   };
 
   /** Focus an element in the section in view, without a history entry. */
@@ -245,9 +237,8 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
         if (section && section !== inView) {
           // The entry stays what it was: one opened from the index keeps its
           // marker, so Back still pops it and Forward brings it back.
-          goRef.current("replaceState", section, openedFromIndex());
           focusNext.current = { element };
-          setChosen(section);
+          goRef.current(true, section, openedFromIndex());
           return;
         }
         // The tablet's strip names the section it marks.
@@ -272,7 +263,11 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   // its heading, the index to the row it was opened from. Not on arrival: a
   // resource just created focuses its name field itself.
   useLayoutEffect(() => {
-    const next = focusNext.current;
+    const previous = shownRef.current;
+    shownRef.current = view;
+    if (previous === view) return;
+    const next =
+      focusNext.current ?? (view ? { section: view } : previous ? { row: previous } : null);
     focusNext.current = null;
     if (next && rootRef.current) focusIn(rootRef.current, next);
   }, [view]);

@@ -218,6 +218,39 @@ describe("scroll and history", () => {
 
     expect(() => navigation.replaceUrl("https://example.org/a")).toThrow(/origin/);
   });
+
+  it("keeps section history state through replacement and browser Back/Forward", async () => {
+    const { panel, router } = await renderPanel("/a");
+    const entries = router.history.length;
+    await act(async () =>
+      navigation.pushUrl("?tab=x#target", {
+        state: { settingsSectionFromIndex: true }
+      })
+    );
+    expect(router.history.length).toBe(entries + 1);
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
+    await act(async () => navigation.replaceUrl("?tab=y#target"));
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
+    expect(router.state.location.hash).toBe("target");
+    expect(router.history.length).toBe(entries + 1);
+    expect(panel.scrollTo).not.toHaveBeenCalled();
+    await act(async () => router.history.back());
+    expect(location()).toBe("/a -");
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBeUndefined();
+    await act(async () => router.history.forward());
+    expect(location()).toBe("/a y");
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
+    vi.mocked(panel.scrollTo).mockClear();
+    await act(async () =>
+      navigation.replaceUrl("?tab=y#target", {
+        state: { settingsSectionFromIndex: false }
+      })
+    );
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(false);
+    expect(panel.scrollTo).not.toHaveBeenCalled();
+    expect(() => navigation.pushUrl("https://example.org/a")).toThrow(/origin/);
+    expect(() => navigation.pushUrl("javascript:alert(1)")).toThrow(/origin/);
+  });
 });
 
 describe("replaceUrl on the same route", () => {

@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "@/lib/navigation";
+import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -20,6 +20,7 @@ import { InsightsPanel } from "./insights-panel";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
 import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "./side-panel/side-panel";
+import { readChatTab } from "./chat-url";
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -151,14 +152,8 @@ export function ChatPage({
       }
     }
   }
-  const [tab, setTab] = useState<"chat" | "insights">(() =>
-    typeof window !== "undefined" &&
-    window.location.search.includes("tab=insights") &&
-    partner.insightEnabled &&
-    partner.type !== "default-assistant"
-      ? "insights"
-      : "chat"
-  );
+  const searchParams = useSearchParams();
+  const tab = hasInsights(partner) ? readChatTab(searchParams) : "chat";
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
@@ -187,19 +182,22 @@ export function ChatPage({
   }
 
   function updateUrl(sessionId: string | null) {
-    // Shallow history update on purpose: router.replace would start an RSC
-    // navigation whose transition holds back streaming re-renders until the
-    // server render resolves (the answer would then paint in one chunk).
-    if (buildSessionUrl) window.history.replaceState(null, "", buildSessionUrl(sessionId));
+    // The navigation seam commits same-route updates without waiting for
+    // background session refreshes, so streaming stays responsive.
+    if (buildSessionUrl) {
+      const url = new URL(buildSessionUrl(sessionId), window.location.href);
+      if (tab === "insights") url.searchParams.set("tab", "insights");
+      else url.searchParams.delete("tab");
+      replaceUrl(url);
+    }
   }
 
   const selectTab = useCallback((next: "chat" | "insights") => {
-    setTab(next);
     setActivity(null);
     const url = new URL(window.location.href);
     if (next === "insights") url.searchParams.set("tab", "insights");
     else url.searchParams.delete("tab");
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
   }, []);
 
   const closeHistory = useCallback(() => {

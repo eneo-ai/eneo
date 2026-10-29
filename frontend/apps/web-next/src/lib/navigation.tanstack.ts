@@ -15,6 +15,12 @@ import {
 import { useMemo, useSyncExternalStore } from "react";
 import type * as Seam from "./navigation";
 
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    settingsSectionFromIndex?: Seam.UrlState["settingsSectionFromIndex"];
+  }
+}
+
 type LocationStore = { get(): ParsedLocation; subscribe(listener: () => void): () => void };
 
 const renderedLocations = new WeakMap<AnyRouter, LocationStore>();
@@ -105,15 +111,25 @@ export function bindNavigationRouter(router: AnyRouter): void {
  * relative to the current address (`?page=2`); another origin throws, as
  * `history.replaceState` does.
  */
-export const replaceUrl: typeof Seam.replaceUrl = (href) => {
+function navigateUrl(href: string | URL, replace: boolean, options?: Seam.UrlOptions) {
   const router = boundRouter;
-  if (!router) throw new Error("replaceUrl() needs the app's router: createAppRouter binds it.");
+  if (!router) throw new Error("URL updates need the app's router: createAppRouter binds it.");
   // Relative to the address the hooks report, as the page that calls it sees it.
   const url = new URL(href, router.origin + renderedLocation(router).get().href);
-  if (url.origin !== router.origin) throw new Error(`replaceUrl() stays on this origin: ${url}`);
+  if (url.origin !== router.origin) throw new Error(`URL updates stay on this origin: ${url}`);
   void router.navigate({
     href: url.pathname + url.search + url.hash,
-    replace: true,
+    replace,
+    state: (current) => ({ ...(replace ? current : {}), ...options?.state }),
     ...scrollOptions(false)
   });
+}
+
+export const replaceUrl: typeof Seam.replaceUrl = (href, options) =>
+  navigateUrl(href, true, options);
+export const pushUrl: typeof Seam.pushUrl = (href, options) => navigateUrl(href, false, options);
+
+export const readUrlState: typeof Seam.readUrlState = () => {
+  if (!boundRouter) throw new Error("URL state needs the app's router: createAppRouter binds it.");
+  return renderedLocation(boundRouter).get().state;
 };

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setRoute } from "@/test/navigation";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 
@@ -473,7 +474,6 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
 
 describe("ChatPage while an answer streams", () => {
   it("keeps an answer that finishes after the user left it out of the next conversation", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
     renderPage(null);
     askWithKeyboard("Vilken gräns gäller?");
     await screen.findByRole("log", { name: "Konversation" });
@@ -486,10 +486,29 @@ describe("ChatPage while an answer streams", () => {
     // The left conversation still gets its title (the history lists it)…
     await waitFor(() => expect(spies.titled).toEqual(["session-old"]));
     // …but the new one keeps its URL, heading and silence.
-    expect(replaceState).not.toHaveBeenCalledWith(null, "", "/chat?session_id=session-old");
+    expect(window.location.pathname + window.location.search).toBe("/chat");
     expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
     expect(screen.queryByText("Gammalt svar")).toBeNull();
+  });
+
+  it("keeps Insights selected when the first session id arrives in the background", async () => {
+    renderPage(null, { ...partner, insightEnabled: true });
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    await act(async () => answer(spies.streams[0]!, "session-late", "Gränsen är 700 000 kr."));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("session_id")).toBe("session-late")
+    );
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("insights");
+    expect(screen.getByRole("radio", { name: "Insikter", checked: true })).toBeTruthy();
+    expect(screen.getByText("Totala konversationer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
   });
 
   it("keeps this visit's turns when switching to Insikter and back", async () => {
@@ -507,6 +526,17 @@ describe("ChatPage while an answer streams", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
     expect(within(screen.getByRole("log")).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
+  });
+
+  it("follows external tab changes without mistaking another parameter for the insights tab", async () => {
+    const rerender = renderPage(null, { ...partner, insightEnabled: true });
+    setRoute("/chat?tab=insights");
+    rerender(null);
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    setRoute("/chat?other=tab%3Dinsights");
+    rerender(null);
+    expect(composer()).toBeTruthy();
+    expect(screen.queryByText("Totala konversationer")).toBeNull();
   });
 
   it("returns a first question that fails before it is sent to the start composer", async () => {

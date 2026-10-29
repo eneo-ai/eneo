@@ -3,6 +3,7 @@ import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination } from "@/lib/api/pagination";
+import type { SpaceResource } from "@/features/spaces/space";
 
 export type Collection = Schema<"CollectionPublic">;
 export type Website = Schema<"WebsitePublic">;
@@ -12,6 +13,22 @@ export type CrawlFailurePage = Schema<"CrawlFailurePagePublic">;
 export type InfoBlob = Schema<"InfoBlobPublicNoText">;
 export type EmbeddingModel = Schema<"EmbeddingModelPublic">;
 export type IntegrationKnowledge = Schema<"IntegrationKnowledgePublic">;
+
+export type KnowledgeTab = "collections" | "websites" | "integrations";
+
+/** In display order, with the resource permission each tab requires. */
+export const KNOWLEDGE_TABS: { id: KnowledgeTab; resource: SpaceResource }[] = [
+  { id: "collections", resource: "collection" },
+  { id: "websites", resource: "website" },
+  { id: "integrations", resource: "integrationKnowledge" }
+];
+
+export function readKnowledgeTab(
+  search: Pick<URLSearchParams, "get">,
+  available: readonly KnowledgeTab[]
+): KnowledgeTab {
+  return available.find((id) => id === search.get("tab")) ?? available[0] ?? "collections";
+}
 
 export function formatWebsiteName(website: { url: string; name?: string | null }): string {
   if (website.name) return website.name;

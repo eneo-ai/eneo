@@ -8,9 +8,9 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
-import { useSearchParams } from "@/lib/navigation";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useFormatter, useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -19,11 +19,18 @@ import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { PasswordPolicyPanel } from "./password-policy-panel";
 import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
 import { UserTable } from "./user-table";
-import { adminUsersQueryOptions, isSearchable, type StateFilter } from "./users";
+import {
+  adminUsersQueryOptions,
+  isSearchable,
+  readUsersFilters,
+  usersFiltersSearchParams,
+  type StateFilter,
+  type UsersFilters
+} from "./users";
 
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
@@ -31,62 +38,14 @@ const NARROW_QUERY = `not all and ${MEDIA.sm}`;
 /** The role filter's "all roles" option (role ids are UUIDs). */
 const ALL_ROLES = "all";
 
-type Filters = {
-  stateFilter: StateFilter;
-  search: string;
-  searchName: string;
-  page: number;
-  roleId: string | null;
-};
-
-/** Sync the current filter state into the URL for shareable links. */
-function syncUrl({ stateFilter, search, searchName, page, roleId }: Filters) {
-  const params = new URLSearchParams();
-  if (stateFilter !== "active") params.set("tab", stateFilter);
-  if (search) params.set("search", search);
-  if (searchName) params.set("search_name", searchName);
-  if (page > 1) params.set("page", String(page));
-  if (roleId) params.set("role_id", roleId);
-  const query = params.toString();
-  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-}
-
-/**
- * A search box: the draft, and the search it commits once typing pauses at 0
- * or ≥3 characters (backend rule), calling `onCommit`. `clear` empties both
- * at once; the debounced draft still holds the old text then, so a commit
- * waits until it has caught up with the draft.
- */
-function useSearchBox(initial: string, onCommit: () => void) {
-  const [draft, setDraft] = useState(initial);
-  const [value, setValue] = useState(initial);
-  const debounced = useDebouncedValue(draft.trim());
-  if (debounced === draft.trim() && isSearchable(debounced) && debounced !== value) {
-    setValue(debounced);
-    onCommit();
-  }
-  return {
-    draft,
-    setDraft,
-    value,
-    clear() {
-      setDraft("");
-      setValue("");
-    }
-  };
-}
-
 export function AdminUsersPage() {
   const t = useTranslations();
   const format = useFormatter();
   const searchParams = useSearchParams();
 
-  const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
-  const initialPage = Math.max(1, Number(searchParams.get("page")) || 1);
-  const [roleId, setRoleId] = useState(searchParams.get("role_id"));
-
-  const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
-  const [page, setPage] = useState(initialPage);
+  const pathname = usePathname();
+  const filters = useMemo(() => readUsersFilters(searchParams), [searchParams]);
+  const { stateFilter, search, searchName, page, roleId } = filters;
   const [showCreate, setShowCreate] = useState(false);
   // Passwords the editor set, shown one at a time in the order the saves
   // landed. Held here, not in the row whose editor set them: a refetch may
@@ -100,10 +59,26 @@ export function AdminUsersPage() {
     setIssued((queue) => [...queue, { key, password }]);
   }
   // E-mail and username searches combine (AND); a new search starts over at page 1.
-  const emailBox = useSearchBox((searchParams.get("search") ?? "").trim(), () => setPage(1));
-  const nameBox = useSearchBox((searchParams.get("search_name") ?? "").trim(), () => setPage(1));
-  const search = emailBox.value;
-  const searchName = nameBox.value;
+  const emailBox = useSearchDraft(search);
+  const nameBox = useSearchDraft(searchName);
+  const nextEmail = isSearchable(emailBox.settled) ? emailBox.settled : search;
+  const nextName = isSearchable(nameBox.settled) ? nameBox.settled : searchName;
+  useEffect(() => {
+    if (nextEmail !== filters.search || nextName !== filters.searchName) {
+      const query = usersFiltersSearchParams({
+        ...filters,
+        search: nextEmail,
+        searchName: nextName,
+        page: 1
+      }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [filters, nextEmail, nextName, pathname]);
+
+  function changeFilters(next: Partial<UsersFilters>) {
+    const query = usersFiltersSearchParams({ ...filters, ...next }).toString();
+    replaceUrl(query ? `${pathname}?${query}` : pathname);
+  }
 
   const baseId = useId();
   const panelId = `${baseId}-panel`;
@@ -115,10 +90,6 @@ export function AdminUsersPage() {
   const rescue = useFocusRescue();
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
-
-  useEffect(() => {
-    syncUrl({ stateFilter, search, searchName, page, roleId });
-  }, [stateFilter, search, searchName, page, roleId]);
 
   const roles = useQuery(rolesQueryOptions(browserApi));
   const predefined = roles.data?.predefined ?? [];
@@ -161,7 +132,12 @@ export function AdminUsersPage() {
 
   // A page past the end (its last user was deactivated or deleted, or an old
   // link): show the last page rather than an empty list.
-  if (metadata && !isPlaceholderData && page > totalPages) setPage(totalPages);
+  useEffect(() => {
+    if (metadata && !isPlaceholderData && filters.page > totalPages) {
+      const query = usersFiltersSearchParams({ ...filters, page: totalPages }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [metadata, isPlaceholderData, filters, totalPages, pathname]);
 
   // Past the backend's page cap the rest can only be reached by filtering.
   const capped =
@@ -181,24 +157,21 @@ export function AdminUsersPage() {
   }, [announce, resultsFor, t, total]);
 
   function selectTab(next: StateFilter) {
-    setStateFilter(next);
-    setPage(1);
+    changeFilters({ stateFilter: next, page: 1 });
   }
 
   function selectRole(next: string) {
-    setRoleId(next === ALL_ROLES ? null : next);
-    setPage(1);
+    changeFilters({ roleId: next === ALL_ROLES ? null : next, page: 1 });
   }
 
   function clearFilters() {
-    emailBox.clear();
-    nameBox.clear();
-    setRoleId(null);
-    setPage(1);
+    emailBox.setDraft("");
+    nameBox.setDraft("");
+    changeFilters({ search: "", searchName: "", roleId: null, page: 1 });
   }
 
   function changePage(next: number) {
-    setPage(next);
+    changeFilters({ page: next });
     // The pressed button stays focused, except "next"/"previous" at the last
     // or first page, which becomes disabled: then focus moves to the panel.
     rescue(panelRef.current);

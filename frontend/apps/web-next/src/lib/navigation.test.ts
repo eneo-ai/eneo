@@ -28,8 +28,25 @@ describe("replaceUrl", () => {
   it("replaces the current history entry with the address", () => {
     const replaceState = vi.spyOn(window.history, "replaceState");
     navigation.replaceUrl("/a?tab=x");
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/a?tab=x");
+    expect(replaceState).toHaveBeenCalledWith(expect.any(Object), "", "/a?tab=x");
     expect(window.location.pathname + window.location.search).toBe("/a?tab=x");
+  });
+
+  it("preserves app metadata while letting Next apply its own history update", () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    window.history.replaceState({ __NA: true, tree: "router-owned" }, "", "/a");
+    navigation.pushUrl("/a?section=general", { state: { settingsSectionFromIndex: true } });
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
+    window.history.replaceState({ ...window.history.state, __NA: true, tree: "router-owned" }, "");
+    navigation.replaceUrl("/a?section=ai");
+    expect(window.history.state).toMatchObject({
+      settingsSectionFromIndex: true,
+      tree: "router-owned"
+    });
+    expect(replaceState.mock.lastCall?.[0]).not.toHaveProperty("__NA");
+    expect(replaceState.mock.lastCall?.[0]).not.toHaveProperty("_N");
+    navigation.replaceUrl("/a", { state: { settingsSectionFromIndex: false } });
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(false);
   });
 });
 

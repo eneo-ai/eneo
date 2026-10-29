@@ -3,13 +3,12 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
-import { appQueryOptions } from "@/features/apps/apps";
+import { appQueryOptions, readAppTab } from "@/features/apps/apps";
 import { ResultsTable } from "@/features/apps/results/results-table";
 import { RunView } from "@/features/apps/run/run-view";
 
@@ -22,14 +21,12 @@ export function DashboardApp({ appId }: { appId: string }) {
   const base = `/dashboard/app/${appId}`;
   const resultHref = (runId: string) => `${base}/results/${runId}`;
 
-  const requested = searchParams.get("tab");
-  const [tab, setTab] = useState(requested === "results" ? "results" : "run");
+  const tab = readAppTab(searchParams);
 
   function selectTab(next: string) {
-    setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
   }
 
   return (

@@ -18,6 +18,7 @@
 import { createElement, useSyncExternalStore } from "react";
 import { vi } from "vitest";
 import type { LinkProps } from "@/lib/link";
+import type { UrlOptions, UrlState } from "@/lib/navigation";
 
 /** The route before a test sets one. */
 const HOME = "/";
@@ -56,13 +57,24 @@ export function resetNavigation(): void {
     if (vi.isMockFunction(method)) method.mockReset();
   }
   replaceUrl.mockClear();
+  pushUrl.mockClear();
+  router.back.mockImplementation(() => window.history.back());
 }
 
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void) {
+  if (listeners.size === 0) window.addEventListener("popstate", followHistory);
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) window.removeEventListener("popstate", followHistory);
+  };
+}
+
+function followHistory() {
+  setRoute(window.location.href);
+  for (const listener of listeners) listener();
 }
 
 const readPathname = () => url.pathname;
@@ -81,14 +93,26 @@ export function useRouter(): typeof router {
 }
 
 /** Puts `href` in the address bar, as the app's `replaceUrl` does, and reports it as the route. */
-export const replaceUrl = vi.fn((href: string | URL) => {
+function navigateUrl(href: string | URL, replace: boolean, options?: UrlOptions) {
   const next = new URL(href, url);
   const route = next.pathname + next.search;
   setRoute(route);
   // The path, not `next`: jsdom's origin is not this module's base URL.
-  if (typeof window !== "undefined") window.history.replaceState(null, "", route + next.hash);
+  const state = { ...(replace ? window.history.state : {}), ...options?.state };
+  window.history[replace ? "replaceState" : "pushState"](state, "", route + next.hash);
   for (const listener of listeners) listener();
-});
+}
+
+export const replaceUrl = vi.fn((href: string | URL, options?: UrlOptions) =>
+  navigateUrl(href, true, options)
+);
+export const pushUrl = vi.fn((href: string | URL, options?: UrlOptions) =>
+  navigateUrl(href, false, options)
+);
+
+export function readUrlState(): UrlState {
+  return window.history.state ?? {};
+}
 
 export function useSpaceSegments(): string[] {
   return url.pathname.split("/").filter(Boolean).slice(2);

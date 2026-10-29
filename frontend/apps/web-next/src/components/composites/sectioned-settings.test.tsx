@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router, setRoute } from "@/test/navigation";
+import { replaceUrl, router, setRoute } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { SaveStatusProvider, useSetSaveStatus } from "./save-status";
@@ -208,7 +208,10 @@ describe("SectionedSettings on a phone (decision 21)", () => {
   it("opens a section in place and goes back to the index with what was typed still there", () => {
     setRoute(EDIT);
     const push = vi.spyOn(window.history, "pushState");
-    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.history.replaceState(null, "", EDIT);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
     renderEditor();
     const draft = screen.getByRole("textbox", { name: "Beskrivning" });
 
@@ -255,6 +258,41 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     expect(view()).toBe("index");
   });
 
+  it("follows external same-route navigation without remounting a draft", () => {
+    setRoute(EDIT);
+    renderEditor();
+    const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+    fireEvent.change(draft, { target: { value: "Utkast" } });
+    act(() => replaceUrl(`${EDIT}?section=ai`));
+    expect(current()).toEqual(["ai"]);
+    act(() => replaceUrl(`${EDIT}?section=general`));
+    expect(current()).toEqual(["general"]);
+    expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
+    expect(draft).toHaveProperty("value", "Utkast");
+  });
+
+  it("shows the creation section before its fields run their mount focus", () => {
+    setRoute(EDIT);
+    const mountedViews: ReturnType<typeof current>[] = [];
+    function CreationField() {
+      useLayoutEffect(() => {
+        mountedViews.push(current());
+      }, []);
+      return <input aria-label="Namn" defaultValue="Ny app" />;
+    }
+    renderInApp(
+      <SectionedSettings
+        header={<h1>Ny app</h1>}
+        navigationLabel="Avsnitt"
+        phone={{ parent: { label: "Appar", href: "/apps" }, title: "Ny app", openFirst: "general" }}
+        sections={[
+          { id: "general", label: "Allmänt", icon: SlidersHorizontal, node: <CreationField /> }
+        ]}
+      />
+    );
+    expect(mountedViews).toEqual([["general"]]);
+  });
+
   it("opens a resource just created on the section it names, and Back replaces the address", () => {
     setRoute(EDIT);
     const replace = vi.spyOn(window.history, "replaceState");
@@ -290,10 +328,32 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     window.history.replaceState(null, "", EDIT);
     renderEditor({ openFirst: "general" });
     act(() => {
-      window.history.pushState(null, "", `${EDIT}#main-content`);
+      const url = new URL(window.location.href);
+      url.hash = "main-content";
+      window.history.pushState(window.history.state, "", url);
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(current()).toEqual(["general"]);
+  });
+
+  it("keeps a draft and its focus when a tablet turns into a phone", () => {
+    setViewport("tablet-portrait");
+    setRoute(`${EDIT}?section=ai`);
+    renderEditor();
+    const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+    fireEvent.change(draft, { target: { value: "Oavslutat utkast" } });
+    act(() => draft.focus());
+    act(() => setViewport("phone"));
+    expect(current()).toEqual(["general"]);
+    expect(document.activeElement).toBe(draft);
+    expect(draft).toHaveProperty("value", "Oavslutat utkast");
+    // jsdom has no layout; the field stays visible on the wider layout.
+    vi.spyOn(draft, "getClientRects").mockReturnValue([
+      new DOMRect(0, 0, 200, 44)
+    ] as unknown as DOMRectList);
+    act(() => setViewport("tablet-portrait"));
+    expect(document.activeElement).toBe(draft);
+    expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
   });
 
   it("goes back with the system back, focus on the row it came from", () => {
