@@ -68,8 +68,18 @@ class InfoBlobPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplacedPage:
+    """A page of replaced versions in id order, and which still hold chunks."""
+
+    last_id: UUID | None
+    versions_read: int
+    with_search_data: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
 class ReplacedBatch:
     last_scanned_id: UUID | None
+    versions_read: int
     released_versions: int
     released_bytes: int
     skipped_busy: int
@@ -785,47 +795,57 @@ class InfoBlobRepository:
         )
         return released
 
-    @staticmethod
-    def _replaced_with_search_data() -> ColumnElement[bool]:
-        return sa.and_(
-            InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
-            sa.exists().where(InfoBlobChunks.info_blob_id == InfoBlobs.id),
-        )
-
-    async def count_replaced_with_search_data(self) -> int:
-        count = await self.session.scalar(
-            sa.select(sa.func.count())
-            .select_from(InfoBlobs)
-            .where(self._replaced_with_search_data())
-        )
-        return int(count or 0)
-
-    async def release_next_replaced_batch(
+    async def scan_replaced_page(
         self, *, after: UUID | None, limit: int
-    ) -> ReplacedBatch:
-        """Release a bounded batch of replaced versions ordered after `after`.
+    ) -> ReplacedPage:
+        """Read the next `limit` versions of any state after `after`, in id order.
 
-        Versions another transaction holds, for example one deleting their
-        source, are skipped rather than waited for.
+        One page reads at most `limit` rows through the primary key, however
+        few of them are replaced versions; `versions_read` counts the replaced
+        ones and `with_search_data` those of them that still hold chunks.
         """
-        candidates = (
-            await self.session.scalars(
-                sa.select(InfoBlobs.id)
-                .where(
-                    self._replaced_with_search_data(),
-                    InfoBlobs.id > after if after is not None else sa.true(),
-                )
+        replaced = InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value
+        holds_chunks = sa.case(
+            (
+                replaced,
+                sa.exists().where(InfoBlobChunks.info_blob_id == InfoBlobs.id),
+            ),
+            else_=sa.false(),
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(InfoBlobs.id, replaced, holds_chunks)
+                .where(InfoBlobs.id > after if after is not None else sa.true())
                 .order_by(InfoBlobs.id)
                 .limit(limit)
             )
         ).all()
-        if not candidates:
-            return ReplacedBatch(None, 0, 0, 0)
+        if not rows:
+            return ReplacedPage(None, 0, [])
+        return ReplacedPage(
+            last_id=rows[-1][0],
+            versions_read=sum(1 for _, is_replaced, _ in rows if is_replaced),
+            with_search_data=[id_ for id_, _, holding in rows if holding],
+        )
+
+    async def release_next_replaced_batch(
+        self, *, after: UUID | None, limit: int
+    ) -> ReplacedBatch:
+        """Release the replaced versions in the next page after `after`.
+
+        Versions another transaction holds, for example one deleting their
+        source, are skipped rather than waited for.
+        """
+        page = await self.scan_replaced_page(after=after, limit=limit)
+        if page.last_id is None:
+            return ReplacedBatch(None, 0, 0, 0, 0)
+        if not page.with_search_data:
+            return ReplacedBatch(page.last_id, page.versions_read, 0, 0, 0)
         available = (
             await self.session.scalars(
                 sa.select(InfoBlobs.id)
                 .where(
-                    InfoBlobs.id.in_(candidates),
+                    InfoBlobs.id.in_(page.with_search_data),
                     InfoBlobs.version_state == InfoBlobVersionState.SUPERSEDED.value,
                 )
                 .order_by(InfoBlobs.id)
@@ -843,10 +863,11 @@ class InfoBlobRepository:
         ).all()
         released = await self.release_replaced_search_data(holding)
         return ReplacedBatch(
-            last_scanned_id=candidates[-1],
+            last_scanned_id=page.last_id,
+            versions_read=page.versions_read,
             released_versions=len(holding),
             released_bytes=sum(released.values()),
-            skipped_busy=len(candidates) - len(available),
+            skipped_busy=len(page.with_search_data) - len(available),
         )
 
     async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
