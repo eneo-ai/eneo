@@ -35,6 +35,14 @@ export type AppRouter = {
 /** What `useSearchParams()` returns: the current query, read-only. */
 export type ReadonlySearchParams = Omit<URLSearchParams, "append" | "delete" | "set" | "sort">;
 
+/** App-owned history metadata, separate from each router's internal state. */
+export type UrlState = {
+  /** A phone settings section has an index entry immediately behind it. */
+  settingsSectionFromIndex?: boolean;
+};
+
+export type UrlOptions = { state?: UrlState };
+
 // Next's hooks themselves, not wrappers, typed down to the shared API: a test
 // that mocks next/navigation reaches every caller through this module, and
 // src/test/render.tsx checks which useRouter is in place by identity. They are
@@ -49,8 +57,18 @@ export const useSearchParams: () => ReadonlySearchParams = nextUseSearchParams;
  * without navigating: the page keeps its state, and the hooks report the new
  * address.
  */
-export function replaceUrl(href: string | URL): void {
-  window.history.replaceState(null, "", href);
+export function replaceUrl(href: string | URL, options?: UrlOptions): void {
+  window.history.replaceState({ ...window.history.state, ...options?.state }, "", href);
+}
+
+/** Opens an in-page view as a new history entry, keeping scroll and mounted state. */
+export function pushUrl(href: string | URL, options?: UrlOptions): void {
+  window.history.pushState(options?.state ?? null, "", href);
+}
+
+/** Metadata of the entry currently shown; controls use it to choose Back or replace. */
+export function readUrlState(): UrlState {
+  return window.history.state ?? {};
 }
 
 /**

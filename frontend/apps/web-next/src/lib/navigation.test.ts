@@ -28,8 +28,23 @@ describe("replaceUrl", () => {
   it("replaces the current history entry with the address", () => {
     const replaceState = vi.spyOn(window.history, "replaceState");
     navigation.replaceUrl("/a?tab=x");
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/a?tab=x");
+    expect(replaceState).toHaveBeenCalledWith(expect.any(Object), "", "/a?tab=x");
     expect(window.location.pathname + window.location.search).toBe("/a?tab=x");
+  });
+
+  it("preserves router and app metadata on replacement, with explicit state updates", () => {
+    window.history.replaceState({ __NA: true, tree: "router-owned" }, "", "/a");
+    navigation.pushUrl("/a?section=general", { state: { settingsSectionFromIndex: true } });
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
+    window.history.replaceState({ ...window.history.state, __NA: true, tree: "router-owned" }, "");
+    navigation.replaceUrl("/a?section=ai");
+    expect(window.history.state).toMatchObject({
+      settingsSectionFromIndex: true,
+      __NA: true,
+      tree: "router-owned"
+    });
+    navigation.replaceUrl("/a", { state: { settingsSectionFromIndex: false } });
+    expect(navigation.readUrlState().settingsSectionFromIndex).toBe(false);
   });
 });
 

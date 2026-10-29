@@ -3,15 +3,14 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import Link from "@/lib/link";
-import { useSearchParams } from "@/lib/navigation";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
-import { appQueryOptions } from "./apps";
+import { appQueryOptions, readAppTab } from "./apps";
 import { ResultsTable } from "./results/results-table";
 import { RunView } from "./run/run-view";
 
@@ -25,14 +24,12 @@ export function AppDetail({ appId }: { appId: string }) {
   const base = `/spaces/${routeId}/apps/${appId}`;
   const resultHref = (runId: string) => `${base}/results/${runId}`;
 
-  const requested = searchParams.get("tab");
-  const [tab, setTab] = useState(requested === "results" ? "results" : "run");
+  const tab = readAppTab(searchParams);
 
   function selectTab(next: string) {
-    setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
   }
 
   const canEdit = (app.permissions ?? []).includes("edit");

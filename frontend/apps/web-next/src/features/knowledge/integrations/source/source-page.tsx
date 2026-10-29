@@ -5,9 +5,9 @@ import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { useRouter, useSearchParams } from "@/lib/navigation";
+import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
 import { useFormatter, useTranslations } from "next-intl";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ClientTime } from "@/components/composites/client-time";
 import { PageHeader } from "@/components/composites/page-header";
@@ -25,13 +25,15 @@ import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import { useWatchStates } from "../source-status";
 import {
   isSyncActive,
+  readSourceView,
   sourceContentsLabel,
   sourceHref,
   sourceTabParam,
   summarizeSource,
   wrapperPermissions,
   type IntegrationSource,
-  type SourceTab
+  type SourceTab,
+  type SourceView
 } from "../sources";
 import { useSourceAnnouncements } from "../use-sync-announcements";
 import { useSyncProgress } from "../use-sync-progress";
@@ -43,13 +45,6 @@ import { FolderOverview } from "./folder-overview";
 import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 import { SyncProgressPanel } from "./progress-panel";
-
-/** What the page shows: a tab and, on a source of many folders, the folder (null: all of them). */
-type SourceView = { tab: SourceTab; folder: string | null };
-
-function viewOfAddress(tab: string | null, folder: string | null): SourceView {
-  return { tab: sourceTabParam(tab ?? undefined) ?? "content", folder };
-}
 
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -122,24 +117,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const rescue = useFocusRescue();
   // By id, not a ref: the in-place links that call it are built during render (react-hooks/refs).
   const focusPanelIfLost = () => rescue(document.getElementById(panelId));
-  // The view follows the address: a navigation here with other parameters (a
-  // link, a toast's Show) changes it. An in-place change sets the view and
-  // writes the address it reads from, so the two never disagree.
-  const addressTab = searchParams.get("tab");
-  const addressFolder = searchParams.get("folder");
-  const [shown, setShown] = useState(() => ({
-    tab: addressTab,
-    folder: addressFolder,
-    view: viewOfAddress(addressTab, addressFolder)
-  }));
-  if (shown.tab !== addressTab || shown.folder !== addressFolder) {
-    setShown({
-      tab: addressTab,
-      folder: addressFolder,
-      view: viewOfAddress(addressTab, addressFolder)
-    });
-  }
-  const { view } = shown;
+  const view = readSourceView(searchParams);
   const { tab } = view;
 
   const { progress, queued, loaded: progressLoaded } = useSyncProgress();
@@ -196,13 +174,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
   // Like the knowledge page's tabs: the address follows, without a server round trip.
   function show(next: SourceView) {
-    setShown((current) => ({ ...current, view: next }));
     const url = new URL(window.location.href);
     if (next.tab === "content") url.searchParams.delete("tab");
     else url.searchParams.set("tab", next.tab);
     if (next.folder) url.searchParams.set("folder", next.folder);
     else url.searchParams.delete("folder");
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
     // The link that was pressed may have gone with the old view; a folder picked
     // from the overview takes focus at its heading, anything else at the panel.
     const folderHeading =

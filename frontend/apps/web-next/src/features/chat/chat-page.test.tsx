@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setRoute } from "@/test/navigation";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 
@@ -507,6 +508,17 @@ describe("ChatPage while an answer streams", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
     expect(within(screen.getByRole("log")).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
+  });
+
+  it("follows external tab changes without mistaking another parameter for the insights tab", async () => {
+    const rerender = renderPage(null, { ...partner, insightEnabled: true });
+    setRoute("/chat?tab=insights");
+    rerender(null);
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    setRoute("/chat?other=tab%3Dinsights");
+    rerender(null);
+    expect(composer()).toBeTruthy();
+    expect(screen.queryByText("Totala konversationer")).toBeNull();
   });
 
   it("returns a first question that fails before it is sent to the start composer", async () => {

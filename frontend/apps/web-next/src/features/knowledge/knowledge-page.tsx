@@ -4,27 +4,18 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useTranslations } from "next-intl";
-import { useSearchParams } from "@/lib/navigation";
-import { useId, useRef, useState } from "react";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { useId, useRef } from "react";
 import type { TableName } from "@/components/astryx/table";
 import { PageHeader } from "@/components/composites/page-header";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { RemovalFocusScope } from "@/features/spaces/removal";
-import type { SpaceResource } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
 import { KnowledgeActionScope } from "./knowledge-action-scope";
 import { IntegrationsTab } from "./integrations/tab";
 import { WebsitesTab } from "./websites";
-
-type KnowledgeTab = "collections" | "websites" | "integrations";
-
-/** The tabs in order, each with the resource it lists (read to see it, create to add). */
-const KNOWLEDGE_TABS: { id: KnowledgeTab; resource: SpaceResource }[] = [
-  { id: "collections", resource: "collection" },
-  { id: "websites", resource: "website" },
-  { id: "integrations", resource: "integrationKnowledge" }
-];
+import { KNOWLEDGE_TABS, readKnowledgeTab, type KnowledgeTab } from "./knowledge";
 
 /**
  * The space knowledge hub: collections / websites / integrations as Astryx
@@ -56,16 +47,12 @@ export function KnowledgePage({
   const phone = useMediaMatch(PHONE_QUERY);
 
   const tabs = KNOWLEDGE_TABS.filter((tab) => can("read", tab.resource)).map((tab) => tab.id);
-  const requested = searchParams.get("tab");
-  const [tab, setTab] = useState<KnowledgeTab>(
-    tabs.find((id) => id === requested) ?? tabs[0] ?? "collections"
-  );
+  const tab = readKnowledgeTab(searchParams, tabs);
 
   function selectTab(next: KnowledgeTab) {
-    setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
   }
 
   const panelId = `${baseId}-panel`;

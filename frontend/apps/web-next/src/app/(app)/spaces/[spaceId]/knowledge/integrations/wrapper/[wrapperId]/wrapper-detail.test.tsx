@@ -35,7 +35,7 @@ const toasts = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/toast", () => ({ toast: toasts }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 /** The props each next/link gets: Astryx's links too, through the app's LinkProvider. */
 const links = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("next/link", async (importOriginal) => {
@@ -668,8 +668,7 @@ describe("WrapperDetail navigation", () => {
   });
 
   it("switches tabs and folders in place and keeps real addresses on the folder links", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
-    const search = () => new URL(String(replaceState.mock.lastCall?.[2])).search;
+    const search = () => window.location.search;
     show([mall, protokoll]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Aktivitet" }));
@@ -902,8 +901,7 @@ describe("WrapperDetail navigation", () => {
   });
 
   it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
-    const search = () => new URL(String(replaceState.mock.lastCall?.[2])).search;
+    const search = () => window.location.search;
     const sync = (id: string, startedAt: string, error: string | null = null) => ({
       id,
       integration_knowledge_id: "i2",

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { setRoute } from "@/test/navigation";
 import type { Space } from "@/features/spaces/space";
 import {
   makeCollection,
@@ -14,7 +15,6 @@ import {
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
-  tab: null as string | null,
   posted: [] as { path: string; body: unknown }[],
   deleted: [] as string[],
   bulkResult: { total: 0, queued: 0, failed: 0, crawl_runs: [], errors: [] } as unknown,
@@ -23,10 +23,7 @@ const state = vi.hoisted(() => ({
   toasts: [] as { kind: string; message: string; description?: string }[]
 }));
 
-vi.mock("@/lib/navigation", () => ({
-  useRouter: () => ({ push: () => {}, prefetch: () => {} }),
-  useSearchParams: () => new URLSearchParams(state.tab ? { tab: state.tab } : {})
-}));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -84,13 +81,26 @@ afterEach(() => {
 
 function show(space: Space, tab: string | null = null) {
   state.space = space;
-  state.tab = tab;
-  return renderInApp(<KnowledgePage />, { appContext: testAppContext({ permissions: ["admin"] }) });
+  return renderInApp(<KnowledgePage />, {
+    appContext: testAppContext({ permissions: ["admin"] }),
+    route: `/spaces/space-1/knowledge${tab ? `?tab=${tab}` : ""}`
+  });
 }
 
 const liveRegion = () => document.querySelector("[data-astryx-live-region='polite']");
 
 describe("KnowledgePage", () => {
+  it("follows an external same-route tab change and defaults an unknown tab", () => {
+    const { rerender } = show(makeSpace());
+    expect(screen.getByRole("tabpanel", { name: "Samlingar" })).toBeTruthy();
+    setRoute("/spaces/space-1/knowledge?tab=websites");
+    rerender(<KnowledgePage />);
+    expect(screen.getByRole("tabpanel", { name: "Webbplatser" })).toBeTruthy();
+    setRoute("/spaces/space-1/knowledge?tab=unknown");
+    rerender(<KnowledgePage />);
+    expect(screen.getByRole("tabpanel", { name: "Samlingar" })).toBeTruthy();
+  });
+
   it("keeps the Kunskap heading and tabs, with one create button in an empty space", async () => {
     const { container } = show(makeSpace());
 

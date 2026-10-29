@@ -72,6 +72,20 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/navigation.ts", "src/**/*.test.{ts,tsx}", "src/test/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.property.name='history'][callee.property.name='replaceState'][arguments.0.raw='null']",
+          message: "Use replaceUrl from @/lib/navigation: the router owns silent URL updates."
+        }
+      ]
+    }
+  },
+  {
     plugins: {
       eneo
     }

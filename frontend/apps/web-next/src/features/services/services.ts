@@ -9,6 +9,10 @@ export type ServiceSparse = Schema<"ServiceSparse">;
 export type ServiceUpdate = Schema<"PartialServiceUpdatePublic">;
 export type ServiceOutputFormat = "json" | "list" | "boolean";
 
+export function readServiceTab(search: Pick<URLSearchParams, "get">): "playground" | "settings" {
+  return search.get("tab") === "settings" ? "settings" : "playground";
+}
+
 /** Services configured in a space, name-sorted with the locale's collator (Astryx `useCollator().compare`). */
 export function spaceServices(space: Space, compare: Intl.Collator["compare"]): ServiceSparse[] {
   return [...(space.applications?.services.items ?? [])].sort((a, b) => compare(a.name, b.name));
