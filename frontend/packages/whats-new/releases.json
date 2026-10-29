@@ -36,8 +36,8 @@
             "sv": "Utforska CSV- och Excel-filer i chatten"
           },
           "body": {
-            "en": "When file analysis is enabled for your assistant, you can ask questions about CSV and Excel files and explore results in interactive tables with sorting and filtering. In the file preview, select a cell or row and choose Ask about selection to include it in your next message. Expand an analysis step to see which file was used and what was done.",
-            "sv": "När filanalys är aktiverat för din assistent kan du ställa frågor om CSV- och Excel-filer och utforska resultaten i interaktiva tabeller med sortering och filtrering. Markera en cell eller rad i filens förhandsvisning och välj Fråga om markeringen för att ta med den i nästa meddelande. Fäll ut ett analyssteg för att se vilken fil som användes och vad som gjordes."
+            "en": "When the Ask a file function is enabled for your assistant, you can ask questions about CSV and Excel files. In the file preview, select a cell or row and choose Ask about selection to include it in your next message. Expand an analysis step to see which file was used and what was done. If interactive views are turned on for your installation, results also appear in tables you can sort and filter.",
+            "sv": "När funktionen Fråga fil är aktiverad för din assistent kan du ställa frågor om CSV- och Excel-filer. Markera en cell eller rad i filens förhandsvisning och välj Fråga om markeringen för att ta med den i nästa meddelande. Fäll ut ett analyssteg för att se vilken fil som användes och vad som gjordes. Om interaktiva vyer är påslagna i er installation visas resultaten också i tabeller som du kan sortera och filtrera."
           }
         },
         {
@@ -50,12 +50,12 @@
           "area": "chat",
           "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
           "title": {
-            "en": "Calculate and explore interactive charts",
-            "sv": "Beräkna och utforska interaktiva diagram"
+            "en": "Calculate and create charts",
+            "sv": "Beräkna och skapa diagram"
           },
           "body": {
-            "en": "Assistants with the calculation and chart tools enabled can calculate from your figures and display interactive charts in chat. For calculations based on values you supplied, you can change the inputs and calculate again to compare outcomes. Charts can be included in Word and PDF reports without showing every intermediate table in chat.",
-            "sv": "Assistenter som har verktygen för beräkningar och diagram aktiverade kan räkna på dina siffror och visa interaktiva diagram i chatten. För beräkningar utifrån värden du själv angett kan du ändra indata och beräkna igen för att jämföra resultat. Diagram kan tas med i Word- och PDF-rapporter utan att varje mellantabell visas i chatten."
+            "en": "Assistants with the Compute and Charts functions enabled can calculate exactly from your figures and draw bar, line, pie and scatter charts, which can also be included in Word and PDF documents. If interactive views are turned on for your installation, charts are interactive, and for calculations based on values you supplied you can change the inputs and choose Run again.",
+            "sv": "Assistenter med funktionerna Beräkning och Diagram aktiverade kan räkna exakt på dina siffror och rita stapel-, linje-, cirkel- och punktdiagram, som också kan tas med i Word- och PDF-dokument. Om interaktiva vyer är påslagna i er installation är diagrammen interaktiva, och för beräkningar på värden du själv angett kan du ändra indata och välja Beräkna igen."
           }
         },
         {
@@ -128,25 +128,24 @@
           "area": "spaces",
           "title": {
             "en": "Keep resources when changing a Space",
-            "sv": "Behåll resurser när du ändrar ett Space"
+            "sv": "Behåll resurser när du ändrar en yta"
           },
           "body": {
             "en": "Changing a Space or one of its resources preserves other assistants, group chat members and saved selections, including resources that are temporarily unavailable. Memberships also remain when a removed user is reactivated.",
-            "sv": "När du ändrar ett Space eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
+            "sv": "När du ändrar en yta eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
           }
         },
         {
           "id": "clearer-errors",
           "type": "fixed",
           "area": "platform",
-          "aliases": ["sign-in-behind-reverse-proxy"],
           "title": {
             "en": "Understand why a request failed",
             "sv": "Förstå varför en förfrågan misslyckades"
           },
           "body": {
-            "en": "When an assistant's reply fails, you get a clearer reason, such as an unavailable model or a usage limit. File uploads explain when your storage quota is exceeded, and sign-in distinguishes an unreachable service from an incorrect password. Password sign-in also works behind a reverse proxy without requiring a separately registered public address.",
-            "sv": "Om assistentens svar misslyckas får du en tydligare orsak, till exempel att modellen inte är tillgänglig eller att en användningsgräns nåtts. Filuppladdning visar när lagringsutrymmet är slut, och inloggning skiljer på en tjänst som inte kan nås och ett felaktigt lösenord. Lösenordsinloggning fungerar också bakom en omvänd proxy utan att den publika adressen måste registreras separat."
+            "en": "When an assistant's reply fails, you get a clearer reason, such as an unavailable model or a usage limit, and whether trying again can help. File uploads tell you which storage quota is full, and when an MCP tool refuses access you get a hint about permissions and credentials next to the original error.",
+            "sv": "Om assistentens svar misslyckas får du en tydligare orsak, till exempel att modellen inte är tillgänglig eller att en användningsgräns nåtts, och om ett nytt försök kan hjälpa. Filuppladdning visar vilket lagringsutrymme som är fullt, och när ett MCP-verktyg nekar åtkomst får du en ledtråd om behörigheter och inloggningsuppgifter bredvid det ursprungliga felet."
           }
         },
         {
@@ -162,7 +161,7 @@
           },
           "body": {
             "en": "Collections and websites can no longer be moved between Spaces. When you move an assistant, its knowledge does not move with it; check and attach the knowledge it needs in the destination Space.",
-            "sv": "Samlingar och webbplatser kan inte längre flyttas mellan Spaces. När du flyttar en assistent följer kunskapen inte med; kontrollera och koppla den kunskap som assistenten behöver i det nya Spacet."
+            "sv": "Samlingar och webbplatser kan inte längre flyttas mellan ytor. När du flyttar en assistent följer kunskapen inte med; kontrollera och koppla den kunskap som assistenten behöver i den nya ytan."
           }
         },
         {
@@ -193,8 +192,8 @@
             "sv": "Aktivera och kontrollera inbyggda verktyg"
           },
           "body": {
-            "en": "Under Administration › Tools, you can enable file analysis, file creation, calculations and charts, and check the tool service status. Connection and version problems include guidance on what to do next. Users also need the corresponding role permissions to use the enabled tools.",
-            "sv": "Under Administration › Verktyg kan du aktivera filanalys, filskapande, beräkningar och diagram och kontrollera verktygstjänstens status. Vid anslutnings- och versionsproblem får du vägledning om nästa steg. Användare behöver även motsvarande rollbehörigheter för att använda de aktiverade verktygen."
+            "en": "On the Functions tab under Administration › Tools, you can turn on Ask a file, Create a file, Compute and Charts, and check the status of the tool service. Connection and version problems include guidance on what to do next. Users also need the corresponding role permissions, and the function must be turned on for the Space and the assistant.",
+            "sv": "På fliken Funktioner under Administration › Verktyg kan du slå på Fråga fil, Skapa fil, Beräkning och Diagram och kontrollera verktygstjänstens status. Vid anslutnings- och versionsproblem får du vägledning om nästa steg. Användare behöver även motsvarande rollbehörigheter, och funktionen måste slås på för ytan och assistenten."
           },
           "showMe": {
             "href": "/admin/tools",
@@ -211,8 +210,8 @@
             "sv": "Word- och PDF-filer följer er dokumentmall"
           },
           "body": {
-            "en": "Under Administration › Tools › File creation you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
-            "sv": "Under Administration › Verktyg › Filskapande kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
+            "en": "Under Administration › Tools › Functions › Create a file, in Document templates, you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
+            "sv": "Under Administration › Verktyg › Funktioner › Skapa fil, i Dokumentmallar, kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
           },
           "showMe": {
             "href": "/admin/tools",
@@ -257,15 +256,15 @@
         },
         {
           "id": "account-news-navigation",
-          "type": "improved",
+          "type": "new",
           "area": "account",
           "title": {
-            "en": "Browse news from your account sidebar",
-            "sv": "Läs nyheter från kontots sidomeny"
+            "en": "See what's new in Eneo",
+            "sv": "Se vad som är nytt i Eneo"
           },
           "body": {
-            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar. Release notes use the available width at /news. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
-            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny. Nyheterna använder hela bredden på /news. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+            "en": "Under What's new in the account menu you can read what has changed in each release, and Show me points out a new feature where you find it. After an update, a short announcement highlights the most important news: choose Later to see it again after 24 hours, or Not interested to dismiss it for this version. You only see news about features your role can use, and administrators can turn What's new off for the organisation.",
+            "sv": "Under Nyheter i kontomenyn kan du läsa vad som har ändrats i varje version, och Visa mig pekar ut en ny funktion där du hittar den. Efter en uppdatering lyfter ett kort meddelande fram de viktigaste nyheterna: välj Senare för att se det igen efter 24 timmar, eller Inte intresserad för att stänga det för den här versionen. Du ser bara nyheter om funktioner som din roll kan använda, och administratörer kan stänga av Nyheter för organisationen."
           }
         }
       ]
