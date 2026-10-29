@@ -5,19 +5,17 @@
 -->
 <script lang="ts">
   import type { Eneo, components } from "@eneo/eneo-js";
-  import {
-    Check,
-    ChevronDown,
-    ChevronUp,
-    Download,
-    FileText,
-    Pencil,
-    RefreshCw,
-    Star,
-    Trash2,
-    TriangleAlert,
-    Upload
-  } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import Download from "@lucide/svelte/icons/download";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Star from "@lucide/svelte/icons/star";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Upload from "@lucide/svelte/icons/upload";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";

@@ -8,7 +8,12 @@
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { Calculator, ChartColumn, FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
+import Calculator from "@lucide/svelte/icons/calculator";
+import ChartColumn from "@lucide/svelte/icons/chart-column";
+import FilePlus from "@lucide/svelte/icons/file-plus";
+import FileSearch from "@lucide/svelte/icons/file-search";
+import Globe from "@lucide/svelte/icons/globe";
+import Image from "@lucide/svelte/icons/image";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";

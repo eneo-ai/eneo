@@ -2,7 +2,12 @@
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
   import type { ApiKeyV2, ModuleInstallation } from "@eneo/eneo-js";
-  import { CircleAlert, CircleCheck, LoaderCircle, Pencil, Plus, Trash2 } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";

@@ -66,6 +66,29 @@ def safe_count_tokens(text: str, model_name: str | None) -> int:
 _background_save_tasks: set[asyncio.Task[None]] = set()
 
 
+async def drain_background_saves(timeout: float) -> int:
+    """Wait for scheduled saves at shutdown; return how many were pending.
+
+    Partial answers are saved on a task of their own after the request ends.
+    The database pool they write through closes after this, so a save that
+    is still running then would be lost.
+    """
+    pending = {task for task in _background_save_tasks if not task.done()}
+    if not pending:
+        return 0
+    logger.info("Waiting for %d background save(s) before shutdown", len(pending))
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.wait(pending)
+    except TimeoutError:
+        logger.error(
+            "%d background save(s) did not finish within %.0fs at shutdown",
+            sum(1 for task in pending if not task.done()),
+            timeout,
+        )
+    return len(pending)
+
+
 def schedule_background_save(coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
     """Schedule a fire-and-forget background save with GC protection.
 

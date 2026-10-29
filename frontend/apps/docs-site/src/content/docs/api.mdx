@@ -405,6 +405,32 @@ instantiated. Legacy data and direct SQL/import writes therefore need inspection
 an invalid row alone does not establish which path wrote it. Avoid raw SQL updates
 that bypass the validated repair path.
 
+## Icons
+
+Assistants, apps, spaces and group chats show an uploaded icon through their
+`icon_id`. Upload the image with `POST /api/v1/icons/`, then set the returned id
+with the resource's own update endpoint. Icon ids are public:
+`GET /api/v1/icons/{id}/` needs no authentication, so an id proves nothing about
+who may change the icon. A resource therefore accepts a new `icon_id` only for
+an icon the caller uploaded in their own tenant; any other id returns `400` with
+`eneo_error_code` `9076`.
+Sending the resource's current `icon_id` again is always accepted. An icon whose
+uploader is not recorded (icons from before object-content storage, or of a
+removed user) keeps showing where it is but cannot be attached anywhere new.
+Service API keys have no user, so they cannot upload (`403`) or attach icons;
+use a user account or a user-owned key.
+
+`DELETE /api/v1/icons/{id}/` deletes an icon only when no assistant, app, space
+or group chat shows it. An icon that is still shown returns `409` with
+`eneo_error_code` `9075`: clear `icon_id` on the resource first, which runs that
+resource's own permission check. An icon of another tenant returns `400`.
+
+A resource releases its icon itself: replacing or clearing `icon_id`, or
+deleting the resource, deletes the previous icon when nothing else shows it.
+Deleting a space does the same for the icons of its assistants, apps and group
+chats. A client therefore only calls `DELETE` for an icon it uploaded but never
+attached.
+
 ## Related pages
 
 - [API Key Management](/docs/api-key-management) for key types, scopes, permissions, guardrails, and lifecycle

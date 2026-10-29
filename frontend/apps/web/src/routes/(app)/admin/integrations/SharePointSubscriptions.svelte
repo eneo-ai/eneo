@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { Eneo, components } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

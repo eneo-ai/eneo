@@ -10,17 +10,15 @@
   import { m } from "$lib/paraglide/messages";
   import type { ApiKeyPolicy } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import {
-    Calendar,
-    Clock,
-    Gauge,
-    Earth,
-    Layers,
-    Link,
-    CircleAlert,
-    Check,
-    RotateCcw
-  } from "@lucide/svelte";
+  import Calendar from "@lucide/svelte/icons/calendar";
+  import Clock from "@lucide/svelte/icons/clock";
+  import Gauge from "@lucide/svelte/icons/gauge";
+  import Earth from "@lucide/svelte/icons/earth";
+  import Layers from "@lucide/svelte/icons/layers";
+  import Link from "@lucide/svelte/icons/link";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Check from "@lucide/svelte/icons/check";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { fly } from "svelte/transition";
 
   const eneo = getEneo();

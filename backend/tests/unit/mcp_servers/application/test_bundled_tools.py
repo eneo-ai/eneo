@@ -129,6 +129,18 @@ async def test_bundled_server_gets_the_live_catalog_without_touching_the_entity(
     assert [tool.name for tool in server.tools] == ["query_table", "gone_tool"]
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_live_bundled_tools_keep_tenant_override_separate_from_default(enabled):
+    server = _server()
+    server.tools[0].is_enabled_by_default = not enabled
+    server.tools[0].enabled_override = enabled
+
+    tool = merge_live_tools(server, LIVE)[0]
+
+    assert tool.is_enabled is enabled
+    assert tool.is_enabled_by_default is not enabled
+
+
 async def test_catalog_is_listed_once_per_endpoint_until_it_expires(monkeypatch):
     calls = _runtime(monkeypatch, [LIVE])
     first = _server()

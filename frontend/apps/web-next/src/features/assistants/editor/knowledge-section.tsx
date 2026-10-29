@@ -6,6 +6,7 @@ import { SettingsGroup, SettingsRow } from "@/components/composites/settings-row
 import { useAutosave } from "@/components/composites/use-autosave";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
+import { RerankerRow } from "./reranker-row";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 function toIds(selections: KnowledgeSelections): string {
@@ -105,6 +106,7 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
           />
         </div>
       </SettingsRow>
+      <RerankerRow assistant={assistant} />
     </SettingsGroup>
   );
 }

@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import UploadFile
 
 from eneo.files.file_size_service import FileSizeService
-from eneo.icons.icon import IconMetadata, IconMetadataCreate
+from eneo.icons.icon import IconInUseError, IconMetadata, IconMetadataCreate
 from eneo.icons.icon_repo import IconRepository, LegacyIconContentRecord
 from eneo.main.exceptions import (
     BadRequestException,
@@ -240,8 +240,16 @@ class IconService:
         )
 
     async def delete_icon(self, icon_id: UUID, tenant_id: UUID) -> None:
+        """Delete an icon of the tenant that no resource shows.
+
+        The id is public, so it proves nothing about the caller: removing an icon
+        from a resource is authorized by that resource's own update.
+        """
         async with self._write_transaction():
-            if await self.icon_repo.get_for_lifecycle(icon_id) is None:
+            icon = await self.icon_repo.get_for_lifecycle(icon_id, lock=True)
+            if icon is None:
                 raise NotFoundException(f"Icon with id {icon_id} not found")
-            if not await self.icon_repo.delete_by_tenant(icon_id, tenant_id):
+            if icon.tenant_id != tenant_id:
                 raise BadRequestException("Cannot delete icon from another tenant")
+            if not await self.icon_repo.delete_if_unreferenced(icon_id):
+                raise IconInUseError()
