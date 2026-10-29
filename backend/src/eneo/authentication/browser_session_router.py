@@ -420,7 +420,7 @@ async def complete_browser_federation(
 ) -> Response:
     settings = get_settings()
     transaction = transaction_cookie(request, settings)
-    if not transaction or not state:
+    if not state:
         return _federation_failure("invalid_login_attempt")
     try:
         payload = jwt.decode(
@@ -436,6 +436,8 @@ async def complete_browser_federation(
             raw_detail="Authorization session expired. Please try logging in again.",
         )
     except jwt.InvalidTokenError:
+        return _federation_failure("invalid_login_attempt")
+    if not transaction:
         return _federation_failure("invalid_login_attempt")
     binding = payload.get("frontend_state")
     if not isinstance(binding, str):

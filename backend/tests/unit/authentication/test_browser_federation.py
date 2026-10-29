@@ -321,6 +321,40 @@ def test_callback_reports_provider_and_missing_code(
     federation.callback.assert_not_awaited()
 
 
+@pytest.mark.parametrize("path", CALLBACKS)
+@pytest.mark.parametrize("valid_signature", [True, False])
+def test_expired_state_without_cookie_has_only_verified_expiry_diagnostics(
+    federation: Federation, path: str, valid_signature: bool
+) -> None:
+    state = signed_state(exp=1)
+    if not valid_signature:
+        state = jwt.encode(
+            {"exp": 1, "frontend_state": "untrusted:/private"},
+            "different-test-signing-key-32-bytes-minimum",
+            algorithm="HS256",
+        )
+    response = federation.client.get(
+        path, params={"state": state, "code": "one-time-code"}
+    )
+    assert response.status_code == 303
+    assert detail_code(response) == "invalid_login_attempt"
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert "next" not in query
+    if valid_signature:
+        assert query["rawDetail"] == [
+            "Authorization session expired. Please try logging in again."
+        ]
+        assert query["correlation"]
+    else:
+        assert "rawDetail" not in query
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers.get_list("set-cookie") == [
+        expected_set_cookie("__Host-eneo_oidc_txn", '""', 0, production=True)
+    ]
+    federation.callback.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     "status,expected",
     [
