@@ -63,6 +63,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AuditPage", () => {
+  it("keeps the raw search draft when its trimmed value commits", async () => {
+    renderInApp(<AuditPage />, { route: "/admin/audit" });
+    await screen.findByRole("table", { name: "Granskningsloggar" });
+    const search = screen.getByRole("textbox", { name: "Sök" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(search, { target: { value: "Anna " } });
+      act(() => vi.advanceTimersByTime(300));
+      expect(window.location.search).toBe("?search=Anna");
+      expect(search).toHaveProperty("value", "Anna ");
+      fireEvent.change(search, { target: { value: `${(search as HTMLInputElement).value}Lind` } });
+      act(() => vi.advanceTimersByTime(300));
+      expect(search).toHaveProperty("value", "Anna Lind");
+      expect(new URLSearchParams(window.location.search).get("search")).toBe("Anna Lind");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("follows external filters and discards a pending search draft", async () => {
     renderInApp(<AuditPage />, { route: "/admin/audit" });
     await screen.findByRole("table", { name: "Granskningsloggar" });

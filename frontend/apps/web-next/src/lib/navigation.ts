@@ -58,7 +58,11 @@ export const useSearchParams: () => ReadonlySearchParams = nextUseSearchParams;
  * address.
  */
 export function replaceUrl(href: string | URL, options?: UrlOptions): void {
-  window.history.replaceState({ ...window.history.state, ...options?.state }, "", href);
+  const state: Record<string, unknown> = { ...window.history.state, ...options?.state };
+  // Next copies its internals itself. Passing these markers bypasses its hook update.
+  delete state.__NA;
+  delete state._N;
+  window.history.replaceState(state, "", href);
 }
 
 /** Opens an in-page view as a new history entry, keeping scroll and mounted state. */

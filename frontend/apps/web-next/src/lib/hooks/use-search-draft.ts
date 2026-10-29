@@ -4,7 +4,9 @@ import { useDebouncedValue } from "./use-debounced-value";
 /** A local search draft; a different committed URL value replaces pending typing. */
 export function useSearchDraft(value: string) {
   const [edit, setEdit] = useState({ source: value, draft: value });
-  if (edit.source !== value) setEdit({ source: value, draft: value });
+  if (edit.source !== value) {
+    setEdit({ source: value, draft: value === edit.draft.trim() ? edit.draft : value });
+  }
   const trimmed = edit.draft.trim();
   const debounced = useDebouncedValue(trimmed);
   return {

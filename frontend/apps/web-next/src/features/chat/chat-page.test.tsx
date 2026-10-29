@@ -474,7 +474,6 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
 
 describe("ChatPage while an answer streams", () => {
   it("keeps an answer that finishes after the user left it out of the next conversation", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
     renderPage(null);
     askWithKeyboard("Vilken gräns gäller?");
     await screen.findByRole("log", { name: "Konversation" });
@@ -487,10 +486,29 @@ describe("ChatPage while an answer streams", () => {
     // The left conversation still gets its title (the history lists it)…
     await waitFor(() => expect(spies.titled).toEqual(["session-old"]));
     // …but the new one keeps its URL, heading and silence.
-    expect(replaceState).not.toHaveBeenCalledWith(null, "", "/chat?session_id=session-old");
+    expect(window.location.pathname + window.location.search).toBe("/chat");
     expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
     expect(screen.queryByText("Gammalt svar")).toBeNull();
+  });
+
+  it("keeps Insights selected when the first session id arrives in the background", async () => {
+    renderPage(null, { ...partner, insightEnabled: true });
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    await act(async () => answer(spies.streams[0]!, "session-late", "Gränsen är 700 000 kr."));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("session_id")).toBe("session-late")
+    );
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("insights");
+    expect(screen.getByRole("radio", { name: "Insikter", checked: true })).toBeTruthy();
+    expect(screen.getByText("Totala konversationer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
   });
 
   it("keeps this visit's turns when switching to Insikter and back", async () => {

@@ -32,7 +32,8 @@ describe("replaceUrl", () => {
     expect(window.location.pathname + window.location.search).toBe("/a?tab=x");
   });
 
-  it("preserves router and app metadata on replacement, with explicit state updates", () => {
+  it("preserves app metadata while letting Next apply its own history update", () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
     window.history.replaceState({ __NA: true, tree: "router-owned" }, "", "/a");
     navigation.pushUrl("/a?section=general", { state: { settingsSectionFromIndex: true } });
     expect(navigation.readUrlState().settingsSectionFromIndex).toBe(true);
@@ -40,9 +41,10 @@ describe("replaceUrl", () => {
     navigation.replaceUrl("/a?section=ai");
     expect(window.history.state).toMatchObject({
       settingsSectionFromIndex: true,
-      __NA: true,
       tree: "router-owned"
     });
+    expect(replaceState.mock.lastCall?.[0]).not.toHaveProperty("__NA");
+    expect(replaceState.mock.lastCall?.[0]).not.toHaveProperty("_N");
     navigation.replaceUrl("/a", { state: { settingsSectionFromIndex: false } });
     expect(navigation.readUrlState().settingsSectionFromIndex).toBe(false);
   });

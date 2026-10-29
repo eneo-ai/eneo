@@ -146,13 +146,16 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   const router = useRouter();
   const requested = useSearchParams().get("section");
   const valid = (id: string | null) => (id !== null && ids.includes(id) ? id : null);
-  const view = valid(requested);
-  // Creation supplies one initial destination; subsequent views belong to the URL.
-  const [initialSection] = useState(() => (requested === null ? valid(openFirst ?? null) : null));
+  // Creation keeps its fields visible for mount-focus while the URL catches up.
+  // Subsequent views belong to the URL.
+  const [initialSection, setInitialSection] = useState(() =>
+    requested === null ? valid(openFirst ?? null) : null
+  );
+  if (initialSection !== null && requested !== null) setInitialSection(null);
+  const view = valid(requested ?? initialSection);
   const focusNext = useRef<FocusNext>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const shownRef = useRef(view);
-  const initialFocusPending = useRef(initialSection !== null);
 
   useLayoutEffect(() => {
     if (initialSection)
@@ -263,10 +266,6 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
     const previous = shownRef.current;
     shownRef.current = view;
     if (previous === view) return;
-    if (initialFocusPending.current) {
-      initialFocusPending.current = false;
-      return;
-    }
     const next =
       focusNext.current ?? (view ? { section: view } : previous ? { row: previous } : null);
     focusNext.current = null;

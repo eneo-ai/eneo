@@ -184,7 +184,12 @@ export function ChatPage({
   function updateUrl(sessionId: string | null) {
     // The navigation seam commits same-route updates without waiting for
     // background session refreshes, so streaming stays responsive.
-    if (buildSessionUrl) replaceUrl(buildSessionUrl(sessionId));
+    if (buildSessionUrl) {
+      const url = new URL(buildSessionUrl(sessionId), window.location.href);
+      if (tab === "insights") url.searchParams.set("tab", "insights");
+      else url.searchParams.delete("tab");
+      replaceUrl(url);
+    }
   }
 
   const selectTab = useCallback((next: "chat" | "insights") => {
