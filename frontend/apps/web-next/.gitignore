@@ -48,7 +48,9 @@ next-env.d.ts
 # Playwright
 /playwright/.auth/
 /test-results/
+/test-results-fastapi/
 /playwright-report/
+/playwright-report-fastapi/
 /blob-report/
 /playwright/.cache/
 

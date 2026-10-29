@@ -142,6 +142,31 @@ Prioritize one happy path and one failure or permission path for each critical
 workflow. Seed deterministic fixtures in `e2e/seed.py` instead of relying on test
 ordering, production data, or third-party services.
 
+### React beta: Vite and FastAPI
+
+Run the React beta's Playwright suite from `frontend/apps/web-next`. Set
+`E2E_BASE_URL` to use an already-running server; Playwright then starts no web
+server of its own:
+
+```bash
+# Vite dev server, started separately with bun run dev:vite
+E2E_BASE_URL=http://localhost:3101 bun run test:e2e
+
+# FastAPI serving build:vite output with WEB_APP_ENABLED enabled
+E2E_BASE_URL=http://localhost:8123 bun run test:e2e
+```
+
+Use the isolated test backend and set `E2E_USER` and `E2E_PASSWORD` for its seeded
+user. In the E2E Docker stack the FastAPI URL is `http://localhost:8124`; use
+`localhost`, since the SPA does not serve on the backend's own `127.0.0.1`
+address. During migration, select specs for routes already ported to Vite;
+Next-specific checks and unported screens still require the default server.
+Production CSP checks require the FastAPI-served build.
+
+External-server results go to `test-results-fastapi/`, with the CI HTML report
+in `playwright-report-fastapi/`. Both are ignored by Git. With `E2E_BASE_URL`
+unset, the existing Next server and report directories remain the defaults.
+
 ## Writing tests
 
 ### Unit test (`*.test.ts`)

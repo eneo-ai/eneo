@@ -2,7 +2,7 @@ import { expect, test as base, type Page } from "@playwright/test";
 
 /**
  * Playwright's `test`, failing any test during which a page broke the
- * Content-Security-Policy (src/proxy.ts). Production allows <style> only with
+ * Content-Security-Policy (FastAPI's web app or the Next proxy). Production allows <style> only with
  * the request nonce: a library that injects styles at runtime (Sonner did,
  * Astryx CodeBlock does) is blocked there and renders unstyled, while the
  * dev server's looser policy hides it. CI runs the specs against the
@@ -21,16 +21,18 @@ export const test = base.extend<{ cspViolations: string[] }>({
   // hydrates first and the page (the (app) loading boundary) after it, and a
   // click on the page before that goes nowhere (React can't hydrate a part
   // whose code hasn't loaded yet, so it drops the click). goto and reload wait
-  // until the page's first element, or the body's on a page without the
-  // shell, carries the `__reactFiber$…` property React DOM gives the elements
-  // it has hydrated.
+  // until the page's first element, Vite's root child, or the body's on a page
+  // without either carries the `__reactFiber$…` property React DOM gives both
+  // hydrated elements and elements mounted by createRoot.
   // `run`, not `use`: the React hooks lint rule reads `use(page)` as a hook call.
   page: async ({ page }, run) => {
     const hydrated = () =>
       page.waitForFunction(
         () => {
           const first =
-            document.querySelector("#main-content > *") ?? document.body.firstElementChild;
+            document.querySelector("#main-content > *") ??
+            document.querySelector("#root > *") ??
+            document.body.firstElementChild;
           return !!first && Object.keys(first).some((key) => key.startsWith("__reactFiber$"));
         },
         undefined,
