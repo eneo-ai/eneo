@@ -237,19 +237,6 @@
           }
         },
         {
-          "id": "unavailable-conversations",
-          "type": "fixed",
-          "area": "chat",
-          "title": {
-            "en": "Keep using Eneo when a chat cannot be opened",
-            "sv": "Fortsätt använda Eneo när en chatt inte kan öppnas"
-          },
-          "body": {
-            "en": "If a saved conversation has been deleted or cannot be loaded, you see an error message. Opening that chat no longer interrupts Eneo for other users.",
-            "sv": "Om en sparad konversation har raderats eller inte kan laddas får du ett felmeddelande. Att öppna den chatten avbryter inte längre Eneo för andra användare."
-          }
-        },
-        {
           "id": "knowledge-moves-removed",
           "permissions": { "allOf": ["assistants"] },
           "type": "improved",
