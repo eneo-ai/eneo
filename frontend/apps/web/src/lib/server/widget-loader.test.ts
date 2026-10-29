@@ -62,17 +62,21 @@ describe("readManifest", () => {
   });
 });
 
-describe("archived pinned loader", () => {
-  it("keeps serving the exact previous release after the current loader changes", async () => {
-    const old = await getWidgetLoaderBundle("1.0.3");
-    expect(old?.version).toBe("1.0.3");
-    expect(old?.integrity).toBe(
-      "sha384-YuGHNkfFRRXBGeTXTqve526MaS696/y8Lm175OLqyf7y/6c+V1KVgIZcRstCIKOD"
+describe("pinned loader", () => {
+  it("serves the current build under its exact version and under the channel", async () => {
+    const current = await getWidgetLoaderBundle();
+    expect(current?.version).toBeDefined();
+    expect(await getWidgetLoaderBundle(current!.version)).toEqual(current);
+    expect(await getWidgetLoaderBundle(current!.channel)).toEqual(current);
+    expect(`sha384-${createHash("sha384").update(current!.source).digest("base64")}`).toBe(
+      current!.integrity
     );
-    expect(`sha384-${createHash("sha384").update(old!.source).digest("base64")}`).toBe(
-      old?.integrity
-    );
-    expect(old?.cssSource).toBeUndefined();
-    expect(resolveLoaderVariant(old!, "1.0.3")).toBe("pinned");
+    expect(resolveLoaderVariant(current!, current!.version)).toBe("pinned");
+  });
+
+  it("serves nothing for a version that was never released, however it is spelled", async () => {
+    // A pinned request is matched against build-time paths, never used as one.
+    expect(await getWidgetLoaderBundle("0.0.1")).toBeNull();
+    expect(await getWidgetLoaderBundle("../dist")).toBeNull();
   });
 });

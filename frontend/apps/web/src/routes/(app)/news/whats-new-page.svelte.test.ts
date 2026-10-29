@@ -261,12 +261,18 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
           }
         }
         const summary = announcementSummary(release, can);
-        expect(summary.entries.map((entry) => entry.id)).toEqual([
-          "file-creation-progress",
-          "file-analysis-trace",
-          "compute-and-charts",
-          "conversation-uploads"
-        ]);
+        // The widget entry is first in the release but only administrators
+        // and widget editors see it.
+        expect(summary.entries.map((entry) => entry.id)).toEqual(
+          admin
+            ? ["web-widgets", "file-creation-progress", "file-analysis-trace", "compute-and-charts"]
+            : [
+                "file-creation-progress",
+                "file-analysis-trace",
+                "compute-and-charts",
+                "conversation-uploads"
+              ]
+        );
         expect(summary.total).toBe(entries.length);
         expect(summary.more).toBe(entries.length - 4);
         await page.screenshot({

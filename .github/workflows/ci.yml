@@ -318,8 +318,11 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # The web app's server tests read the loader's dist like the app does.
       - name: Build workspace dependencies
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Run type checks
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' check
