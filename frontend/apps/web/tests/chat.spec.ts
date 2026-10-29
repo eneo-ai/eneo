@@ -33,16 +33,15 @@ test("a streamed answer is saved and can be reopened from history", async ({ pag
   const sessionId = new URL(page.url()).searchParams.get("session_id");
   expect(sessionId).toBeTruthy();
 
-  // The conversation loads after hydration. Wait for that request explicitly so
-  // a slow backend is reported separately from a missing persisted message.
-  const restoredConversation = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === `/api/v1/conversations/${sessionId}/` &&
-      response.request().method() === "GET",
-    { timeout: 15_000 }
-  );
-  await page.reload();
-  expect((await restoredConversation).ok()).toBe(true);
+  // The loader settles the conversation on the server before rendering.
+  // Check the saved exchange in the document, then in the hydrated UI below.
+  const restoredPage = await page.reload();
+  if (!restoredPage) throw new Error("Reload did not return a document response");
+  expect(restoredPage.status()).toBe(200);
+  const html = await restoredPage.text();
+  expect(html).toContain(question);
+  expect(html).toContain(MOCK_REPLY);
+  await expect(page).toHaveURL((url) => url.searchParams.get("session_id") === sessionId);
 
   await expect(conversation.getByText(question, { exact: true })).toBeVisible();
   await expect(conversation.getByText("E2E mock completion: pong")).toBeVisible();
