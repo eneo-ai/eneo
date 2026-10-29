@@ -3603,6 +3603,8 @@
   "skills_revision_upgraded_announcement": "{name} now uses version {revision} in this draft.",
   "permission_personal_chat": "Personal chat",
   "permission_personal_chat_description": "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
+  "permission_personal_skills": "Own Skills",
+  "permission_personal_skills_description": "Create your own Skills in your personal space and choose which ones your personal chat uses. Gives no access to Skills in shared spaces or to organisation Skills.",
   "permission_group_chats": "Group chats",
   "permission_group_chats_description": "Management of group chats. Create, update, and delete group chats.",
   "permission_apps": "Apps",

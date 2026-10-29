@@ -19347,6 +19347,7 @@ export interface components {
       | "assistants"
       | "skills"
       | "skills_management"
+      | "personal_skills"
       | "personal_chat"
       | "group_chats"
       | "apps"

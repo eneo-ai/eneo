@@ -3636,6 +3636,8 @@
   "skills_revision_upgraded_announcement": "{name} använder nu version {revision} i det här utkastet.",
   "permission_personal_chat": "Personlig chatt",
   "permission_personal_chat_description": "Använd den personliga chatten. Utan denna behörighet är den personliga chatten otillgänglig; övrig åtkomst påverkas inte.",
+  "permission_personal_skills": "Egna skills",
+  "permission_personal_skills_description": "Skapa egna skills i din personliga yta och välj vilka som ska användas i din personliga chatt. Ger ingen åtkomst till skills i delade ytor eller till organisationens skills.",
   "permission_group_chats": "Gruppchattar",
   "permission_group_chats_description": "Hantering av gruppchattar. Skapa, uppdatera och radera gruppchattar.",
   "permission_apps": "Appar",
