@@ -10,6 +10,51 @@ import { mergeSources } from "./message-parts";
 afterEach(cleanup);
 
 describe("source list", () => {
+  it.each(["crawl-page", "web-search"])(
+    "opens an MCP %s source as an external link",
+    async (sourceType) => {
+      const sources = mergeSources(
+        [],
+        [],
+        [
+          {
+            id: "web-1",
+            uri: "https://example.com/source",
+            content: "Source passage",
+            meta: { sourceType, title: "Web source" }
+          }
+        ]
+      ).map((source) => ({ ...source, origin: null, pageRange: null }));
+      renderInApp(<SourceList messageId="answer-web" sources={sources} />);
+      const link = screen.getByRole("link", { name: /Web source/ });
+      expect(link.getAttribute("href")).toBe("https://example.com/source");
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noreferrer");
+      await expectNoAxeViolations(document.body);
+    }
+  );
+
+  it("keeps an unsafe MCP web-search URI as a snippet without a navigable link", async () => {
+    const sources = mergeSources(
+      [],
+      [],
+      [
+        {
+          id: "web-unsafe",
+          uri: "javascript:alert(1)",
+          content: "Source passage",
+          meta: { sourceType: "web-search", title: "Web source" }
+        }
+      ]
+    ).map((source) => ({ ...source, origin: null, pageRange: null }));
+    renderInApp(<SourceList messageId="answer-web" sources={sources} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Web source" }));
+    const dialog = await screen.findByRole("dialog", { name: "Web source" });
+    expect(within(dialog).getByText("Source passage")).toBeTruthy();
+    expect(within(dialog).queryByRole("link")).toBeNull();
+  });
+
   it("distinguishes excerpts from the same document and opens the selected passage", async () => {
     const passages = [
       "Brasilianskt kaffe har chokladtoner.",
