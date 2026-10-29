@@ -39,7 +39,7 @@ const api = vi.hoisted(() => ({
   })
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 beforeAll(() => {
   api.GET.mockImplementation(
