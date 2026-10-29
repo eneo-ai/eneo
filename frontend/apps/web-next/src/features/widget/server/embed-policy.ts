@@ -24,8 +24,6 @@ export function parseEmbedScheme(raw: string | null | undefined): EmbedScheme {
 export type EmbedPolicy = {
   /** CSP `frame-ancestors` value. */
   frameAncestors: string;
-  /** Image origins on top of the page's own. */
-  imgSources: string[];
   locale: Locale;
   scheme: EmbedScheme;
 };
@@ -134,11 +132,6 @@ export async function embedPolicy(
         ? "'self'"
         : frameAncestorsFor(config.frame_ancestors);
 
-  // No image comes from outside Eneo: answer Markdown must not be able to
-  // reach anything else (an injected image URL would ship the visitor's
-  // question to a third party). The preview is no exception.
-  const imgSources: string[] = [];
-
   const pinned = config?.theme.color_scheme;
   const scheme: EmbedScheme =
     pinned === "light" || pinned === "dark"
@@ -149,7 +142,6 @@ export async function embedPolicy(
 
   return {
     frameAncestors,
-    imgSources,
     locale: embedLocale(pathLocale, config?.language ?? "auto"),
     scheme
   };

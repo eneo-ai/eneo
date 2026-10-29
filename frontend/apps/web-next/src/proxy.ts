@@ -99,20 +99,20 @@ function withDirectives(csp: string, directives: Record<string, string>): string
 /**
  * The policy of an embed page: the app's own, framed only where the widget's
  * configuration allows (the loader's host sites; never on the stand-alone
- * page), showing images from its own origin and the organisation's logo
- * host at most, and connecting to nothing but itself (answer Markdown can
- * carry any image URL; the visitor API is proxied under this origin). The
- * proof-of-work widget (ALTCHA) spawns its workers from blob: URLs. The page
- * never frames anything itself.
+ * page), showing no image from outside Eneo and connecting to nothing but
+ * itself: answer Markdown can carry any image URL, and an injected one would
+ * ship the visitor's question to a third party (the visitor API is proxied
+ * under this origin). The proof-of-work widget (ALTCHA) spawns its workers
+ * from blob: URLs. The page never frames anything itself.
  */
 export function buildEmbedContentSecurityPolicy(
   nonce: string,
-  policy: Pick<EmbedPolicy, "frameAncestors" | "imgSources">,
+  policy: Pick<EmbedPolicy, "frameAncestors">,
   nodeEnv: string | undefined = process.env.NODE_ENV
 ): string {
   return withDirectives(buildContentSecurityPolicy(nonce, nodeEnv, []), {
     "frame-ancestors": policy.frameAncestors,
-    "img-src": ["'self'", "blob:", "data:", ...policy.imgSources].join(" "),
+    "img-src": "'self' blob: data:",
     "frame-src": "'none'",
     "worker-src": "'self' blob:",
     "base-uri": "'none'"

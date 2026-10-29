@@ -53,7 +53,6 @@ describe("embedPolicy", () => {
     const policy = await embedPolicy(embed, new URLSearchParams("scheme=light"), { fetchConfig });
     expect(policy).toEqual({
       frameAncestors: "'self' https://www.sundsvall.se *.sundsvall.se",
-      imgSources: [],
       // Pinned settings win over the path and the host page.
       locale: "en",
       scheme: "dark"
@@ -81,8 +80,6 @@ describe("embedPolicy", () => {
     ).toBe("'self'");
     const preview = await embedPolicy(embed, new URLSearchParams("preview=1"), { fetchConfig });
     expect(preview.frameAncestors).toBe("'self'");
-    // The preview shows no image from outside Eneo either.
-    expect(preview.imgSources).toEqual([]);
     expect(fetchConfig).toHaveBeenCalledTimes(1);
   });
 
