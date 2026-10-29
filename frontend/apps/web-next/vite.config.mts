@@ -2,6 +2,7 @@ import path from "node:path";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type ServerOptions } from "vite";
+import { bundleReport } from "./scripts/vite-bundle-report";
 
 // The Vite build of the SPA (`bun run build:vite`) and its dev server
 // (`bun run dev:vite`); Next still owns `dev`, `build` and `start`. Tests keep
@@ -15,7 +16,8 @@ export default defineConfig(({ command, mode }) => ({
     // It must come before the React plugin so route files are split before
     // JSX is transformed.
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
-    react()
+    react(),
+    bundleReport()
   ],
   resolve: {
     // Ordered: the first match wins, so specific aliases go before `@/`.

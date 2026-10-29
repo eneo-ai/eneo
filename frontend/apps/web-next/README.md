@@ -39,6 +39,19 @@ bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
 route change that produced it. `vite build` does not type-check; `bun run check`
 does.
 
+Each Vite build writes `node_modules/.cache/vite-bundle-report.json` with
+module membership, chunk imports and uncompressed JavaScript sizes. The
+`startup` scope includes the entry and required `render-app` module with their
+static dependencies; `chat` covers the chat feature's static dependencies, or
+is `null` while that feature is absent from the build. Other dynamic imports,
+including locale catalogs, remain visible in the chunk graph. These sizes
+exclude CSS and other assets.
+
+CI checks route-tree drift before type checking, builds both frontends, and
+publishes the bundle report and peak Vite build memory in the
+`web-next-vite-build-resources` artifact. Memory also appears in the job
+summary. Sizes and memory are measured without a budget gate.
+
 ### Vite dev server
 
 The browser talks only to `http://localhost:3101`. The dev server forwards
@@ -112,8 +125,9 @@ hard-coded colours.
 
 ## i18n
 
-next-intl without URL-based routing; the locale comes from the `NEXT_LOCALE`
-cookie (default `sv`, also `en`). Catalogs in `src/lib/i18n/messages/` are
+Client code uses use-intl; frozen Next routes retain next-intl until removal.
+The locale comes from the `NEXT_LOCALE` cookie (default `sv`, also `en`), and
+changing it reloads the document. Catalogs in `src/lib/i18n/messages/` are
 generated from the SvelteKit app's Paraglide catalogs:
 
 ```bash

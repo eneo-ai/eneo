@@ -368,6 +368,10 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # Fail early when generated routes differ from the committed tree.
+      - name: Check route tree drift
+        run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
+
       - name: Lint
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
@@ -379,6 +383,28 @@ jobs:
 
       - name: Build
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' build
+
+      - name: Build (Vite)
+        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-vite-build.txt" bun run --filter '@eneo/web-next' build:vite
+
+      - name: Record Vite build memory
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f "$RUNNER_TEMP/web-next-vite-build.txt" ]; then
+            grep 'Maximum resident set size' "$RUNNER_TEMP/web-next-vite-build.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Vite build reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-next-vite-build-resources
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/web-next-vite-build.txt
+            frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend-e2e:
     name: Frontend E2E

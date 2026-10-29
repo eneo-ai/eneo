@@ -104,6 +104,28 @@ test("the web-next build reports its peak memory as an artifact without a budget
   assert.ok(!workflow.includes(`ci-build-memory.mjs "${report}"`), "report only, no budget yet");
 });
 
+test("web-next rejects route drift and retains Vite resource reports after build failure", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const job = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
+  const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
+  assert.match(job, /working-directory: frontend\n/);
+  assert.match(step("Check route tree drift") ?? "", /routes:generate && git diff --exit-code -- apps\/web-next\/src\/routeTree\.gen\.ts/);
+  assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
+  const report = "$RUNNER_TEMP/web-next-vite-build.txt";
+  assert.ok(step("Build (Vite)")?.includes(`/usr/bin/time -v -o "${report}" bun run --filter '@eneo/web-next' build:vite`));
+  assert.ok(step("Record Vite build memory")?.includes("Maximum resident set size"));
+  for (const name of ["Record Vite build memory", "Upload Vite build reports"]) {
+    assert.ok(step(name)?.includes("if: ${{ !cancelled() }}"), name);
+  }
+  const upload = step("Upload Vite build reports");
+  assert.ok(upload?.includes("name: web-next-vite-build-resources"));
+  assert.ok(upload.includes("${{ runner.temp }}/web-next-vite-build.txt"));
+  assert.ok(upload.includes("frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json"));
+  assert.ok(upload.includes("include-hidden-files: true"), "the explicitly selected .cache report is uploaded");
+  assert.ok(upload.includes("retention-days: 7") && upload.includes("if-no-files-found: ignore"));
+  assert.ok(!job.includes("ci-build-memory.mjs"), "Vite sizes and RSS are report-only");
+});
+
 test("the memory check passes within budget and fails above it or without a measurement", () => {
   const report = (kb) => `\tCommand being timed: "bun run build"\n\tMaximum resident set size (kbytes): ${kb}\n\tExit status: 0\n`;
   assert.equal(readPeakRssMb(report(6_291_456)), 6144);
