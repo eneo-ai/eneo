@@ -35,6 +35,15 @@ async function bound() {
 }
 
 describe("immutable document session", () => {
+  it("leaves a refused personal Skill save with its form instead of expiring the session", async () => {
+    await bound();
+    const response = refusal(9080, 400, { [GENERATION]: "document-session" });
+    await owner.handleRefusal(response, "/api/v1/spaces/personal/skills/");
+    expect(owner.getSessionSnapshot().status).toBe("bound");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
   it("keeps a suspended bootstrap identity-free so its public recovery can render", async () => {
     window.history.replaceState({}, "", "/deactivated");
     fetcher.mockResolvedValueOnce(refusal(9025, 403, { [GENERATION]: "suspended" }));
@@ -58,7 +67,7 @@ describe("immutable document session", () => {
     });
     await expect(owner.requireBrowserSession()).rejects.toMatchObject({ status: 401 });
     fetcher.mockResolvedValueOnce(probe("new-session"));
-    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
     expect(fetcher.mock.calls[1]![1]!.headers).toEqual(new Headers({ [GENERATION]: "expired" }));
     expect(owner.getSessionSnapshot().status).toBe("stale");
   });
@@ -68,7 +77,7 @@ describe("immutable document session", () => {
     fetcher.mockResolvedValueOnce(refusal());
     await owner.initializeBrowserSession();
     fetcher.mockResolvedValueOnce(refusal(9005, 401, { [GENERATION]: "later-cookie" }));
-    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
   });
 
   it("keeps the same unusable cookie bound only to logout after a resume check", async () => {
@@ -101,14 +110,14 @@ describe("immutable document session", () => {
     const request = await owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
     await expect(
       owner.handleRefusal(probe("another-session"), "/api/v1/users/me/")
-    ).rejects.toMatchObject({ code: 9080 });
+    ).rejects.toMatchObject({ code: 9090 });
     expect(request.signal.aborted).toBe(true);
     expect(clear).toHaveBeenCalledTimes(1);
     expect(cancelQueries).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1");
     await expect(
       owner.prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
-    ).rejects.toMatchObject({ code: 9080 });
+    ).rejects.toMatchObject({ code: 9090 });
     expect(fetcher).not.toHaveBeenCalled();
     expect(owner.getSessionSnapshot().status).toBe("stale");
   });
@@ -116,12 +125,12 @@ describe("immutable document session", () => {
   it("navigates once for concurrent refusals and remains blocked when assign returns", async () => {
     await bound();
     await Promise.allSettled([
-      owner.handleRefusal(refusal(9080), "/api"),
-      owner.handleRefusal(refusal(9080), "/api")
+      owner.handleRefusal(refusal(9090), "/api"),
+      owner.handleRefusal(refusal(9090), "/api")
     ]);
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(owner.getSessionSnapshot().status).toBe("stale");
-    await expect(owner.handleRefusal(probe(), "/api")).rejects.toMatchObject({ code: 9080 });
+    await expect(owner.handleRefusal(probe(), "/api")).rejects.toMatchObject({ code: 9090 });
   });
 
   it("processes mismatch before audit and public-page exemptions", async () => {
@@ -129,10 +138,10 @@ describe("immutable document session", () => {
     window.history.replaceState({}, "", "/login");
     await expect(
       owner.handleRefusal(
-        refusal(9080, 401, { "X-Error-Code": "AUDIT_SESSION_REQUIRED" }),
+        refusal(9090, 401, { "X-Error-Code": "AUDIT_SESSION_REQUIRED" }),
         "/api/v1/audit/logs/"
       )
-    ).rejects.toMatchObject({ code: 9080 });
+    ).rejects.toMatchObject({ code: 9090 });
     expect(navigate).not.toHaveBeenCalled();
     expect(owner.getSessionSnapshot().status).toBe("stale");
   });
@@ -228,7 +237,7 @@ describe("immutable document session", () => {
     expect(owner.getSessionSnapshot()).toMatchObject({ status: "bound", generation: null });
     expect(navigate).not.toHaveBeenCalled();
     fetcher.mockResolvedValue(probe("new-account"));
-    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
     expect(owner.getSessionSnapshot().status).toBe("stale");
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -236,7 +245,7 @@ describe("immutable document session", () => {
   it("treats logout or expiry of an authenticated session as stale", async () => {
     await bound();
     fetcher.mockResolvedValue(refusal(9005));
-    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
@@ -246,7 +255,7 @@ describe("immutable document session", () => {
     fetcher.mockClear();
     await expect(
       owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
-    ).rejects.toMatchObject({ code: 9080 });
+    ).rejects.toMatchObject({ code: 9090 });
     expect(fetcher).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledTimes(1);
   });

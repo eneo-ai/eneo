@@ -571,7 +571,7 @@ it("keeps the refusal owner's destination when a module ticket discovers a chang
   generation = "session-a";
   replies.set(
     "/api/v1/module-auth/tickets/",
-    Response.json({ message: "Changed", eneo_error_code: 9080 }, { status: 401 })
+    Response.json({ message: "Changed", eneo_error_code: 9090 }, { status: 401 })
   );
   await route(
     "/module-login?module_key=module&redirect_uri=https%3A%2F%2Fmodule.example%2Fcallback&state=test-state"

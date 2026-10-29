@@ -1257,7 +1257,11 @@ class SkillRepoImpl:
         Every writer that needs both sides locks Assistant rows before Skill
         rows. Binding saves take their parent Assistant lock before Skills FOR
         SHARE, and concurrent fleet chunks take the same ascending-parent then
-        Skill order. Personal Chat writes share only the Skill lock. A binding
+        Skill order. The apply only reads the Skill, so it holds it FOR SHARE:
+        a personal chat policy save holds the same Skill FOR SHARE while it
+        waits for the exclusive fit token, and an exclusive wait here would
+        close a cycle through an Assistant save that holds the shared token
+        and waits for one of these parents. A binding
         SET change also rewrites the already-locked parent row in its save
         transaction, so the captured xmin rejects that whole concurrent edit.
         The runtime-policy FOR SHARE boundary rejects a policy changed after
@@ -1285,6 +1289,7 @@ class SkillRepoImpl:
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id,
             skill_id=skill_id,
+            shared=True,
         )
         if skill_row is None or skill_row.published_revision_number is None:
             raise SkillNotPublishedForBindingError
@@ -1869,7 +1874,13 @@ class SkillRepoImpl:
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        shared: bool = False,
     ) -> Skills | None:
+        """Lock an organisation Skill row; ``shared`` for writers that only read it.
+
+        FOR SHARE still excludes publication, withdrawal and blocking, which
+        take the row FOR UPDATE, so it stabilises everything a reader rechecks.
+        """
         return await self.session.scalar(
             sa.select(Skills)
             .join(Spaces, Spaces.id == Skills.space_id)
@@ -1877,7 +1888,7 @@ class SkillRepoImpl:
                 Skills.id == skill_id,
                 *self._organization_scope(tenant_id),
             )
-            .with_for_update(of=Skills)
+            .with_for_update(of=Skills, read=shared)
         )
 
     _POLICY_ROW_VERSION = sa.cast(
@@ -1904,6 +1915,28 @@ class SkillRepoImpl:
         if shared_lock:
             query = query.with_for_update(read=True, of=SkillRuntimePolicies)
         return await self.session.scalar(query)
+
+    async def personal_defaults_fit_snapshot(
+        self, *, tenant_id: UUID, lock_runtime_policy: bool
+    ) -> PersonalDefaultsSnapshot:
+        """Version every input a personal chat fit validation reads.
+
+        Personal-default row versions plus the runtime-policy version. With
+        ``lock_runtime_policy`` the runtime-policy row is held FOR SHARE, which
+        callers take only after the exclusive fit token (lock order: policy
+        row, fit token, then other rows).
+        """
+        snapshot = await AssistantRepository.get_personal_defaults_snapshot(
+            session=self.session,
+            tenant_id=tenant_id,
+        )
+        return replace(
+            snapshot,
+            runtime_policy_version=await self._runtime_policy_version(
+                tenant_id=tenant_id,
+                shared_lock=lock_runtime_policy,
+            ),
+        )
 
     async def stage_personal_chat_skill_pin_advance(
         self,
@@ -2012,18 +2045,8 @@ class SkillRepoImpl:
         if binding.skill_revision_id != expected_pinned_revision_id:
             raise SkillRevisionConflictError
 
-        personal_defaults_snapshot = (
-            await AssistantRepository.get_personal_defaults_snapshot(
-                session=self.session,
-                tenant_id=tenant_id,
-            )
-        )
-        personal_defaults_snapshot = replace(
-            personal_defaults_snapshot,
-            runtime_policy_version=await self._runtime_policy_version(
-                tenant_id=tenant_id,
-                shared_lock=False,
-            ),
+        personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
+            tenant_id=tenant_id, lock_runtime_policy=False
         )
         return PersonalChatPinAdvanceStage(
             advance=PersonalChatPinAdvance(
@@ -2058,22 +2081,22 @@ class SkillRepoImpl:
         Tenant-level model and MCP catalogue changes are outside this snapshot;
         their administrator flows own their validation.
 
-        The policy lock is NOWAIT so a concurrent policy save refuses this
-        apply instead of waiting. Publication and block state are rechecked
-        under the Skill lock. The exclusive tenant fit token then drains
-        in-flight Assistant saves before the snapshot recheck; later saves wait
-        until this transaction commits and validate against the new pin. The
-        runtime-policy row is then held FOR SHARE, draining an in-flight update
-        and making later updates wait until this short apply completes.
+        Every writer follows one lock order: policy row, fit token, then other
+        rows (Assistant, Skill, binding, runtime-policy).
 
-        Waiting for the token cannot deadlock: an Assistant save holds only its
-        row and the shared token, never policy, Skill, or binding locks. A
-        governance save holds the policy row and never takes this token, so the
-        NOWAIT policy lock refuses before confirm can wait. Runtime-policy
-        updates hold only their own row FOR UPDATE; they take neither the token
-        nor policy, Skill, or binding locks, so our FOR SHARE wait cannot form a
-        cycle. The binding recheck, guarded write, and policy-row bump then
-        finish the short apply.
+        The policy lock is NOWAIT so a concurrent policy save, which holds the
+        policy row before its own exclusive token, refuses this apply instead
+        of waiting. The exclusive tenant fit token then drains in-flight
+        Assistant saves; later saves wait until this transaction commits and
+        validate against the new pin. Assistant saves hold the shared token and
+        then lock Assistant and Skill rows (binding resolution holds Skills FOR
+        SHARE), never the policy row, so the token is taken before the Skill
+        lock here. Publication and block state are rechecked under the Skill
+        lock, and the runtime-policy row is then held FOR SHARE, draining an
+        in-flight update and making later updates wait until this short apply
+        completes. Runtime-policy updates hold only their own row FOR UPDATE and
+        take no token, so that wait cannot form a cycle. The binding recheck,
+        guarded write, and policy-row bump then finish the short apply.
         """
         try:
             async with self.session.begin_nested():
@@ -2092,6 +2115,11 @@ class SkillRepoImpl:
         if locked_version != policy_version:
             return PersonalChatPinConfirmOutcome.POLICY_CHANGED
 
+        await acquire_personal_default_fit_lock(
+            session=self.session,
+            tenant_id=tenant_id,
+            shared=False,
+        )
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id, skill_id=skill_id
         )
@@ -2111,24 +2139,8 @@ class SkillRepoImpl:
         if active_block is not None:
             return PersonalChatPinConfirmOutcome.BLOCKED
 
-        await acquire_personal_default_fit_lock(
-            session=self.session,
-            tenant_id=tenant_id,
-            shared=False,
-        )
-        runtime_policy_version = await self._runtime_policy_version(
-            tenant_id=tenant_id,
-            shared_lock=True,
-        )
-        current_personal_defaults_snapshot = (
-            await AssistantRepository.get_personal_defaults_snapshot(
-                session=self.session,
-                tenant_id=tenant_id,
-            )
-        )
-        current_personal_defaults_snapshot = replace(
-            current_personal_defaults_snapshot,
-            runtime_policy_version=runtime_policy_version,
+        current_personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
+            tenant_id=tenant_id, lock_runtime_policy=True
         )
         if current_personal_defaults_snapshot != personal_defaults_snapshot:
             return PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED

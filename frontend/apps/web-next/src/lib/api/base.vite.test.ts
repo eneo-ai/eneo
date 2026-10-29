@@ -67,7 +67,7 @@ describe("Vite API transports", () => {
     fetcher.mockResolvedValueOnce(admitted('{"name":"B"}', "session-b"));
     await expect(
       transport.apiFetch("/api/v1/example", { method: "POST", body: "draft" })
-    ).rejects.toMatchObject({ code: 9080 });
+    ).rejects.toMatchObject({ code: 9090 });
     const sent = fetcher.mock.calls[0]![0] as Request;
     expect(sent.url).toBe(new URL("/api/v1/example", window.location.href).href);
     expect(sent.headers.get(GENERATION)).toBe("session-a");
@@ -94,7 +94,7 @@ describe("Vite API transports", () => {
     expect(result.data?.id).toBe("user-a");
     expect((fetcher.mock.calls[0]![0] as Request).headers.get(GENERATION)).toBe("session-a");
     fetcher.mockResolvedValueOnce(admitted('{"id":"user-b"}', "session-b"));
-    await expect(browserApi.GET("/api/v1/users/me/")).rejects.toMatchObject({ code: 9080 });
+    await expect(browserApi.GET("/api/v1/users/me/")).rejects.toMatchObject({ code: 9090 });
   });
 
   it("rejects late responses and leaves cancelled query data out of the cache", async () => {
@@ -115,12 +115,12 @@ describe("Vite API transports", () => {
     const settled = Promise.allSettled([loaded]);
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await expect(owner.handleRefusal(admitted("{}", "session-b"), "/api")).rejects.toMatchObject({
-      code: 9080
+      code: 9090
     });
     finish(admitted('{"private":"late"}'));
     expect((await settled)[0].status).toBe("rejected");
     expect(client.getQueryData(["private"])).toBeUndefined();
-    await expect(transport.apiFetch("/api/v1/queued")).rejects.toMatchObject({ code: 9080 });
+    await expect(transport.apiFetch("/api/v1/queued")).rejects.toMatchObject({ code: 9090 });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -156,7 +156,7 @@ describe("Vite API transports", () => {
     stream.enqueue(encoder.encode('event: job\ndata: {"id":"a"}\n\n'));
     await vi.waitFor(() => expect(message).toHaveBeenCalledTimes(1));
     await expect(owner.handleRefusal(admitted("{}", "session-b"), "/api")).rejects.toMatchObject({
-      code: 9080
+      code: 9090
     });
     expect(source.readyState).toBe(2);
     stream.enqueue(encoder.encode('event: job\ndata: {"id":"late"}\n\n'));

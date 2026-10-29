@@ -1432,3 +1432,97 @@ async def test_schedule_background_save_holds_strong_reference_until_done():
     # And removed after completion via the add_done_callback.
     assert task not in session_service_module._background_save_tasks
     assert ran_to_completion is True
+
+
+async def _handle_streaming_response(response: object):
+    svc = _make_assistant_service_for_streaming(AsyncMock())
+    from eneo.assistants.assistant_service import AssistantService
+
+    return await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+        **_skill_runtime_args(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_streaming_abort_closes_the_completion_stream_on_the_same_task():
+    """The completion stream holds the turn's model request and tool
+    connections; an abort must close it here, not leave it to the GC."""
+    completion_closed_on: list[asyncio.Task[object] | None] = []
+
+    async def fake_completion_stream():
+        try:
+            for text in ["hello ", "world"]:
+                yield Completion(
+                    reasoning_token_count=0,
+                    response_type=ResponseType.TEXT,
+                    text=text,
+                )
+        finally:
+            completion_closed_on.append(asyncio.current_task())
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=5,
+        usage=None,
+        extended_logging=None,
+    )
+
+    with patch.object(
+        session_service_module, "persist_partial_question_answer", AsyncMock()
+    ):
+        gen = await _handle_streaming_response(response)
+        await _drain_until(gen, 1)
+        await gen.aclose()
+
+    assert completion_closed_on == [asyncio.current_task()]
+
+
+@pytest.mark.asyncio
+async def test_closing_an_unstarted_answer_releases_the_completion():
+    class _Completion:
+        closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> Completion:
+            raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    completion = _Completion()
+    response = SimpleNamespace(
+        completion=completion, total_token_count=5, usage=None, extended_logging=None
+    )
+
+    gen = await _handle_streaming_response(response)
+    await gen.aclose()
+
+    assert completion.closed
+
+
+@pytest.mark.asyncio
+async def test_shutdown_waits_for_scheduled_partial_saves():
+    saved = False
+
+    async def save() -> None:
+        nonlocal saved
+        await asyncio.sleep(0.02)
+        saved = True
+
+    session_service_module.schedule_background_save(save())
+
+    assert await session_service_module.drain_background_saves(timeout=5) == 1
+    assert saved
+    assert await session_service_module.drain_background_saves(timeout=5) == 0

@@ -7,7 +7,7 @@ import { navigateTo } from "@/lib/navigate-to";
 
 export const SESSION_GENERATION_HEADER = "Eneo-Session-Generation";
 const SESSION_PROBE = "/api/v1/auth/session/";
-const SESSION_MISMATCH = 9080;
+const SESSION_MISMATCH = 9090;
 
 export type SessionSnapshot =
   | { status: "unbound" }
