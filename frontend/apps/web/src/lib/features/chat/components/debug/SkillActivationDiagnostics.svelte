@@ -17,10 +17,16 @@
   } from "../../skillActivationDebug";
   import ChatDebugSection from "./ChatDebugSection.svelte";
   import CopyableDebugValue from "./CopyableDebugValue.svelte";
+  import SkillReferenceDiagnostics from "./SkillReferenceDiagnostics.svelte";
+  import type { components } from "@eneo/eneo-js";
 
   const PAGE_SIZE = 50;
 
-  let { evidence }: { evidence: SkillActivationEvidence } = $props();
+  let {
+    evidence,
+    toolCalls = []
+  }: { evidence: SkillActivationEvidence; toolCalls?: components["schemas"]["ToolCallInfo"][] } =
+    $props();
   let visibleCount = $state(PAGE_SIZE);
   let previousEvidence: SkillActivationEvidence | undefined;
 
@@ -251,6 +257,7 @@
     </div>
   </div>
 
+  {#if evidence.version === 3}<SkillReferenceDiagnostics {evidence} {toolCalls} />{/if}
   <div class="flex flex-col gap-2">
     <h3 class="text-sm font-semibold">{m.chat_debug_candidate_order()}</h3>
     {#if rows.length === 0}

@@ -7,6 +7,8 @@
     the default-assistant queue, so a message sent right after uses it.
 -->
 <script lang="ts">
+  import SkillDependencies from "$lib/features/skills/SkillDependencies.svelte";
+  import { dependencySources } from "@eneo/skill-instructions";
   import { resolve } from "$app/paths";
   import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
@@ -108,6 +110,16 @@
   );
 
   const ownRows = $derived(skills?.ownRows ?? []);
+  const helperSources = $derived.by(() => {
+    const chosen = new Map(
+      (skills?.bindings ?? []).map((binding) => [binding.skill_id, binding.skill_revision_id])
+    );
+    return dependencySources(
+      (skills?.configuration?.bindings ?? []).filter(
+        (binding) => chosen.get(binding.skill_id) === binding.skill_revision_id
+      )
+    );
+  });
 
   const titleId = useId();
   let label = $state<HTMLElement | null>(null);
@@ -195,6 +207,10 @@
     <div class={sheet ? "flex flex-col gap-2" : "flex items-center gap-3"}>
       <div class="min-w-0 flex-1">
         <p class="text-foreground truncate text-sm font-medium">{row.name}</p>
+        {#if helperSources.get(row.id)?.length}<p class="text-muted-foreground mt-1 text-xs">
+            {m.skills_reference_used_via({ names: helperSources.get(row.id)!.join(", ") })}
+          </p>{/if}
+        {#if row.mode !== "off"}<SkillDependencies dependencies={row.binding?.dependencies} />{/if}
         {#if row.description}
           <p
             id="{id}-description"
@@ -288,6 +304,7 @@
                   <p class="text-foreground truncate text-sm font-medium">
                     {binding.display_name}
                   </p>
+                  <SkillDependencies dependencies={binding.dependencies} />
                   {#if binding.description}
                     <p class="text-muted-foreground truncate text-xs" title={binding.description}>
                       {binding.description}

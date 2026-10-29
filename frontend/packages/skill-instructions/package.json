@@ -1,0 +1,16 @@
+{
+  "name": "@eneo/skill-instructions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/references.ts",
+    "./editor": "./src/editor.ts",
+    "./audit": "./src/audit.ts",
+    "./editor.css": "./src/editor.css"
+  },
+  "dependencies": {
+    "@eneo/eneo-js": "workspace:*",
+    "@tiptap/pm": "3.32.0"
+  }
+}

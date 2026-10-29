@@ -11,9 +11,10 @@ import { isSkillCall } from "./tool-presentation";
 
 export type PersistedMessage = Schema<"Message">;
 export type ChatTurnDiagnostics = Schema<"ChatTurnDiagnostics">;
-// V2 adds the personal chat's own-Skill layer; every other field is shared.
 export type SkillActivationEvidence =
-  Schema<"SkillActivationEvidenceV1"> | Schema<"SkillActivationEvidenceV2">;
+  | Schema<"SkillActivationEvidenceV1">
+  | Schema<"SkillActivationEvidenceV2">
+  | Schema<"SkillActivationEvidenceV3">;
 export type SkillActivationReference = Schema<"SkillActivationReference">;
 export type SkillActivationRejection = Schema<"SkillActivationRejection">;
 
@@ -237,7 +238,8 @@ export function summarizeSkillActivation(evidence: SkillActivationEvidence) {
   const enteredContext = new Set([...evidence.initially_active, ...(evidence.accepted ?? [])]);
   return {
     available: evidence.available.length,
-    enteredContext: enteredContext.size,
+    enteredContext:
+      enteredContext.size + (evidence.version === 3 ? (evidence.helpers?.length ?? 0) : 0),
     blocked: evidence.blocked.length,
     rejected: evidence.rejected?.length ?? 0
   };

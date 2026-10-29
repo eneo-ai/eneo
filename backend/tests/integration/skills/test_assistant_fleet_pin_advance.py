@@ -1180,7 +1180,8 @@ async def test_apply_statement_count_is_independent_of_chunk_size(
     assert one_advanced == 1
     assert hundred_advanced == 100
     assert one_count == hundred_count
-    assert hundred_count <= 8
+    # One batch locks the approved helper group before the block-state read.
+    assert hundred_count <= 9
 
 
 @pytest.mark.integration

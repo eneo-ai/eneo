@@ -60,6 +60,41 @@ def test_tool_exposure_uses_override_without_replacing_the_default(enabled):
     assert tool.is_enabled_by_default is not enabled
 
 
+def test_reference_identity_labels_do_not_offer_disabled_or_view_only_tools():
+    server = _make_server("Renamed server")
+    server.tools.extend(
+        [
+            MCPServerTool(
+                mcp_server_id=server.id,
+                name="disabled",
+                description="Off",
+                input_schema={"type": "object"},
+                is_enabled_by_default=False,
+            ),
+            MCPServerTool(
+                mcp_server_id=server.id,
+                name="view_only",
+                description="View",
+                input_schema={"type": "object"},
+                meta={"ui": {"visibility": ["app"]}},
+            ),
+        ]
+    )
+    proxy = MCPProxySession([server])
+    before = proxy.get_tools_for_llm()
+
+    proxy.include_reference_identities()
+    identities = proxy.get_model_tool_identities()
+    after = proxy.get_tools_for_llm()
+
+    assert [(item.server_id, item.tool_name) for item in identities] == [
+        (server.id, "tool")
+    ]
+    assert len(after) == len(before) == 1
+    assert after[0]["function"]["parameters"] == before[0]["function"]["parameters"]
+    assert f"MCP {server.id}, tool tool" in after[0]["function"]["description"]
+
+
 def _make_identity_scoped_server(name: str = "identity-server") -> MCPServer:
     server_id = uuid4()
     tools = [

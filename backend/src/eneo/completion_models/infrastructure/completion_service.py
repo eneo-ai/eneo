@@ -245,6 +245,8 @@ class CompletionService:
             )
 
         try:
+            if mcp_proxy is not None and skill_runtime.has_tool_references:
+                mcp_proxy.include_reference_identities()
             context = self.context_builder.build_context(
                 input_str="",
                 max_tokens=adapter.get_token_limit_of_model(),
@@ -550,6 +552,15 @@ class CompletionService:
             )
 
         try:
+            if skill_runtime is not None and skill_runtime.has_tool_references:
+                if mcp_proxy is not None and model.supports_tool_calling:
+                    mcp_proxy.include_reference_identities()
+                prompt = skill_runtime.prepare_reference_tools(
+                    mcp_proxy.get_model_tool_identities()
+                    if mcp_proxy is not None and model.supports_tool_calling
+                    else (),
+                    rendered_prompt=prompt,
+                )
             context = self.context_builder.build_context(
                 input_str=text_input,
                 max_tokens=max_tokens,

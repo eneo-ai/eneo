@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import {
@@ -272,6 +273,11 @@
             </Alert.Root>
             {#key data.skill.current_revision_id}
               <SkillForm
+                referenceCatalog={skillReferenceCatalog(
+                  data.eneo,
+                  { type: "space", spaceId: data.currentSpace.id },
+                  data.skill.id
+                )}
                 mode="revision"
                 initialValue={{
                   display_name: data.skill.current_revision.display_name,

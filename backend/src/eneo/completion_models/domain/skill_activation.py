@@ -15,6 +15,13 @@ from eneo.completion_models.domain.skill_context import (
     SkillContextMeasurement,
     measure_skill_context,
 )
+from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
+from eneo.skills.domain.instruction_references import (
+    InstructionTarget,
+    SkillInstructionReference,
+    parse_instruction_references,
+    target_matches_tool,
+)
 from eneo.skills.domain.skill import (
     MAX_RETAINED_SKILL_ACTIVATION_REJECTIONS,
     MAX_SKILL_ACTIVATIONS_PER_TURN,
@@ -23,6 +30,7 @@ from eneo.skills.domain.skill import (
     SkillActivationRejectionReason,
     SkillTurnEffectiveMode,
     compose_skill_instructions,
+    effective_skill_bindings,
 )
 from eneo.tokens.token_utils import (
     TokenCountSource,
@@ -73,11 +81,17 @@ class SkillActivationSnapshot:
     measurement: SkillContextMeasurement
     activation_rounds: int
     selection_latency_ms: int
+    reference_tools: tuple[ModelToolIdentity, ...] = ()
+    references_prepared: bool = False
 
     @property
     def changed(self) -> bool:
         return bool(
-            self.activation_rounds or self.accepted or self.repeated or self.rejected
+            self.activation_rounds
+            or self.accepted
+            or self.repeated
+            or self.rejected
+            or self.references_prepared
         )
 
 
@@ -147,10 +161,14 @@ def _compose_prompt(
     *,
     base_instructions: str,
     skills: tuple[FrozenSkillInstruction, ...],
+    available_targets: frozenset[InstructionTarget] = frozenset(),
+    configured_order: tuple[UUID, ...] = (),
 ) -> str:
     return compose_skill_instructions(
         base_instructions=base_instructions,
         bindings=[skill.binding for skill in skills],
+        available_targets=available_targets,
+        configured_order=configured_order,
     ).prompt
 
 
@@ -207,6 +225,13 @@ class SkillActivationRuntime:
         self._effective_mode = effective_mode
         self._fallback_reason = fallback_reason
         self._skills = skills
+        self._configured_order = tuple(skill.binding.skill_id for skill in skills)
+        self._initial_skill_ids = frozenset(
+            binding.skill_id
+            for binding in effective_skill_bindings(
+                [skill.binding for skill in skills if skill.initially_active]
+            )
+        )
         self._skills_by_key = {skill.activation_key: skill for skill in skills}
         self._blocked_keys = blocked_keys
         self._max_activations_per_turn = max_activations_per_turn
@@ -223,6 +248,79 @@ class SkillActivationRuntime:
         self._rejected_keys: set[tuple[str, SkillActivationRejectionReason]] = set()
         self._activation_rounds = 0
         self._selection_latency_ms = 0
+        self._tool_reference_targets = frozenset(
+            reference.target
+            for binding in effective_skill_bindings([skill.binding for skill in skills])
+            for reference in parse_instruction_references(binding.instructions)
+            if not isinstance(reference.target, SkillInstructionReference)
+        )
+        self._available_reference_targets: frozenset[InstructionTarget] = frozenset()
+        self._reference_tools: tuple[ModelToolIdentity, ...] = ()
+        self._references_prepared = False
+
+    @property
+    def has_tool_references(self) -> bool:
+        return bool(self._tool_reference_targets)
+
+    def prepare_reference_tools(
+        self, tools: tuple[ModelToolIdentity, ...], *, rendered_prompt: str
+    ) -> str:
+        """Resolve against the prepared registry without enabling or calling tools."""
+        if not self.has_tool_references:
+            return rendered_prompt
+        previous_prompt = self.prompt
+        if not rendered_prompt.startswith(previous_prompt):
+            raise SkillPromptOwnershipError(
+                "The rendered prompt no longer starts with the frozen Skill prompt"
+            )
+        self._available_reference_targets = frozenset(
+            target
+            for target in self._tool_reference_targets
+            if any(target_matches_tool(target, tool) for tool in tools)
+        )
+        # Evidence covers every registry offered during this answer. Keep an
+        # earlier identity so a recorded call can still be matched after a
+        # progressive server removes that tool. Prompt availability is current.
+        self._reference_tools = tuple(
+            dict.fromkeys(
+                (
+                    *self._reference_tools,
+                    *(
+                        tool
+                        for tool in tools
+                        if any(
+                            target_matches_tool(target, tool)
+                            for target in self._tool_reference_targets
+                        )
+                    ),
+                )
+            )
+        )
+        self._references_prepared = True
+        self.prompt, self._measurement = self._measure(self._active_skills())
+        return self.prompt + rendered_prompt[len(previous_prompt) :]
+
+    def refresh_reference_tools(
+        self,
+        tools: tuple[ModelToolIdentity, ...],
+        *,
+        messages: list[dict[str, object]],
+    ) -> None:
+        if not self.has_tool_references:
+            return
+        previous_prompt = self.prompt
+        had_system_prompt, suffix = self._capture_rendered_suffix(
+            messages, previous_prompt=previous_prompt
+        )
+        self.prepare_reference_tools(tools, rendered_prompt=previous_prompt)
+        if had_system_prompt or self.prompt:
+            self._replace_system_prompt(
+                messages,
+                prompt=self.prompt,
+                previous_prompt=previous_prompt,
+                had_system_prompt=had_system_prompt,
+                rendered_suffix=suffix,
+            )
 
     @classmethod
     def create(
@@ -244,6 +342,7 @@ class SkillActivationRuntime:
         required_prompt = _compose_prompt(
             base_instructions=base_instructions,
             skills=initially_active,
+            configured_order=tuple(skill.binding.skill_id for skill in ordered),
         )
 
         fallback_reason: SkillActivationFallbackReason | None = None
@@ -322,6 +421,8 @@ class SkillActivationRuntime:
         prompt = _compose_prompt(
             base_instructions=self._base_instructions,
             skills=skills,
+            available_targets=self._available_reference_targets,
+            configured_order=self._configured_order,
         )
         tools = (
             [function_definition_to_tool(self.tool_definition)]
@@ -420,6 +521,8 @@ class SkillActivationRuntime:
                     prompt=_compose_prompt(
                         base_instructions=self._base_instructions,
                         skills=self._active_skills(skill.activation_key),
+                        available_targets=self._available_reference_targets,
+                        configured_order=self._configured_order,
                     ),
                     rejection_reason=rejection_reason,
                     measurement=snapshot.measurement,
@@ -431,9 +534,18 @@ class SkillActivationRuntime:
         self,
         skill: FrozenSkillInstruction,
     ) -> SkillActivationCandidateAssessment:
-        prompt, measurement = self._measure(self._active_skills(skill.activation_key))
+        candidates = self._active_skills(skill.activation_key)
+        prompt, measurement = self._measure(candidates)
+        newly_active = {
+            binding.skill_id
+            for binding in effective_skill_bindings(
+                [candidate.binding for candidate in candidates]
+            )
+        } - self._initial_skill_ids
         rejection_reason: SkillActivationRejectionReason | None = None
-        if measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
+        if len(newly_active) > self._max_activations_per_turn:
+            rejection_reason = SkillActivationRejectionReason.ACTIVATION_LIMIT_EXCEEDED
+        elif measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
             rejection_reason = (
                 SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE
             )
@@ -504,6 +616,9 @@ class SkillActivationRuntime:
         staged._rejected_keys = set(self._rejected_keys)
         staged._activation_rounds = self._activation_rounds
         staged._selection_latency_ms = self._selection_latency_ms
+        staged._available_reference_targets = self._available_reference_targets
+        staged._reference_tools = self._reference_tools
+        staged._references_prepared = self._references_prepared
         return staged
 
     def _commit(self, staged: SkillActivationRuntime) -> None:
@@ -592,19 +707,6 @@ class SkillActivationRuntime:
                 continue
 
             assert key is not None
-            if len(self._accepted) >= self._max_activations_per_turn:
-                self._reject(
-                    activation_key=key,
-                    reason=SkillActivationRejectionReason.ACTIVATION_LIMIT_EXCEEDED,
-                )
-                decisions.append(
-                    SkillActivationDecision(
-                        call_id=request.call_id,
-                        provider_payload=self._provider_unavailable(),
-                    )
-                )
-                continue
-
             assessment = self._assess_candidate(candidate)
             if assessment.rejection_reason is not None:
                 self._reject(
@@ -1047,4 +1149,6 @@ class SkillActivationRuntime:
             measurement=self._measurement,
             activation_rounds=self._activation_rounds,
             selection_latency_ms=self._selection_latency_ms,
+            reference_tools=self._reference_tools,
+            references_prepared=self._references_prepared,
         )

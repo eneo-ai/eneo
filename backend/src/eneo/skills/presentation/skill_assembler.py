@@ -38,6 +38,7 @@ from eneo.skills.presentation.skill_models import (
     SkillAdoptionSummaryPublic,
     SkillBindingReferenceInput,
     SkillBindingSummary,
+    SkillDependencySummary,
     SkillPublic,
     SkillRevisionPublic,
     SkillRevisionSummaryPublic,
@@ -354,6 +355,15 @@ class SkillAssembler:
             is_active=binding.is_active,
             source=binding.source,
             execution_blocked=projection.execution_blocked,
+            dependencies=[
+                SkillDependencySummary(
+                    skill_id=dependency.skill_id,
+                    skill_revision_id=dependency.skill_revision_id,
+                    revision_number=dependency.revision_number,
+                    display_name=dependency.display_name,
+                )
+                for dependency in binding.dependencies
+            ],
         )
 
     @classmethod

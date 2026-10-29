@@ -1,5 +1,7 @@
 import json
-from unittest.mock import patch
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -22,6 +24,7 @@ from eneo.completion_models.domain.skill_context import (
     SkillContextMeasurement,
     measure_skill_context,
 )
+from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
     ResolvedSkillBinding,
@@ -131,6 +134,176 @@ def test_selective_runtime_advertises_descriptors_without_instruction_bodies():
     assert "Use for payroll and salary questions" in tool.description
     assert "Secret payroll instructions." not in tool.description
     assert tool.schema["properties"]["skill_key"]["enum"] == ["skill-2"]
+
+
+def test_tool_references_use_exact_prepared_identity_and_survive_activation_staging():
+    server_id, other_server = uuid4(), uuid4()
+    root = _skill(
+        key="skill-1",
+        name="Communication",
+        description="Write",
+        position=0,
+        initially_active=False,
+        instructions=f"Use [Time](eneo-tool:{server_id}/today) then [Search](eneo-function:web_search) and [Other](eneo-mcp:{other_server}).",
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(root,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=3,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    offered = (
+        ModelToolIdentity("renamed_server__today", server_id, "today", "general"),
+        ModelToolIdentity("search__search", uuid4(), "search", "web_search"),
+        ModelToolIdentity("different__today", uuid4(), "today", "general"),
+    )
+    assert (
+        runtime.prepare_reference_tools(
+            offered, rendered_prompt="Base\nAttachment context"
+        )
+        == "Base\nAttachment context"
+    )
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
+    assert decisions == [{"activated": True}]
+    assert f"MCP {server_id}, tool today; available" in runtime.prompt
+    assert "Function web_search; available" in runtime.prompt
+    assert f"MCP {other_server}; unavailable for this turn" in runtime.prompt
+    assert runtime.snapshot().reference_tools == offered[:2]
+    assert runtime.snapshot().references_prepared
+
+
+async def test_progressive_registry_refresh_updates_prompt_and_preserves_offered_identities():
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantModelAdapter,
+    )
+
+    server_id = uuid4()
+    root = _skill(
+        key="guide",
+        name="Guide",
+        description="Write",
+        position=0,
+        instructions=f"Use [Search](eneo-tool:{server_id}/search).",
+        initially_active=True,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(root,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=3,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    runtime.prepare_reference_tools((), rendered_prompt=runtime.prompt)
+    assert "unavailable for this turn" in runtime.prompt
+    messages = [{"role": "system", "content": runtime.prompt + "\nAttachment context"}]
+    identity = ModelToolIdentity("server__search", server_id, "search", "general")
+    proxy = SimpleNamespace(
+        refresh_tools=AsyncMock(return_value=True),
+        get_model_tool_identities=lambda: (identity,),
+        get_tools_for_llm=lambda: [
+            {"type": "function", "function": {"name": identity.model_name}}
+        ],
+    )
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.model = SimpleNamespace(supports_tool_calling=True)
+    kwargs = {}
+    await adapter._refresh_mcp_tools_after_round(
+        proxy, [], ["server__load_tools"], kwargs, runtime, messages=messages
+    )
+    assert "tool search; available" in messages[0]["content"]
+    assert messages[0]["content"].endswith("\nAttachment context")
+    assert runtime.snapshot().reference_tools == (identity,)
+
+    proxy.get_model_tool_identities = lambda: ()
+    proxy.get_tools_for_llm = lambda: []
+    await adapter._refresh_mcp_tools_after_round(
+        proxy, [], [identity.model_name], kwargs, runtime, messages=messages
+    )
+    assert "unavailable for this turn" in messages[0]["content"]
+    assert messages[0]["content"].endswith("\nAttachment context")
+    # Diagnostics describe tools offered during this answer, including the
+    # identity required to match a recorded call after the tool disappears.
+    assert runtime.snapshot().reference_tools == (identity,)
+    assert "tools" not in kwargs
+
+
+def test_missing_tools_do_not_prevent_a_skill_from_activating():
+    candidate = _skill(
+        key="skill-1",
+        name="Communication",
+        description="Write",
+        position=0,
+        initially_active=False,
+        instructions="Use [Search](eneo-function:web_search) if available.",
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=3,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    runtime.prepare_reference_tools((), rendered_prompt=runtime.prompt)
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
+    assert decisions == [{"activated": True}]
+    assert "Function web_search; unavailable for this turn" in runtime.prompt
+    assert runtime.snapshot().reference_tools == ()
+
+
+@pytest.mark.parametrize(
+    "helper_already_active, accepted", [(False, False), (True, True)]
+)
+def test_group_activation_counts_new_helpers_once(helper_already_active, accepted):
+    helper = _skill(
+        key="skill-1",
+        name="Klartext",
+        description="Plain language",
+        position=0,
+        instructions="Use plain language",
+        initially_active=helper_already_active,
+    )
+    root = _skill(
+        key="skill-2",
+        name="Communication",
+        description="Write",
+        position=1,
+        instructions="Root guidance",
+        initially_active=False,
+    )
+    root = replace(root, binding=replace(root.binding, dependencies=(helper.binding,)))
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(helper, root),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+
+    assessment = runtime.assess_on_demand_candidates(
+        frozenset({root.binding.skill_id})
+    )[0]
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-2"))
+
+    assert (assessment.rejection_reason is None) is accepted
+    assert decisions[0]["activated"] is accepted
+    assert ("Root guidance" in runtime.prompt) is accepted
 
 
 def test_runtime_without_native_tool_calls_keeps_only_required_skills():
@@ -376,6 +549,55 @@ def test_fresh_candidate_assessment_matches_oversized_first_activation_rejection
 
     assert decisions == [{"activated": False, "unavailable": True}]
     assert runtime.snapshot().rejected[0].reason is assessment.rejection_reason
+
+
+@pytest.mark.parametrize(
+    "helper_body, accepted", [("Use plain language.", True), ("large " * 20_000, False)]
+)
+def test_reference_group_activation_includes_helper_budget_atomically(
+    helper_body, accepted
+):
+    root = _skill(
+        key="skill-1",
+        name="Communication",
+        description="Use for writing",
+        position=0,
+        instructions="Root instructions",
+        initially_active=False,
+    )
+    helper = _skill(
+        key="unused",
+        name="Klartext",
+        description="",
+        position=0,
+        instructions=helper_body,
+        initially_active=False,
+    )
+    root = replace(root, binding=replace(root.binding, dependencies=(helper.binding,)))
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(root,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=2,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=2_000,
+        supports_tool_calling=True,
+    )
+    assert "Root instructions" not in runtime.prompt
+    assert helper_body not in runtime.prompt
+    assert runtime.tool_definition is not None
+    assert runtime.tool_definition.schema["properties"]["skill_key"]["enum"] == [
+        "skill-1"
+    ]
+
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
+
+    assert decisions[0]["activated"] is accepted
+    assert ("Root instructions" in runtime.prompt) is accepted
+    assert (helper_body in runtime.prompt) is accepted
+    assert runtime.snapshot().active == (("skill-1",) if accepted else ())
 
 
 def test_activation_rejects_when_complete_follow_up_exceeds_model_input_limit():

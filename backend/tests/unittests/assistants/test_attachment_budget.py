@@ -2435,3 +2435,77 @@ def test_assembler_advertises_attachment_guardrails(monkeypatch):
     restrictions = assembler._get_allowed_attachments()
     assert restrictions.limit.max_files == 100
     assert restrictions.limit.max_size == 123
+
+
+@pytest.mark.parametrize("conflicting", [False, True])
+async def test_candidate_pin_checks_whole_skill_group_before_context(conflicting):
+    root = _resolved_skill(
+        name="Root", position=0, activation_mode=SkillActivationMode.ALWAYS
+    )
+    helper = _resolved_skill(
+        name="Helper", position=1, activation_mode=SkillActivationMode.ALWAYS
+    )
+    candidate = replace(root, skill_revision_id=uuid4(), dependencies=(helper,))
+    retained = (
+        replace(helper, skill_revision_id=uuid4())
+        if conflicting
+        else _resolved_skill(
+            name="Retained", position=2, activation_mode=SkillActivationMode.ALWAYS
+        )
+    )
+    service = _service()
+    service._validate_skill_activation_fit = AsyncMock()
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=_assistant_with_runtime_model(),
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            root.skill_id, root.skill_revision_id, candidate.skill_revision_id
+        ),
+        candidate_binding=candidate,
+        resolution=SkillRuntimeResolution(eligible=(root,), blocked=(retained,)),
+        runtime_policy=replace(_runtime_policy(), max_attached_skills=2),
+        preflight_adapters={},
+        completion_prompt_files=[],
+    )
+    assert verdict is not None
+    assert verdict.value == (
+        "conflicting_revisions" if conflicting else "attachment_limit"
+    )
+    service._validate_skill_activation_fit.assert_not_awaited()
+
+
+async def test_personal_pin_checks_group_limit_even_without_existing_chats():
+    root = _resolved_skill(
+        name="Root", position=0, activation_mode=SkillActivationMode.ALWAYS
+    )
+    helper = _resolved_skill(
+        name="Helper", position=1, activation_mode=SkillActivationMode.ALWAYS
+    )
+    service = _service()
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda **kwargs: SkillTurnPlan.create(
+            **kwargs, policy=replace(_runtime_policy(), max_attached_skills=1)
+        )
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        SimpleNamespace(
+            enforced_prompt_text="",
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(replace(root, dependencies=(helper,)),), blocked=()
+            ),
+            available_models=[],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+        )
+    )
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[], next_after=None
+    )
+    with pytest.raises(BadRequestException, match="limit of 1"):
+        await service.assert_personal_default_governance_context_fit(
+            personal_chat_pin_override=PersonalChatPinOverride(
+                root.skill_id, uuid4(), root.skill_revision_id
+            )
+        )
+    service.repo.get_personal_defaults_page.assert_not_awaited()

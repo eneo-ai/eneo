@@ -87,6 +87,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9055: () => m.eneo_error_9055(), // SKILL_RUNTIME_POLICY_CHANGED
 
   // --- Skill lifecycle ---
+  9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
   9049: () => m.eneo_error_9049(), // SKILL_PUBLISHED_NOT_DELETABLE
   9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
