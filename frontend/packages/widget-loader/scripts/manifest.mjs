@@ -10,7 +10,9 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { loaderChannel, lockRelease, releaseProblem } from "./release.mjs";
 
-const GZIP_BUDGET_BYTES = 6 * 1024;
+// Raised from 6 kB with 1.0.12 (the small-screen launcher): the loader is the
+// one script every host page loads, so growth is deliberate and reviewed.
+const GZIP_BUDGET_BYTES = 6.5 * 1024;
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const bundlePath = new URL("../dist/eneo.js", import.meta.url);

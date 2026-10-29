@@ -43,6 +43,11 @@
       "version": "1.0.11",
       "integrity": "sha384-l6VvipNQ6FZQ18ydxC3PWNfCj5j2JjKP0hIxUf9AXv1WaeGj7U3FuLa54PioauUH",
       "css_integrity": "sha384-+cWkn+OkHfYuQYGFsWgzElE8Z07OXpIEyZBAvHdW5WtvCuf7vzG0uvDnUTIHngKd"
+    },
+    {
+      "version": "1.0.12",
+      "integrity": "sha384-XnPVrjBVKFlfkusWJgGyOoyfzIAMqq9ctQr/0jFsTeTFBt/hYXe4VbZfi3MHU9uu",
+      "css_integrity": "sha384-Bh+CBtbv36spMq42bSu8QSUakymnYCkWs+K3f3v8xsz6J7fQBWvSjNO/78m9n5AY"
     }
   ]
 }

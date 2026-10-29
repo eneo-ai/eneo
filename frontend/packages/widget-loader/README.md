@@ -11,7 +11,7 @@ dependencies) so it works with `async` in any CMS. The shadow root loads
 `dist/eneo.css` from the same pinned version with its own SRI check, allowing
 hosts to keep a strict policy against inline styles. The build writes
 `dist/manifest.json` (version, channel, hashes, sizes) and fails when the bundle
-exceeds **6 kB gzipped** or when its bytes differ from what `release.json`
+exceeds **6.5 kB gzipped** or when its bytes differ from what `release.json`
 records for the version (see [Releases](#releases)). The web app serves the
 bundle from `/widget/v1/eneo.js` (floating) and `/widget/<version>/eneo.js`
 (pinned, immutable, for hosts that require `integrity`). Older pinned assets
@@ -43,7 +43,7 @@ Optional `data-*` attributes (also usable as attributes on a hand-written
 | `position`     | `bottom-right`, `bottom-left`; only without saved settings | `bottom-right`              |
 | `color-scheme` | `auto`, `light`, `dark`                                    | `auto`                      |
 | `auto-open`    | `true`                                                     | closed                      |
-| `launcher`     | `none` (host renders its own)                              | built-in button             |
+| `launcher`     | `none` (host renders its own), `static` (never tucks)      | built-in button             |
 | `label`        | accessible name of the button                              | "Öppna chatt" / "Open chat" |
 | `frame-title`  | accessible name of the iframe                              | the widget's title          |
 | `prefetch`     | `true` (load before first open)                            | lazy                        |
@@ -62,8 +62,12 @@ works during loading, beside a localized loading status and a small indicator. T
 indicator clears when the frame document loads (including an error page) or
 the chat reports ready; the chat's own header then takes over the close control. Closing or removing
 the widget restores the host page's scroll position and styles. Reduced-motion
-preferences disable the animation. CSS custom
-properties on the element or `:root` override it: `--eneo-widget-color`,
+preferences disable the animation. On a phone-width page (`SMALL_SCREEN_MEDIA`,
+40em) the launcher is 48 px inside the safe area and tucks halfway into the
+edge while the page scrolls down (class `tucked`), coming back on the way up,
+after `tuckIdleMs` at rest, on focus, on open or when a reply is waiting;
+`launcher="static"` keeps it in place. CSS custom
+properties on the element or `:root` override it: `--eneo-widget-size`, `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.
 
