@@ -141,8 +141,8 @@ The repository uses GitHub security features and CI to prevent regressions:
   through bounded read tools and tries to disprove each candidate finding
   before reporting it; findings can still be wrong. It has no write access or
   merge authority, does not gate the merge and is not a full security audit
-  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work)). Its findings are fixed or answered in the pull
-  request.
+  ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work)). Our rule is to fix or answer its findings before
+  merging.
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules over
   `backend/src`, both frontends' sources and `.github`, and scans the added Git
@@ -152,8 +152,8 @@ The repository uses GitHub security features and CI to prevent regressions:
   block the merge, and pull requests into `main` do not run it.
   On `develop` and tag builds, component images are pushed while the checks
   run; only the completed release bundle waits for them, so deployments must
-  consume the bundle. The tool runtime's `bun.lock` is not part of the audit
-  yet. Reports are retained as CI artifacts.
+  consume the bundle. The tool runtime's `bun.lock` is not part of the audit.
+  Reports are retained as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -181,7 +181,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   attestations, and the pushed backend, frontend, web-next, tool runtime, and
   SeaweedFS images include provenance attestations in GHCR. Fixable HIGH and
   CRITICAL image vulnerabilities block the frontend, web-next, and tool runtime
-  images; the backend image has no image scan yet and relies on the audit of
+  images; the backend image has no image scan and relies on the audit of
   its Python lock.
   `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
   exact image digests scanned by platform and records the bundled store's
@@ -273,7 +273,9 @@ on the documentation site.
 - **`main`.** The same review rule applies, and `main` is protected against
   deletion and force pushes.
 - **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
-  no one can skip the required checks or the merge queue. Repository
+  no ordinary pull request can skip the required checks or the merge queue.
+  Merging from a security advisory's private fork would skip them, so our
+  procedure is not to use it. Repository
   administrators are not exempt from rulesets unless they are on a bypass
   list. If GitHub itself blocks a critical fix, an organisation owner may
   change the ruleset temporarily; restore it straight away and record the

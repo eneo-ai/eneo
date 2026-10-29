@@ -8,7 +8,7 @@ import { Callout } from "nextra/components";
 
 Municipalities and agencies run Eneo with their own users, documents and model
 providers. This page explains how we protect them, from who decides what goes
-into the platform to the evidence that comes with every release. Each section
+into the platform to the evidence attached to a release. Each section
 links to the page that has the details.
 
 <Callout type="warning">
@@ -29,9 +29,9 @@ links to the page that has the details.
 - In a running deployment, every endpoint declares who may call it, services
   check access to each space and resource, and code written by the model runs
   in a separate tool runtime whose isolation depends on how it is deployed.
-- Releases built by the current publication workflow come with a release
-  bundle of exact image digests, followed by SBOMs and attestations that you
-  can check.
+- The current publication workflow attaches a release bundle of exact image
+  digests once its checks pass; a separate job then attaches SBOMs and
+  attestations. Check that the files you need are present.
 - Vulnerabilities are reported privately and handled as the security policy
   describes; fixed ones are published as GitHub Security Advisories.
 
@@ -72,7 +72,7 @@ the permission table and the reasons behind them are in
 | API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                                                                                                        | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
 | Code and files from the model | Run in a separate tool runtime. The reference Compose stack gives it no route to the database, Redis or the internet; other deployments must provide the same isolation. Each job is confined to its own files when Landlock is available, and operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
 | Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                                                                                                           | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
-| Network, TLS and secrets      | The database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                                                                                                               | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
+| Network, TLS and secrets      | In the reference Compose stack, the database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                                                                               | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
 | Traceability                  | The audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                                                                                                                       | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
 
 ## Evidence you can inspect

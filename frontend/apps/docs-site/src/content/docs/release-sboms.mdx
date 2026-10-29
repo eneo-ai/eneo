@@ -1,10 +1,11 @@
 # Release SBOMs and Attestations
 
-Each Eneo release includes Software Bill of Materials (SBOM) files for the
-published backend, frontend, web-next, tool runtime and bundled object-store
-container images, and attestations that show where they were built. The files
-are attached to the GitHub Release so you can check the dependency inventory and
-origin of the exact version you run. For how this fits with Eneo's other
+The current publication workflow attaches Software Bill of Materials (SBOM)
+files for the published backend, frontend, web-next, tool runtime and bundled
+object-store container images to the GitHub Release, with attestations that
+show where they were built. A separate job attaches them after the release
+bundle when it succeeds, and older releases may have fewer files, so check that
+the files you need are present for the version you run. For how this fits with Eneo's other
 security controls, see [Security at Eneo](/docs/security).
 
 **In short**
@@ -64,7 +65,7 @@ completed release bundle, it starts the release SBOM workflow:
 8. It attests the release SBOM assets with GitHub artifact attestations.
 9. It uploads the generated files to the same GitHub Release page.
 
-Each release keeps its own SBOM files. Older release pages keep their original
+Each release with SBOMs keeps its own files. Older release pages keep their original
 assets, so you can compare one version with the next. The backend, frontend,
 web-next and tool runtime container images also get provenance attestations
 when they are built and pushed to GitHub Container Registry.
