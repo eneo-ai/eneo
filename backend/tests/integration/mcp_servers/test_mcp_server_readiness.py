@@ -42,7 +42,7 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user):
     ],
 )
 async def test_reads_and_edits_agree_with_settings_and_keep_stored_data(
-    client, db_container, admin_user, admin_token, tool_state
+    client, db_container, admin_user, admin_token, monkeypatch, tool_state
 ):
     async with db_container() as container:
         session = container.session()
@@ -110,6 +110,34 @@ async def test_reads_and_edits_agree_with_settings_and_keep_stored_data(
     response = await client.get(f"/api/v1/mcp-servers/{server_id}/", headers=headers)
     assert response.status_code == 200, response.text
     assert response.json()["readiness_reason"] == expected
+
+    monkeypatch.setattr(
+        MCPServerService,
+        "_test_connection_and_discover_tools",
+        AsyncMock(return_value=([], ConnectionResult(success=True))),
+    )
+    response = await client.post(
+        f"/api/v1/mcp-servers/{server_id}/activate/", headers=headers
+    )
+    if expected is None:
+        assert response.status_code == 200, response.text
+        assert response.json()["server"]["is_enabled"] is True
+        assert response.json()["server"]["readiness_reason"] is None
+    else:
+        assert response.status_code == 400, response.text
+
+    # Check immediately after activation, before any other edit can mask it.
+    async with db_container() as container:
+        session = container.session()
+        assert (
+            await session.scalar(
+                sa.select(MCPServers.security_classification_id).where(
+                    MCPServers.id == server_id
+                )
+            )
+            == classification_id
+        )
+        assert (await session.execute(tool_rows)).mappings().all() == before
 
     # A separate request/session avoids a list read masking missing eager loads.
     response = await client.post(
