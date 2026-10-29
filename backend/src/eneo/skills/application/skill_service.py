@@ -37,11 +37,13 @@ from eneo.skills.domain.skill import (
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
+    SkillRuntimePolicy,
     SkillRuntimeResolution,
     SkillStatusChange,
     SkillTurnPlan,
     compose_skill_instructions,
     parse_skill_revision_cursor,
+    validate_skill_binding_group,
     validate_skill_slug,
 )
 from eneo.skills.domain.skill_repo import SkillRepo
@@ -328,6 +330,7 @@ class SkillService:
                 content_digest=source_revision.content_digest,
                 created_by_user_id=self.user.id,
                 expected_current_revision_id=reviewed_current_revision_id,
+                restore_reference_revision_id=source_revision_id,
             )
         except SkillRevisionConflictError as error:
             raise SkillRevisionConflictException(
@@ -382,7 +385,7 @@ class SkillService:
         *,
         tenant_id: UUID,
         references: list[SkillBindingReference],
-    ) -> None:
+    ) -> SkillRuntimePolicy:
         # The stored organisation policy is the source of truth for the
         # attachment guard; the SKILL_MAX_BINDINGS environment value only
         # seeded it during migration. The shared lock serializes this write
@@ -396,6 +399,7 @@ class SkillService:
                 f"A resource cannot use more than {policy.max_attached_skills} Skills"
             )
         self._validate_reference_uniqueness(references)
+        return policy
 
     @staticmethod
     def _validate_reference_uniqueness(references: list[SkillBindingReference]) -> None:
@@ -451,13 +455,12 @@ class SkillService:
         self,
         *,
         tenant_id: UUID,
-        references: list[SkillBindingReference],
+        bindings: list[ResolvedSkillBinding],
     ) -> None:
-        if not references:
+        if not bindings:
             return
-        blocks = await self.repo.list_active_execution_blocks(
-            tenant_id=tenant_id,
-            skill_ids=[reference.skill_id for reference in references],
+        blocks = await self._active_execution_blocks(
+            tenant_id=tenant_id, bindings=bindings
         )
         if blocks:
             raise BadRequestException(
@@ -534,10 +537,11 @@ class SkillService:
         # The personal chat's own layer takes only the owner's personal-space
         # Skills, and its count is the layer assessment's: organisation plus
         # own Skills together, where removing Skills must always be possible.
+        policy = None
         if personal_chat_layer:
             self._validate_reference_uniqueness(references)
         else:
-            await self._validate_reference_count(
+            policy = await self._validate_reference_count(
                 tenant_id=tenant_id, references=references
             )
         retained_by_reference, new_references = await self._resolve_retained_references(
@@ -595,11 +599,7 @@ class SkillService:
             existing=existing,
             requested_modes=requested_modes,
         )
-        await self._reject_blocked_references(
-            tenant_id=tenant_id,
-            references=[*new_references, *mode_changed_retained_references],
-        )
-        return self._order_resolved_bindings(
+        bindings = self._order_resolved_bindings(
             references=references,
             resolved_groups=(
                 list(retained_by_reference.values()),
@@ -612,6 +612,19 @@ class SkillService:
                 "One or more Skill revisions are unavailable for this resource"
             ),
         )
+        validate_skill_binding_group(
+            bindings, max_attached_skills=policy.max_attached_skills if policy else None
+        )
+        changed = set((*new_references, *mode_changed_retained_references))
+        await self._reject_blocked_references(
+            tenant_id=tenant_id,
+            bindings=[
+                binding
+                for binding in bindings
+                if self._binding_reference(binding) in changed
+            ],
+        )
+        return bindings
 
     async def _resolve_governance_references(
         self,
@@ -621,7 +634,7 @@ class SkillService:
         existing: list[ResolvedSkillBinding],
         requested_modes: dict[UUID, SkillActivationMode] | None = None,
     ) -> list[ResolvedSkillBinding]:
-        await self._validate_reference_count(
+        policy = await self._validate_reference_count(
             tenant_id=self.user.tenant_id, references=references
         )
         retained_by_reference, new_references = await self._resolve_retained_references(
@@ -646,11 +659,7 @@ class SkillService:
             existing=existing,
             requested_modes=requested_modes,
         )
-        await self._reject_blocked_references(
-            tenant_id=self.user.tenant_id,
-            references=[*new_references, *mode_changed_retained_references],
-        )
-        return self._order_resolved_bindings(
+        bindings = self._order_resolved_bindings(
             references=references,
             resolved_groups=(list(retained_by_reference.values()), published),
             existing=existing,
@@ -659,6 +668,19 @@ class SkillService:
                 "Personal Chat can only use published organisation Skill versions"
             ),
         )
+        validate_skill_binding_group(
+            bindings, max_attached_skills=policy.max_attached_skills
+        )
+        changed = set((*new_references, *mode_changed_retained_references))
+        await self._reject_blocked_references(
+            tenant_id=self.user.tenant_id,
+            bindings=[
+                binding
+                for binding in bindings
+                if self._binding_reference(binding) in changed
+            ],
+        )
+        return bindings
 
     async def list_assistant_bindings(
         self, *, space_id: UUID, assistant_id: UUID
@@ -926,9 +948,29 @@ class SkillService:
     ) -> dict[UUID, SkillExecutionBlock]:
         if not bindings:
             return {}
-        return await self.repo.list_active_execution_blocks(
+        blocks = await self.repo.list_active_execution_blocks(
             tenant_id=tenant_id,
-            skill_ids=[binding.skill_id for binding in bindings],
+            skill_ids=list(
+                dict.fromkeys(
+                    member.skill_id
+                    for binding in bindings
+                    for member in (binding, *binding.dependencies)
+                )
+            ),
+        )
+        return blocks
+
+    @staticmethod
+    def _binding_execution_block(
+        binding: ResolvedSkillBinding, blocks: dict[UUID, SkillExecutionBlock]
+    ) -> SkillExecutionBlock | None:
+        return next(
+            (
+                blocks[member.skill_id]
+                for member in (binding, *binding.dependencies)
+                if member.skill_id in blocks
+            ),
+            None,
         )
 
     async def _project_bindings(
@@ -944,7 +986,8 @@ class SkillService:
         return [
             SkillBindingProjection(
                 binding=binding,
-                execution_blocked=binding.skill_id in blocks,
+                execution_blocked=self._binding_execution_block(binding, blocks)
+                is not None,
             )
             for binding in bindings
         ]
@@ -961,10 +1004,14 @@ class SkillService:
         )
         return SkillRuntimeResolution(
             eligible=tuple(
-                binding for binding in bindings if binding.skill_id not in blocks
+                binding
+                for binding in bindings
+                if self._binding_execution_block(binding, blocks) is None
             ),
             blocked=tuple(
-                binding for binding in bindings if binding.skill_id in blocks
+                binding
+                for binding in bindings
+                if self._binding_execution_block(binding, blocks) is not None
             ),
         )
 
@@ -979,7 +1026,7 @@ class SkillService:
             bindings=bindings,
         )
         for binding in sorted(bindings, key=lambda item: item.position):
-            block = blocks.get(binding.skill_id)
+            block = self._binding_execution_block(binding, blocks)
             if block is not None:
                 raise SkillExecutionBlockedException(
                     block=block,
@@ -1078,10 +1125,14 @@ class SkillService:
         return {
             assistant_id: SkillRuntimeResolution(
                 eligible=tuple(
-                    binding for binding in bindings if binding.skill_id not in blocks
+                    binding
+                    for binding in bindings
+                    if self._binding_execution_block(binding, blocks) is None
                 ),
                 blocked=tuple(
-                    binding for binding in bindings if binding.skill_id in blocks
+                    binding
+                    for binding in bindings
+                    if self._binding_execution_block(binding, blocks) is not None
                 ),
             )
             for assistant_id, bindings in bindings_by_assistant.items()

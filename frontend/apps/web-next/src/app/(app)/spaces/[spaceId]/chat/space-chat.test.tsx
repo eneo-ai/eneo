@@ -125,7 +125,7 @@ describe("SpaceChat", () => {
 
     const skills = await screen.findByRole("button", { name: /^Skills/ });
     const composer = screen
-      .getByRole("textbox", { name: /^Meddelande till/ })
+      .getByRole("textbox", { name: "Fråga Personlig assistent" })
       .closest("[data-clear-of-toasts]") as HTMLElement;
     expect(within(composer).getByRole("button", { name: /^Skills/ })).toBe(skills);
   });

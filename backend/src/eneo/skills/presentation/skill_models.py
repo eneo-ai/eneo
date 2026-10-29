@@ -397,6 +397,13 @@ class AssistantSkillBindingInput(SkillBindingReferenceInput):
     )
 
 
+class SkillDependencySummary(BaseModel):
+    skill_id: UUID
+    skill_revision_id: UUID
+    revision_number: int
+    display_name: str
+
+
 class SkillBindingSummary(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
@@ -411,6 +418,9 @@ class SkillBindingSummary(BaseModel):
     is_active: bool
     source: SkillBindingSource
     execution_blocked: bool
+    dependencies: list[SkillDependencySummary] = Field(
+        default_factory=list[SkillDependencySummary]
+    )
 
 
 class AssistantSkillBindingSummary(SkillBindingSummary):

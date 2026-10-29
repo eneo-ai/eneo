@@ -12,6 +12,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { skillQueryKey } from "./skill-revisions";
 
 export function SpaceSkillNewPage() {
@@ -40,6 +41,7 @@ export function SpaceSkillNewPage() {
         </Alert>
       ) : (
         <SkillForm
+          referenceCatalog={skillReferenceCatalog({ type: "space", spaceId: space.id })}
           mode="create"
           onSubmit={async (value) => {
             const skill = await unwrap(

@@ -105,6 +105,7 @@ class ErrorCodes(int, Enum):
     # A personal chat save whose own Skills would not run as configured. The
     # details carry the layer reason so clients can explain it in their language.
     PERSONAL_SKILLS_REJECTED = 9080
+    SKILL_REFERENCED_BY_REVISION = 9081
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090

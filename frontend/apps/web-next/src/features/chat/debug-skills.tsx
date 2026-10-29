@@ -10,6 +10,8 @@ import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { CopyableValue, DebugSection } from "./debug-section";
+import { DebugSkillReferences } from "./debug-skill-references";
+import type { Schema } from "@/lib/api/models";
 import {
   buildSkillActivationRows,
   summarizeSkillActivation,
@@ -165,7 +167,13 @@ function CandidateRow({
  * why a fallback applied, counts, the Skill token budget and every candidate
  * in evaluation order with what happened to it (50 at a time).
  */
-export function SkillActivationSection({ evidence }: { evidence: SkillActivationEvidence }) {
+export function SkillActivationSection({
+  evidence,
+  toolCalls = []
+}: {
+  evidence: SkillActivationEvidence;
+  toolCalls?: Schema<"ToolCallInfo">[];
+}) {
   const t = useTranslations();
   const format = useFormatter();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -217,6 +225,7 @@ export function SkillActivationSection({ evidence }: { evidence: SkillActivation
 
   return (
     <DebugSection title={t("chat_debug_skill_activation")} count={rows.length}>
+      {evidence.version === 3 && <DebugSkillReferences evidence={evidence} toolCalls={toolCalls} />}
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <p className="text-sm font-semibold tabular-nums">{verdict}</p>

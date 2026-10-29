@@ -1,0 +1,16 @@
+/* ProseMirror inserts zero-width images around inline atoms for cursor movement.
+   Both apps reset images to display:block; these must remain inline. */
+[data-skill-instruction-editor] img.ProseMirror-separator {
+  display: inline !important;
+  border: 0 !important;
+  margin: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+[data-skill-instruction-editor][data-empty="true"]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  pointer-events: none;
+  color: var(--skill-placeholder, currentColor);
+}

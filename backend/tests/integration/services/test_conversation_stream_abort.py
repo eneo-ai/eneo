@@ -13,7 +13,7 @@ file focuses on the DB-level behavior that those unit tests can't validate with 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,6 +26,7 @@ from eneo.completion_models.domain.skill_activation import (
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session_service import (
     persist_final_skill_runtime_state,
@@ -35,6 +36,7 @@ from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_tur
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillActivationEvidenceV2,
+    SkillActivationEvidenceV3,
     SkillActivationMode,
     SkillBindingSource,
     SkillRuntimePolicy,
@@ -430,14 +432,15 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("finish", ["placeholder", "answer", "abort"])
 async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
     client,
     db_container,
     default_user,
     default_user_token,
+    finish,
 ):
-    """Version 2 evidence, written for a personal chat with its own layer,
-    reads back unchanged from the store and through turn diagnostics."""
+    """Personal-layer and prepared reference evidence survive final/partial writes."""
     space_id = await _create_space(client, default_user_token)
     assistant_id = await _create_assistant(client, default_user_token, space_id)
     own = ResolvedSkillBinding(
@@ -454,12 +457,42 @@ async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
         position=0,
         source=SkillBindingSource.SPACE,
     )
+    organisation = ()
+    personal = (own,)
+    identity = ModelToolIdentity("search__query", uuid4(), "query", "web_search")
+    if finish != "placeholder":
+        helper = replace(
+            own,
+            skill_id=uuid4(),
+            skill_revision_id=uuid4(),
+            skill_space_id=uuid4(),
+            source=SkillBindingSource.ORGANIZATION,
+            instructions="Organisation helper instructions.",
+        )
+        root = replace(
+            helper,
+            skill_id=uuid4(),
+            skill_revision_id=uuid4(),
+            instructions=f"Use [Helper](eneo-skill:{helper.skill_id}@{helper.skill_revision_id}).",
+            dependencies=(helper,),
+        )
+        own = replace(own, instructions="Use [Search](eneo-function:web_search).")
+        on_demand = replace(
+            own,
+            skill_id=uuid4(),
+            skill_revision_id=uuid4(),
+            position=1,
+            instructions=f"Use [Time](eneo-mcp:{uuid4()}).",
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        )
+        organisation = (root,)
+        personal = (own, on_demand)
     plan = plan_personal_chat_turn(
         base_instructions="Base",
-        organisation=SkillRuntimeResolution(eligible=(), blocked=()),
-        personal=SkillRuntimeResolution(eligible=(own,), blocked=()),
+        organisation=SkillRuntimeResolution(eligible=organisation, blocked=()),
+        personal=SkillRuntimeResolution(eligible=personal, blocked=()),
         policy=SkillRuntimePolicy(
-            selective_activation_enabled=False,
+            selective_activation_enabled=finish != "placeholder",
             max_attached_skills=100,
             context_share_percent=10,
             max_activations_per_turn=10,
@@ -480,7 +513,12 @@ async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
         selected_model_route="openai/gpt-4o",
         snapshot=runtime.snapshot(),
     )
-    assert isinstance(evidence, SkillActivationEvidenceV2)
+    assert isinstance(
+        evidence,
+        SkillActivationEvidenceV2
+        if finish == "placeholder"
+        else SkillActivationEvidenceV3,
+    )
 
     async with db_container() as container:
         session_service = container.session_service()
@@ -497,6 +535,55 @@ async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
             skill_activation=evidence,
         )
 
+    if finish != "placeholder":
+        runtime.prepare_reference_tools((identity,), rendered_prompt=runtime.prompt)
+        candidate = next(
+            item
+            for item in plan.available
+            if item.binding.skill_id == on_demand.skill_id
+        )
+        runtime.apply_provider_tool_calls(
+            calls=(
+                ProviderToolCall(
+                    call_id="activate",
+                    name=SKILL_ACTIVATION_TOOL_NAME,
+                    arguments=f'{{"skill_key":"{candidate.activation_key}"}}',
+                ),
+            ),
+            messages=[{"role": "system", "content": runtime.prompt}],
+        )
+        evidence = plan.activation_evidence(
+            selected_model_id=evidence.selected_model_id,
+            selected_model_route="openai/gpt-4o",
+            snapshot=runtime.snapshot(),
+        )
+        assert isinstance(evidence, SkillActivationEvidenceV3)
+        assert evidence.accepted == (candidate.activation_key,)
+        assert [item.skill_revision_id for item in evidence.helpers] == [
+            helper.skill_revision_id
+        ]
+        assert evidence.reference_tools == (identity,)
+        assert evidence.references_prepared
+        assert "unavailable for this turn" in runtime.prompt
+        if finish == "answer":
+            async with db_container() as container:
+                await container.session_service().complete_question_with_answer(
+                    question_id=question_id,
+                    answer="Finished answer",
+                    num_tokens_question=10,
+                    num_tokens_answer=2,
+                    info_blob_chunks=[],
+                    skill_activation=evidence,
+                )
+        else:
+            await persist_partial_question_answer(
+                tenant_id=default_user.tenant_id,
+                question_id=question_id,
+                answer="Partial answer",
+                num_tokens_answer=2,
+                skill_activation=evidence,
+            )
+
     async with db_container() as container:
         hydrated = await container.question_repo().get_with_skill_activation(
             id=question_id,
@@ -511,12 +598,14 @@ async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
     )
     assert diagnostics.status_code == 200, diagnostics.text
     stored = diagnostics.json()["skill_activation"]
-    assert stored["version"] == 2
+    assert stored["version"] == (2 if finish == "placeholder" else 3)
     assert stored["personal_layer"]["status"] == "applied"
     assert [
         reference["skill_id"] for reference in stored["personal_layer"]["references"]
-    ] == [str(own.skill_id)]
+    ] == [str(item.skill_id) for item in personal]
     assert "Svara kort." not in diagnostics.text
+    assert "Organisation helper instructions." not in diagnostics.text
+    assert stored == evidence.model_dump(mode="json")
 
 
 @pytest.mark.integration

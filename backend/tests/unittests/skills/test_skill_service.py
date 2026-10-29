@@ -546,6 +546,7 @@ async def test_editor_restores_exact_historical_content_as_a_new_revision():
         content_digest=source.content_digest,
         created_by_user_id=service.user.id,
         expected_current_revision_id=reviewed_current_revision_id,
+        restore_reference_revision_id=source.id,
     )
 
 
@@ -696,6 +697,7 @@ async def test_blocked_organization_skill_cannot_receive_new_binding(owner: str)
     space = _space(organization=owner == "governance")
     blocked = _binding()
     repo = AsyncMock()
+    repo.resolve_published_references_for_binding_update.return_value = [blocked]
     repo.list_active_execution_blocks.return_value = {blocked.skill_id: MagicMock()}
     service = _service(
         space=space,
@@ -733,6 +735,7 @@ async def test_blocked_organization_skill_cannot_change_revision(owner: str):
     existing = _binding()
     changed = _binding(skill_id=existing.skill_id)
     repo = AsyncMock()
+    repo.resolve_published_references_for_binding_update.return_value = [changed]
     repo.list_active_execution_blocks.return_value = {changed.skill_id: MagicMock()}
     if owner == "assistant":
         repo.list_assistant_bindings.return_value = [existing]

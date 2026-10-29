@@ -38,6 +38,7 @@
   import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -355,6 +356,10 @@
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
             >
               <SkillBindingsEditor
+                referenceCatalog={skillReferenceCatalog(data.eneo, {
+                  type: "space",
+                  spaceId: $currentSpace.id
+                })}
                 bind:bindings={$update.skill_bindings}
                 initialCatalogPage={data.skills}
                 bindingSummaries={data.skillBindings}

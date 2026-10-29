@@ -52,6 +52,8 @@ import {
   type BindingSummary
 } from "./skill-bindings";
 import { SkillForm } from "./skill-form";
+import { SkillDependencies } from "./skill-dependencies";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { skillQueryKey } from "./skill-revisions";
 
 type ResourceProps = {
@@ -492,6 +494,9 @@ export function SkillBindingsEditor({
                 <div className="min-w-0 flex-1 space-y-2">
                   <div>
                     <p className="font-medium">{name}</p>
+                    {summary?.skill_revision_id === binding.skill_revision_id && (
+                      <SkillDependencies dependencies={summary?.dependencies} />
+                    )}
                     {description && <p className="text-muted-foreground text-sm">{description}</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -753,7 +758,15 @@ export function SkillBindingsEditor({
             <AlertTitle>{t("skills_create_immediate_title")}</AlertTitle>
             <AlertDescription>{t("skills_create_immediate_description")}</AlertDescription>
           </Alert>
-          <SkillForm mode="create" onDirtyChange={setCreateDirty} onSubmit={createSkill} />
+          <SkillForm
+            mode="create"
+            onDirtyChange={setCreateDirty}
+            onSubmit={createSkill}
+            referenceCatalog={skillReferenceCatalog(
+              organizationSpace ? { type: "organization" } : { type: "space", spaceId }
+            )}
+            referencePickerInline
+          />
         </DialogContent>
       </Dialog>
     </SettingsGroup>

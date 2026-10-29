@@ -1,4 +1,5 @@
 "use client";
+import { dependencySources } from "@eneo/skill-instructions";
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
@@ -63,6 +64,8 @@ export type PersonalSkillRow = {
   pinnedNumber: number | null;
   /** The newer version the chat could move to, when it pins an older one. */
   latest: { id: string; number: number } | null;
+  dependencies?: Summary["dependencies"];
+  usedVia?: string[];
 };
 
 /** ErrorCodes.PERSONAL_SKILLS_REJECTED: the save would not run as configured. */
@@ -252,6 +255,11 @@ export function usePersonalChatSkills({
     (left, right) => left.position - right.position
   );
   const layer = data?.personal_layer ?? null;
+  const helperSources = dependencySources(
+    (data?.bindings ?? []).filter(
+      (binding) => chosen.get(binding.skill_id)?.skill_revision_id === binding.skill_revision_id
+    )
+  );
 
   function row(skillId: string, name: string, description: string, revisionId: string) {
     const summary: Summary | undefined = summaries.get(skillId);
@@ -266,6 +274,9 @@ export function usePersonalChatSkills({
       blocked: summary?.execution_blocked ?? false,
       revisionId,
       pinnedNumber: summary?.revision_number ?? null,
+      dependencies:
+        binding?.skill_revision_id === summary?.skill_revision_id ? summary?.dependencies : [],
+      usedVia: helperSources.get(skillId) ?? [],
       latest:
         binding &&
         latestId !== null &&

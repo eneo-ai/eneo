@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -18,6 +19,7 @@ from eneo.skills.domain.skill import (
     SkillExecutionBlock,
     SkillExecutionBlockedException,
     SkillExecutionReference,
+    SkillRuntimePolicy,
 )
 
 
@@ -620,3 +622,48 @@ async def test_publish_app_without_skills_keeps_legacy_context_fit_behavior(
 
     service.repo.get_for_update.assert_awaited_once_with(app.id)
     context_assertion.assert_not_called()
+
+
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_candidate_pin_checks_whole_skill_group_before_context(service, conflicting):
+    root = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="root",
+        revision_number=1,
+        current_revision_number=1,
+        display_name="Root",
+        instructions="Write clearly.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.ORGANIZATION,
+    )
+    helper = replace(root, skill_id=uuid4(), skill_revision_id=uuid4(), position=1)
+    candidate = replace(root, skill_revision_id=uuid4(), dependencies=(helper,))
+    retained = (
+        replace(helper, skill_revision_id=uuid4())
+        if conflicting
+        else replace(helper, skill_id=uuid4())
+    )
+    service._assert_context_fits = MagicMock()
+    verdict = service.candidate_pin_incompatible_reason(
+        validation_input=SimpleNamespace(prompt_text="Base", completion_model=None),
+        bindings=[root, retained],
+        skill_id=root.skill_id,
+        from_revision_id=root.skill_revision_id,
+        candidate_binding=candidate,
+        completion_prompt_files=[],
+        runtime_policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=2,
+            context_share_percent=10,
+            max_activations_per_turn=3,
+        ),
+    )
+    assert verdict is not None
+    assert verdict.value == (
+        "conflicting_revisions" if conflicting else "attachment_limit"
+    )
+    service._assert_context_fits.assert_not_called()
