@@ -126,7 +126,7 @@ describe("launcher", () => {
     expect(launcherOf(element).offsetWidth).toBe(56);
     element.openPanel();
     await vi.waitFor(() => expect(getComputedStyle(close).opacity).toBe("1"));
-    expect(getComputedStyle(chat).opacity).toBe("0");
+    await vi.waitFor(() => expect(getComputedStyle(chat).opacity).toBe("0"));
   });
 
   it("switches its transitions on at the first open, so a late stylesheet never fades the backdrop on page load", async () => {

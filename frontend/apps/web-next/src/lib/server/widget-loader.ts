@@ -42,7 +42,7 @@ const VERSION = /^\d+\.\d+\.\d+$/;
 let cachedCurrent: Promise<WidgetLoaderBundle | null> | undefined;
 const cachedArchives = new Map<string, Promise<WidgetLoaderBundle | null>>();
 
-/** An old manifest has no CSS because its loader carried an inline stylesheet. */
+/** A manifest without CSS belongs to a loader that carries its stylesheet inline. */
 export function readManifest(raw: string): Omit<WidgetLoaderBundle, "source" | "cssSource"> | null {
   const parsed = JSON.parse(raw) as Partial<Manifest>;
   if (!parsed.version || !parsed.channel || !parsed.integrity || parsed.file !== "eneo.js") {

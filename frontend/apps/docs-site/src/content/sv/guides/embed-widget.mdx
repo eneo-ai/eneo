@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@436e4edcb74f
+translationSource: guides/embed-widget.mdx@f9c68fb3540d
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -332,9 +332,7 @@ in i webbplatsen:
    serveras med oförändrat innehåll. Den externa stilmallen har också en
    integritetskontroll. Den gamla koden fortsätter alltså att laddas; kopiera
    en nyare version från fliken **Publicera** när ni vill ha ändringar i
-   laddaren. Versioner före `1.0.4` använder fortfarande inline-stilar, så en
-   webbplats med strikt CSP för stilar måste uppdatera sin låsta kod. Den
-   flytande adressen `v1` följer utgåvor automatiskt.
+   laddaren. Den flytande adressen `v1` följer utgåvor automatiskt.
 7. **Test före publicering.** Testmiljöns origin måste också vara tillåten.
    Öppna chatten, skicka en fråga, stäng med Escape och kontrollera att fokus
    återgår till knappen. Prova med enbart tangentbord, med skärmläsare, på
@@ -607,8 +605,7 @@ Widgeten är byggd för WCAG 2.2 AA:
   **Förminska chatten**, lägger tillbaka panelen bredvid sidan, och det gör även
   stängning. Skärmläsare får höra när chatten förstoras eller får sin vanliga
   storlek igen, och i en bred panel behåller konversationen och frågefältet en
-  läsbar kolumnbredd. Knappen visas bara med laddare 1.0.9 eller nyare, så en
-  webbplats som låst en äldre version behåller panelen den har.
+  läsbar kolumnbredd.
 - Medan den inbäddade sidan laddas visas en liten indikator och ett laddningsmeddelande
   på widgetens språk. Animationen stängs av vid minskad rörelse. En felsida förblir
   synlig om chatten inte kan starta.

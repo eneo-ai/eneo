@@ -28,8 +28,7 @@ const V1 = {
       type: "context",
       payload: { page_url: "https://www.kommun.se/bygglov", page_title: "Bygglov" }
     },
-    // Added in loader 1.0.5; older loaders never send it and the embed page
-    // then offers no expand control.
+    // A loader that never sends it gets no expand control.
     { ns: "eneo-widget", v: 1, type: "layout", payload: { full: false, expanded: false } },
     { ns: "eneo-widget", v: 1, type: "layout", payload: { full: true, expanded: true } }
   ],
@@ -40,7 +39,7 @@ const V1 = {
     { ns: "eneo-widget", v: 1, type: "close" },
     { ns: "eneo-widget", v: 1, type: "conversation_started" },
     { ns: "eneo-widget", v: 1, type: "unread", payload: { count: 2 } },
-    // Added with loader 1.0.5; a loader from before ignores them as unknown types.
+    // A loader ignores these as unknown types until it supports them.
     { ns: "eneo-widget", v: 1, type: "expand" },
     { ns: "eneo-widget", v: 1, type: "collapse" }
   ]

@@ -133,8 +133,7 @@ state as an `expanded` attribute for the stylesheet). The loader tells the
 embed page how the panel is shown (`layout`: full or not, expanded or not),
 so the chat offers the control only where it does something: never on a small
 screen that already fills the viewport, and as "shrink" while expanded. Closing
-always puts the panel back beside the page. Loaders before 1.0.9 know none of
-these messages and ignore them; the embed page then shows no such control.
+always puts the panel back beside the page.
 
 Hosts should also offer a visible "Chat with us" link early on the page that
 calls `Eneo('open')`: the launcher is appended to `<body>`, so keyboard and
@@ -190,8 +189,7 @@ bumping `version` in `package.json`, copy the current `dist/eneo.js`,
 archive and `release.json`. The build verifies archived bytes against the
 append-only release record, and `lock` refuses to strand a recorded version
 or give it other bytes. An older pinned snippet keeps working after an
-upgrade; update it when you want newer loader fixes. Versions before 1.0.4
-carry inline CSS, so sites with a strict style CSP need a newer snippet.
+upgrade; update it when you want newer loader fixes.
 
 The floating channel (`v1` in `/widget/v1/eneo.js`) is `eneoWidgetChannel`
 in `package.json`, not the major version. Every floating snippet already
