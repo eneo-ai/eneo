@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@997003fbe9d7
+translationSource: guides/deployment.mdx@5bcb0a191fe7
 ---
 
 import { Callout } from "nextra/components";
@@ -209,18 +209,13 @@ Behåll en kopia av miljöfiler, krypteringsnyckel, releasepaket och exakt
 Compose-kommando. Vid återställning ska databasen och objektlagringen höra
 till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
 
-Vid uppgradering från 2.2 eller en 2.3-förhandsversion: de versionerna behöll
-sökdata (textbitar och inbäddningar) för varje ersatt dokumentversion. De
-räknas mot lagringskvoten men söks aldrig. När den nya versionen kör, ta bort
-dem en gång med worker-avbildningen:
+Vid uppgradering från 2.2 eller från 2.3.0-rc.3 eller tidigare: de utgåvorna
+behöll sökdata (textbitar och inbäddningar) för varje ersatt dokumentversion.
+De räknas mot lagringskvoten men söks aldrig. När den nya versionen kör, ta
+bort dem en gång enligt [Frigör utrymme från tidigare
+versioner](/guides/free-space-earlier-versions). Eneo är tillgängligt under
+tiden, och rensningen kan stoppas och köras igen.
 
-```bash
-docker compose exec worker python -m eneo.info_blobs.replaced_versions run
-```
-
-Eneo är tillgängligt under tiden, och kommandot kan stoppas och köras igen.
-Se [Frigör utrymme från tidigare
-versioner](/guides/document-processing#free-space-held-by-earlier-versions).
 Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
 `stop_grace_period: 2m`, som referensfilen gör; se nästa avsnitt.
 
