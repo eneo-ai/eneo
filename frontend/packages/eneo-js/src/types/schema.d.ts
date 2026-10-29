@@ -47041,13 +47041,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description The completed export file */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "text/csv": string;
+          "application/x-ndjson": string;
         };
       };
       /** @description Bad Request */

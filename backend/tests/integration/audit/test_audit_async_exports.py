@@ -10,8 +10,22 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize(
+    ("export_format", "media_type", "content"),
+    [
+        ("csv", "text/csv", b"action,user\nlogin,fixture\n"),
+        ("jsonl", "application/x-ndjson", b'{"action":"login"}\n{"action":"logout"}\n'),
+    ],
+)
 async def test_completed_export_signed_download_is_independent_of_ambient_identity(
-    client, auth_headers, redis_client, db_container, tmp_path
+    client,
+    auth_headers,
+    redis_client,
+    db_container,
+    tmp_path,
+    export_format,
+    media_type,
+    content,
 ):
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
     from eneo.authentication import signed_urls
@@ -20,10 +34,9 @@ async def test_completed_export_signed_download_is_independent_of_ambient_identi
         tenant_id = container.user().tenant_id
     job_id = uuid4()
     manager = ExportJobManager(redis_client)
-    content = b"action,user\nlogin,fixture\n"
-    path = tmp_path / "export.csv"
+    path = tmp_path / f"export.{export_format}"
     path.write_bytes(content)
-    await manager.create_job(job_id, tenant_id)
+    await manager.create_job(job_id, tenant_id, format=export_format)
     await manager.complete_job(tenant_id, job_id, str(path), len(content), 1)
     base = f"/api/v1/audit/logs/export/{job_id}"
     try:
@@ -35,6 +48,7 @@ async def test_completed_export_signed_download_is_independent_of_ambient_identi
         response = await client.get(url)
         assert response.status_code == 200
         assert response.content == content
+        assert response.headers["content-type"].split(";", 1)[0] == media_type
         assert response.headers["cache-control"] == "no-store"
         assert response.headers["referrer-policy"] == "no-referrer"
         assert response.headers["content-disposition"].startswith("attachment;")

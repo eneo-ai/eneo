@@ -1216,9 +1216,21 @@ def authorize_export_token(
 
 @router.get(
     "/logs/export/{job_id}/signed-download",
+    response_class=Response,
     response_model=None,
     description="Stream a completed export using the short-lived URL returned by its status.",
-    responses=responses.get_responses([400, 401, 403, 404]),
+    responses={
+        200: {
+            "description": "The completed export file",
+            "content": {
+                "text/csv": {"schema": {"type": "string", "format": "binary"}},
+                "application/x-ndjson": {
+                    "schema": {"type": "string", "format": "binary"}
+                },
+            },
+        },
+        **responses.get_responses([400, 401, 403, 404]),
+    },
 )
 @endpoint_access(
     authentication=Authentication.SIGNED_URL,
