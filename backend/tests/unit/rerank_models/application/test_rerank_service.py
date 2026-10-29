@@ -215,6 +215,29 @@ class TestSpecForModel:
         assert spec.model_name == model.name
         service.rerank_model_repo.one_or_none.assert_awaited_once_with(model.id)
 
+    async def test_the_spec_takes_factor_and_cap_from_the_model(self):
+        model = _model(candidate_factor=2, max_candidates=30)
+        service = _service([])
+        service.rerank_model_repo.one_or_none = AsyncMock(return_value=model)
+
+        with (
+            patch.object(
+                service_module,
+                "load_active_litellm_provider",
+                AsyncMock(return_value=_provider()),
+            ),
+            patch.object(
+                service_module, "build_litellm_provider_kwargs", return_value={}
+            ),
+        ):
+            spec = await service.spec_for_model(model.id, "q", None)
+
+        assert spec is not None
+        assert spec.candidate_factor == 2
+        assert spec.max_candidates == 30
+        assert spec.candidate_count(10) == 20
+        assert spec.candidate_count(80) == 30
+
 
 class TestSelectable:
     async def test_missing_or_disabled_is_not_selectable(self):

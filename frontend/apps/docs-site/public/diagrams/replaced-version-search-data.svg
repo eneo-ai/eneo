@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="468" viewBox="0 0 800 468" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="title">Replacing a knowledge version</title>
+  <desc id="desc">A recrawl finds one changed page. In one transaction Eneo marks version 1 as replaced, adds version 2 with its chunks, and removes version 1's chunks. Version 2 is searched; version 1 keeps its text, title, URL and original for citations. If any step fails the page rolls back and version 1 stays active with its chunks. Before this fix replaced versions kept their chunks, which were never searched but counted toward the quota.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="799" height="467" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+
+  <rect x="24" y="20" width="752" height="36" fill="#1a1a1a"/>
+  <text x="40" y="44" fill="#ffffff" font-size="16" font-weight="700">Replacing a knowledge version</text>
+
+  <!-- A changed page -->
+  <rect x="24" y="80" width="184" height="128" rx="8" fill="#f8f9fa" stroke="#455a64"/>
+  <text x="40" y="108" fill="#1a1a1a" font-size="13" font-weight="700">A recrawl finds</text>
+  <text x="40" y="126" fill="#1a1a1a" font-size="13" font-weight="700">one changed page</text>
+  <text x="40" y="160" fill="#455a64" font-size="12">Unchanged pages keep</text>
+  <text x="40" y="177" fill="#455a64" font-size="12">their version and their</text>
+  <text x="40" y="194" fill="#455a64" font-size="12">chunks.</text>
+
+  <line x1="208" y1="144" x2="236" y2="144" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- One transaction -->
+  <rect x="240" y="80" width="260" height="128" rx="8" fill="#f8f9fa" stroke="#455a64"/>
+  <text x="256" y="108" fill="#1a1a1a" font-size="13" font-weight="700">One transaction for that page</text>
+  <text x="256" y="138" fill="#1a1a1a" font-size="13">1  Mark version 1 as replaced</text>
+  <text x="256" y="162" fill="#1a1a1a" font-size="13">2  Add version 2 with its chunks</text>
+  <text x="256" y="186" fill="#1a1a1a" font-size="13">3  Remove version 1's chunks</text>
+
+  <line x1="500" y1="144" x2="528" y2="144" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Result -->
+  <rect x="532" y="80" width="244" height="60" rx="8" fill="#e8f5e9" stroke="#2e7d32"/>
+  <text x="548" y="104" fill="#1b5e20" font-size="13" font-weight="700">Version 2 · active</text>
+  <text x="548" y="126" fill="#1a1a1a" font-size="12">Text, chunks, embeddings: searched</text>
+
+  <rect x="532" y="148" width="244" height="60" rx="8" fill="#fff8e1" stroke="#b26a00"/>
+  <text x="548" y="172" fill="#7a4a00" font-size="13" font-weight="700">Version 1 · replaced</text>
+  <text x="548" y="194" fill="#1a1a1a" font-size="12">Text, title, URL, original: kept</text>
+
+  <!-- Failure -->
+  <rect x="24" y="228" width="752" height="48" rx="8" fill="#fdecea" stroke="#b42318"/>
+  <text x="40" y="257" fill="#1a1a1a" font-size="13"><tspan font-weight="700" fill="#8a1c12">If any step fails,</tspan> the page rolls back: version 1 stays active with its chunks.</text>
+
+  <!-- Before and now -->
+  <rect x="24" y="296" width="368" height="148" rx="8" fill="#f8f9fa" stroke="#455a64"/>
+  <text x="40" y="322" fill="#1a1a1a" font-size="13" font-weight="700">Before: 2.2 and the 2.3 release candidates</text>
+  <text x="40" y="350" fill="#1a1a1a" font-size="12">• Replaced versions kept chunks and embeddings</text>
+  <text x="40" y="372" fill="#1a1a1a" font-size="12">• Never searched, but counted toward the quota</text>
+  <text x="40" y="394" fill="#1a1a1a" font-size="12">• A full quota stops changed pages from saving</text>
+  <text x="40" y="416" fill="#1a1a1a" font-size="12">• Large histories made the quota sum slow</text>
+
+  <rect x="408" y="296" width="368" height="148" rx="8" fill="#e8f5e9" stroke="#2e7d32"/>
+  <text x="424" y="322" fill="#1b5e20" font-size="13" font-weight="700">Now</text>
+  <text x="424" y="350" fill="#1a1a1a" font-size="12">• Replaced versions keep their text for citations</text>
+  <text x="424" y="372" fill="#1a1a1a" font-size="12">• The quota counts what is kept</text>
+  <text x="424" y="394" fill="#1a1a1a" font-size="12">• One command removes chunks left from before</text>
+  <text x="424" y="416" fill="#1a1a1a" font-size="12">• An index answers the user's quota sum</text>
+</svg>

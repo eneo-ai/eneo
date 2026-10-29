@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { File, FileText, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import File from "@lucide/svelte/icons/file";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import HighlightedText from "$lib/components/HighlightedText.svelte";

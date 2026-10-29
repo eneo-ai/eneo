@@ -12,7 +12,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { BookOpen } from "@lucide/svelte";
+  import BookOpen from "@lucide/svelte/icons/book-open";
 
   type KnowledgeSource = {
     id: string;

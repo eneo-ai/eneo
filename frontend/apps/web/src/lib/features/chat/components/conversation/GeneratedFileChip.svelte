@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download } from "@lucide/svelte";
+  import Download from "@lucide/svelte/icons/download";
   import { sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
