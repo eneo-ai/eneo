@@ -382,7 +382,9 @@ def test_logout_clears_session_txn_and_next_era_cookies(
     token = mint()
 
     response = endpoints.client.post(
-        LOGOUT, headers=SAME_ORIGIN | {"Cookie": f"{session}={token}"}
+        LOGOUT,
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{session}={token}", GENERATION: session_generation(token)},
     )
 
     assert response.status_code == 204
@@ -404,20 +406,17 @@ def test_logout_refuses_cross_site(endpoints: Endpoints, site: dict[str, str]):
     assert set_cookies(response) == []
 
 
+@pytest.mark.parametrize("expected", [None, "stale"])
 def test_logout_keeps_a_session_the_page_did_not_expect(
-    endpoints: Endpoints, caplog: pytest.LogCaptureFixture
+    endpoints: Endpoints, caplog: pytest.LogCaptureFixture, expected: str | None
 ):
     # The page loaded under one session; another tab has since signed in.
     page_session, current = mint(), mint(30)
 
-    response = endpoints.client.post(
-        LOGOUT,
-        headers=SAME_ORIGIN
-        | {
-            "Cookie": f"{SESSION}={current}",
-            GENERATION: session_generation(page_session),
-        },
-    )
+    headers = SAME_ORIGIN | {"Cookie": f"{SESSION}={current}"}
+    if expected is not None:
+        headers[GENERATION] = session_generation(page_session)
+    response = endpoints.client.post(LOGOUT, headers=headers)
 
     assert response.status_code == 401
     body = response.json()
@@ -434,20 +433,15 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
     assert current not in all_logs(caplog)
 
 
-@pytest.mark.parametrize(
-    "case", ["expected generation", "no expectation", "no session", "dead session"]
-)
+@pytest.mark.parametrize("case", ["expected generation", "no session", "dead session"])
 def test_logout_clears_what_the_page_expects_or_cannot_use(
     endpoints: Endpoints, case: str
 ):
-    token = mint()
+    token = "not-a-token" if case == "dead session" else mint()
     headers = dict(SAME_ORIGIN)
     if case != "no session":
-        headers["Cookie"] = (
-            f"{SESSION}={'not-a-token' if case == 'dead session' else token}"
-        )
-    if case in ("expected generation", "no session"):
-        headers[GENERATION] = session_generation(token)
+        headers["Cookie"] = f"{SESSION}={token}"
+    headers[GENERATION] = session_generation(token)
 
     response = endpoints.client.post(LOGOUT, headers=headers)
 

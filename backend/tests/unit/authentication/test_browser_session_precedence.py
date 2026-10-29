@@ -7,21 +7,29 @@ only with BROWSER_SESSION_ENABLED on and when the Sec-Fetch-Site gate allows.
 
 import logging
 from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from dependency_injector import providers
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
+from eneo.authentication.browser_session import (
+    SESSION_GENERATION_HEADER,
+    SessionGenerationMismatchError,
+    session_generation,
+)
 from eneo.database.database import (
     AsyncSession,
     get_session,
     get_session_with_transaction,
 )
 from eneo.main.config import Settings, get_settings, set_settings
-from eneo.main.exceptions import AuthenticationException
+from eneo.main.container.container import Container
+from eneo.main.exceptions import AuthenticationException, NotFoundException
 from eneo.main.logging import OTELJSONFormatter
 from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.main import get_application
@@ -119,13 +127,25 @@ async def test_explicit_credentials_win_over_the_cookie(
     # Same-origin, so the gate would accept the cookie: precedence decides.
     for method in ("GET", "POST"):
         assert await credential(method, SAME_ORIGIN | headers, WITH_COOKIE) == expected
+        assert (
+            await credential(
+                method,
+                SAME_ORIGIN | headers | {SESSION_GENERATION_HEADER: "other-page"},
+                WITH_COOKIE,
+            )
+            == expected
+        )
 
 
 @pytest.mark.parametrize(
     ("method", "headers", "expected"),
     [
         # 6. Same-origin, any method.
-        ("POST", SAME_ORIGIN, COOKIE),
+        (
+            "POST",
+            SAME_ORIGIN | {SESSION_GENERATION_HEADER: session_generation(COOKIE)},
+            COOKIE,
+        ),
         ("GET", SAME_ORIGIN, COOKIE),
         # 7. A sibling or another tenant's host is same-site, not same-origin.
         ("GET", {"Sec-Fetch-Site": "same-site"}, None),
@@ -146,6 +166,23 @@ async def test_cookie_only_through_the_gate(
     method: str, headers: dict[str, str], expected: str | None
 ):
     assert await credential(method, headers, WITH_COOKIE) == expected
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("expected", [None, "matching", "stale", ""])
+async def test_cookie_request_is_bound_to_the_sending_document(
+    method: str, expected: str | None
+):
+    headers = dict(SAME_ORIGIN)
+    if expected is not None:
+        headers[SESSION_GENERATION_HEADER] = (
+            session_generation(COOKIE) if expected == "matching" else expected
+        )
+    if expected == "matching" or (expected is None and method in {"GET", "HEAD"}):
+        assert await credential(method, headers, WITH_COOKIE) == COOKIE
+    else:
+        with pytest.raises(SessionGenerationMismatchError):
+            await credential(method, headers, WITH_COOKIE)
 
 
 @pytest.mark.parametrize(
@@ -342,3 +379,58 @@ def test_bearer_request_ignores_the_cookie(me_endpoint):
     assert without_cookie.json() == with_cookie.json()
     assert calls == calls_without_cookie
     assert all(call == {"token": BEARER, "api_key": None} for call in calls)
+
+
+@pytest.mark.parametrize("expected", [None, "matching", "stale"])
+@pytest.mark.parametrize("operation", ["read", "mutation", "upload"])
+def test_real_routes_refuse_the_wrong_document_before_authentication_or_work(
+    me_endpoint, monkeypatch: pytest.MonkeyPatch, expected: str | None, operation: str
+):
+    from eneo.server.dependencies import container as container_dependencies
+
+    client, auth_calls = me_endpoint
+    domain = AsyncMock(side_effect=NotFoundException("Reached the domain service"))
+    monkeypatch.setattr(UserService, "invalidate_sessions", domain)
+    # A permitted upload should reach its domain service without using storage.
+    refresh = AsyncMock()
+    monkeypatch.setattr(
+        container_dependencies.object_content_runtime,
+        "refresh_object_store_configuration",
+        refresh,
+    )
+    monkeypatch.setattr(
+        container_dependencies, "load_container_upload_admission", AsyncMock()
+    )
+    headers = COOKIE_HEADER | SAME_ORIGIN
+    if expected is not None:
+        headers[SESSION_GENERATION_HEADER] = (
+            session_generation(COOKIE) if expected == "matching" else expected
+        )
+
+    if operation == "read":
+        response = client.get(ME, headers=headers)
+    elif operation == "mutation":
+        response = client.post("/api/v1/users/me/sessions/invalidate/", headers=headers)
+    else:
+        with Container.group_service.override(
+            providers.Object(SimpleNamespace(get_group=domain))
+        ):
+            response = client.post(
+                "/api/v1/groups/00000000-0000-0000-0000-000000000001/info-blobs/upload/",
+                files={"file": ("document.txt", b"document", "text/plain")},
+                headers=headers,
+            )
+
+    accepted = expected == "matching" or (expected is None and operation == "read")
+    if accepted:
+        assert response.status_code == (200 if operation == "read" else 404)
+        assert auth_calls
+        if operation != "read":
+            domain.assert_awaited_once()
+    else:
+        assert response.status_code == 401, response.text
+        assert response.json()["eneo_error_code"] == 9080
+        assert SESSION_GENERATION_HEADER not in response.headers
+        assert auth_calls == []
+        domain.assert_not_awaited()
+        refresh.assert_not_awaited()

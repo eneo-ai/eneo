@@ -82,6 +82,29 @@ existing session to another account, including one with the same username.
 The identity contract belongs to Eneo session tokens. Identity-provider tokens
 are validated separately during OIDC login and exchanged for an Eneo session.
 
+#### Backend browser sessions
+
+The backend-served web app remains disabled by default. With
+`BROWSER_SESSION_ENABLED`, an authenticated cookie response includes
+`Eneo-Session-Generation`, a fingerprint of the selected session credential.
+It is neither an authentication credential nor a CSRF token.
+
+A document must remember its initial generation and send it on subsequent
+cookie-authenticated requests. Only GET and HEAD may omit it for bootstrap;
+a supplied mismatch on any method returns HTTP 401 with `eneo_error_code: 9080`
+before authentication or domain work. Cookie writes without the header are
+also refused. This prevents a tab from acting as another account after a
+different tab replaces the shared cookie. Bearer and API-key authentication
+retain their existing precedence and do not use this check.
+
+Password and federation login establish a new session and must end with a new
+document. Logout requires the expected generation whenever a session cookie
+is present, including an expired cookie; without a cookie it still returns 204
+and clears any remaining authentication cookies.
+A document must never adopt a replacement generation to retry a refused write.
+These backend rules do not yet establish complete cross-tab protection in the
+beta UI; its Vite transport and route migration must be completed before rollout.
+
 #### Deploying the identity contract
 
 The transition requires users to sign in again. Pre-upgrade Eneo and module

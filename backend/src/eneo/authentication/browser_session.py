@@ -177,6 +177,7 @@ def session_token_from_request(request: Request) -> str | None:
     token = session_cookie(request, settings)
     if not token or not gate_allows(request):
         return None
+    refuse_superseded_session(request, token)
     generation = session_generation(token)
     request.scope.setdefault("state", {})[_SELECTED_GENERATION] = generation
     return token
@@ -215,11 +216,14 @@ def refuse_superseded_session(request: Request, token: str) -> None:
 
     The page names the generation it was loaded with; when the cookie now
     holds another credential (another tab signed in or out), acting on it
-    would act as someone the page does not show. Without the header nothing
-    is compared. The domain-exception handler logs the refusal.
+    would act as someone the page does not show. Only bootstrap reads may
+    omit the header; writes must name their expected session. The domain
+    exception handler logs the refusal.
     """
     expected = request.headers.get(SESSION_GENERATION_HEADER)
-    if expected is not None and expected != session_generation(token):
+    if expected is None and request.method in SAFE_METHODS:
+        return
+    if expected != session_generation(token):
         raise SessionGenerationMismatchError()
 
 

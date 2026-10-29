@@ -20,6 +20,7 @@ SESSION = "__Host-eneo_web"
 GENERATION = "Eneo-Session-Generation"
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 SESSION_LOGIN = "/api/v1/auth/session/password/"
+PROBE = "/api/v1/auth/session/"
 TOKEN_LOGIN = "/api/v1/users/login/token/"
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 TICKETS = "/api/v1/module-auth/tickets/"
@@ -128,7 +129,9 @@ async def test_session_cookie_signs_the_browser_in_and_out(
 
     # A Session-only endpoint admits the cookie session (no API key behind it)
     # and reaches the broker, which knows no such module.
-    ticket = await client.post(TICKETS, json=TICKET, headers=cookie | SAME_ORIGIN)
+    ticket = await client.post(
+        TICKETS, json=TICKET, headers=cookie | SAME_ORIGIN | {GENERATION: generation}
+    )
     assert ticket.status_code == 404, ticket.text
     # The broker's NotFoundException, not a routing miss (which has no code).
     assert ticket.json()["eneo_error_code"] == 9000
@@ -173,7 +176,8 @@ async def test_a_password_that_must_be_replaced_still_signs_in(
 
     signed_in = await _login(client, SESSION_LOGIN, email, PASSWORD)
     assert signed_in.status_code == 204, signed_in.text
-    cookie = {"Cookie": f"{SESSION}={_session_token(signed_in)}"}
+    token = _session_token(signed_in)
+    cookie = {"Cookie": f"{SESSION}={token}", GENERATION: session_generation(token)}
 
     me = await client.get("/api/v1/users/me/", headers=cookie | SAME_ORIGIN)
     assert me.status_code == 200, me.text
@@ -185,6 +189,59 @@ async def test_a_password_that_must_be_replaced_still_signs_in(
     assert blocked.json()["eneo_error_code"] == 9070
     # Admitted is not authenticated: a refused request names no generation.
     assert GENERATION not in blocked.headers
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_document_cannot_use_a_replacement_session_from_another_tenant(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    # Each helper creates its own tenant: the ambient cookie now belongs to a
+    # different account and organisation from the document's initial session.
+    first_email = await _create_local_user(client, super_admin_token)
+    second_email = await _create_local_user(client, super_admin_token)
+    first = _session_token(await _login(client, SESSION_LOGIN, first_email, PASSWORD))
+    second = _session_token(await _login(client, SESSION_LOGIN, second_email, PASSWORD))
+    current = SAME_ORIGIN | {"Cookie": f"{SESSION}={second}"}
+    stale = current | {GENERATION: session_generation(first)}
+    invalidate = "/api/v1/users/me/sessions/invalidate/"
+
+    refused_read = await client.get("/api/v1/users/me/", headers=stale)
+    assert refused_read.status_code == 401, refused_read.text
+    assert refused_read.json()["eneo_error_code"] == 9080
+    assert second_email not in refused_read.text
+
+    for headers in (current, stale):
+        refused_write = await client.post(invalidate, headers=headers)
+        assert refused_write.status_code == 401, refused_write.text
+        assert refused_write.json()["eneo_error_code"] == 9080
+        refused_upload = await client.post(
+            "/api/v1/groups/00000000-0000-0000-0000-000000000001/info-blobs/upload/",
+            files={"file": ("document.txt", b"document", "text/plain")},
+            headers=headers,
+        )
+        assert refused_upload.status_code == 401, refused_upload.text
+        assert refused_upload.json()["eneo_error_code"] == 9080
+
+    # Neither rejected write invalidated the replacement account's sessions.
+    matching = current | {GENERATION: session_generation(second)}
+    still_signed_in = await client.get("/api/v1/users/me/", headers=matching)
+    assert still_signed_in.status_code == 200, still_signed_in.text
+    assert still_signed_in.json()["email"] == second_email
+    accepted_write = await client.post(invalidate, headers=matching)
+    assert accepted_write.status_code == 204, accepted_write.text
+    assert (await client.get(PROBE, headers=matching)).status_code == 401
+    # Credential invalidation of account B never invalidates A.
+    first_probe = await client.get(
+        PROBE,
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{SESSION}={first}", GENERATION: session_generation(first)},
+    )
+    assert first_probe.status_code == 204, first_probe.text
 
 
 @pytest.mark.integration
