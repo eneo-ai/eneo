@@ -189,42 +189,70 @@ user offboarding keeps its existing database-cascade behavior.
 
 ### Files nothing uses anymore
 
-Eneo does not keep a File after its last use. The same locked check runs
-whenever a use disappears:
+Eneo releases unused Files through a shared reference check. Scheduled retention
+uses bounded atomic units; manual deletion releases unused Files immediately:
 
 - **Deleting a conversation or App run**, by hand or through conversation
   retention, deletes the Files that only that conversation or run used. A File
   still used elsewhere is kept.
-- **A daily cleanup at 03:30 UTC** deletes every other File family that no chat,
-  Assistant, App, or App run uses and that is older than 24 hours. This covers
+- **The daily retention task (03:30 by default, in the worker's time zone)** removes other File families that no chat,
+  Assistant, App, or App run uses and that are older than the configured grace period (24 hours by default). This covers
   Files left behind when an Assistant, App, Space, or group chat is deleted,
   uploads that were never attached, and a File removed from an Assistant or
   App that nothing else uses. The 24 hours protect uploads that are still on
   their way to a chat message or App run; they do not measure how long a File
   has been unused. A chat message, App run or service call that names a File
   deleted this way is refused with the missing file id (`400`), so the File is
-  uploaded again rather than silently left out.
+  uploaded again rather than silently left out. The task walks every root File
+  past the grace period in creation order, one candidate per read, and only
+  locks and proves the families whose own use is absent; a root still in use
+  costs one examined row and is counted as `files_in_use`, not reported as
+  blocked.
 
 Knowledge is never part of this cleanup. Documents in a collection and the
 originals Eneo retains for them are not Files: they are stored as info blobs
-with their own content references, and a piece of content shared between a
-File and an info blob is only removed once both references are gone. A File
-attached to an Assistant or App stays in use for as long as the attachment
-exists.
+with their own content references. A File attached to an Assistant or App stays
+in use for as long as the attachment exists.
 
-Deleting the File releases its content, and the object-content lifecycle
-removes the bytes, including audio recordings and transcriptions. Removal runs
-in bounded batches, so after a large cleanup storage usage falls over a few
-hours rather than at once.
+Deleting the File releases its content references in the same database
+transaction. Object content then removes unreferenced bytes from PostgreSQL
+inline storage or S3, including audio recordings and transcriptions. Shared
+content stays until its last reference is released and any content hold or
+minimum retention period has ended. Physical removal runs in bounded background
+batches; an unavailable object store is retried, so File deletion does not mean
+that its stored bytes have already been removed.
+
+Conversation expiry removes that conversation's use of a File. It does not
+enforce a decision to erase the File from every conversation or resource.
+Remaining references prevent deletion, but do not establish a legal basis for
+retention; the organization must define the permitted purposes and retention
+periods. A file-wide erasure request requires its own scope and resolution of
+remaining uses. Do not report it complete merely because a conversation or
+retention execution has finished.
 
 Preview the cleanup inside the worker container. It reports the number of
-File families and managed bytes per organization without deleting anything:
+File families per organization (`families`, `families_by_tenant`) and their
+managed bytes in total (`managed_bytes`) without deleting anything:
 
 ```bash
 docker compose exec worker python -m eneo.files.unused_file_cleanup preview
 ```
 
-`run` performs the same cleanup immediately.
+Preview is advisory. It takes database locks while it checks families, under the
+same statement and lock timeouts as a retention chunk. Its totals can include
+families that a bounded execution retains because of its limits.
+
+`run` starts one budgeted execution of the registered unused-files task and prints
+its job id, outcome, counts and blocked counts as JSON. It honours the same
+emergency switch, reference checks, audit and resumable cursor as the nightly
+execution. `partial` means work remains; it does not mean every candidate was
+removed. Locked or oversized families stay intact. `counts` holds disposal facts
+(`families.roots_deleted`, `families.files_deleted`) and observations
+(`families.files_in_use`) alike. `outcome` is `null` with no `job_run_id` when
+another execution held the task and nothing ran; it is `running` with
+`error_code: finish_timeout` when the work was done but the final outcome could
+not be written, and the next execution records that row as superseded. See [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
+for settings and health reporting.
 
 ## Choose the right deployment
 
@@ -465,6 +493,10 @@ and paired restore. Use one dedicated private active-content bucket with
 versioning and Object Lock disabled. Eneo currently deletes one opaque key and
 does not claim to purge retained historical object versions; snapshots and
 paired backups own recovery.
+The connection test does not inspect versioning or Object Lock settings. Verify
+these with the provider, including whether earlier versioning left historical
+versions behind: suspending versioning does not remove them. Eneo's deletion
+confirmation checks the current key, not those versions or provider replicas.
 
 Range reads reuse the verification chunks calculated during the original
 upload. Eneo stores each object's chunk size, so changing multipart tuning later
@@ -662,6 +694,10 @@ the way back is a fresh copy in the other direction followed by **Change
 storage location**. When you are satisfied, select **Remove configuration** and
 decommission the old bucket at your provider.
 
+Removing the configuration does not erase the old bucket. Include its copies in
+the organization's retention procedure; deletion in the active destination does
+not confirm deletion from previous destinations.
+
 If anything looks wrong, switch back, correct the copy, and switch again.
 
 ### Back up and restore
@@ -673,6 +709,17 @@ For the second case, stop writers and reconciliation, give both backups one
 recovery ID, preserve `OBJECT_CONTENT_DEPLOYMENT_ID` and the bucket marker,
 restore both halves in isolation, verify checksums and sample reads, then reopen
 traffic. Never combine a newer database with an older bucket or the reverse.
+
+Define backup retention periods, access restrictions and responsibility for
+expiry with the provider. PostgreSQL row deletion and current-key deletion in
+S3 do not remove backup copies. Before reopening a restored system, reconcile
+deletions made since the recovery point so erased data does not become available
+again. Keep the evidence needed for that reconciliation outside the restored
+snapshot. Eneo does not automatically replay manual deletions or certify backup
+expiry; a successful retention run is not evidence that all copies are gone.
+These operational procedures follow the concerns described in
+[IMY's guidance on deletion routines, section 5.1.3](https://www.imy.se/globalassets/dokument/rapporter/transkribering-inom-socialtjansten.pdf)
+and its [report on erasure and backups, page 17](https://www.imy.se/globalassets/dokument/rapporter/imy-nationell-rapport-till-edpb-svenska.pdf).
 
 The File/Icon schema expansion needs this pre-upgrade recovery point, but its
 online worker does not require a new full backup for every batch. Keep the

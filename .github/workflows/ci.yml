@@ -251,6 +251,15 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify retention migration rollback
+        if: matrix.suite == 'migrations'
+        run: >-
+          uv run pytest -q -m migration_isolation
+          tests/integration/migrations/test_retention_job_runs_round_trip.py
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
       - name: Verify crawler migration rollback
         # These tests own disposable databases and deliberately change their schema.
         run: >-

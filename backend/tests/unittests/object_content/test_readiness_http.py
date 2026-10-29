@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 import eneo.object_content.runtime as runtime_module
 import eneo.server.main as server_main
+from eneo.data_retention.application.retention_health import (
+    RetentionHealth,
+    RetentionHealthStatus,
+)
 from eneo.database.database import DatabaseSessionManager
 from eneo.object_content.runtime import (
     ObjectContentReadiness,
@@ -21,6 +25,15 @@ from eneo.object_content.runtime import (
 from eneo.server.main import get_application
 from eneo.worker import redis as worker_redis
 from eneo.worker.redis.client import WorkerHealth
+
+
+@pytest.fixture(autouse=True)
+def retention_health(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    health = AsyncMock(
+        return_value=RetentionHealth(status=RetentionHealthStatus.HEALTHY)
+    )
+    monkeypatch.setattr(server_main, "retention_health", health)
+    return health
 
 
 class _CountingDisabledDatabase(DatabaseSessionManager):
@@ -108,9 +121,23 @@ def test_liveness_stays_green_while_object_store_readiness_recovers(
     }
 
 
-def test_readiness_is_healthy_when_object_store_is_not_configured(
-    monkeypatch,
+@pytest.mark.parametrize(
+    "retention_status,expected",
+    [
+        (RetentionHealthStatus.INITIALIZING, "HEALTHY"),
+        (RetentionHealthStatus.HEALTHY, "HEALTHY"),
+        (RetentionHealthStatus.DEGRADED, "DEGRADED"),
+        (RetentionHealthStatus.UNKNOWN, "DEGRADED"),
+    ],
+)
+def test_readiness_combines_retention_and_object_store_status(
+    monkeypatch: pytest.MonkeyPatch,
+    retention_health: AsyncMock,
+    retention_status: RetentionHealthStatus,
+    expected: str,
 ) -> None:
+    """Mutant: ignore unavailable retention when the object store is healthy."""
+    retention_health.return_value = RetentionHealth(status=retention_status)
     monkeypatch.setattr(
         worker_redis,
         "get_worker_health",
@@ -131,6 +158,8 @@ def test_readiness_is_healthy_when_object_store_is_not_configured(
     response = client.get("/api/readyz")
 
     assert response.status_code == 200
+    assert response.json()["detail"]["status"] == expected
+    assert response.json()["detail"]["retention"]["status"] == retention_status.value
     assert response.json()["detail"]["object_content"] == {
         "status": "NOT_CONFIGURED",
         "code": "object_store_not_configured",

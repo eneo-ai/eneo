@@ -352,6 +352,20 @@
             "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar, with release notes using the available width at /news. News and guided tours follow your feature permissions. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
             "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny, med nyheter över hela bredden på /news. Nyheter och guidade turer anpassas efter dina behörigheter. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
           }
+        },
+        {
+          "id": "retention-runs-in-audit-log",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Follow retention runs in the audit log",
+            "sv": "Följ gallringskörningar i granskningsloggen"
+          },
+          "body": {
+            "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
+            "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
+          }
         }
       ]
     },

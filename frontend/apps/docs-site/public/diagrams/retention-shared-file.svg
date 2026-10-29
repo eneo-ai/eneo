@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="330" viewBox="0 0 860 330" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">A file shared by two spaces</title>
+  <desc id="d">Space A keeps chat history 30 days and Space B 60 days. The same file is attached in both. On night 31 the chat in Space A is removed and the file is kept because Space B still uses it. On night 61 the chat in Space B is removed, the last use is gone, and the file and its bytes are deleted.</desc>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+  <style>
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .keep{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .gone{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .file{fill:#e8f5e9;stroke:#2e7d32;stroke-width:2}
+    .t{fill:#222;font-size:14px}
+    .h{fill:#222;font-size:15px;font-weight:600}
+    .s{fill:#444;font-size:12px}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .axis{stroke:#999;stroke-width:1}
+  </style>
+  <!-- timeline -->
+  <line class="axis" x1="40" y1="300" x2="820" y2="300"/>
+  <text class="s" x="140" y="320" text-anchor="middle">day 0: uploaded and attached in both</text>
+  <text class="s" x="410" y="320" text-anchor="middle">night 31</text>
+  <text class="s" x="710" y="320" text-anchor="middle">night 61</text>
+  <!-- day 0 column -->
+  <rect class="box" x="40" y="40" width="200" height="54" rx="8"/><text class="h" x="140" y="63" text-anchor="middle">Space A, 30 days</text><text class="s" x="140" y="82" text-anchor="middle">chat with the file attached</text>
+  <rect class="box" x="40" y="110" width="200" height="54" rx="8"/><text class="h" x="140" y="133" text-anchor="middle">Space B, 60 days</text><text class="s" x="140" y="152" text-anchor="middle">chat with the same file attached</text>
+  <rect class="file" x="40" y="190" width="200" height="54" rx="8"/><text class="h" x="140" y="213" text-anchor="middle">The file</text><text class="s" x="140" y="232" text-anchor="middle">one upload, two uses</text>
+  <!-- night 31 column -->
+  <rect class="gone" x="300" y="40" width="220" height="54" rx="8"/><text class="h" x="410" y="63" text-anchor="middle">Chat in Space A removed</text><text class="s" x="410" y="82" text-anchor="middle">its link to the file removed with it</text>
+  <rect class="box" x="300" y="110" width="220" height="54" rx="8"/><text class="h" x="410" y="133" text-anchor="middle">Chat in Space B stays</text><text class="s" x="410" y="152" text-anchor="middle">its period has not passed</text>
+  <rect class="keep" x="300" y="190" width="220" height="54" rx="8"/><text class="h" x="410" y="213" text-anchor="middle">File kept: still in use</text><text class="s" x="410" y="232" text-anchor="middle">counted as files_in_use, not an error</text>
+  <!-- night 61 column -->
+  <rect class="gone" x="600" y="110" width="220" height="54" rx="8"/><text class="h" x="710" y="133" text-anchor="middle">Chat in Space B removed</text><text class="s" x="710" y="152" text-anchor="middle">the last use of the file is gone</text>
+  <rect class="gone" x="600" y="190" width="220" height="54" rx="8"/><text class="h" x="710" y="213" text-anchor="middle">File and bytes deleted</text><text class="s" x="710" y="232" text-anchor="middle">object content storage writes a tombstone</text>
+  <!-- edges -->
+  <path class="edge" d="M240,67 H300"/><path class="edge" d="M240,137 H300"/><path class="edge" d="M240,217 H300"/>
+  <path class="edge" d="M520,137 H600"/><path class="edge" d="M520,217 H600"/>
+  <text class="s" x="40" y="275">Space A's shorter period never reaches Space B's data. Erasing the file from both spaces at once is a separate, explicit decision.</text>
+</svg>
