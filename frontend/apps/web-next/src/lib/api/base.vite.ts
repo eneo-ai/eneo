@@ -6,10 +6,12 @@ export const API_BASE = "";
 export const CHAT_API = "/api/v1/conversations/?version=3";
 export const JOB_EVENTS_PATH = "/api/v1/jobs/events/";
 
-// Global login discovery is public, so it has no authenticated session generation.
+// Login discovery is public, so it has no authenticated session generation.
 function isPublicDiscovery(request: Request): boolean {
+  const path = new URL(request.url).pathname;
   return (
-    request.method === "GET" && new URL(request.url).pathname === "/api/v1/auth/federation-status"
+    request.method === "GET" &&
+    (path === "/api/v1/auth/federation-status" || path === "/api/v1/auth/tenants")
   );
 }
 

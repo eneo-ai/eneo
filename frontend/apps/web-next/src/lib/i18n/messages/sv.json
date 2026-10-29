@@ -6946,5 +6946,7 @@
   "session_changed_description": "Sessionen är inte längre densamma som när sidan öppnades. Ladda om för att fortsätta.",
   "session_reload": "Ladda om sidan",
   "session_check_failed": "Sessionen kunde inte kontrolleras",
-  "session_check_retry_description": "Försök igen innan du sparar eller hämtar ny information."
+  "session_check_retry_description": "Försök igen innan du sparar eller hämtar ny information.",
+  "logout_pending": "Loggar ut…",
+  "logout_failed": "Utloggningen misslyckades. Försök igen."
 }

@@ -1773,5 +1773,7 @@
   "session_changed_description": "Your session is no longer the one this page opened with. Reload to continue.",
   "session_reload": "Reload page",
   "session_check_failed": "Your session could not be checked",
-  "session_check_retry_description": "Try again before saving or loading new information."
+  "session_check_retry_description": "Try again before saving or loading new information.",
+  "logout_pending": "Signing out…",
+  "logout_failed": "Sign-out failed. Try again."
 }

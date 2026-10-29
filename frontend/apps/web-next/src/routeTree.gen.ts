@@ -11,7 +11,11 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AppRouteImport } from "./routes/_app"
+import { Route as LogoutRouteImport } from "./routes/logout"
 import { Route as AppSplatRouteImport } from "./routes/_app/$"
+import { Route as LoginIndexRouteImport } from "./routes/login/index"
+import { Route as LoginFailedRouteImport } from "./routes/login/failed"
+import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/switch-organisation"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -22,37 +26,93 @@ const AppRoute = AppRouteImport.update({
   id: "/_app",
   getParentRoute: () => rootRouteImport,
 } as any)
+const LogoutRoute = LogoutRouteImport.update({
+  id: "/logout",
+  path: "/logout",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppSplatRoute = AppSplatRouteImport.update({
   id: "/$",
   path: "/$",
   getParentRoute: () => AppRoute,
 } as any)
+const LoginIndexRoute = LoginIndexRouteImport.update({
+  id: "/login/",
+  path: "/login/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginFailedRoute = LoginFailedRouteImport.update({
+  id: "/login/failed",
+  path: "/login/failed",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginSwitchOrganisationRoute = LoginSwitchOrganisationRouteImport.update({
+  id: "/login/switch-organisation",
+  path: "/login/switch-organisation",
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/logout": typeof LogoutRoute
   "/$": typeof AppSplatRoute
+  "/login/failed": typeof LoginFailedRoute
+  "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/login/": typeof LoginIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/logout": typeof LogoutRoute
   "/$": typeof AppSplatRoute
+  "/login/failed": typeof LoginFailedRoute
+  "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/login": typeof LoginIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/_app": typeof AppRouteWithChildren
+  "/logout": typeof LogoutRoute
   "/_app/$": typeof AppSplatRoute
+  "/login/failed": typeof LoginFailedRoute
+  "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/login/": typeof LoginIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: "/" | "/$"
+  fullPaths:
+    | "/"
+    | "/logout"
+    | "/$"
+    | "/login/failed"
+    | "/login/switch-organisation"
+    | "/login/"
   fileRoutesByTo: FileRoutesByTo
-  to: "/" | "/$"
-  id: "__root__" | "/" | "/_app" | "/_app/$"
+  to:
+    | "/"
+    | "/logout"
+    | "/$"
+    | "/login/failed"
+    | "/login/switch-organisation"
+    | "/login"
+  id:
+    | "__root__"
+    | "/"
+    | "/_app"
+    | "/logout"
+    | "/_app/$"
+    | "/login/failed"
+    | "/login/switch-organisation"
+    | "/login/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  LogoutRoute: typeof LogoutRoute
+  LoginFailedRoute: typeof LoginFailedRoute
+  LoginSwitchOrganisationRoute: typeof LoginSwitchOrganisationRoute
+  LoginIndexRoute: typeof LoginIndexRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -71,12 +131,40 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/logout": {
+      id: "/logout"
+      path: "/logout"
+      fullPath: "/logout"
+      preLoaderRoute: typeof LogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/_app/$": {
       id: "/_app/$"
       path: "/$"
       fullPath: "/$"
       preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
+    }
+    "/login/": {
+      id: "/login/"
+      path: "/login"
+      fullPath: "/login/"
+      preLoaderRoute: typeof LoginIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/login/failed": {
+      id: "/login/failed"
+      path: "/login/failed"
+      fullPath: "/login/failed"
+      preLoaderRoute: typeof LoginFailedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/login/switch-organisation": {
+      id: "/login/switch-organisation"
+      path: "/login/switch-organisation"
+      fullPath: "/login/switch-organisation"
+      preLoaderRoute: typeof LoginSwitchOrganisationRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -94,6 +182,10 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  LogoutRoute: LogoutRoute,
+  LoginFailedRoute: LoginFailedRoute,
+  LoginSwitchOrganisationRoute: LoginSwitchOrganisationRoute,
+  LoginIndexRoute: LoginIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
