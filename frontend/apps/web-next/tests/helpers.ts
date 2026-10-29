@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 
 export const MOCK_REPLY = process.env.MOCK_REPLY ?? "E2E mock completion: pong";
+export const E2E_CREDENTIALS = {
+  username: process.env.E2E_USER ?? "user@example.com",
+  password: process.env.E2E_PASSWORD ?? "Password1!"
+};
 
 let counter = 0;
 

@@ -539,7 +539,7 @@ jobs:
         # the web-next build. "Wait for the E2E stack" collects the exit status
         # before the tests start.
         run: |
-          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
       - name: Set up frontend dependencies
@@ -593,13 +593,21 @@ jobs:
           E2E_PASSWORD: E2ePassword123!
         run: bun run test:e2e
 
+      - name: Run E2E against FastAPI serving the Vite build
+        working-directory: frontend/apps/web-next
+        env:
+          E2E_BASE_URL: http://localhost:8124
+          E2E_USER: e2e@example.com
+          E2E_PASSWORD: E2ePassword123!
+        run: bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
+
       - name: Capture E2E stack diagnostics
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
-          docker compose -f docker-compose.e2e.ci.yml ps --all \
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml ps --all \
             > e2e-artifacts/compose-ps.txt
-          docker compose -f docker-compose.e2e.ci.yml logs \
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml logs \
             --no-color --timestamps \
             > e2e-artifacts/compose.log
 
@@ -611,13 +619,15 @@ jobs:
           path: |
             frontend/apps/web-next/playwright-report
             frontend/apps/web-next/test-results
+            frontend/apps/web-next/playwright-report-fastapi
+            frontend/apps/web-next/test-results-fastapi
             e2e-artifacts
           retention-days: 7
           if-no-files-found: ignore
 
       - name: Stop E2E stack
         if: ${{ always() }}
-        run: docker compose -f docker-compose.e2e.ci.yml down -v
+        run: docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v
 
   schema-drift:
     name: Schema drift

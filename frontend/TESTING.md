@@ -152,8 +152,8 @@ server of its own:
 # Vite dev server, started separately with bun run dev:vite
 E2E_BASE_URL=http://localhost:3101 bun run test:e2e
 
-# FastAPI serving build:vite output with WEB_APP_ENABLED enabled
-E2E_BASE_URL=http://localhost:8123 bun run test:e2e
+# FastAPI serving build:vite output with WEB_APP_ENABLED and BROWSER_SESSION_ENABLED
+E2E_BASE_URL=http://localhost:8123 bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
 ```
 
 Use the isolated test backend and set `E2E_USER` and `E2E_PASSWORD` for its seeded
@@ -162,6 +162,10 @@ user. In the E2E Docker stack the FastAPI URL is `http://localhost:8124`; use
 address. During migration, select specs for routes already ported to Vite;
 Next-specific checks and unported screens still require the default server.
 Production CSP checks require the FastAPI-served build.
+
+CI enables both backend settings through `docker-compose.e2e.web-app.yml` and
+runs these two specs after the existing suite. They cover the built app's CSP,
+boot failure and recovery, locale, cookie login and cross-origin rejection.
 
 External-server results go to `test-results-fastapi/`, with the CI HTML report
 in `playwright-report-fastapi/`. Both are ignored by Git. With `E2E_BASE_URL`
