@@ -5292,10 +5292,12 @@
   "skills_reference_audit_calls": "Anrop {calls}",
   "skills_reference_used_via": "Ingår via {names}, även när det egna valet är Av.",
   "skills_reference_preview_failed": "Förhandsgranskningen kunde inte hämtas. Försök igen.",
-  "skills_reference_preview_ready": "Förhandsgranskningen är klar.",
   "skills_reference_version_short": "v{version}",
   "skills_reference_back": "Tillbaka till listan",
   "skills_reference_placeholder": "Beskriv hur Skillen ska hjälpa till. Skriv @ för att använda andra Skills eller verktyg.",
+  "eneo_error_9081": "Skillen används av en sparad version av en annan Skill och kan inte tas bort. Avaktivera den om den inte längre ska kunna väljas.",
+  "organization_skills_rollout_attachment_limit": "För många Skills inklusive hjälpskills",
+  "organization_skills_rollout_conflicting_revisions": "Olika versioner av samma Skill",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
   "mcp_toggle_server": "Aktivera {name}",
@@ -6862,6 +6864,6 @@
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
   "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
-  "eneo_error_9081": "Skillen används av en sparad version av en annan Skill och kan inte tas bort. Avaktivera den om den inte längre ska kunna väljas.",
+  "skills_reference_preview_ready": "Förhandsgranskningen är klar.",
   "organization_skills_rollout_incompatible": "Kunde inte uppdateras med nuvarande inställningar"
 }

@@ -5292,10 +5292,12 @@
   "skills_reference_audit_calls": "Calls {calls}",
   "skills_reference_used_via": "Included through {names}, even when its independent selection is Off.",
   "skills_reference_preview_failed": "The preview could not be loaded. Try again.",
-  "skills_reference_preview_ready": "The preview is ready.",
   "skills_reference_version_short": "v{version}",
   "skills_reference_back": "Back to results",
   "skills_reference_placeholder": "Describe how this Skill should help. Type @ to use other Skills or tools.",
+  "eneo_error_9081": "A saved version of another Skill refers to this Skill, so it cannot be deleted. Deactivate it if it should no longer be available for selection.",
+  "organization_skills_rollout_attachment_limit": "Too many Skills including helpers",
+  "organization_skills_rollout_conflicting_revisions": "Conflicting versions of the same Skill",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
   "mcp_tools_count": "{count, plural, one {# tool} other {# tools}}",
   "mcp_toggle_server": "Enable {name}",
@@ -6862,6 +6864,6 @@
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
   "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
-  "eneo_error_9081": "A saved version of another Skill refers to this Skill, so it cannot be deleted. Deactivate it if it should no longer be available for selection.",
+  "skills_reference_preview_ready": "The preview is ready.",
   "organization_skills_rollout_incompatible": "Incompatible with the current configuration"
 }
