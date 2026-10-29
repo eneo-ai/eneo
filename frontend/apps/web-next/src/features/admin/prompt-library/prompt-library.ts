@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { matchesSearch } from "@/features/spaces/resource-filter";
+import { matchesSearch } from "@/lib/search";
 
 /** A list row: the text is left out for payload size. */
 export type Entry = Schema<"PromptLibraryEntrySparse">;

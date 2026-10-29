@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ResourceAttachmentsSection } from "@/features/files/resource-attachments-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 

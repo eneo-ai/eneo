@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "@/lib/i18n/messages/en.json";
 import { renderInApp } from "@/test/render";
 
@@ -108,9 +108,9 @@ describe("SharePointSubscriptions", () => {
     listed.subscriptions = [subscription({ consecutive_renewal_failures: 1 })];
     // Swedish says "1 förnyelsefel" either way; English tells the forms apart.
     renderInApp(
-      <NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Stockholm">
+      <IntlProvider locale="en" messages={en} timeZone="Europe/Stockholm">
         <SharePointSubscriptions />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     expect(await screen.findByText("1 renewal failure")).toBeTruthy();
   });

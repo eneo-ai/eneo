@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- FastAPI substitutes only __ENEO_CSP_NONCE__ and __ENEO_HTML_LANG__ on each response. -->
+<html lang="__ENEO_HTML_LANG__" data-astryx-theme="eneo" class="antialiased">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111419" />
+    <meta name="description" content="Eneo" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Eneo" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link
+      rel="preload"
+      href="/fonts/figtree-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin=""
+    />
+    <style nonce="__ENEO_CSP_NONCE__" data-astryx-chat-following-style>
+      [data-astryx-chat-following] {
+        overflow-anchor: none !important;
+      }
+    </style>
+    <script nonce="__ENEO_CSP_NONCE__">
+      (() => {
+        let theme = "system";
+        try {
+          const stored = localStorage.getItem("theme");
+          if (stored === "light" || stored === "dark") theme = stored;
+        } catch {}
+        if (theme === "system")
+          theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        const root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add(theme);
+        root.dataset.theme = theme;
+        root.style.colorScheme = theme;
+      })();
+    </script>
+  </head>
+  <body class="min-h-svh">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

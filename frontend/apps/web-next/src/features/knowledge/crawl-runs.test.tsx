@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
@@ -75,6 +75,16 @@ describe("CrawlRunsTable", () => {
     // Named like the website page's tab it fills.
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     expect(statusColumn()).toEqual(["Delvis klar", "Misslyckades", "Klar"]);
+    // On a phone the start time stays in view while the run scrolls sideways
+    // (Astryx offsets pinned cells); an iPad held upright (770 px) shows it whole.
+    const table = screen.getByRole("table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .filter((cell) => cell.style.insetInlineStart)
+        .map((cell) => cell.textContent)
+    ).toEqual(["Startad"]);
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();
@@ -120,11 +130,11 @@ describe("CrawlRunsTable", () => {
   it("renders dates only after hydration, in the viewer's time zone", () => {
     const html = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
+        <IntlProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
           <AstryxProvider>
             <CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />
           </AstryxProvider>
-        </NextIntlClientProvider>
+        </IntlProvider>
       </QueryClientProvider>
     );
     // The server does not know the viewer's zone: no date in its HTML to mismatch.

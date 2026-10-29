@@ -12,7 +12,7 @@ import {
   Folder,
   Globe
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { browserApi } from "@/lib/api/browser";

@@ -2,11 +2,11 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { SearchX, Wrench } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { ResourceCollection } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -60,13 +60,11 @@ export function ServicesPage() {
                 isCompact
               />
             ) : (
-              <ul className={RESOURCE_GRID_CLASS}>
+              <ResourceCollection>
                 {filteredServices.map((service) => (
-                  <li key={service.id} className="min-w-0">
-                    <ServiceTile service={service} />
-                  </li>
+                  <ServiceTile key={service.id} service={service} />
                 ))}
-              </ul>
+              </ResourceCollection>
             )}
           </>
         )}

@@ -1,10 +1,12 @@
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import {
   apiErrorFromResponse,
   EneoApiError,
+  errorReference,
+  errorReferenceLines,
   extractTraceId,
   getErrorMessage,
   unwrap
@@ -198,6 +200,20 @@ describe("getErrorMessage", () => {
     expect(refused(9061)).toBe("Det nuvarande lösenordet är felaktigt.");
   });
 
+  it("words an unexpected failure in the user's language instead of the backend's English", () => {
+    // The 500 body: `{ error, error_id, message }` with no eneo_error_code.
+    const error = apiErrorFromResponse(errorResponse(500), {
+      error: "Internal server error",
+      error_id: "8bc91e0a",
+      message:
+        "An unexpected error occurred. Please try again or contact support with the error_id."
+    });
+
+    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+      "Vi upplever vissa svårigheter, försök igen senare."
+    );
+  });
+
   it("words a taken name for every resource that answers with it, not only models", () => {
     // Providers, MCP servers, templates, files, modules and models all send 9017.
     const error = new EneoApiError("An MCP server with this name already exists.", {
@@ -211,5 +227,38 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, translator("en", en))).toBe(
       "This name is already in use. Choose a different one."
     );
+  });
+});
+
+describe("errorReference", () => {
+  const failure = (ids: { errorId?: string; traceId?: string }) =>
+    new EneoApiError("Failed", { status: 500, ...ids });
+
+  it("returns both the backend error id and the trace id", () => {
+    expect(errorReference(failure({ errorId: "8bc91e0a", traceId: "trace-1" }))).toEqual({
+      errorId: "8bc91e0a",
+      traceId: "trace-1"
+    });
+  });
+
+  it("returns whichever id the error carries", () => {
+    expect(errorReference(failure({ errorId: "8bc91e0a" }))).toEqual({ errorId: "8bc91e0a" });
+    expect(errorReference(failure({ traceId: "trace-1" }))).toEqual({ traceId: "trace-1" });
+  });
+
+  it("returns no ids for an error without them or a non-API error", () => {
+    expect(errorReference(failure({}))).toEqual({});
+    expect(errorReference(new Error("boom"))).toEqual({});
+    expect(errorReference(null)).toEqual({});
+  });
+
+  it("labels the ids in the user's language", () => {
+    expect(
+      errorReferenceLines(
+        failure({ errorId: "8bc91e0a", traceId: "trace-1" }),
+        translator("sv", sv)
+      )
+    ).toEqual(["Fel-ID: 8bc91e0a", "Spårnings-ID: trace-1"]);
+    expect(errorReferenceLines(new Error("boom"), translator("sv", sv))).toEqual([]);
   });
 });

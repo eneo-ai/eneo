@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import {
   Dialog,
   DialogContent,
@@ -15,12 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { API_KEY_POLICY_CONSTRAINTS_KEY } from "@/features/api-keys/api-keys";
 
 type Policy = Schema<"ApiKeyPolicyResponse">;
 type PolicyUpdate = Schema<"ApiKeyPolicyUpdate">;
@@ -60,7 +61,7 @@ export function ApiKeyPolicyDialog({
         </DialogHeader>
 
         {isPending || !policy ? (
-          <Skeleton className="h-72 w-full" />
+          <LoadingState rows={1} height={288} />
         ) : (
           <PolicyForm
             policy={policy}
@@ -90,6 +91,9 @@ function PolicyForm({
     mutationFn: () => {
       // ApiKeyPolicyUpdate is extra="forbid" — send only changed fields.
       const body: PolicyUpdate = {};
+      if (draft.require_tenant_allowed_origin !== policy.require_tenant_allowed_origin) {
+        body.require_tenant_allowed_origin = draft.require_tenant_allowed_origin ?? true;
+      }
       if (draft.require_expiration !== policy.require_expiration) {
         body.require_expiration = draft.require_expiration ?? null;
       }
@@ -115,6 +119,8 @@ function PolicyForm({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: POLICY_KEY });
+      // The limits the key forms and dialogs show.
+      void queryClient.invalidateQueries({ queryKey: API_KEY_POLICY_CONSTRAINTS_KEY });
       onClose();
     },
     onError: (error) => toastApiError(error, t)
@@ -125,7 +131,6 @@ function PolicyForm({
   // Never disabled: busy, it keeps focus and a second press is ignored; with
   // nothing changed there is nothing to send, and the dialog just closes.
   function submit() {
-    if (save.isPending) return;
     if (!dirty) {
       onClose();
       return;
@@ -153,6 +158,12 @@ function PolicyForm({
   return (
     <>
       <div className="flex flex-col gap-4">
+        <ToggleRow
+          label={t("api_keys_admin_policy_require_tenant_origin")}
+          description={t("api_keys_admin_policy_require_tenant_origin_desc")}
+          checked={draft.require_tenant_allowed_origin ?? true}
+          onCheckedChange={(value) => setField("require_tenant_allowed_origin", value)}
+        />
         <ToggleRow
           label={t("api_keys_admin_policy_require_expiration")}
           description={t("api_keys_admin_policy_require_expiration_desc")}
@@ -331,7 +342,7 @@ function SuperKeySection({
         </span>
       </div>
       {!status ? (
-        <Skeleton className="h-12 w-full" />
+        <LoadingState rows={1} height={48} />
       ) : (
         <div className="flex flex-col gap-2">
           {rows.map((row) => (

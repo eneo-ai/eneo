@@ -82,6 +82,39 @@ existing session to another account, including one with the same username.
 The identity contract belongs to Eneo session tokens. Identity-provider tokens
 are validated separately during OIDC login and exchanged for an Eneo session.
 
+#### Backend browser sessions
+
+The backend-served web app remains disabled by default. With
+`BROWSER_SESSION_ENABLED`, an authenticated cookie response includes
+`Eneo-Session-Generation`, a fingerprint of the selected session credential.
+It is neither an authentication credential nor a CSRF token.
+
+A document must remember its initial generation and send it on subsequent
+cookie-authenticated requests. Only GET and HEAD may omit it for bootstrap;
+a supplied mismatch on any method returns HTTP 401 with `eneo_error_code: 9080`
+before authentication or domain work. Cookie writes without the header are
+also refused. This prevents a tab from acting as another account after a
+different tab replaces the shared cookie. Bearer and API-key authentication
+retain their existing precedence and do not use this check.
+
+Password and federation login establish a new session and must end with a new
+document. Logout requires the expected generation whenever a session cookie
+is present, including an expired cookie; without a cookie it still returns 204
+and clears any remaining authentication cookies.
+A document must never adopt a replacement generation to retry a refused write.
+
+The Vite transport binds the document through `GET /api/v1/auth/session/`
+before rendering. Typed requests, raw fetches, job events and uploads share
+that binding. Resuming a hidden or cached page checks the session before more
+authenticated work. A changed session aborts active work, clears cached data
+and requests a new document; if the user cancels navigation, a blocking screen
+offers an explicit reload. A temporary network failure preserves the binding
+and unsaved form state, blocking new requests until a session check succeeds.
+Signed downloads use their resource token instead of adopting the current cookie.
+
+The retained Next frontend does not use this transport. The Vite route migration
+must still be completed before enabling the backend-served app in production.
+
 #### Deploying the identity contract
 
 The transition requires users to sign in again. Pre-upgrade Eneo and module

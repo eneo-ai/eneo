@@ -17,7 +17,7 @@ import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null
@@ -25,7 +25,6 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
 const SPACES = [
   { id: "s1", name: "Upphandling", description: null, personal: false, organization: false },

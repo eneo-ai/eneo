@@ -117,3 +117,44 @@ it("queues a recording using the accepted MIME essence and releases capture", as
   unmount();
   expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:recording");
 });
+
+/** Whether the browser would ask before unloading the page now. */
+function unloadIsGuarded(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+it("warns before a reload loses a recording, until it is queued and uploaded", async () => {
+  const props = { field, onAddFiles: vi.fn(), onRemoveFile: vi.fn() };
+  const { rerender } = renderInApp(<AudioRecorderInput {...props} files={[]} />);
+  expect(unloadIsGuarded()).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
+  expect(unloadIsGuarded()).toBe(true);
+
+  const recorder = Recorder.instances[0]!;
+  act(() => recorder.data());
+  // The recorder finalizes the audio after Stop; the page stays guarded meanwhile.
+  recorder.stop = () => {
+    recorder.state = "inactive";
+  };
+  fireEvent.click(stop);
+  expect(unloadIsGuarded()).toBe(true);
+  act(() => {
+    recorder.dispatchEvent(new Event("stop"));
+  });
+  await screen.findByRole("button", { name: "Använd denna inspelning" });
+  // Recorded but not queued yet.
+  expect(unloadIsGuarded()).toBe(true);
+
+  const queued = { key: "r1", name: "recording.webm", size: 5, mimetype: "audio/webm" };
+  rerender(<AudioRecorderInput {...props} files={[{ ...queued, uploading: true }]} />);
+  expect(unloadIsGuarded()).toBe(true);
+
+  rerender(
+    <AudioRecorderInput {...props} files={[{ ...queued, uploading: false, fileId: "f1" }]} />
+  );
+  expect(unloadIsGuarded()).toBe(false);
+});

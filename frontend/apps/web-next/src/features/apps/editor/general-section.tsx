@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";

@@ -14,7 +14,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn()
 }));
 vi.mock("@/lib/toast", () => ({ toast }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -336,4 +336,116 @@ it("SharePoint: shows why a batch could not start at all, and lets the import be
   await waitFor(() => expect(importButton.getAttribute("aria-busy")).toBeNull());
   fireEvent.click(importButton);
   await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+});
+
+it("Confluence: starts over when reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  const search = () => document.getElementById("confluence-space-search") as HTMLInputElement;
+  await screen.findByRole("button", { name: "Personal" });
+  fireEvent.change(search(), { target: { value: "Pers" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+
+  await screen.findByRole("button", { name: "Personal" });
+  expect(search().value).toBe("");
+  expect(
+    (await screen.findByRole("button", { name: "Personal" })).getAttribute("aria-pressed")
+  ).toBe("false");
+});
+
+it("Confluence: keeps a pending import pending when closed and reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  api.POST.mockImplementation(() => new Promise(() => {}));
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importera yta" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  const busy = screen.getByRole("button", { name: "Importerar..." });
+  fireEvent.click(busy);
+
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  expect(api.POST).toHaveBeenCalledTimes(1);
+});
+
+it("Confluence and SharePoint: the source search ignores a trailing space", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" },
+        { key: "IT", type: "space", name: "IT-stöd", url: "https://wiki/IT" }
+      ]
+    })
+  );
+  renderInApp(
+    <ConfluenceImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const spaces = await screen.findByRole("group", { name: "Confluence-ytor" });
+  await within(spaces).findByRole("button", { name: "IT-stöd" });
+  fireEvent.change(document.getElementById("confluence-space-search")!, {
+    target: { value: "personal " }
+  });
+  expect(within(spaces).getByRole("button", { name: "Personal" })).toBeTruthy();
+  expect(within(spaces).queryByRole("button", { name: "IT-stöd" })).toBeNull();
+  cleanup();
+
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "site-1", type: "site", name: "Intranätet", url: "https://sp/intra" },
+        { key: "site-2", type: "site", name: "Ekonomi", url: "https://sp/eko" }
+      ]
+    })
+  );
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const sites = await screen.findByRole("group", {
+    name: "Tillgängliga SharePoint- och OneDrive-källor"
+  });
+  await within(sites).findByRole("button", { name: "Intranätet" });
+  fireEvent.change(document.getElementById("sharepoint-site-search")!, {
+    target: { value: "ekonomi " }
+  });
+  expect(within(sites).getByRole("button", { name: "Ekonomi" })).toBeTruthy();
+  expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
 });

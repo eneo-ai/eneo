@@ -11,17 +11,20 @@ import {
   type TableColumn,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
+import { Table, type TableName } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
+import { use, useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +52,11 @@ import {
 } from "./knowledge-sort";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { DockedActions } from "@/components/shell/docked-actions";
+import { TableFrame } from "@/components/composites/table-frame";
+import { KnowledgeActionContext } from "./knowledge-action-context";
+import { RowsOrTable } from "./knowledge-list";
+import { collectionRow } from "./knowledge-rows";
 import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 
 function useInvalidateSpace() {
@@ -129,9 +136,7 @@ function CollectionDialog({
             if (save.isPending) return;
             const firstProblem = noModels ? noModelsRef : !name.trim() ? nameRef : null;
             if (firstProblem) {
-              // Rendered before focus moves, so the field is read with its error.
-              flushSync(() => setSubmitted(true));
-              firstProblem.current?.focus();
+              revealProblems(() => setSubmitted(true), firstProblem.current);
               return;
             }
             save.mutate();
@@ -206,30 +211,22 @@ export function CreateCollectionButton() {
 /** Row menu for a collection: rename, delete. */
 export function CollectionActions({ collection }: { collection: Collection }) {
   const t = useTranslations();
-  const invalidateSpace = useInvalidateSpace();
-  const [showEdit, setShowEdit] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-
+  const shared = use(KnowledgeActionContext);
+  const [opening, setOpening] = useState<{ action: "edit" | "delete" } | null>(null);
+  const open = (next: "edit" | "delete") => {
+    if (shared) shared({ kind: "collection", collection, action: next });
+    else setOpening({ action: next });
+  };
   const canDelete = collection.permissions?.includes("delete") ?? false;
-
-  const deleteCollection = useRemovalMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.DELETE("/api/v1/groups/{id}/", { params: { path: { id: collection.id } } })
-      ),
-    refresh: invalidateSpace,
-    onRemoved: () => setShowDelete(false)
-  });
-
   const items: DropdownMenuOption[] = [
-    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
+    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => open("edit") },
     ...(canDelete
       ? [
           {
             label: t("delete"),
             icon: <Trash2 aria-hidden="true" />,
             variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
+            onClick: () => open("delete")
           }
         ]
       : [])
@@ -242,13 +239,54 @@ export function CollectionActions({ collection }: { collection: Collection }) {
         items={items}
         alignment="end"
       />
-      {showEdit && (
-        <CollectionDialog collection={collection} open={showEdit} onOpenChange={setShowEdit} />
+      {opening && (
+        <CollectionActionDialog
+          collection={collection}
+          action={opening.action}
+          onClose={() => setOpening((current) => (current === opening ? null : current))}
+        />
       )}
-      {showDelete && (
+    </>
+  );
+}
+
+export function CollectionActionDialog({
+  collection,
+  action,
+  onClose
+}: {
+  collection: Collection;
+  action: "edit" | "delete";
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const invalidateSpace = useInvalidateSpace();
+
+  const deleteCollection = useRemovalMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.DELETE("/api/v1/groups/{id}/", { params: { path: { id: collection.id } } })
+      ),
+    refresh: invalidateSpace,
+    onRemoved: () => onClose()
+  });
+
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
+  return (
+    <>
+      {action === "edit" && (
+        <CollectionDialog
+          collection={collection}
+          open={action === "edit"}
+          onOpenChange={onOpenChange}
+        />
+      )}
+      {action === "delete" && (
         <ConfirmDialogControlled
-          open={showDelete}
-          onOpenChange={setShowDelete}
+          open={action === "delete"}
+          onOpenChange={onOpenChange}
           title={t("delete_collection")}
           description={t("confirm_delete_collection", { name: collection.name })}
           confirmLabel={deleteCollection.isPending ? t("deleting") : t("delete")}
@@ -261,17 +299,17 @@ export function CollectionActions({ collection }: { collection: Collection }) {
 }
 
 /**
- * One embedding model's collections, named by `labelledBy`: the model heading
+ * One embedding model's collections, named by `name`: the model heading
  * when grouped, else the tab.
  */
 function CollectionsTable({
   collections,
   sortConfig,
-  labelledBy
+  name
 }: {
   collections: Collection[];
   sortConfig: UseTableSortableConfig<CollectionSortKey>;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -281,7 +319,7 @@ function CollectionsTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(3),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (collection) => (
         <KnowledgeNameCell
@@ -295,7 +333,7 @@ function CollectionsTable({
     {
       key: "files",
       header: t("content"),
-      width: proportional(1),
+      width: pixel(112),
       sortable: true,
       renderCell: (collection) =>
         t("space_files_count", { count: collection.metadata.num_info_blobs })
@@ -303,7 +341,7 @@ function CollectionsTable({
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(128),
       renderCell: (collection) =>
         collection.metadata.num_info_blobs > 0 ? (
           <StatusLabel status="success" label={t("space_status_indexed")} />
@@ -314,7 +352,7 @@ function CollectionsTable({
     {
       key: "updated",
       header: t("space_updated_column"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (collection) => {
         const updatedAt = collection.updated_at ?? collection.created_at;
@@ -324,35 +362,30 @@ function CollectionsTable({
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (collection) => <CollectionActions collection={collection} />
     }
   ];
 
   return (
-    <SpaceTableFrame>
+    <TableFrame>
       <Table
         data={collections}
         columns={columns}
         idKey="id"
-        aria-labelledby={labelledBy}
+        {...name}
+        pinnedColumn="name"
         plugins={{ sort: sortPlugin }}
       />
-    </SpaceTableFrame>
+    </TableFrame>
   );
 }
 
-/** The collections tab; `labelledBy` is the tab, which names an ungrouped table. */
-export function CollectionsTab({
-  canCreate,
-  labelledBy
-}: {
-  canCreate: boolean;
-  labelledBy: string;
-}) {
+/** The collections tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
+export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const groupId = useId();
   const [filter, setFilter] = useState("");
 
@@ -372,23 +405,29 @@ export function CollectionsTab({
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
 
+  // The tab's primary action: docked at the bottom on a phone.
   const action = canCreate ? (
-    <CreateCollectionButton />
+    <DockedActions label={t("space_knowledge_actions")}>
+      <CreateCollectionButton />
+    </DockedActions>
   ) : (
     <NoCreatePermissionInfo resourceType={t("resource_collections")} />
   );
 
-  // Nothing to filter yet: the empty state carries the one create button.
+  // Nothing to filter yet: the empty state carries the one create button
+  // (on a phone, the dock does).
   if (collections.length === 0) {
     return (
-      <EmptyState
-        icon={<FolderClosed />}
-        hue={AREA_HUES.knowledge}
-        title={t("space_collections_empty_title")}
-        description={t("space_collections_empty_description")}
-        headingLevel={3}
-        actions={action}
-      />
+      <>
+        <EmptyState
+          icon={<FolderClosed />}
+          hue={AREA_HUES.knowledge}
+          title={t("space_collections_empty_title")}
+          description={t("space_collections_empty_description")}
+          headingLevel={3}
+          actions={action}
+        />
+      </>
     );
   }
 
@@ -434,11 +473,19 @@ export function CollectionsTab({
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <CollectionsTable
-              collections={rows}
-              sortConfig={sortConfig}
-              labelledBy={headingId ?? labelledBy}
-            />
+            <RowsOrTable
+              items={rows.map((collection) => ({
+                row: collectionRow(collection, routeId),
+                actions: <CollectionActions collection={collection} />
+              }))}
+              name={headingId ? { "aria-labelledby": headingId } : name}
+            >
+              <CollectionsTable
+                collections={rows}
+                sortConfig={sortConfig}
+                name={headingId ? { "aria-labelledby": headingId } : name}
+              />
+            </RowsOrTable>
           </div>
         );
       })}

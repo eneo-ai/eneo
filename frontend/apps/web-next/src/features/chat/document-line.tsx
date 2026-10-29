@@ -2,12 +2,12 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Download, FileText } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { displayFileName } from "./side-panel/panel-contents-list";
@@ -42,10 +42,9 @@ export function DocumentLine({ file, kind }: { file: GeneratedDocument; kind: Do
   async function download() {
     setDownloading(true);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
-      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
-    } catch {
-      toast.error(t("attachment_error_loading_content"));
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    } catch (error) {
+      toastDownloadError(error, t);
     } finally {
       setDownloading(false);
     }

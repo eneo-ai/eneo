@@ -55,5 +55,8 @@ it("establishes the same user's app session and consumes the matched transaction
   );
   expect(session?.user.email).toBe("anna@example.se");
   expect(response.cookies.get(FEDERATION_TXN_COOKIE)?.value).toBe("");
-  expect(response.headers.get("location")).toBe("http://localhost:3100/spaces/list");
+  // Through the login page, which continues in a new document.
+  expect(response.headers.get("location")).toBe(
+    "http://localhost:3100/login?next=%2Fspaces%2Flist"
+  );
 });

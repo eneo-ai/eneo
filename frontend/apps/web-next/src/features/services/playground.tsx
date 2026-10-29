@@ -1,19 +1,21 @@
 "use client";
 
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 function stringifyOutput(output: unknown): string {
   if (typeof output === "string") return output;
@@ -25,7 +27,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
   const t = useTranslations();
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   const run = useMutation({
     mutationFn: async (text: string) => {
@@ -46,11 +48,8 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
 
   // Run is never disabled: an empty input shows at the field, which takes focus.
   function runService() {
-    if (run.isPending) return;
     if (!input.trim()) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById("service-input")?.focus();
+      revealProblems(() => setSubmitted(true), "service-input");
       return;
     }
     run.mutate(input);
@@ -83,9 +82,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
           variant="outline"
           className="self-end"
           disabled={!output}
-          onClick={async () => {
-            if (!(await copy(output))) toast.error(t("chat_copy_failed"));
-          }}
+          onClick={() => void copy(output)}
         >
           {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {isCopied ? t("copied") : t("copy_response")}

@@ -1,5 +1,6 @@
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { proxiedDownloadPath } from "./signed-file-url";
 
 /**
  * A short-lived URL for a file's exact original bytes (a document is
@@ -13,12 +14,5 @@ export async function signedOriginalUrl(api: EneoClient, fileId: string): Promis
       body: { expires_in: 3600, content_disposition: "attachment" }
     })
   );
-  const parsed = new URL(signed.url);
-  if (
-    parsed.pathname !== `/api/v1/files/${encodeURIComponent(fileId)}/original/download/` ||
-    !parsed.searchParams.get("token")
-  ) {
-    throw new Error("Unexpected signed file URL");
-  }
-  return `/api/eneo${parsed.pathname}${parsed.search}`;
+  return proxiedDownloadPath(signed.url, fileId, "original");
 }

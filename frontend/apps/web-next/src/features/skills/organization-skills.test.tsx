@@ -10,11 +10,11 @@ const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", () => ({
   useRouter: () => ({ push }),
   useSearchParams: () => new URLSearchParams()
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager } from "@tanstack/react-query";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
@@ -7,13 +8,13 @@ import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { observedElements, reportResize } from "@/test/setup-dom";
+import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold",
+  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break",
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
@@ -42,6 +43,37 @@ vi.mock("@/lib/chat/transport", () => ({
       }
       // The SDK hands the backend's error text over as an Error message.
       if (spies.mode === "json") throw new Error('{"message":"Not authenticated"}');
+      if (spies.mode === "approval" || spies.mode === "approval-break") {
+        // A tool asks first; the stream waits for the decision, or breaks.
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "start", messageId: "answer-1" });
+            controller.enqueue({
+              type: "data-tool-approval",
+              id: "ap-1",
+              data: {
+                approval_id: "ap-1",
+                status: "pending",
+                tools: [
+                  {
+                    server_name: "diarium",
+                    tool_name: "sok_arende",
+                    title: "Sök ärende i diariet",
+                    tool_call_id: "call-1",
+                    arguments: { arendenummer: "BN 2026-0412" }
+                  }
+                ]
+              }
+            });
+            if (spies.mode === "approval-break") {
+              setTimeout(() => controller.error(new Error("Anslutningen bröts")), 0);
+            }
+            abortSignal?.addEventListener("abort", () =>
+              controller.error(new DOMException("Aborted", "AbortError"))
+            );
+          }
+        });
+      }
       if (spies.mode === "hold") {
         // Starts answering, then waits until the user stops it.
         return new ReadableStream({
@@ -112,7 +144,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
 }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();
@@ -133,16 +165,19 @@ const partner: ChatPartner = {
 function Harness({
   onSessionCreated,
   onTitle,
-  chatPartner = partner
+  chatPartner = partner,
+  initialMessages
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
   chatPartner?: ChatPartner;
+  initialMessages?: EneoUIMessage[];
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
     <ChatView
       partner={chatPartner}
+      initialMessages={initialMessages}
       activity={activity}
       onActivityChange={setActivity}
       onSessionCreated={onSessionCreated}
@@ -152,7 +187,7 @@ function Harness({
 }
 
 function ask(question: string) {
-  const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+  const textarea = screen.getByRole("textbox", { name: /^Fråga / });
   fireEvent.change(textarea, { target: { value: question } });
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 }
@@ -265,23 +300,116 @@ describe("ChatView sending", () => {
 });
 
 describe("ChatView docked composer", () => {
-  // WCAG 2.4.11: the conversation scrolls focused elements above the docked
-  // composer. A new conversation mounts the dock only after the first
-  // question, and its height must still be tracked.
-  it("keeps focus clear of the dock that appears with the first question", async () => {
+  // WCAG 2.4.11 and decision 16: the composer sits under the conversation,
+  // not over it, so nothing focused can hide behind it; the conversation is
+  // the scroller the answer is followed in.
+  it("docks the composer under the conversation's scroller, never over it", async () => {
     spies.mode = "answer";
     renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
-    const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
-    expect(scroller?.style.scrollPaddingBottom).toBe("28px");
+    // useChatStreamScroll marks the element it follows the answer in.
+    const scroller = document.querySelector("[data-astryx-chat-following]");
+    expect(scroller?.contains(log)).toBe(true);
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / });
+    expect(scroller?.contains(textarea)).toBe(false);
+  });
+});
 
-    const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
-    const dock = observedElements().find((element) => element.contains(textarea));
-    expect(dock).toBeDefined();
-    act(() => reportResize(dock!, { height: 150 }));
-    expect(scroller?.style.scrollPaddingBottom).toBe("178px");
+describe("ChatView tool approval on a phone (decision 26)", () => {
+  it("puts the decision in the composer's place while the tool waits, then gives it back", async () => {
+    spies.mode = "approval";
+    setViewport("phone");
+    renderInApp(<Harness />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+
+    const bar = await screen.findByRole("region", {
+      name: /vill använda Sök ärende i diariet$/
+    });
+    expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
+    expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
+    // Asked once: the card in the conversation shows the call, the bar decides.
+    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));
+    const sheet = await screen.findByRole("dialog", { name: "Sök ärende i diariet" });
+    expect(within(sheet).getByText("diarium/sok_arende")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Stäng" })).toBeTruthy();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Godkänn Sök ärende i diariet" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy());
+    expect(
+      within(screen.getByRole("region", { name: "Verktygsgodkännande" })).getByText("Godkänt")
+    ).toBeTruthy();
+  });
+
+  it("keeps the dock for the decision: an earlier answer's sources do not cover it", async () => {
+    spies.mode = "approval";
+    setViewport("phone");
+    const earlier: EneoUIMessage[] = [
+      { id: "q0", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
+      {
+        id: "a0",
+        role: "assistant",
+        parts: [
+          {
+            type: "source-document",
+            sourceId: "abcd1234-0000",
+            mediaType: "text/plain",
+            title: "LOU 19 kap."
+          },
+          { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
+        ] as EneoUIMessage["parts"]
+      }
+    ];
+    renderInApp(<Harness initialMessages={earlier} />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+    await screen.findByRole("region", { name: /vill använda Sök ärende i diariet$/ });
+
+    const source = within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
+      name: "Källa 1: LOU 19 kap."
+    });
+    fireEvent.click(source);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Aktivitet för svaret" })).toBeNull()
+    );
+    // The focus goes back to what opened the sheet, not to the page.
+    await waitFor(() => expect(document.activeElement).toBe(source));
+    expect(screen.getByRole("region", { name: /vill använda Sök ärende i diariet$/ })).toBeTruthy();
+  });
+
+  it("gives the composer back when the stream breaks while a tool waits", async () => {
+    spies.mode = "approval-break";
+    setViewport("phone");
+    renderInApp(<Harness />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
+    expect(await screen.findByRole("button", { name: "Försök igen" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /vill använda/ })).toBeNull();
+    expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy();
+  });
+});
+
+describe("ChatView offline", () => {
+  afterEach(() => onlineManager.setOnline(true));
+
+  it("keeps the question and says at the field why it cannot be sent", () => {
+    spies.mode = "answer";
+    renderInApp(<Harness />);
+    act(() => void window.dispatchEvent(new Event("offline")));
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    const sentBefore = spies.sent.length;
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expect(spies.sent).toHaveLength(sentBefore);
+    expect(textarea.value).toBe("Vilken gräns gäller?");
+    const description = (textarea.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(description).toContain("Du är offline. Skicka frågan när du är uppkopplad igen.");
   });
 });
 
@@ -299,7 +427,7 @@ describe("ChatView when generation fails", () => {
       within(list)
         .getAllByRole("listitem")
         .map((item) => item.textContent)
-    ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-id trace-1"]);
+    ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-ID: trace-1"]);
     await expectNoAxeViolations(document.body);
   });
 
@@ -333,9 +461,9 @@ describe("ChatView when generation fails", () => {
     expect(within(list).getByText("Tjänsten svarar inte")).toBeTruthy();
     // The failed first question returns to the composer instead of vanishing.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Vilken gräns gäller?")
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Vilken gräns gäller?"
+      )
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
@@ -460,9 +588,9 @@ describe("ChatView when generation fails", () => {
 
     // Back to the start state with the draft and its attachment in the composer.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Sammanfatta policyn")
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Sammanfatta policyn"
+      )
     );
     expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
     expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();

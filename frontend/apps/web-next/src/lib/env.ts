@@ -36,7 +36,6 @@ const envSchema = z
     OIDC_CLIENT_ID: z.string().optional(),
     OIDC_CLIENT_SECRET: z.string().optional(),
     OIDC_SCOPES: z.string().default("openid profile email offline_access"),
-    SHOW_WEB_SEARCH: boolFlag,
     SHOW_HELP_CENTER: boolFlag,
     HELP_CENTER_URL: optionalLinkUrl,
     LEGACY_APP_URL: optionalLinkUrl,

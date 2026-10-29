@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";

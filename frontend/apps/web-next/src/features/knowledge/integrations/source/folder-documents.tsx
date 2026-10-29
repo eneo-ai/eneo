@@ -14,17 +14,19 @@ import {
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink, FileText, Search } from "lucide-react";
-import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
-import { ListError } from "@/components/composites/query-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { formatBytes } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { BlobPreviewDialog } from "../../blobs";
@@ -42,12 +44,11 @@ import { SourceStateLabel, useWatchStates } from "../source-status";
 import { itemState, watchStateLabel, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
-import type { InPlaceLink } from "./in-place-link";
+import type { InPlaceLink } from "@/components/composites/in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
-const SEARCH_DEBOUNCE_MS = 300;
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
-const NARROW_QUERY = "(width < 40rem)";
+const NARROW_QUERY = `not all and ${MEDIA.sm}`;
 
 type DocumentsView = "searchable" | "skipped";
 type DocumentRow = IntegrationDocument;
@@ -249,18 +250,12 @@ export function FolderDocuments({
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
 
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      const next = searchInput.trim();
-      // Only a new search starts over at page 1, not the first run after mount.
-      if (next === q) return;
-      setQ(next);
-      setPage(1);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [q, searchInput]);
+  // A new search starts over at page 1.
+  const debouncedQ = useDebouncedValue(searchInput.trim());
+  if (debouncedQ !== q) {
+    setQ(debouncedQ);
+    setPage(1);
+  }
 
   const [active] = sort;
   const documents = useQuery(
@@ -335,14 +330,14 @@ export function FolderDocuments({
     {
       key: "name",
       header: t("name"),
-      width: proportional(2),
+      width: proportional(2, { minWidth: 192 }),
       sortable: true,
       renderCell: (row) => <DocumentNameCell document={row} />
     },
     {
       key: "path",
       header: t("integration_documents_path"),
-      width: proportional(1),
+      width: proportional(1, { minWidth: 96 }),
       sortable: true,
       renderCell: (row) => (
         <span className="text-ax-text-secondary block truncate" title={row.relative_path}>
@@ -360,7 +355,7 @@ export function FolderDocuments({
     {
       key: "updated_at",
       header: t("integration_documents_updated"),
-      width: proportional(1),
+      width: pixel(152),
       sortable: true,
       renderCell: (row) =>
         row.updated_at ? <ClientTime value={row.updated_at} format="date_time" /> : "–"
@@ -368,7 +363,7 @@ export function FolderDocuments({
     {
       key: "status",
       header: t("status"),
-      width: pixel(120),
+      width: pixel(128),
       renderCell: () => (
         <span className="text-ax-success inline-flex items-center gap-1.5 text-sm">
           <Check className="size-4" aria-hidden="true" />
@@ -379,7 +374,7 @@ export function FolderDocuments({
     {
       key: "link",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (row) => {
         const url = safeExternalUrl(row.url);
@@ -456,49 +451,55 @@ export function FolderDocuments({
             />
           </div>
 
-          {documents.isPending || pastTheEnd ? (
+          {pastTheEnd ? (
             <LoadingState label={t("integration_documents_loading")} rows={5} />
-          ) : documents.isError ? (
-            <ListError
-              error={documents.error}
-              title={t("integration_documents_load_failed")}
-              isRetrying={documents.isFetching}
-              onRetry={() => void documents.refetch()}
-            />
-          ) : data && data.items.length > 0 ? (
-            <>
-              <div aria-busy={documents.isFetching || undefined}>
-                <Table
-                  data={data.items}
-                  columns={columns}
-                  idKey="id"
-                  aria-label={t("integration_documents_table_label", { name: item.name })}
-                  plugins={{ sort: sortPlugin }}
-                />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                <p className="text-ax-text-secondary">
-                  {rangeText} ·{" "}
-                  {t("integration_documents_total_size", {
-                    size: formatBytes(data.total_size, locale)
-                  })}
-                </p>
-                {/* Never disabled while a page loads: that would take focus from the
-                    pressed button. The previous page stays visible (aria-busy). */}
-                {lastPage > 1 ? (
-                  <Pagination
-                    page={Math.min(page, lastPage)}
-                    totalPages={lastPage}
-                    onChange={changePage}
-                    variant={isNarrow ? "compact" : "pages"}
-                    size="sm"
-                    label={t("integration_documents_pagination_label", { name: item.name })}
-                  />
-                ) : null}
-              </div>
-            </>
           ) : (
-            <p className="text-ax-text-secondary py-8 text-sm">{emptyText}</p>
+            <QueryStateBoundary
+              query={documents}
+              rows={5}
+              loadingLabel={t("integration_documents_loading")}
+              errorTitle={t("integration_documents_load_failed")}
+            >
+              {(data) =>
+                data.items.length > 0 ? (
+                  <>
+                    <div aria-busy={documents.isFetching || undefined}>
+                      <Table
+                        data={data.items}
+                        columns={columns}
+                        idKey="id"
+                        aria-label={t("integration_documents_table_label", { name: item.name })}
+                        pinnedColumn="name"
+                        className="[--table-sticky-background:var(--color-ax-surface)]"
+                        plugins={{ sort: sortPlugin }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                      <p className="text-ax-text-secondary">
+                        {rangeText} ·{" "}
+                        {t("integration_documents_total_size", {
+                          size: formatBytes(data.total_size, locale)
+                        })}
+                      </p>
+                      {/* Never disabled while a page loads: that would take focus from the
+                    pressed button. The previous page stays visible (aria-busy). */}
+                      {lastPage > 1 ? (
+                        <Pagination
+                          page={Math.min(page, lastPage)}
+                          totalPages={lastPage}
+                          onChange={changePage}
+                          variant={isNarrow ? "compact" : "pages"}
+                          size="sm"
+                          label={t("integration_documents_pagination_label", { name: item.name })}
+                        />
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-ax-text-secondary py-8 text-sm">{emptyText}</p>
+                )
+              }
+            </QueryStateBoundary>
           )}
         </>
       )}

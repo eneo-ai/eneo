@@ -12,8 +12,8 @@ import {
   Search,
   type LucideIcon
 } from "lucide-react";
-import Link from "next/link";
-import { useFormatter, useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useFormatter, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,7 @@ import {
 } from "../integration-tree";
 import { itemState, sourceStateStatus, type ItemState, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
-import type { InPlaceLink } from "./in-place-link";
+import type { InPlaceLink } from "@/components/composites/in-place-link";
 
 /** Below this many folders the whole tree fits and a filter only adds noise. */
 const FILTER_FROM = 8;

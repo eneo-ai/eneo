@@ -1,14 +1,19 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { integrationCallbackUrl } from "@/features/integrations/callback-message";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -120,9 +125,7 @@ export function SharePointAppConfigDialog({
               ? tenantDomainRef
               : null;
     if (!firstProblem) return true;
-    // Rendered before focus moves, so the field is read with its error.
-    flushSync(() => setSubmitted(true));
-    firstProblem.current?.focus();
+    revealProblems(() => setSubmitted(true), firstProblem.current);
     return false;
   }
 
@@ -160,7 +163,7 @@ export function SharePointAppConfigDialog({
       unwrap(
         browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/start", {
           body: {
-            redirect_uri: window.location.origin + "/integrations/callback/token/",
+            redirect_uri: integrationCallbackUrl(),
             client_id: clientId.trim(),
             client_secret: clientSecret,
             tenant_domain: tenantDomain.trim()
@@ -189,7 +192,7 @@ export function SharePointAppConfigDialog({
         </DialogHeader>
 
         {isPending ? (
-          <Skeleton className="h-40 w-full" />
+          <LoadingState rows={1} height={160} />
         ) : config ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">

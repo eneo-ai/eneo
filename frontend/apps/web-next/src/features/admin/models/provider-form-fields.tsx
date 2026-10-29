@@ -1,7 +1,7 @@
 "use client";
 
 import { TextInput } from "@/components/astryx/text-input";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useRef } from "react";
 import {
   ConfirmedSecretInput,

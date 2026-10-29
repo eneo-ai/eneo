@@ -1,7 +1,7 @@
 "use client";
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Translate } from "./skip-reasons";
 import type { SourceSummary } from "./sources";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
 import {
@@ -25,7 +25,7 @@ export function useAppRunInputs() {
   const files = uploads.files;
 
   async function addFiles(incoming: File[], rules: FileUploadRules) {
-    const plan = planFileUploads(incoming, files, rules);
+    const plan = planFileUploads(incoming, uploads.current(), rules);
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
     await uploads.add(plan.accepted);

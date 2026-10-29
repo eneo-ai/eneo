@@ -1,13 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 
@@ -77,7 +77,7 @@ export function PromptVersionDialog({
         <div className="grid max-h-[60vh] grid-cols-1 gap-4 sm:grid-cols-[18rem_1fr]">
           <div className="overflow-y-auto rounded-md border">
             {list.isPending ? (
-              <Skeleton className="h-40 w-full" />
+              <LoadingState rows={1} height={160} />
             ) : (
               <ul className="divide-border divide-y">
                 {(list.data ?? []).map((version) => (
@@ -115,7 +115,7 @@ export function PromptVersionDialog({
               {!selectedId ? (
                 <p className="text-muted-foreground text-sm">{t("preview")}</p>
               ) : preview.isPending ? (
-                <Skeleton className="h-40 w-full" />
+                <LoadingState rows={1} height={160} />
               ) : (
                 <pre className="text-sm whitespace-pre-wrap">{preview.data?.text}</pre>
               )}

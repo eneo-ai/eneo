@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -63,20 +63,12 @@ function IntegrationCard({ integration }: { integration: TenantIntegration }) {
           size="sm"
           disabled={!integration.id}
           aria-busy={unlink.isPending || undefined}
-          onClick={() => {
-            if (!unlink.isPending) unlink.mutate();
-          }}
+          onClick={() => unlink.mutate()}
         >
           {t("disable")}
         </Button>
       ) : (
-        <Button
-          size="sm"
-          aria-busy={link.isPending || undefined}
-          onClick={() => {
-            if (!link.isPending) link.mutate();
-          }}
-        >
+        <Button size="sm" aria-busy={link.isPending || undefined} onClick={() => link.mutate()}>
           {t("enable")}
         </Button>
       )}

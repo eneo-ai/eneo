@@ -2,7 +2,7 @@
 
 import { Heading } from "@astryxdesign/core/Heading";
 import { Switch } from "@/components/astryx/switch";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";

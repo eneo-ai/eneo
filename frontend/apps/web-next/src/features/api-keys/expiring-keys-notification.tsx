@@ -6,12 +6,13 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, ChevronRight } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 import { summaryToDisplayItems, type ExpiringKeyDisplayItem } from "./expiration-utils";
+import { apiKeyNotificationSubscriptionsQueryOptions } from "./notification-follows";
 
 const MAX_VISIBLE = 5;
 
@@ -50,14 +51,15 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
     staleTime: 60_000
   });
   const subscriptions = useQuery({
-    queryKey: ["api-key-notification-subscriptions"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/api-keys/notification-subscriptions")),
-    enabled: featureEnabled,
-    staleTime: 60_000
+    ...apiKeyNotificationSubscriptionsQueryOptions(browserApi),
+    enabled: featureEnabled
   });
 
   const daysWindow = Math.max(...(preferences.data?.days_before_expiry ?? [30]), 1);
   const hasSubscriptions = (subscriptions.data?.items.length ?? 0) > 0;
+  // Off (tenant switch or user preference) or nothing followed: no bell, even
+  // with an earlier summary in the cache.
+  const active = featureEnabled && (preferences.data?.enabled ?? false) && hasSubscriptions;
   const summary = useQuery({
     queryKey: ["api-keys", "expiring-soon", "subscribed", daysWindow],
     queryFn: () =>
@@ -66,11 +68,11 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
           params: { query: { days: daysWindow, mode: "subscribed" } }
         })
       ),
-    enabled: featureEnabled && (preferences.data?.enabled ?? false) && hasSubscriptions,
+    enabled: active,
     staleTime: 60_000
   });
 
-  const items = summary.data ? summaryToDisplayItems(summary.data.items) : [];
+  const items = active && summary.data ? summaryToDisplayItems(summary.data.items) : [];
   if (items.length === 0) return null;
 
   const counts = summary.data?.counts_by_severity ?? {};

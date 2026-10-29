@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

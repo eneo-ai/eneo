@@ -10,6 +10,13 @@ useDefault = true
 id = "generic-api-key"
 
 [[rules.allowlists]]
+description = "Python model import misidentified as a credential in the API-key limiter"
+condition = "AND"
+paths = ['''^backend/src/eneo/authentication/api_key_rate_limiter\.py$''']
+regexTarget = "secret"
+regexes = ['''^ApiKeyV2InDB$''']
+
+[[rules.allowlists]]
 description = "Public Fernet key for the isolated E2E stack's dummy credentials"
 condition = "AND"
 paths = ['''^docker-compose\.e2e(\.ci)?\.yml$''']

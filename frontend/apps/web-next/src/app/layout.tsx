@@ -1,32 +1,14 @@
-import type { Metadata } from "next";
-import { Figtree, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
+import { ThemeColor } from "@/components/providers/theme-color";
 import { Toaster } from "@/components/ui/sonner";
 import { eneoTheme } from "@/theme/eneo";
+import { surfaceColors } from "@/theme/surface-colors";
 import "./globals.css";
-
-// UI font. The Eneo Astryx theme reads it through --font-figtree
-// (src/theme/eneo-theme.ts), and Tailwind's font-sans follows the theme.
-const figtree = Figtree({
-  variable: "--font-figtree",
-  subsets: ["latin"]
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"]
-});
-
-// Serif "voice" for assistant answers — signals who's speaking (content to read)
-// vs the sans UI chrome around it. Applied via --font-voice on MessageResponse.
-const sourceSerif = Source_Serif_4({
-  variable: "--font-source-serif",
-  subsets: ["latin"]
-});
 
 export const metadata: Metadata = {
   // Child routes/layouts set a string title → "<Page> · Eneo"; routes without
@@ -34,7 +16,29 @@ export const metadata: Metadata = {
   // <title>). Area layouts (admin / account / space) carry the area title so
   // their child pages inherit it without per-page boilerplate.
   title: { template: "%s · Eneo", default: "Eneo" },
-  description: "Eneo"
+  description: "Eneo",
+  icons: { icon: "/favicon.ico" }
+};
+
+const surface = surfaceColors();
+
+/**
+ * Phones and tablets: the page runs edge to edge (viewport-fit=cover) and pads
+ * itself clear of the notch and the home indicator (globals.css section 14,
+ * the shell frame); the on-screen keyboard shrinks the layout on Android as it
+ * does on iOS, so the docked composer stays above it. The status bar and the
+ * browser toolbar take the surface colour behind the top bar (ThemeColor
+ * follows an explicit Tema choice). Pinch zoom stays on (WCAG 1.4.4).
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: surface.light },
+    { media: "(prefers-color-scheme: dark)", color: surface.dark }
+  ]
 };
 
 export default async function RootLayout({
@@ -56,10 +60,20 @@ export default async function RootLayout({
       // The Astryx theme scope, server-rendered so tokens exist on <html> (and
       // in portals) from first paint; the root <Theme> keeps it in sync.
       data-astryx-theme={eneoTheme.name}
-      className={`${figtree.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`}
+      className="antialiased"
       suppressHydrationWarning
     >
       <head>
+        <meta property="csp-nonce" nonce={nonce} />
+        {/* The UI font (globals.css "2b. Fonts"): every page needs it before
+            first paint. The code and answer fonts load when first used. */}
+        <link
+          rel="preload"
+          href="/fonts/figtree-latin-wght-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
+        />
         {/* The rule Astryx's chat stream scroller would inject at runtime
             (scroll anchoring off while it follows new tokens), which the CSP
             blocks. Astryx skips its own injection when <head> already holds
@@ -81,6 +95,7 @@ export default async function RootLayout({
           >
             <Providers nonce={nonce}>{children}</Providers>
             <Toaster />
+            <ThemeColor />
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

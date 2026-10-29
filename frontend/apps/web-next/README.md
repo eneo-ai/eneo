@@ -24,6 +24,57 @@ bun run test     # vitest run
 bun run theme:build # compile src/theme/eneo-theme.ts after editing it
 ```
 
+## Vite build (migration)
+
+The app is moving from Next.js to a Vite SPA with TanStack Router. Until the
+move is done, this package builds both, and Next stays the default:
+
+```bash
+bun run dev:vite        # Vite dev server on port 3101, beside Next on 3100
+bun run build:vite      # static SPA in dist/ (vite.config.mts)
+bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
+```
+
+`src/routeTree.gen.ts` is generated and committed: commit it together with the
+route change that produced it. `vite build` does not type-check; `bun run check`
+does.
+
+Each Vite build writes `node_modules/.cache/vite-bundle-report.json` with
+module membership, chunk imports and uncompressed JavaScript sizes. The
+`startup` scope includes the entry and required `render-app` module with their
+static dependencies; `chat` covers the chat feature's static dependencies, or
+is `null` while that feature is absent from the build. Other dynamic imports,
+including locale catalogs, remain visible in the chunk graph. These sizes
+exclude CSS and other assets.
+
+CI checks route-tree drift before type checking, builds both frontends, and
+publishes the bundle report and peak Vite build memory in the
+`web-next-vite-build-resources` artifact. Memory also appears in the job
+summary. Sizes and memory are measured without a budget gate.
+
+### Vite dev server
+
+The browser talks only to `http://localhost:3101`. The dev server forwards
+`/api` (WebSockets too), `/version`, `/login/callback` and `/auth/callback` to
+the backend at `ENEO_BACKEND_URL` without changing the Host header, so the
+session cookie and the backend's same-origin checks work as in production. It
+refuses to start without `ENEO_BACKEND_URL` (set it in `.env.local`). It sends no
+CSP; the CSP is checked against the build FastAPI serves.
+
+Run the backend in development mode with these in its `.env`:
+
+```bash
+ENVIRONMENT=development          # session cookie eneo_web, without Secure, works on http
+BROWSER_SESSION_ENABLED=true
+PUBLIC_ORIGIN=http://localhost:3101
+```
+
+The backend refuses to start with the browser session in development mode
+unless `PUBLIC_ORIGIN` is a localhost origin. The SSO `redirect_uri` follows the
+request's host, so register `http://localhost:3101/login/callback` with the
+identity provider or the tenant's federation redirect URIs; with global OIDC,
+`PUBLIC_ORIGIN` already makes it the redirect URI.
+
 ## Environment
 
 Copy [`.env.example`](.env.example) to `.env.local`. Set the backend URL,
@@ -74,8 +125,9 @@ hard-coded colours.
 
 ## i18n
 
-next-intl without URL-based routing; the locale comes from the `NEXT_LOCALE`
-cookie (default `sv`, also `en`). Catalogs in `src/lib/i18n/messages/` are
+Client code uses use-intl; frozen Next routes retain next-intl until removal.
+The locale comes from the `NEXT_LOCALE` cookie (default `sv`, also `en`), and
+changing it reloads the document. Catalogs in `src/lib/i18n/messages/` are
 generated from the SvelteKit app's Paraglide catalogs:
 
 ```bash

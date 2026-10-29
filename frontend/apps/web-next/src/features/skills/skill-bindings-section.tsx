@@ -2,8 +2,8 @@
 
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Trash2 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useState } from "react";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useSetSaveStatus } from "@/components/composites/save-status";
@@ -18,9 +18,18 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  blockingError,
+  ListError,
+  LoadMore,
+  QueryStateBoundary,
+  RefreshError
+} from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { useSpace } from "@/features/spaces/use-space";
 import {
   candidateRevisionId,
@@ -164,20 +173,19 @@ export function SkillBindingsEditor({
     resource === "personal_chat" ? (bindings ?? []) : activeEdit ? editing.draft : loaded;
   const dirty = resource !== "personal_chat" && JSON.stringify(draft) !== JSON.stringify(baseline);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
   const [created, setCreated] = useState<SkillCandidate[]>([]);
   const [previewCandidate, setPreviewCandidate] = useState<SkillCandidate | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<unknown>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDirty, setCreateDirty] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState<string | null>(null);
-  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [upgradeError, setUpgradeError] = useState<unknown>(null);
   const [revisionMetadata, setRevisionMetadata] = useState<Preview[]>([]);
 
   function setDraft(next: Binding[] | ((current: Binding[]) => Binding[])) {
@@ -209,7 +217,7 @@ export function SkillBindingsEditor({
         ? null
         : saving
           ? "saving"
-          : saveError
+          : saveError != null
             ? "error"
             : dirty
               ? "dirty"
@@ -218,14 +226,11 @@ export function SkillBindingsEditor({
     return () => setSaveStatus("skills", null);
   }, [dirty, resource, saveError, saving, setSaveStatus]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  const search = useDebouncedValue(searchInput.trim());
 
   const catalogue = useInfiniteQuery({
     queryKey: ["skill-binding-catalogue", spaceId, search],
-    initialPageParam: null as string | null,
+    ...cursorPagination,
     queryFn: ({ pageParam }) =>
       loadSkillBindingCatalog({
         spaceId,
@@ -233,14 +238,12 @@ export function SkillBindingsEditor({
         cursor: pageParam,
         search
       }),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: showPicker,
     retry: false
   });
   const catalogItems = useMemo(() => {
     const byId = new Map<string, SkillCandidate>();
-    for (const skill of catalogue.data?.pages.flatMap((page) => page.items) ?? [])
-      byId.set(skill.id, skill);
+    for (const skill of flattenPages(catalogue.data?.pages)) byId.set(skill.id, skill);
     for (const skill of created) byId.set(skill.id, skill);
     return [...byId.values()];
   }, [catalogue.data, created]);
@@ -259,8 +262,8 @@ export function SkillBindingsEditor({
     setPreviewLoading(true);
     try {
       setPreview(await getSkillPreview(spaceId, skill));
-    } catch {
-      setPreviewError(t("skills_preview_load_error"));
+    } catch (cause) {
+      setPreviewError(cause);
     } finally {
       setPreviewLoading(false);
     }
@@ -298,8 +301,8 @@ export function SkillBindingsEditor({
           revision: String(exact.revisionNumber)
         })
       );
-    } catch {
-      setUpgradeError(t("skills_preview_load_error"));
+    } catch (cause) {
+      setUpgradeError(cause);
     } finally {
       setUpgradeBusy(null);
     }
@@ -326,7 +329,7 @@ export function SkillBindingsEditor({
       setAnnouncement(t("skills_bindings_saved"));
       void queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {
-      setSaveError(getErrorMessage(cause, t));
+      setSaveError(cause);
     } finally {
       setSaving(false);
     }
@@ -358,23 +361,20 @@ export function SkillBindingsEditor({
     });
   }
 
+  if (resource !== "personal_chat" && blockingError(configuration))
+    return (
+      <SettingsGroup title={t("skills")}>
+        <ListError
+          error={configuration.error}
+          isRetrying={configuration.isFetching}
+          onRetry={() => void configuration.refetch()}
+        />
+      </SettingsGroup>
+    );
   if (resource !== "personal_chat" && configuration.isPending)
     return (
       <SettingsGroup title={t("skills")}>
         <p role="status">{t("loading")}</p>
-      </SettingsGroup>
-    );
-  if (resource !== "personal_chat" && configuration.isError)
-    return (
-      <SettingsGroup title={t("skills")}>
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void configuration.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
       </SettingsGroup>
     );
 
@@ -392,6 +392,7 @@ export function SkillBindingsEditor({
         </Badge>
       }
     >
+      <RefreshError queries={[configuration]} />
       <p className="text-muted-foreground text-sm">
         {t(
           resource === "personal_chat"
@@ -441,10 +442,8 @@ export function SkillBindingsEditor({
           </AlertDescription>
         </Alert>
       )}
-      {upgradeError && (
-        <p role="alert" className="text-destructive text-sm">
-          {upgradeError}
-        </p>
+      {upgradeError != null && (
+        <ListError error={upgradeError} title={t("skills_preview_load_error")} />
       )}
       {draft.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("skills_no_bindings")}</p>
@@ -631,56 +630,43 @@ export function SkillBindingsEditor({
             placeholder={t("skills_search_existing")}
             aria-label={t("skills_search_existing")}
           />
-          {catalogue.isPending ? (
-            <p role="status">{t("loading")}</p>
-          ) : catalogue.isError && !catalogue.data ? (
-            <Button variant="outline" onClick={() => void catalogue.refetch()}>
-              {t("retry")}
-            </Button>
-          ) : choices.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {t(search ? "skills_search_no_results" : "skills_no_available")}
-            </p>
-          ) : (
-            <ul className="max-h-72 divide-y overflow-y-auto">
-              {choices.map((skill) => (
-                <li key={skill.id}>
-                  <button
-                    type="button"
-                    className="hover:bg-muted w-full rounded-md p-3 text-left"
-                    onClick={() => void openPreview(skill)}
-                  >
-                    <span className="font-medium">{skill.display_name}</span>
-                    <span className="text-muted-foreground ml-2 text-xs">
-                      {t("skills_revision_label", {
-                        revision: String(candidateRevisionNumber(skill))
-                      })}
-                    </span>
-                    <p className="text-muted-foreground text-sm">{skill.description}</p>
-                    <span className="text-muted-foreground text-xs">
-                      {t(
-                        skill.source === "organization"
-                          ? "skills_source_organization"
-                          : "skills_source_space"
-                      )}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {catalogue.hasNextPage && (
-            <Button
-              variant="ghost"
-              aria-busy={catalogue.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!catalogue.isFetchingNextPage) void catalogue.fetchNextPage();
-              }}
-            >
-              {catalogue.isFetchingNextPage ? t("loading") : t("load_more")}
-            </Button>
-          )}
+          <QueryStateBoundary query={catalogue} rows={3}>
+            {() =>
+              choices.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  {t(search ? "skills_search_no_results" : "skills_no_available")}
+                </p>
+              ) : (
+                <ul className="max-h-72 divide-y overflow-y-auto">
+                  {choices.map((skill) => (
+                    <li key={skill.id}>
+                      <button
+                        type="button"
+                        className="hover:bg-muted w-full rounded-md p-3 text-left"
+                        onClick={() => void openPreview(skill)}
+                      >
+                        <span className="font-medium">{skill.display_name}</span>
+                        <span className="text-muted-foreground ml-2 text-xs">
+                          {t("skills_revision_label", {
+                            revision: String(candidateRevisionNumber(skill))
+                          })}
+                        </span>
+                        <p className="text-muted-foreground text-sm">{skill.description}</p>
+                        <span className="text-muted-foreground text-xs">
+                          {t(
+                            skill.source === "organization"
+                              ? "skills_source_organization"
+                              : "skills_source_space"
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+          </QueryStateBoundary>
+          <LoadMore query={catalogue} label={t("load_more")} />
         </div>
       )}
       {resource !== "personal_chat" && (
@@ -700,10 +686,8 @@ export function SkillBindingsEditor({
           )}
         </div>
       )}
-      {resource !== "personal_chat" && saveError && (
-        <p role="alert" className="text-destructive text-sm">
-          {saveError}
-        </p>
+      {resource !== "personal_chat" && saveError != null && (
+        <ListError error={saveError} title={t("skills_bindings_save_error")} />
       )}
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
@@ -728,10 +712,8 @@ export function SkillBindingsEditor({
           </DialogHeader>
           {previewLoading ? (
             <p>{t("loading")}</p>
-          ) : previewError ? (
-            <p role="alert" className="text-destructive">
-              {previewError}
-            </p>
+          ) : previewError != null ? (
+            <ListError error={previewError} title={t("skills_preview_load_error")} />
           ) : (
             preview && (
               <div className="space-y-3">

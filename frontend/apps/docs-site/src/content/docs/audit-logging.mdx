@@ -113,6 +113,8 @@ Endpoint: `POST /api/v1/audit/logs/export/async`
 
 Async exports are streamed and resilient for large datasets. Each tenant can have at most two async exports running at once. Export files are retained for 24 hours before cleanup.
 
+For a completed export, the admin-protected status response includes a `download_url` valid for 60 seconds. Request fresh status when the user downloads the file. This signed URL streams only that export in its tenant and does not use the browser's session cookie. Treat the URL as a temporary credential: signing out does not revoke it before its expiry. The authenticated `/download` endpoint remains available for API clients.
+
 ## UI behavior notes
 
 - Free-text search matches the audit log description. Include names or identifiers in descriptions if you want them to be searchable.

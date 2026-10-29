@@ -3,58 +3,86 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
+import { Selector, type SelectorOptionType } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Search, UserPlus } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { useFormatter, useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { UserPlus } from "lucide-react";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import { useFormatter, useTranslations } from "use-intl";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { TableFrame } from "@/components/composites/table-frame";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { PasswordPolicyPanel } from "./password-policy-panel";
-import { UserEditorDialog } from "./user-editor";
+import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
 import { UserTable } from "./user-table";
-import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
+import {
+  adminUsersQueryOptions,
+  isSearchable,
+  readUsersFilters,
+  usersFiltersSearchParams,
+  type StateFilter,
+  type UsersFilters
+} from "./users";
 
-const SEARCH_DEBOUNCE_MS = 250;
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
-const NARROW_QUERY = "(width < 40rem)";
-
-/** Sync the current filter state into the URL for shareable links. */
-function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {
-  const params = new URLSearchParams();
-  if (stateFilter !== "active") params.set("tab", stateFilter);
-  if (search) params.set("search", search);
-  if (page > 1) params.set("page", String(page));
-  if (roleId) params.set("role_id", roleId);
-  const query = params.toString();
-  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-}
+const NARROW_QUERY = `not all and ${MEDIA.sm}`;
+/** The role filter's "all roles" option (role ids are UUIDs). */
+const ALL_ROLES = "all";
 
 export function AdminUsersPage() {
   const t = useTranslations();
   const format = useFormatter();
   const searchParams = useSearchParams();
 
-  const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
-  const initialSearch = searchParams.get("search") ?? "";
-  const initialPage = Math.max(1, Number(searchParams.get("page")) || 1);
-  const [roleId, setRoleId] = useState(searchParams.get("role_id"));
-
-  const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
-  const [searchInput, setSearchInput] = useState(initialSearch);
-  const [search, setSearch] = useState(initialSearch);
-  const [page, setPage] = useState(initialPage);
+  const pathname = usePathname();
+  const filters = useMemo(() => readUsersFilters(searchParams), [searchParams]);
+  const { stateFilter, search, searchName, page, roleId } = filters;
   const [showCreate, setShowCreate] = useState(false);
+  // Passwords the editor set, shown one at a time in the order the saves
+  // landed. Held here, not in the row whose editor set them: a refetch may
+  // drop that row mid-save, and the save then lands with its editor gone. A
+  // queue, as the admin may save another user meanwhile, so a second password
+  // can land before the first has been handed over.
+  const [issued, setIssued] = useState<{ key: number; password: IssuedPassword }[]>([]);
+  const issuedCount = useRef(0);
+  function showIssued(password: IssuedPassword) {
+    const key = ++issuedCount.current;
+    setIssued((queue) => [...queue, { key, password }]);
+  }
+  // E-mail and username searches combine (AND); a new search starts over at page 1.
+  const emailBox = useSearchDraft(search);
+  const nameBox = useSearchDraft(searchName);
+  const nextEmail = isSearchable(emailBox.settled) ? emailBox.settled : search;
+  const nextName = isSearchable(nameBox.settled) ? nameBox.settled : searchName;
+  useEffect(() => {
+    if (nextEmail !== filters.search || nextName !== filters.searchName) {
+      const query = usersFiltersSearchParams({
+        ...filters,
+        search: nextEmail,
+        searchName: nextName,
+        page: 1
+      }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [filters, nextEmail, nextName, pathname]);
+
+  function changeFilters(next: Partial<UsersFilters>) {
+    const query = usersFiltersSearchParams({ ...filters, ...next }).toString();
+    replaceUrl(query ? `${pathname}?${query}` : pathname);
+  }
 
   const baseId = useId();
   const panelId = `${baseId}-panel`;
+  const hintId = `${baseId}-search-hint`;
   const tabId = (value: StateFilter) => `${baseId}-tab-${value}`;
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
@@ -63,35 +91,34 @@ export function AdminUsersPage() {
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
-  // Debounce the search box; only commit at 0 or ≥3 chars (backend rule).
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      const trimmed = searchInput.trim();
-      if (trimmed.length > 0 && trimmed.length < MIN_SEARCH_LENGTH) return;
-      if (trimmed !== search) {
-        setSearch(trimmed);
-        setPage(1);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput, search]);
-
-  useEffect(() => {
-    syncUrl(stateFilter, search, page, roleId);
-  }, [stateFilter, search, page, roleId]);
-
   const roles = useQuery(rolesQueryOptions(browserApi));
-  const selectedRole = [...(roles.data?.custom ?? []), ...(roles.data?.predefined ?? [])].find(
-    (role) => role.id === roleId
-  );
+  const predefined = roles.data?.predefined ?? [];
+  const custom = roles.data?.custom ?? [];
+  const roleKnown = [...predefined, ...custom].some((role) => role.id === roleId);
+  const roleOptions: SelectorOptionType[] = [
+    { value: ALL_ROLES, label: t("admin_users_all_roles") },
+    ...[
+      { title: t("default_roles"), roles: predefined },
+      { title: t("custom_roles"), roles: custom }
+    ]
+      .filter((section) => section.roles.length > 0)
+      .map((section) => ({
+        type: "section" as const,
+        title: section.title,
+        options: section.roles.map((role) => ({ value: role.id, label: role.name }))
+      })),
+    // A role from an old link that no longer exists still shows as the filter.
+    ...(roleId && roles.data && !roleKnown
+      ? [{ value: roleId, label: t("admin_users_unknown_role") }]
+      : [])
+  ];
 
   const { data, isPending, isPlaceholderData } = useQuery({
     ...adminUsersQueryOptions(browserApi, {
       page,
       stateFilter,
       search,
+      searchName: searchName || undefined,
       roleId: roleId ?? undefined
     }),
     placeholderData: keepPreviousData
@@ -105,12 +132,23 @@ export function AdminUsersPage() {
 
   // A page past the end (its last user was deactivated or deleted, or an old
   // link): show the last page rather than an empty list.
-  if (metadata && !isPlaceholderData && page > totalPages) setPage(totalPages);
+  useEffect(() => {
+    if (metadata && !isPlaceholderData && filters.page > totalPages) {
+      const query = usersFiltersSearchParams({ ...filters, page: totalPages }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [metadata, isPlaceholderData, filters, totalPages, pathname]);
+
+  // Past the backend's page cap the rest can only be reached by filtering.
+  const capped =
+    metadata != null &&
+    !isPlaceholderData &&
+    metadata.total_count > metadata.total_pages * metadata.page_size;
 
   // Announce the result count once the results of a new search, tab or role
   // filter are in (WCAG 4.1.3); not on first load, not for page changes
   // (Pagination announces those).
-  const resultsFor = `${stateFilter}|${search}|${roleId ?? ""}`;
+  const resultsFor = `${stateFilter}|${search}|${searchName}|${roleId ?? ""}`;
   const announcedFor = useRef(resultsFor);
   useEffect(() => {
     if (total == null || announcedFor.current === resultsFor) return;
@@ -119,12 +157,21 @@ export function AdminUsersPage() {
   }, [announce, resultsFor, t, total]);
 
   function selectTab(next: StateFilter) {
-    setStateFilter(next);
-    setPage(1);
+    changeFilters({ stateFilter: next, page: 1 });
+  }
+
+  function selectRole(next: string) {
+    changeFilters({ roleId: next === ALL_ROLES ? null : next, page: 1 });
+  }
+
+  function clearFilters() {
+    emailBox.setDraft("");
+    nameBox.setDraft("");
+    changeFilters({ search: "", searchName: "", roleId: null, page: 1 });
   }
 
   function changePage(next: number) {
-    setPage(next);
+    changeFilters({ page: next });
     // The pressed button stays focused, except "next"/"previous" at the last
     // or first page, which becomes disabled: then focus moves to the panel.
     rescue(panelRef.current);
@@ -137,13 +184,14 @@ export function AdminUsersPage() {
     results = <EmptyState title={t("no_users_found")} />;
   } else {
     results = (
-      <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
+      <TableFrame>
         <UserTable
           users={users}
           label={tabLabel(stateFilter)}
           onRemoved={() => rescue(panelRef.current)}
+          onIssued={showIssued}
         />
-      </div>
+      </TableFrame>
     );
   }
 
@@ -205,41 +253,52 @@ export function AdminUsersPage() {
         tabIndex={-1}
         className="focus-visible:outline-ring rounded-ax-element flex flex-col gap-4 focus-visible:outline-2 focus-visible:outline-offset-4"
       >
-        <div className="flex flex-wrap items-center gap-2.5">
-          <TextInput
-            label={t("admin_users_search")}
-            isLabelHidden
-            placeholder={t("admin_users_search_placeholder")}
-            startIcon={Search}
-            value={searchInput}
-            onChange={setSearchInput}
-            hasClear
-            autoComplete="off"
-            className="w-full sm:w-80"
-          />
-          {roleId && (
-            <div className="bg-ax-muted rounded-ax-element flex items-center gap-2 py-1 ps-3 pe-1 text-sm">
-              <span>
-                {t("roles_filter_label")}:{" "}
-                <strong className="font-semibold">{selectedRole?.name ?? roleId}</strong>
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                label={t("roles_clear_filter")}
-                onClick={() => {
-                  setRoleId(null);
-                  setPage(1);
-                }}
-              />
-            </div>
-          )}
-          <p className="text-ax-text-secondary ms-auto text-sm">
-            {total != null ? t("admin_users_count", { count: total }) : ""}
-          </p>
+        {/* The filters search the whole list (the backend filters), not the page. */}
+        <div role="search" aria-label={t("users")} className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <TextInput
+              label={t("email")}
+              value={emailBox.draft}
+              onChange={emailBox.setDraft}
+              hasClear
+              autoComplete="off"
+              aria-describedby={hintId}
+              width="100%"
+            />
+            <TextInput
+              label={t("username")}
+              value={nameBox.draft}
+              onChange={nameBox.setDraft}
+              hasClear
+              autoComplete="off"
+              aria-describedby={hintId}
+              width="100%"
+            />
+            <Selector
+              label={t("roles_filter_label")}
+              options={roleOptions}
+              value={roleId ?? ALL_ROLES}
+              onChange={selectRole}
+              isLoading={roles.isPending}
+              width="100%"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <p id={hintId} className="text-ax-text-secondary max-w-xl text-sm">
+              {t("admin_users_search_hint")}
+            </p>
+            <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            <p className="text-ax-text-secondary ms-auto text-sm">
+              {total != null ? t("admin_users_count", { count: total }) : ""}
+            </p>
+          </div>
         </div>
 
         <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+
+        {capped ? (
+          <p className="text-ax-text-secondary text-sm">{t("admin_users_refine_search")}</p>
+        ) : null}
 
         {/* Never disabled while a page loads: that would take focus from the
             pressed button. The previous page stays visible (aria-busy) and
@@ -256,7 +315,17 @@ export function AdminUsersPage() {
 
       <PasswordPolicyPanel />
 
-      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} />
+      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} onIssued={showIssued} />
+      <IssuedPasswordDialog
+        // A fresh view for each password.
+        key={issued[0]?.key}
+        issued={issued[0]?.password ?? null}
+        onClose={() => {
+          setIssued((queue) => queue.slice(1));
+          // The row whose menu opened the editor may have gone meanwhile.
+          rescue(panelRef.current);
+        }}
+      />
     </div>
   );
 }

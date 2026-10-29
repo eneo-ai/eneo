@@ -17,36 +17,24 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftRight,
   Info,
+  MapPin,
   MoreHorizontal,
   Pencil,
   ShieldCheck,
   Star,
   Trash2
 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { useTranslations } from "use-intl";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
-import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
-import { DeleteBlockedDialog } from "./delete-blocked-dialog";
-import { EditModelDialog } from "./edit-model-dialog";
-import { MigrateModelDialog } from "./migrate-model-dialog";
 import { useModelTypeLabel } from "./model-type-label";
-import { ModelDetailDialog } from "./model-detail-dialog";
-import {
-  type AdminModel,
-  deleteTenantModel,
-  imageModelUsedBy,
-  type MigratableModelKind,
-  MODELS_KEY,
-  type ModelKind
-} from "./models";
+import { type AdminModel, imageModelUsedBy, MODELS_KEY, type ModelKind } from "./models";
+import type { ModelAction } from "./model-dialogs";
 import { modelLifecycle, modelPrice } from "./provider-sections";
 
 type ModelFlags = {
@@ -97,7 +85,8 @@ function hasDefault(model: AdminModel): model is AdminModel & { is_org_default?:
 }
 
 /** Vision / reasoning / tools as small tokens; "–" where the type has none. */
-function Capabilities({ model }: { model: AdminModel }) {
+/** In a list row (`label`), named and left out when there are none. */
+function Capabilities({ model, label }: { model: AdminModel; label?: string }) {
   const t = useTranslations();
   const labels = [
     "vision" in model && model.vision ? t("admin_models_capability_vision") : null,
@@ -108,6 +97,7 @@ function Capabilities({ model }: { model: AdminModel }) {
   ].filter((label): label is string => label !== null);
 
   if (labels.length === 0) {
+    if (label) return null;
     return (
       <>
         <span aria-hidden="true" className="text-ax-text-secondary">
@@ -118,10 +108,10 @@ function Capabilities({ model }: { model: AdminModel }) {
     );
   }
   return (
-    <ul className="flex flex-wrap gap-1">
-      {labels.map((label) => (
-        <li key={label} className="flex">
-          <Token label={label} size="sm" />
+    <ul aria-label={label} className="flex flex-wrap gap-1">
+      {labels.map((capability) => (
+        <li key={capability} className="flex">
+          <Token label={capability} size="sm" />
         </li>
       ))}
     </ul>
@@ -132,11 +122,21 @@ function Capabilities({ model }: { model: AdminModel }) {
  * Mono price, right-aligned by the cell; screen readers get "Indata $5,
  * utdata $25". Per-minute and per-image prices carry their unit.
  */
-function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
+/** In a list row (`isEmptyHidden`), left out when unknown. */
+function Price({
+  model,
+  kind,
+  isEmptyHidden
+}: {
+  model: AdminModel;
+  kind: ModelKind;
+  isEmptyHidden?: boolean;
+}) {
   const t = useTranslations();
   const price = modelPrice(model, kind);
 
   if (price.kind === "unknown") {
+    if (isEmptyHidden) return null;
     return (
       <>
         <span aria-hidden="true" className="text-ax-text-secondary">
@@ -176,26 +176,32 @@ function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
   return <span className="font-mono text-xs tabular-nums">{price.input ?? price.output}</span>;
 }
 
+/**
+ * One model: its switch, name with badges, and menu with the dialogs it
+ * opens. A table row from 768 px; on a phone a list row (decision 31) with
+ * where the model is hosted and the class it is approved for, the switch and
+ * the menu at its end, its price and capabilities under them.
+ */
 export function ModelRow({
   model,
   kind,
   classifications,
   securityEnabled,
-  showKind = false
+  showKind = false,
+  layout = "table",
+  onAction
 }: {
   model: AdminModel;
   kind: ModelKind;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   showKind?: boolean;
+  layout?: "table" | "list";
+  onAction: (action: ModelAction) => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
-  const [showEdit, setShowEdit] = useState(false);
-  const [showMigrate, setShowMigrate] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
   // Embedding models have no detail view; image models get the properties
   // without a usage tab (no usage endpoint).
   const canViewDetail = kind !== "embedding";
@@ -270,87 +276,193 @@ export function ModelRow({
   // falls back to the saved state when the last write failed.
   const enabled = enable.isPending ? enable.variables : (model.is_org_enabled ?? false);
 
-  // The row, its menu and the dialog go with the model: focus moves to the
-  // page's RemovalFocusScope (the tab panel) once the list has refetched.
-  const remove = useRemovalMutation({
-    mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
-    refresh: refetchModels,
-    onRemoved: () => {
-      setShowDelete(false);
-      toast.success(t("model_deleted_success"));
-    },
-    onError: (error) => {
-      if (
-        error instanceof EneoApiError &&
-        error.code === 9039 &&
-        (kind === "completion" || kind === "transcription")
-      ) {
-        toast.error(getErrorMessage(error, t), {
-          action: {
-            label: t("migrate"),
-            onClick: () => {
-              setShowDelete(false);
-              setShowMigrate(true);
-            }
-          }
-        });
-        return;
-      }
-      toastApiError(error, t);
-    }
-  });
+  const enableSwitch = (
+    <Switch
+      label={t("admin_models_enable_model", { name: label })}
+      isLabelHidden
+      value={enabled}
+      onChange={(next) => enable.mutate(next)}
+      isDisabled={locked}
+      disabledMessage={locked ? t("api_credentials_required_for_provider") : undefined}
+    />
+  );
+  const name = (
+    <>
+      {canViewDetail ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => onAction("detail")}
+          className={cn(
+            "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 min-w-0 items-center text-start font-semibold [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
+            enabled ? "text-ax-text" : "text-ax-text-secondary"
+          )}
+        >
+          {label}
+        </button>
+      ) : (
+        <span
+          className={cn(
+            "min-w-0 font-semibold [overflow-wrap:anywhere]",
+            enabled ? "text-ax-text" : "text-ax-text-secondary"
+          )}
+        >
+          {label}
+        </span>
+      )}
+    </>
+  );
+  const badges = (
+    <>
+      {isDefault && <Badge variant="blue" label={t("admin_models_default_badge")} />}
+      {lifecycle.kind === "deprecated" && (
+        <Badge variant="error" label={t("model_label_deprecated")} />
+      )}
+      {lifecycle.kind === "retiring" && (
+        <Badge variant="warning" label={t("model_label_retiring", { date: lifecycle.date })} />
+      )}
+      {deleteBlocked && <Badge variant="warning" label={t("model_used_by_image_generation")} />}
+    </>
+  );
+  const menu = (
+    <>
+      {hasMenu && (
+        <DropdownMenu
+          button={{
+            label: t("admin_models_row_menu", { name: label }),
+            tooltip: t("admin_models_row_menu", { name: label }),
+            icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+            isIconOnly: true,
+            variant: "ghost",
+            size: "sm"
+          }}
+          hasChevron={false}
+          alignment="end"
+        >
+          {canViewDetail && (
+            <DropdownMenuItem
+              icon={Info}
+              label={t("model_details")}
+              onClick={() => onAction("detail")}
+            />
+          )}
+          {canEdit && (
+            <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => onAction("edit")} />
+          )}
+          {canMigrate && (
+            <DropdownMenuItem
+              icon={ArrowLeftRight}
+              label={t("migrate")}
+              onClick={() => onAction("migrate")}
+            />
+          )}
+          {hasModelActions && hasFlagActions && <DropdownMenuDivider />}
+          {supportsDefault && (
+            <DropdownMenuItem
+              icon={Star}
+              label={t("set_as_default_model")}
+              isDisabled={isDefault || !enabled || makeDefault.isPending}
+              onClick={() => makeDefault.mutate()}
+            />
+          )}
+          {supportsClassification && (
+            <DropdownMenuSubMenu icon={ShieldCheck} label={t("security_classification")}>
+              <DropdownMenuRadioGroup
+                label={t("security_classification")}
+                value={currentClassification?.id ?? NO_CLASSIFICATION}
+                onChange={(value) =>
+                  classify.mutate(
+                    classifications.find((classification) => classification.id === value) ?? null
+                  )
+                }
+              >
+                <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />
+                {classifications.map((classification) => (
+                  <DropdownMenuRadioItem
+                    key={classification.id}
+                    value={classification.id}
+                    label={classification.name}
+                  />
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubMenu>
+          )}
+          {canDelete && (hasModelActions || hasFlagActions) && <DropdownMenuDivider />}
+          {canDelete && (
+            <DropdownMenuItem
+              icon={Trash2}
+              label={t("delete")}
+              // The reason is at the action, and the item stays reachable:
+              // Astryx menus skip disabled items, reason and all.
+              description={
+                deleteBlocked
+                  ? t("model_delete_blocked_used_by", { names: usedByNames })
+                  : undefined
+              }
+              variant="destructive"
+              onClick={() => onAction("delete")}
+            />
+          )}
+        </DropdownMenu>
+      )}
+    </>
+  );
+  if (layout === "list") {
+    const hosting = (model as { hosting?: string | null }).hosting;
+    return (
+      <li data-model-id={model.id} className="flex min-h-14 items-center gap-3 py-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {name}
+            {badges}
+          </div>
+          {technicalId ? (
+            <Text type="code" size="sm" color="secondary" maxLines={1}>
+              {technicalId}
+            </Text>
+          ) : null}
+          <div className="text-ax-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            {hosting ? (
+              <span className="inline-flex">
+                <span className="sr-only">{t("hosting_region")}: </span>
+                <Token
+                  size="sm"
+                  label={t.has(`hosting_${hosting}`) ? t(`hosting_${hosting}`) : hosting}
+                  icon={<MapPin className="size-3.5" aria-hidden="true" />}
+                />
+              </span>
+            ) : null}
+            {securityEnabled ? (
+              currentClassification ? (
+                <span className="inline-flex">
+                  <span className="sr-only">{t("admin_models_security_filter")}: </span>
+                  <Badge label={currentClassification.name} />
+                </span>
+              ) : (
+                <span>{t("admin_models_unclassified")}</span>
+              )
+            ) : null}
+            {showKind ? <span>{typeLabel(kind)}</span> : null}
+            <Price model={model} kind={kind} isEmptyHidden />
+          </div>
+          <Capabilities model={model} label={t("capabilities")} />
+        </div>
+        {/* The track centred in its 44 px touch box, level with the menu. */}
+        <div className="[&>*]:flex [&>*]:min-h-11 [&>*]:items-center">{enableSwitch}</div>
+        {menu}
+      </li>
+    );
+  }
 
   return (
-    <TableRow>
-      <TableCell>
-        <Switch
-          label={t("admin_models_enable_model", { name: label })}
-          isLabelHidden
-          value={enabled}
-          onChange={(next) => enable.mutate(next)}
-          isDisabled={locked}
-          disabledMessage={locked ? t("api_credentials_required_for_provider") : undefined}
-        />
-      </TableCell>
+    <TableRow data-model-id={model.id}>
+      <TableCell>{enableSwitch}</TableCell>
 
       <TableCell>
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {canViewDetail ? (
-              <button
-                type="button"
-                aria-haspopup="dialog"
-                onClick={() => setShowDetail(true)}
-                className={cn(
-                  "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-start font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
-                  enabled ? "text-ax-text" : "text-ax-text-secondary"
-                )}
-              >
-                {label}
-              </button>
-            ) : (
-              <span
-                className={cn(
-                  "font-semibold break-words",
-                  enabled ? "text-ax-text" : "text-ax-text-secondary"
-                )}
-              >
-                {label}
-              </span>
-            )}
-            {isDefault && <Badge variant="blue" label={t("admin_models_default_badge")} />}
-            {lifecycle.kind === "deprecated" && (
-              <Badge variant="error" label={t("model_label_deprecated")} />
-            )}
-            {lifecycle.kind === "retiring" && (
-              <Badge
-                variant="warning"
-                label={t("model_label_retiring", { date: lifecycle.date })}
-              />
-            )}
-            {deleteBlocked && (
-              <Badge variant="warning" label={t("model_used_by_image_generation")} />
-            )}
+            {name}
+            {badges}
           </div>
           {technicalId && (
             <Text type="code" size="sm" color="secondary" maxLines={1}>
@@ -385,133 +497,7 @@ export function ModelRow({
         </TableCell>
       )}
 
-      <TableCell className="text-end">
-        {hasMenu && (
-          <DropdownMenu
-            button={{
-              label: t("admin_models_row_menu", { name: label }),
-              tooltip: t("admin_models_row_menu", { name: label }),
-              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-              isIconOnly: true,
-              variant: "ghost",
-              size: "sm"
-            }}
-            hasChevron={false}
-            alignment="end"
-          >
-            {canViewDetail && (
-              <DropdownMenuItem
-                icon={Info}
-                label={t("model_details")}
-                onClick={() => setShowDetail(true)}
-              />
-            )}
-            {canEdit && (
-              <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => setShowEdit(true)} />
-            )}
-            {canMigrate && (
-              <DropdownMenuItem
-                icon={ArrowLeftRight}
-                label={t("migrate")}
-                onClick={() => setShowMigrate(true)}
-              />
-            )}
-            {hasModelActions && hasFlagActions && <DropdownMenuDivider />}
-            {supportsDefault && (
-              <DropdownMenuItem
-                icon={Star}
-                label={t("set_as_default_model")}
-                isDisabled={isDefault || !enabled || makeDefault.isPending}
-                onClick={() => makeDefault.mutate()}
-              />
-            )}
-            {supportsClassification && (
-              <DropdownMenuSubMenu icon={ShieldCheck} label={t("security_classification")}>
-                <DropdownMenuRadioGroup
-                  label={t("security_classification")}
-                  value={currentClassification?.id ?? NO_CLASSIFICATION}
-                  onChange={(value) =>
-                    classify.mutate(
-                      classifications.find((classification) => classification.id === value) ?? null
-                    )
-                  }
-                >
-                  <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />
-                  {classifications.map((classification) => (
-                    <DropdownMenuRadioItem
-                      key={classification.id}
-                      value={classification.id}
-                      label={classification.name}
-                    />
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubMenu>
-            )}
-            {canDelete && (hasModelActions || hasFlagActions) && <DropdownMenuDivider />}
-            {canDelete && (
-              <DropdownMenuItem
-                icon={Trash2}
-                label={t("delete")}
-                // The reason is at the action, and the item stays reachable:
-                // Astryx menus skip disabled items, reason and all.
-                description={
-                  deleteBlocked
-                    ? t("model_delete_blocked_used_by", { names: usedByNames })
-                    : undefined
-                }
-                variant="destructive"
-                onClick={() => setShowDelete(true)}
-              />
-            )}
-          </DropdownMenu>
-        )}
-
-        {canEdit && (
-          <EditModelDialog
-            model={model}
-            kind={kind}
-            classifications={classifications}
-            securityEnabled={securityEnabled}
-            open={showEdit}
-            onOpenChange={setShowEdit}
-          />
-        )}
-        {canMigrate && (
-          <MigrateModelDialog
-            model={model}
-            kind={kind as MigratableModelKind}
-            open={showMigrate}
-            onOpenChange={setShowMigrate}
-          />
-        )}
-        {canViewDetail && (
-          <ModelDetailDialog
-            model={model}
-            kind={kind as Exclude<ModelKind, "embedding">}
-            open={showDetail}
-            onOpenChange={setShowDetail}
-          />
-        )}
-        {canDelete && deleteBlocked && (
-          <DeleteBlockedDialog
-            open={showDelete}
-            onOpenChange={setShowDelete}
-            title={t("admin_models_delete_blocked_title", { name: label })}
-            description={t("admin_models_delete_blocked_description", { names: usedByNames })}
-          />
-        )}
-        {canDelete && !deleteBlocked && (
-          <ConfirmDialogControlled
-            open={showDelete}
-            onOpenChange={setShowDelete}
-            title={t("delete_model")}
-            description={`${t("delete_model_confirm", { name: label })} ${t("delete_model_warning")}`}
-            confirmLabel={remove.isPending ? t("deleting") : t("delete")}
-            pending={remove.isPending}
-            onConfirm={() => remove.mutate()}
-          />
-        )}
-      </TableCell>
+      <TableCell className="text-end">{menu}</TableCell>
     </TableRow>
   );
 }

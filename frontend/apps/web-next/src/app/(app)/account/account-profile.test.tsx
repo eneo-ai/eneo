@@ -2,13 +2,12 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
+import { switchLocale } from "@/lib/i18n/switch-locale";
 import { renderInApp, testAppContext } from "@/test/render";
 import { AccountProfile } from "./account-profile.client";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
-const setLocale = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale }));
+vi.mock("@/lib/i18n/switch-locale", () => ({ switchLocale: vi.fn() }));
 
 it("shows the current language as the selected value, named by the row title", async () => {
   const { container } = renderInApp(<AccountProfile />);
@@ -18,14 +17,13 @@ it("shows the current language as the selected value, named by the row title", a
   await expectNoAxeViolations(container);
 });
 
-it("saves the chosen language and refreshes the page", async () => {
+it("switches the chosen language through the document owner", async () => {
   renderInApp(<AccountProfile />);
 
   fireEvent.click(screen.getByRole("combobox", { name: "Språk" }));
   fireEvent.click(await screen.findByRole("option", { name: "English" }));
 
-  await waitFor(() => expect(setLocale).toHaveBeenCalledWith("en"));
-  await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  await waitFor(() => expect(switchLocale).toHaveBeenCalledWith("en"));
 });
 
 it("shows the frontend's and the backend's version", () => {

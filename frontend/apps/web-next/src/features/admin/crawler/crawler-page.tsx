@@ -11,14 +11,15 @@ import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Globe, RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { crawlRunState, crawlRunStateLabelKey } from "@/features/knowledge/crawl-run-state";
 import { CrawlRunCounts, CrawlRunStatusLabel } from "@/features/knowledge/crawl-run-ui";
 import { CrawlDetailsDialog } from "./crawl-details-dialog";
@@ -202,7 +203,10 @@ function DayCards({
                     {t(PERIOD_KEYS[day])}
                   </h2>
                   <span className="text-ax-text-secondary text-sm">
-                    <ClientTime value={`${data.calendar[day].date}T00:00:00Z`} format="date_long" />
+                    {formatCalendarDate(data.calendar[day].date, locale, {
+                      day: "numeric",
+                      month: "long"
+                    })}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -616,7 +620,9 @@ export function CrawlerPage() {
             ) : null}
           </form>
 
-          {rows.isError ? (
+          {/* The page's own copy for a failed poll (data kept) and a failed first read;
+              blockingError keeps the retry under focus while a first read retries. */}
+          {rows.isError || blockingError(rows) ? (
             <ListError
               error={rows.error}
               title={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
@@ -625,7 +631,7 @@ export function CrawlerPage() {
             />
           ) : null}
 
-          {rows.isPending && !rows.isError ? (
+          {rows.isPending && !blockingError(rows) ? (
             <LoadingState rows={3} />
           ) : isSchedule && schedule.data ? (
             <ScheduleTable

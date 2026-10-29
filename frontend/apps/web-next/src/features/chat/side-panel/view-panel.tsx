@@ -1,7 +1,7 @@
 "use client";
 
 import { AppWindow } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback } from "react";
 import { appViewSubject, appViewTitle, type McpAppCall } from "@/features/mcp-apps/mcp-apps";
 import { PanelFrame, type PanelMaximise, type PanelSwitcher } from "./panel-frame";

@@ -70,3 +70,40 @@ async def test_resolve_single_tenant_redirect_uri_requires_tenant_id_for_overrid
     )
 
     assert resolved == "https://canonical.example.com/login/callback"
+
+
+async def test_resolve_single_tenant_redirect_uri_brackets_an_allowed_ipv6_origin():
+    tenant_id = uuid4()
+    container = SimpleNamespace(
+        allowed_origin_repo=lambda: AllowedOriginRepoStub(
+            {tenant_id: ["https://[::1]:8443"]}
+        )
+    )
+    settings = SimpleNamespace(oidc_tenant_id=str(tenant_id))
+
+    resolved = await user_router._resolve_single_tenant_redirect_uri(
+        container=container,
+        settings=settings,
+        redirect_uri="https://canonical.example.com/login/callback",
+        request_origin="https://[::1]:8443",
+        correlation_id="corr-ipv6-origin",
+    )
+
+    assert resolved == "https://[::1]:8443/login/callback"
+
+
+async def test_resolve_single_tenant_redirect_uri_keeps_its_own_origin():
+    def allowed_origin_repo():
+        raise AssertionError("the redirect URI's own origin needs no allowlist")
+
+    settings = SimpleNamespace(oidc_tenant_id=str(uuid4()))
+
+    resolved = await user_router._resolve_single_tenant_redirect_uri(
+        container=SimpleNamespace(allowed_origin_repo=allowed_origin_repo),
+        settings=settings,
+        redirect_uri="https://[::1]:8443/login/callback",
+        request_origin="https://[::1]:8443",
+        correlation_id="corr-own-origin",
+    )
+
+    assert resolved == "https://[::1]:8443/login/callback"

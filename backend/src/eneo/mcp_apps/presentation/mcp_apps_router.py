@@ -121,7 +121,7 @@ async def mint_app_view_token(
     return McpAppViewTokenResponse(url=url, expires_at=expires_at, html=view.html)
 
 
-def _on_content_origin(request: Request) -> bool:
+def on_content_origin(request: Request) -> bool:
     """Whether the request came in on the host views are served from."""
     content_base = get_settings().mcp_app_content_base_url
     if not content_base:
@@ -164,7 +164,7 @@ async def serve_app_view_content(
     # A view is served on the content origin and nowhere else. The same route
     # is reachable on Eneo's own address in an ordinary deployment, and a
     # server's HTML must never be handed out from there.
-    if not get_settings().mcp_apps_enabled or not _on_content_origin(request):
+    if not get_settings().mcp_apps_enabled or not on_content_origin(request):
         raise NotFoundException("MCP app view not found")
 
     session = cast("AsyncSession", container.session())

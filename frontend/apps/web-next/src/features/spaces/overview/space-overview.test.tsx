@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -21,7 +22,7 @@ import {
 
 const state = vi.hoisted(() => ({ space: null as unknown, progress: [] as unknown[] }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
     space: state.space,
@@ -220,5 +221,60 @@ describe("SpaceOverview", () => {
     show(makeSpace({ overrides: { organization: true } }));
     expect(screen.queryByRole("region", { name: "Assistenter" })).toBeNull();
     expect(screen.getByRole("region", { name: "Kunskap" })).toBeTruthy();
+  });
+});
+
+describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
+  const manage = () => screen.getByRole("region", { name: "Hantera ytan" });
+  const rows = () =>
+    within(manage())
+      .getAllByRole("link")
+      .map((link) => [link.textContent, link.getAttribute("href")]);
+
+  it("lists what manages the space, each opening its screen", async () => {
+    setViewport("phone");
+    const { container } = show(
+      makeSpace({ members: [makeMember(), makeMember({ id: "u2", email: "erik@example.com" })] })
+    );
+    expect(rows()).toEqual([
+      ["Medlemmar (2)", "/spaces/space-1/members"],
+      ["Inställningar", "/spaces/space-1/settings"],
+      ["Skills", "/spaces/space-1/skills"],
+      ["Tjänster", "/spaces/space-1/services"]
+    ]);
+    // After the space's content.
+    const regions = screen
+      .getAllByRole("region")
+      .map((region) => region.getAttribute("aria-labelledby"));
+    expect(regions.at(-1)).toBe(manage().getAttribute("aria-labelledby"));
+    await expectNoAxeViolations(container);
+  });
+
+  it("lists only what the user may manage", () => {
+    setViewport("phone");
+    show(makeSpace({ permissions: ["read"], skillPermissions: [] }));
+    expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)", "Tjänster"]);
+  });
+
+  it("lists the newest assistants as rows, then the create card", () => {
+    setViewport("phone");
+    show(busySpace());
+    const assistants = screen.getByRole("region", { name: "Assistenter" });
+    const rows = within(within(assistants).getAllByRole("list")[0]!).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByRole("link", { name: /^Avtalsgranskaren/ })).toBeTruthy();
+    expect(within(assistants).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+  });
+
+  it("is not there on a tablet, which has a tab for each", () => {
+    setViewport("tablet-portrait");
+    show(makeSpace());
+    expect(screen.queryByRole("region", { name: "Hantera ytan" })).toBeNull();
+  });
+
+  it("is not there for the organisation space, which keeps them as tabs (F4)", () => {
+    setViewport("phone");
+    show(makeSpace({ overrides: { organization: true } }));
+    expect(screen.queryByRole("region", { name: "Hantera ytan" })).toBeNull();
   });
 });

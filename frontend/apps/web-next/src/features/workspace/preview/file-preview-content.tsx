@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { TextQuote } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { useNonce } from "@/components/providers/nonce";
 import { DocxPreview, type DocxPreviewHandle } from "./docx-preview";

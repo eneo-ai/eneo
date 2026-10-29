@@ -2,9 +2,9 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
+import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { cn } from "@/lib/utils";
 import { auditLogsQueryOptions, type AuditFilters } from "./audit";
 import { AuditConfig } from "./audit-config";
@@ -21,34 +22,25 @@ import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters
 import { ExportDialog } from "./export-dialog";
 import { JustificationForm } from "./justification-form";
 
-const SEARCH_DEBOUNCE_MS = 300;
-
 function LogsTab() {
   const t = useTranslations();
   const searchParams = useSearchParams();
-  const [filters, setFilters] = useState<AuditFilters>(() => parseAuditFilters(searchParams));
-  const [searchInput, setSearchInput] = useState(() => parseAuditFilters(searchParams).search);
+  const pathname = usePathname();
+  const filters = useMemo(() => parseAuditFilters(searchParams), [searchParams]);
+  const search = useSearchDraft(filters.search);
   const [showExport, setShowExport] = useState(false);
   const [paging, setPaging] = useState<"previous" | "next" | null>(null);
 
-  // Debounce the free-text search into the committed filters.
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      setFilters((current) =>
-        current.search === searchInput ? current : { ...current, search: searchInput, page: 1 }
-      );
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput]);
-
-  useEffect(() => {
-    const query = auditFiltersSearchParams(filters).toString();
-    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
-    const currentUrl = `${window.location.pathname}${window.location.search}`;
-    if (nextUrl !== currentUrl) window.history.replaceState(null, "", nextUrl);
-  }, [filters]);
+    if (search.settled !== filters.search) {
+      const query = auditFiltersSearchParams({
+        ...filters,
+        search: search.settled,
+        page: 1
+      }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [filters, search.settled, pathname]);
 
   const logsQuery = useQuery({
     ...auditLogsQueryOptions(browserApi, filters),
@@ -62,7 +54,12 @@ function LogsTab() {
   }
 
   function patchFilters(next: Partial<AuditFilters>) {
-    setFilters((current) => ({ ...current, ...next, page: next.page ?? 1 }));
+    const query = auditFiltersSearchParams({
+      ...filters,
+      ...next,
+      page: next.page ?? 1
+    }).toString();
+    replaceUrl(query ? `${pathname}?${query}` : pathname);
   }
 
   const totalPages = data?.total_pages ?? 1;
@@ -72,10 +69,7 @@ function LogsTab() {
   function turnPage(direction: "previous" | "next") {
     if (isPlaceholderData) return;
     setPaging(direction);
-    setFilters((current) => ({
-      ...current,
-      page: current.page + (direction === "next" ? 1 : -1)
-    }));
+    patchFilters({ page: filters.page + (direction === "next" ? 1 : -1) });
   }
 
   return (
@@ -87,17 +81,11 @@ function LogsTab() {
       </div>
 
       <AuditFilterBar
-        filters={{ ...filters, search: searchInput }}
-        onChange={({ search, ...rest }) => {
-          if (search !== undefined) {
-            setSearchInput(search);
-            if (search === "") {
-              setFilters((current) =>
-                current.search === "" ? current : { ...current, search: "", page: 1 }
-              );
-            }
-          }
-          if (Object.keys(rest).length > 0) patchFilters(rest);
+        filters={{ ...filters, search: search.draft }}
+        onChange={({ search: nextSearch, ...rest }) => {
+          if (nextSearch !== undefined) search.setDraft(nextSearch);
+          if (nextSearch === "") patchFilters({ ...rest, search: "" });
+          else if (Object.keys(rest).length > 0) patchFilters(rest);
         }}
       />
 

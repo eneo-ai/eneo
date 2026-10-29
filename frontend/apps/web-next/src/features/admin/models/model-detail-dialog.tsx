@@ -1,11 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useId } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -90,6 +90,7 @@ function InfoTab({
   t: ReturnType<typeof useTranslations>;
 }) {
   const imageLabels = useImageOptionLabels();
+  const format = useFormatter();
   const get = (key: string) => (model as Record<string, unknown>)[key];
   const contextWindow = get("max_input_tokens");
   const usedBy = imageModelUsedBy(model);
@@ -107,7 +108,7 @@ function InfoTab({
       )}
       {model.hosting && <Field label={t("hosting_region")} value={model.hosting} />}
       {typeof contextWindow === "number" && (
-        <Field label={t("model_context_label")} value={contextWindow.toLocaleString()} />
+        <Field label={t("model_context_label")} value={format.number(contextWindow)} />
       )}
       {kind === "image" ? (
         <>
@@ -178,7 +179,7 @@ function UsageTab({
     return key ? t(key) : type;
   };
 
-  if (isPending) return <Skeleton className="h-40 w-full" />;
+  if (isPending) return <LoadingState rows={1} height={160} />;
   if (!data || data.items.length === 0)
     return <p className="text-muted-foreground py-4 text-sm">{t("model_usage_empty")}</p>;
 

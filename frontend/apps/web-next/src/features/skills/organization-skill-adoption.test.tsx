@@ -7,7 +7,7 @@ import type { Schema } from "@/lib/api/models";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 import { OrganizationSkillAdoption } from "./organization-skill-adoption";
 
@@ -116,7 +116,13 @@ describe("organisation Skill bindings", () => {
       expect(get).toHaveBeenCalledWith("/api/v1/skills/organization/{skill_id}/adoption/", {
         params: {
           path: { skill_id: "skill-1" },
-          query: { limit: 100, cursor: null, query: "Review", kind: undefined, drift: undefined }
+          query: {
+            limit: 100,
+            cursor: undefined,
+            query: "Review",
+            kind: undefined,
+            drift: undefined
+          }
         }
       })
     );

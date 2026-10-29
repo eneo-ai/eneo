@@ -10,6 +10,21 @@ explicitly intended for the beta. See
 [the frontend development policy](../../../AGENTS.md#frontend-development).
 The UI rules below apply to web-next.
 
+## Vite migration
+
+On `feat/web-next-vite` and its slice branches, the target is a Vite SPA with
+TanStack Router and Query; FastAPI is the only server. Build framework-neutral
+React in `src/features`, `src/components` and `src/lib`, with routes in
+`src/routes`. The existing `src/app` layer is frozen until removal; integrate
+existing responsive changes and make only the wiring changes required by the
+migration. SvelteKit in `apps/web` is the production behaviour reference and
+must not be changed by migration slices.
+
+Follow the migration epic `eneo-web-next-vite-ded5` in Beads from the
+`flows-core` workspace. Land reviewed slices by fast-forward on
+`feat/web-next-vite`; never modify `develop` or merge, approve, close or enable
+auto-merge on a pull request.
+
 ## In short
 
 - **New UI uses [Astryx](https://github.com/facebook/astryx)** (`@astryxdesign/core`)
@@ -20,7 +35,7 @@ The UI rules below apply to web-next.
 - **Layout** with Astryx `VStack`/`HStack`/`Layout` or Tailwind utilities.
 - **Tokens only**: no raw colours, no `dark:` variants (both are lint errors in
   TS/TSX). Every colour, radius and shadow flips with the colour mode by itself.
-- **Every UI string goes through next-intl** (Swedish is the default locale).
+- **Every UI string goes through use-intl** (Swedish is the default locale).
 - **Accessibility is a requirement: WCAG 2.2 AA.** Follow the section below
   and [ACCESSIBILITY.md](ACCESSIBILITY.md).
 - **Reuse before you build.** If an Astryx component or hook already does it,
@@ -39,7 +54,7 @@ manual test protocol and the exceptions process. Read it before building UI.
 - Everything works with the keyboard, in visual order, with a visible 3:1
   focus indicator that sticky headers and the docked chat composer never cover
   (`scroll-pt-*` / `scroll-pb-*` on the scroll container).
-- Accessible names, `alt`, `title` and `placeholder` come from next-intl, never
+- Accessible names, `alt`, `title` and `placeholder` come from use-intl, never
   literals (`eneo/no-literal-accessible-name`). Icon-only controls get a
   translated `aria-label`; decorative images get `alt=""`.
 - Every form control has a visible label; errors are text at the field with a
@@ -92,7 +107,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `--type component`) before writing behaviour yourself: focus handling
   (`useFocusTrap`, `useListFocus`), shortcuts (`useHotkeys`), breakpoints
   (`useMediaQuery`), announcements (`useAnnounce`: never a hand-rolled
-  `aria-live`/`role="status"` region), copying (`useClipboard`), clickable
+  `aria-live`/`role="status"` region), copying (through our `useCopy` in
+  `src/lib/hooks/use-copy.ts`, which wraps `useClipboard` and adds the refusal
+  toast; raw `useClipboard` only for the secret reveal and chat's rich-text
+  copy), clickable
   cards with nested actions (`useClickableContainer`), overflow (`useOverflow`),
   truncation (`useTruncation`, exported from `@astryxdesign/core/Text`, paired
   with `Tooltip`), free-text tags (`Tokenizer` with `hasCreate`), table
@@ -103,8 +121,8 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `useChatPasteAsToken`) plus `useStreamingText` from `/hooks`.
   `useFocusReturnVisibility`, `useTriggerMenu` and `useScrollSpy` exist in
   Astryx's dist but are not exported; do not import them. Astryx has no
-  debounce, before-unload or cursor-pagination hook: ours live in
-  `src/lib/hooks`.
+  debounce, before-unload, cursor-pagination or copy-feedback hook: ours live
+  in `src/lib/hooks` (`useCopy` among them).
 - **One implementation per behaviour.** When an Astryx hook or component
   replaces ours, delete our version and its tests in the same change instead
   of keeping both.
@@ -177,6 +195,16 @@ through `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses
 the default name and announces the creation; `createWithUniqueName` numbers
 the default name on a backend name collision (9017).
 
+On a phone an editor opens on an index of its sections (decision 21): pass
+`phone` (`useEditorPhoneIndex`) and give each section a `group` and, where its
+data is loaded, a `summary` (`src/features/spaces/editor-summaries.ts`). The
+index and the sections are views of one mounted tree chosen by `?section=`,
+so a draft and its pending save outlive a trip to the index or a turn to the
+tablet layout; never render a section only in one view. A section's
+`SettingsGroup` drops its card frame and repeated title there by itself. A
+resource just created opens on General, so its name field is in view. Space
+settings uses the layout without `phone` and keeps one page on every width.
+
 ## How it is wired
 
 - **Packages** (beta, pinned exactly; upgrade together, then run
@@ -203,8 +231,8 @@ the default name on a backend name collision (9017).
   `className` wins. The shadcn variables (`--background`, `--primary`, …) point
   at Astryx tokens, so unmigrated screens already use the Eneo look.
 - **Providers**: `src/components/providers/astryx-provider.tsx` mounts the root
-  `Theme`, Astryx's own strings in the active locale and `next/link` for Astryx
-  links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
+  `Theme`, Astryx's own strings in the active locale and the app's link
+  (`@/lib/link`) for Astryx links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
   is fine.
 - **Contexts above the page hold still.** The page is its own Suspense
   boundary and hydrates after the shell. A context provided above it (root
@@ -247,17 +275,93 @@ the default name on a backend name collision (9017).
   back with one class. Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
   the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
-  `/admin`, Astryx `MobileNav` below 768px and the ⌘K `CommandPalette`. A page
-  header that carries its own phone menu button (the chat header) calls
-  `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
-  opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
-  (`src/components/shell/routes.ts`).
+  `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
+  markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
+  `CommandPalette`. A page header that replaces the phone top bar (the chat
+  header, a pushed screen's `PageBar` with its back link) spreads
+  `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
+  from the server render on. A space is pushed on phones only (decision 24:
+  tablets show it with breadcrumbs under the top bar): its bar is
+  `PageBar until="md"`, which spreads `OWN_PHONE_HEADER` instead. The chat
+  header opens the drawer with
+  `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
+  (`src/components/shell/routes.ts`). Keep state that changes after
+  hydration out of contexts above the page: React replaces a page it has not
+  hydrated yet with its loading state when such a context changes.
+- **Phones and tablets**: the root layout's `viewport` runs the page edge to
+  edge (`viewportFit: "cover"`), lets the Android keyboard resize the layout
+  (`interactiveWidget: "resizes-content"`) and colours the status bar with the
+  surface token (`ThemeColor` follows an explicit Tema). Each safe-area inset
+  has one owner: the shell frame pads the top and sides, `main#main-content`
+  the bottom, the drawer's panel pads itself (`globals.css` section 14), and
+  Astryx Dialog, Popover and BottomSheet pad themselves. Don't add
+  `env(safe-area-inset-*)` inside the page. The page never pulls to refresh
+  (`overscroll-behavior`), and the drawer and dialogs have no backdrop blur.
+- **Panels by the room they have**: the chat's side panel and history decide
+  beside or sheet from the width of the row they share (`useElementWidth`,
+  decision 14: the conversation keeps 480 px), not from a media query; the
+  chat page owns that row and the history gives way to a panel that opens
+  where both do not fit. Widths in that rule are px, set inline.
+- **Collections of resources** (spaces, assistants, apps, services, the
+  catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
+  rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
+  many columns as the page has room for. A list row with a link is one
+  target (globals.css 12b); put controls in its end slot.
+- **Navigation and links**: app code imports `@/lib/navigation` and
+  `@/lib/link`, never `next/navigation` or `next/link` (lint error; `src/app`
+  excepted until it is ported to the Vite build, which swaps both modules).
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
   static (see CSP). The stack rises clear of the focused element
   (`src/components/ui/toast-lift.ts`, WCAG 2.4.11); put `data-clear-of-toasts`
   on a docked group (like the chat composer) that should stay clear as a whole.
+
+## Routing (Vite)
+
+The Vite build (`bun run build:vite`) routes with TanStack Router:
+`src/router.tsx` owns every router option, `src/routes/` holds the route
+files and `src/routes/__root.tsx` renders the providers of the Next root
+layout.
+
+- **Loading has no side effects.** `beforeLoad` and loaders also run when a
+  link is hovered, so they never mutate: logout, a module ticket or an
+  integration callback runs once in an effect or a click handler, without
+  retries or the query cache.
+- **Loaders and guards read through `src/lib/api/query.ts`**, never a bare
+  `queryClient.query`:
+  - `readCached`: session and display data, as cached, even when stale or
+    after a failed background refresh (mounted observers refresh it);
+  - `readFresh`: a guard's evidence (a permission, a resource that may be
+    gone), read again when stale or invalidated; the guard keeps its 403/404
+    handling;
+  - `warmQuery`: starts what the page will need without waiting, with the
+    query's own retry policy.
+
+  None of them changes `retry`: every reader of a query shares the options
+  of the request that started it. `makeQueryClient` owns the default (never
+  on a 4xx, three more tries on a server or network failure); a resource that
+  must not retry, such as a guard's that must fail at once, sets
+  `retry: false` in its own options, after any spread.
+
+- **`loaderDeps` hold no UI state** (`tab`, `page`, `search`, `role_id`,
+  `session_id`, `step`): a tab or filter change must not show pending UI or
+  run the loader again.
+- **Every page route has a title**: `head: routeTitle("key")`
+  (`src/lib/route-head.ts`), shown as "<Page> · Eneo".
+- **Pending UI belongs to page routes**, not `_app`, so the shell stays while
+  a page loads. Chat routes show none for a change of parameters alone.
+- **Errors**: `RouteError` is for a route that failed to load or render. A
+  query that fails while its data is on screen stays with
+  `QueryStateBoundary`.
+- **Search** is flat `URLSearchParams` (`src/lib/router/search.ts`): every
+  value is a string, a repeated key a list.
+- **Navigation**: `vite.config.mts` aliases `@/lib/navigation` and
+  `@/lib/link` to their TanStack implementations (`*.tanstack.ts(x)`), typed
+  against the Next ones. The hooks report the page on screen until the next
+  one has loaded; `replaceUrl` is a router navigation in place (no history
+  entry, no scroll reset, the page stays mounted). Test them in a real router
+  with `renderWithRouter` (`src/test/router.tsx`).
 
 ## Styling
 
@@ -321,6 +425,24 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   (`data` + `columns`) with a width on every column: `pixel(n)` for fixed
   columns, `proportional(n)` for text (it keeps a 120 px minimum). Its plugins
   do sorting, filtering, pagination and selection.
+- Size short columns (counts, dates, states, sizes) with `pixel(n)` to fit
+  their content and header, and leave the name `proportional(1, { minWidth })`.
+  The table's min width is the sum of the pixel columns plus, for each
+  proportional one, its min width times the total share over its own share:
+  three `proportional(1)` beside a `proportional(3)` make 840 px of a table
+  whose content needs half. Knowledge tables fit an iPad held upright (770 px).
+- Decision 9: a table keeps every column on a phone and scrolls sideways with
+  what names a row held in view: `pinnedColumn="name"` (the wrapper pins it
+  and any selection or row-status column before it, and keeps focus clear of
+  it). A space's Kunskap tab is the exception: on a phone its sources list
+  rows (`RowsOrTable` in `features/knowledge/knowledge-list.tsx`, rows from
+  `knowledge-rows.ts`, which the overview shares) under a segmented control;
+  selecting websites for bulk actions stays on tablets and desktop. A
+  collection's files stay a table. On touch, sortable headers are 44 px targets with their arrows shown,
+  and long header labels wrap (`globals.css` section 9b). A pinned column takes
+  its container's colour from `--table-sticky-background`: `TableFrame`
+  sets it (and runs edge to edge on a phone); a table on the page sets
+  `[--table-sticky-background:var(--color-ax-surface)]`.
 - Every table is named: `aria-labelledby` its visible heading, or a translated
   `aria-label` (the wrapper's type requires one). The wrapper gives the
   table's horizontal scroll region the same name; Astryx would call it just
@@ -332,9 +454,10 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   and one column without a width, which takes what is left, work as they are.
 - A column with a button or menu is at least `w-14 min-w-14`: on touch,
   Astryx controls are 44 px, plus the cell's 12 px start padding.
-- Give a table with many columns a min width (`min-w-*` on `Table`). Below it
-  the table scrolls sideways in its own focusable region instead of squeezing
-  the columns.
+- Give a children-mode table with many columns a min width (`min-w-*` on
+  `Table`; data-driven tables get it from their columns). Below it the table
+  scrolls sideways in its own focusable region instead of squeezing the
+  columns.
 - The page scans in `tests/a11y.spec.ts` fail on a column that collapsed.
 - Legacy shadcn tables (`@/components/ui/table`) get the same keyboard-scrollable,
   named container from Astryx's `useScrollableArea`; name them the same way.
@@ -439,7 +562,7 @@ production build shows these violations. Never loosen the policy.
 
 ## Text and i18n
 
-- next-intl, locales `sv` (default) and `en`, chosen by the `NEXT_LOCALE` cookie.
+- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. The frozen Next layout keeps its existing provider until removal; changing its context during partial hydration can discard server-rendered pages. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs
@@ -475,12 +598,12 @@ production build shows these violations. Never loosen the policy.
   opt into jsdom (`// @vitest-environment jsdom`) and use one harness in
   `src/test/`:
   - `renderInApp(ui, { queryClient?, appContext?, shell?, route? })` renders
-    with the app's providers (next-intl in Swedish, Astryx, React Query with the
+    with the app's providers (use-intl in Swedish, Astryx, React Query with the
     app's 30 s staleTime and no retries, app and shell context); also
     `renderHookInApp` and `renderToHtml` (server render). Build app context with
     `testAppContext({ permissions: ["admin"], settings: { … } })`; don't mock
     `@/components/providers/app-context`.
-  - Navigation: `vi.mock("next/navigation", () => import("@/test/navigation"))`,
+  - Navigation: `vi.mock("@/lib/navigation", () => import("@/test/navigation"))`,
     then the `route` option or `setRoute("/x?tab=y")`.
   - `src/test/setup-dom.ts` fills in what jsdom lacks and behaves like Chromium:
     `setViewport("phone" | "desktop" | {…})` drives `matchMedia`,

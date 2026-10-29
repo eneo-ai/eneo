@@ -3,8 +3,8 @@
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -15,6 +15,7 @@ import { IntegrationActions, WrapperActions } from "@/features/knowledge/integra
 import {
   isSyncActive,
   summarizeSource,
+  wrapperPermissions,
   type QueuedIds
 } from "@/features/knowledge/integrations/sources";
 import type { ProgressById } from "@/features/knowledge/integrations/sync-progress";
@@ -24,12 +25,8 @@ import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
 import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
 import { useSpace } from "../use-space";
-import {
-  overviewKnowledgeRows,
-  uploadTargets,
-  type KnowledgeKind,
-  type KnowledgeRow
-} from "./overview-data";
+import type { KnowledgeKind, KnowledgeRow } from "@/features/knowledge/knowledge-rows";
+import { overviewKnowledgeRows, uploadTargets } from "./overview-data";
 import { OverviewLink, OverviewSection } from "./overview-section";
 
 const VISIBLE_ROWS = 5;
@@ -100,6 +97,7 @@ function UploadMenu() {
 type SyncState = { progress: ProgressById; queued: QueuedIds };
 
 function RowActions({ row, sync }: { row: KnowledgeRow; sync: SyncState }) {
+  const { space } = useSpace();
   const { source } = row;
   const syncActive = (items: readonly IntegrationKnowledge[]) =>
     isSyncActive(summarizeSource(items, sync.progress, sync.queued));
@@ -110,19 +108,16 @@ function RowActions({ row, sync }: { row: KnowledgeRow; sync: SyncState }) {
       return <WebsiteActions website={source.website} />;
     case "integration":
       return <IntegrationActions item={source.item} syncActive={syncActive([source.item])} />;
-    case "wrapper": {
-      const permissions = source.items[0]?.permissions ?? [];
+    case "wrapper":
       return (
         <WrapperActions
           wrapperId={source.wrapperId}
           wrapperName={source.wrapperName}
           items={source.items}
-          canEdit={permissions.includes("edit")}
-          canDelete={permissions.includes("delete")}
+          {...wrapperPermissions(source.items, space.id)}
           syncActive={syncActive(source.items)}
         />
       );
-    }
   }
 }
 

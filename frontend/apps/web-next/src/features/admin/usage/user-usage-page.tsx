@@ -1,17 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, RotateCcw } from "lucide-react";
-import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
-import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import Link from "@/lib/link";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
+import { useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
-import { Badge } from "@/components/ui/badge";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,12 +19,11 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
-import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { useSearchParams } from "@/lib/navigation";
 import {
-  buildRateMap,
-  defaultUsageRange,
   formatCost,
   usageIntensity,
+  usageListHref,
   userModelBreakdownQueryOptions,
   userTokenUsageSummaryQueryOptions,
   userUsageCost,
@@ -34,8 +31,15 @@ import {
   type UsageRange,
   type UserUsageRow
 } from "@/features/admin/usage/usage";
-
-const NUMBER = new Intl.NumberFormat("sv-SE");
+import {
+  CostNote,
+  type CostRates,
+  DateRangeBar,
+  percent,
+  share,
+  UsageBadge,
+  useCostRates
+} from "@/features/admin/usage/usage-parts";
 
 function Stat({ label, value, subvalue }: { label: string; value: string; subvalue?: string }) {
   return (
@@ -47,80 +51,12 @@ function Stat({ label, value, subvalue }: { label: string; value: string; subval
   );
 }
 
-function percent(value: number, locale: string): string {
-  return new Intl.NumberFormat(locale, {
-    style: "percent",
-    maximumFractionDigits: 1
-  }).format(Number.isFinite(value) ? value : 0);
-}
-
-function share(part: number, total: number): number {
-  return total > 0 ? part / total : 0;
-}
-
 function modelDisplayName(model: TokenUsage["models"][number]): string {
   return model.model_nickname || model.model_name;
 }
 
 function modelProvider(model: TokenUsage["models"][number], unknown: string): string {
   return model.model_provider || model.model_org || unknown;
-}
-
-function DateRangeBar({
-  range,
-  setRange
-}: {
-  range: UsageRange;
-  setRange: Dispatch<SetStateAction<UsageRange>>;
-}) {
-  const t = useTranslations();
-  return (
-    <Card className="flex flex-wrap items-end gap-3 p-4">
-      <label className="flex flex-col gap-1 text-xs">
-        {t("from")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={range.from}
-          onChange={(event) => {
-            if (event.target.value)
-              setRange((current) => ({ ...current, from: event.target.value }));
-          }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        {t("to")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={range.to}
-          onChange={(event) => {
-            if (event.target.value) setRange((current) => ({ ...current, to: event.target.value }));
-          }}
-        />
-      </label>
-      <Button variant="outline" size="sm" onClick={() => setRange(defaultUsageRange())}>
-        <RotateCcw className="size-4" />
-        {t("reset")}
-      </Button>
-    </Card>
-  );
-}
-
-function UsageBadge({ user, range }: { user: UserUsageRow; range: UsageRange }) {
-  const t = useTranslations();
-  const intensity = usageIntensity(user.total_tokens, range);
-  const className =
-    intensity === "high"
-      ? "border-destructive/40 text-destructive"
-      : intensity === "medium"
-        ? "border-warning/40 text-warning"
-        : "border-success/40 text-success";
-  return (
-    <Badge variant="outline" className={className}>
-      {t(`usage_level_${intensity}`)}
-    </Badge>
-  );
 }
 
 function UserSummary({
@@ -133,6 +69,7 @@ function UserSummary({
   cost: number | null;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const locale = useLocale();
   const averageTokens =
     user.total_requests > 0 ? user.total_tokens / user.total_requests : user.total_tokens;
@@ -149,7 +86,7 @@ function UserSummary({
             <p className="text-muted-foreground truncate text-sm">{user.email}</p>
           </div>
         </div>
-        <UsageBadge user={user} range={range} />
+        <UsageBadge level={usageIntensity(user.total_tokens, range)} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
           <dt className="text-muted-foreground">{t("username")}</dt>
           <dd className="truncate">{user.username}</dd>
@@ -159,25 +96,25 @@ function UserSummary({
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label={t("usage_total_tokens")} value={NUMBER.format(user.total_tokens)} />
+        <Stat label={t("usage_total_tokens")} value={format.number(user.total_tokens)} />
         <Stat
           label={t("usage_input_tokens")}
-          value={NUMBER.format(user.total_input_tokens)}
+          value={format.number(user.total_input_tokens)}
           subvalue={`${percent(share(user.total_input_tokens, user.total_tokens), locale)} ${t(
             "usage_of_total"
           )}`}
         />
         <Stat
           label={t("usage_output_tokens")}
-          value={NUMBER.format(user.total_output_tokens)}
+          value={format.number(user.total_output_tokens)}
           subvalue={`${percent(share(user.total_output_tokens, user.total_tokens), locale)} ${t(
             "usage_of_total"
           )}`}
         />
         <Stat
           label={t("usage_total_requests")}
-          value={NUMBER.format(user.total_requests)}
-          subvalue={`${NUMBER.format(Math.round(averageTokens))} ${t(
+          value={format.number(user.total_requests)}
+          subvalue={`${format.number(Math.round(averageTokens))} ${t(
             "usage_tokens_avg_per_request"
           )} · ${formatCost(cost)}`}
         />
@@ -188,6 +125,7 @@ function UserSummary({
 
 function ProviderBreakdown({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const format = useFormatter();
   const locale = useLocale();
   const unknown = t("unknown");
   const labelId = useId();
@@ -219,7 +157,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
                 {provider.provider}
               </span>
               <span className="text-muted-foreground tabular-nums">
-                {NUMBER.format(provider.tokens)} ·{" "}
+                {format.number(provider.tokens)} ·{" "}
                 {percent(share(provider.tokens, data.total_token_usage), locale)}
               </span>
             </div>
@@ -236,6 +174,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
 
 function TopModels({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const format = useFormatter();
   const labelId = useId();
   const topModels = useMemo(
     () => [...data.models].sort((a, b) => b.total_token_usage - a.total_token_usage).slice(0, 5),
@@ -255,7 +194,7 @@ function TopModels({ data }: { data: TokenUsage }) {
                 {modelDisplayName(model)}
               </span>
               <span className="text-muted-foreground shrink-0 tabular-nums">
-                {NUMBER.format(model.total_token_usage)} · {NUMBER.format(model.request_count)}{" "}
+                {format.number(model.total_token_usage)} · {format.number(model.request_count)}{" "}
                 {t("usage_requests_label")}
               </span>
             </div>
@@ -272,12 +211,13 @@ function TopModels({ data }: { data: TokenUsage }) {
 
 function ModelBreakdownTable({
   data,
-  rates
+  costRates: { rates, ratecard }
 }: {
   data: TokenUsage;
-  rates: ReturnType<typeof buildRateMap>;
+  costRates: CostRates;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const unknown = t("unknown");
   const headingId = useId();
 
@@ -319,16 +259,16 @@ function ModelBreakdownTable({
                   {modelProvider(model, unknown)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.request_count)}
+                  {format.number(model.request_count)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.input_token_usage)}
+                  {format.number(model.input_token_usage)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.output_token_usage)}
+                  {format.number(model.output_token_usage)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {NUMBER.format(model.total_token_usage)}
+                  {format.number(model.total_token_usage)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-right tabular-nums">
                   {formatCost(cost)}
@@ -338,6 +278,7 @@ function ModelBreakdownTable({
           })}
         </TableBody>
       </Table>
+      <CostNote ratecard={ratecard} />
     </Card>
   );
 }
@@ -353,52 +294,57 @@ export function UserUsagePage({
   const [range, setRange] = useState(initialRange);
   const user = useQuery(userTokenUsageSummaryQueryOptions(browserApi, userId, range));
   const breakdown = useQuery(userModelBreakdownQueryOptions(browserApi, userId, range));
-  const models = useQuery(adminModelsQueryOptions(browserApi));
-  const rates = useMemo(() => buildRateMap(models.data?.completion_models ?? []), [models.data]);
+  const costRates = useCostRates();
+  const searchParams = useSearchParams();
   const userRow = user.data?.user;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <PageHeader title={userRow?.username ?? t("usage")}>
         <Button variant="outline" asChild>
-          <Link href="/admin/usage">
+          <Link href={usageListHref(searchParams)}>
             <ArrowLeft className="size-4" />
             {t("back")}
           </Link>
         </Button>
       </PageHeader>
 
-      <DateRangeBar range={range} setRange={setRange} />
+      <DateRangeBar range={range} onChange={setRange} />
 
-      {user.isPending ? (
-        <Skeleton className="h-64 w-full" />
-      ) : user.isError || !userRow ? (
-        <Card className="p-6 text-center">
-          <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {user.isError ? t("request_failed") : t("usage_user_not_found_description")}
-          </p>
-        </Card>
-      ) : (
-        <>
-          <UserSummary user={userRow} range={range} cost={userUsageCost(userRow, rates)} />
-
-          {breakdown.isPending ? (
-            <Skeleton className="h-72 w-full" />
-          ) : breakdown.isError || !breakdown.data ? (
+      <QueryStateBoundary query={user} rows={1} height={256}>
+        {() =>
+          !userRow ? (
             <Card className="p-6 text-center">
-              <h2 className="font-semibold">{t("usage_error_loading_model_breakdown")}</h2>
-              <p className="text-muted-foreground mt-1 text-sm">{t("request_failed")}</p>
+              <h2 className="font-semibold">{t("usage_user_not_found")}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("usage_user_not_found_description")}
+              </p>
             </Card>
           ) : (
             <>
-              <ProviderBreakdown data={breakdown.data} />
-              <TopModels data={breakdown.data} />
-              <ModelBreakdownTable data={breakdown.data} rates={rates} />
+              <UserSummary
+                user={userRow}
+                range={range}
+                cost={userUsageCost(userRow, costRates.rates)}
+              />
+              <QueryStateBoundary
+                query={breakdown}
+                rows={1}
+                height={288}
+                errorTitle={t("usage_error_loading_model_breakdown")}
+              >
+                {(data) => (
+                  <>
+                    <ProviderBreakdown data={data} />
+                    <TopModels data={data} />
+                    <ModelBreakdownTable data={data} costRates={costRates} />
+                  </>
+                )}
+              </QueryStateBoundary>
             </>
-          )}
-        </>
-      )}
+          )
+        }
+      </QueryStateBoundary>
     </div>
   );
 }

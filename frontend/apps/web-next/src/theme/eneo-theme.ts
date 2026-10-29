@@ -176,7 +176,7 @@ export const eneoTheme = defineTheme({
       "0 24px 56px light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.6)), " +
       "inset 0 0 0 1px light-dark(transparent, rgba(255, 255, 255, 0.09))",
 
-    // Fonts are loaded by next/font in src/app/layout.tsx (CSS variables on <html>).
+    // Fonts are self-hosted by src/app/globals.css (CSS variables on :root).
     "--font-family-body": FONT_BODY,
     "--font-family-heading": FONT_BODY,
     "--font-family-code": FONT_CODE
@@ -235,11 +235,14 @@ export const eneoTheme = defineTheme({
   },
 
   // Touch layouts: 44×44 px targets (ACCESSIBILITY.md → Target size, the
-  // Eneo standard above WCAG 2.5.8's 24 px). The element sizes drive buttons
-  // (icon-only ones are square), menu triggers, tabs, nav items, inputs and
-  // selectors; segmented items sit 4 px inside theirs, checkbox, radio and
-  // switch rows get the height their enlarged inputs need (globals.css), and
-  // a Selector's search field and option rows get 44 px of their own.
+  // Eneo standard above WCAG 2.5.8's 24 px), and text a step larger for
+  // reading at arm's length: body and labels 15 px, supporting text 13 px
+  // (globals.css section 14 moves Tailwind's text-sm and text-xs with it).
+  // The element sizes drive buttons (icon-only ones are square), menu
+  // triggers, tabs, nav items, inputs and selectors; segmented items sit 4 px
+  // inside theirs, checkbox, radio and switch rows get the height their
+  // enlarged inputs need (globals.css), and a Selector's search field and
+  // option rows get 44 px of their own.
   adaptations: {
     rules: [
       {
@@ -248,7 +251,10 @@ export const eneoTheme = defineTheme({
           tokens: {
             "--size-element-sm": "44px",
             "--size-element-md": "44px",
-            "--size-element-lg": "44px"
+            "--size-element-lg": "44px",
+            "--text-body-size": "0.9375rem",
+            "--text-label-size": "0.9375rem",
+            "--text-supporting-size": "0.8125rem"
           },
           components: {
             "segmented-control-item": { base: { minHeight: "44px" } },

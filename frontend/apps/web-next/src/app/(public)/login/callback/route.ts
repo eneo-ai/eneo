@@ -3,7 +3,7 @@ import { z } from "zod";
 import { buildLoginDiagnosticsUrl } from "@/lib/auth/login-diagnostics";
 import { sessionFromEneoJwt } from "@/lib/auth/password";
 import { sealedSessionCookie } from "@/lib/auth/session";
-import { safeNextPath } from "@/lib/auth/safe-next";
+import { signedInContinuation } from "@/lib/auth/safe-next";
 import { FEDERATION_TXN_COOKIE, openFederationTxn } from "@/lib/auth/session-codec";
 import { env } from "@/lib/env";
 
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
     return failedRedirect("missing_access_token");
   }
 
-  const redirect = NextResponse.redirect(new URL(safeNextPath(txn.next), env.APP_ORIGIN));
+  const redirect = NextResponse.redirect(new URL(signedInContinuation(txn.next), env.APP_ORIGIN));
   const cookie = await sealedSessionCookie(session);
   redirect.cookies.set(cookie.name, cookie.value, cookie.options);
   redirect.cookies.delete(FEDERATION_TXN_COOKIE);

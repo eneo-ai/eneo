@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { EyeOff, Info, TriangleAlert } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import type { ContextUsage } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
@@ -90,11 +90,7 @@ export function ContextUsageBar({
   onNewConversation?: () => void;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const fmt = useMemo(() => {
-    const nf = new Intl.NumberFormat(locale === "sv" ? "sv-SE" : "en-US");
-    return (value: number) => nf.format(value);
-  }, [locale]);
+  const { number: fmt } = useFormatter();
 
   const pinned = useContextUsagePinned();
   const [open, setOpen] = useState(false);

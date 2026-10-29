@@ -1,6 +1,7 @@
 """FastAPI routes for audit logging."""
 
 import logging
+import time
 from datetime import datetime
 from typing import Annotated, Optional, Sequence, cast
 from uuid import UUID
@@ -30,17 +31,31 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.export_job import ExportJob
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.audit.infrastructure.rate_limiting import (
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    authenticates,
+    endpoint_access,
+)
+from eneo.authentication.signed_urls import (
+    AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
+    generate_audit_export_download_token,
+    verify_audit_export_download_token,
+)
+from eneo.database.tables.users_table import Users
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import AuthenticationException, UnauthorizedException
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
     RateLimitExceededError,
     RateLimitServiceUnavailableError,
     build_rate_limit_key,
     enforce_rate_limit,
+    raise_rate_limited,
 )
-from eneo.authentication.endpoint_access import Authentication, endpoint_access
-from eneo.database.tables.users_table import Users
-from eneo.main.config import get_settings
-from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -50,6 +65,30 @@ _AUDIT_ADMIN_ACCESS_REASON = (
 )
 
 logger = logging.getLogger(__name__)
+
+_AUDIT_SESSION_RATE_LIMIT = RateLimitConfig(
+    max_requests=5, window_seconds=3600, key_prefix="rate_limit:audit_session"
+)
+
+_AUDIT_LOG_VIEW_ON_GET = (
+    "Audited read: records AUDIT_LOG_VIEWED with the session's justification and "
+    "slides the audit session's idle expiry (Redis TTL and cookie). Recording the "
+    "access is the purpose of the audit trail; the logs go only to the caller."
+)
+_AUDIT_USER_LOGS_ON_GET = (
+    "Audited read: records AUDIT_LOG_VIEWED for the caller. Recording the access is "
+    "the purpose of the audit trail; the logs go only to the caller."
+)
+_AUDIT_EXPORT_ON_GET = (
+    "Audited read: records AUDIT_LOG_EXPORTED (or the failed attempt) for the "
+    "caller. Recording the access is the purpose of the audit trail; the logs go "
+    "only to the caller."
+)
+_DEFAULT_RETENTION_ON_GET = (
+    "Creates the tenant's default 365-day retention policy on first read (INSERT "
+    "... ON CONFLICT DO NOTHING); the result is the default the read reports either "
+    "way."
+)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -192,7 +231,9 @@ async def reset_rate_limit(
         raise HTTPException(status_code=404, detail="Not found")
 
     redis_client = get_redis()
-    rate_limit_key = build_rate_limit_key(current_user.id, current_user.tenant_id)
+    rate_limit_key = build_rate_limit_key(
+        current_user.id, current_user.tenant_id, _AUDIT_SESSION_RATE_LIMIT.key_prefix
+    )
 
     try:
         deleted = await redis_client.delete(rate_limit_key)
@@ -269,12 +310,13 @@ async def create_access_session(
             redis_client=redis_client,
             user_id=current_user.id,
             tenant_id=current_user.tenant_id,
+            config=_AUDIT_SESSION_RATE_LIMIT,
         )
         count = rate_limit_result.current_count
-    except RateLimitExceededError:
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
+    except RateLimitExceededError as exc:
+        raise_rate_limited(
+            exc.result,
+            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
         )
     except RateLimitServiceUnavailableError:
         raise HTTPException(
@@ -363,6 +405,7 @@ async def create_access_session(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_LOG_VIEW_ON_GET,
 )
 async def list_audit_logs(
     request: Request,
@@ -592,6 +635,7 @@ async def list_audit_logs(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_USER_LOGS_ON_GET,
 )
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
@@ -700,6 +744,7 @@ async def get_user_logs(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_AUDIT_EXPORT_ON_GET,
 )
 async def export_audit_logs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1088,7 +1133,16 @@ async def get_export_status(
     # Build download URL if completed
     download_url = None
     if job.status.value == "completed" and job.file_path:
-        download_url = f"/api/v1/audit/logs/export/{job_id}/download"
+        issued_at = int(time.time())
+        token = generate_audit_export_download_token(
+            job_id,
+            issued_at + AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
+            current_user.tenant_id,
+            issued_at=issued_at,
+        )
+        download_url = (
+            f"/api/v1/audit/logs/export/{job_id}/signed-download?token={token}"
+        )
 
     return ExportJobStatusResponse(
         job_id=job.job_id,
@@ -1134,10 +1188,6 @@ async def download_export(
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
     """
-    import os
-
-    from fastapi.responses import FileResponse
-
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
 
     current_user = container.user()
@@ -1147,6 +1197,61 @@ async def download_export(
     export_job_manager = ExportJobManager(redis)
 
     job = await export_job_manager.get_job(current_user.tenant_id, job_id)
+
+    return _export_file_response(job)
+
+
+@authenticates(Authentication.SIGNED_URL)
+def authorize_export_token(
+    job_id: UUID,
+    token: Annotated[str, Query(description="Short-lived audit export token")],
+) -> UUID:
+    payload = verify_audit_export_download_token(token)
+    if payload is None:
+        raise AuthenticationException("Invalid or expired token")
+    if payload["job_id"] != str(job_id):
+        raise UnauthorizedException("Token not valid for this export")
+    return UUID(payload["tenant_id"])
+
+
+@router.get(
+    "/logs/export/{job_id}/signed-download",
+    response_class=Response,
+    response_model=None,
+    description="Stream a completed export using the short-lived URL returned by its status.",
+    responses={
+        200: {
+            "description": "The completed export file",
+            "content": {
+                "text/csv": {"schema": {"type": "string", "format": "binary"}},
+                "application/x-ndjson": {
+                    "schema": {"type": "string", "format": "binary"}
+                },
+            },
+        },
+        **responses.get_responses([400, 401, 403, 404]),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.SIGNED_URL,
+    authorization=Authorization.SIGNED_URL,
+    reason="An admin-issued token grants access only to one export and tenant for 60 seconds.",
+)
+async def download_export_signed(
+    job_id: UUID,
+    tenant_id: Annotated[UUID, Depends(authorize_export_token)],
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+):
+    from eneo.audit.infrastructure.export_job_manager import ExportJobManager
+
+    job = await ExportJobManager(container.redis_client()).get_job(tenant_id, job_id)
+    return _export_file_response(job)
+
+
+def _export_file_response(job: ExportJob | None):
+    import os
+
+    from fastapi.responses import FileResponse
 
     if not job:
         raise HTTPException(
@@ -1181,6 +1286,7 @@ async def download_export(
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
             "X-Total-Records": str(job.total_records),
+            "Referrer-Policy": "no-referrer",
         },
     )
 
@@ -1251,6 +1357,7 @@ async def cancel_export(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_AUDIT_ADMIN_ACCESS_REASON,
+    effect_on_get=_DEFAULT_RETENTION_ON_GET,
 )
 async def get_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],

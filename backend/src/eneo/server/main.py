@@ -1,16 +1,12 @@
 import asyncio
-import traceback
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from eneo.allowed_origins.get_origin_callback import get_origin
 from eneo.authentication.auth import authenticate_super_api_key
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -23,7 +19,6 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
-from eneo.main.request_context import get_request_context
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     object_content_runtime,
@@ -35,27 +30,14 @@ from eneo.server.endpoint_routes import (
     declare_framework_documentation_access,
     validate_endpoint_access,
 )
-from eneo.server.exception_handlers import (
-    add_exception_handlers,
-    correlation_headers,
-    default_error_code_for_status,
-)
-from eneo.server.middleware.cors import CORSMiddleware
+from eneo.server.exception_handlers import add_exception_handlers
+from eneo.server.middleware.cors import CORS_OPTIONS, CORSMiddleware
 from eneo.server.middleware.request_context import RequestContextMiddleware
-from eneo.server.middleware.trace_id import (
-    TraceIdResponseMiddleware,
-    current_trace_id,
-)
+from eneo.server.middleware.trace_id import TraceIdResponseMiddleware
 from eneo.server.models.api import VersionResponse
 from eneo.server.routers import router as api_router
 
 logger = get_logger(__name__)
-
-# Single source of truth for trace headers exposed to cross-origin callers.
-# Used in both the normal CORSMiddleware config and the manual CORS block in
-# 500 error handlers so they stay in sync.
-_TRACE_EXPOSE_HEADERS = ("X-Trace-Id", "X-Correlation-ID")
-
 
 # Initialise OTEL before the FastAPI app is created so that SQLAlchemy,
 # Redis, and aiohttp auto-instrumentation is active before those
@@ -241,15 +223,7 @@ def get_application():
     # so the server span is guaranteed active when http.response.start fires.
     app.add_middleware(TraceIdResponseMiddleware)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=list(_TRACE_EXPOSE_HEADERS),
-        callback=get_origin,
-    )
+    app.add_middleware(CORSMiddleware, **CORS_OPTIONS)
 
     # OTEL middleware must be outermost so the span is active when inner
     # middlewares run. instrument_fastapi adds it last.
@@ -263,42 +237,7 @@ def get_application():
     for mount_path, internal_mcp_app in internal_mcp_mounts():
         app.mount(mount_path, internal_mcp_app)
 
-    # Add handlers of all errors except 500
     add_exception_handlers(app)
-
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(
-        request: Request, exc: HTTPException
-    ) -> JSONResponse:
-        detail = exc.detail
-        # The raiser's headers win; otherwise carry the request's correlation
-        # id like the canonical handlers do, so the header matches the logs.
-        headers = {**(correlation_headers() or {}), **(exc.headers or {})}
-        request_id = request.headers.get("x-correlation-id") or request.headers.get(
-            "x-request-id"
-        )
-        if not request_id:
-            request_id = cast(str | None, get_request_context().get("correlation_id"))
-
-        if isinstance(detail, dict) and "code" in detail and "message" in detail:
-            normalized_detail: dict[str, Any] = cast(dict[str, Any], detail)
-            if request_id and "request_id" not in normalized_detail:
-                normalized_detail["request_id"] = request_id
-            # Every raiser of this shape means it as the documented error, but
-            # each built the dict by hand and most left the required numeric
-            # category out. Fill it here, where the dict becomes the body, so a
-            # direct `raise HTTPException` cannot bypass the contract.
-            if "eneo_error_code" not in normalized_detail:
-                normalized_detail["eneo_error_code"] = default_error_code_for_status(
-                    exc.status_code
-                ).value
-            return JSONResponse(
-                status_code=exc.status_code, content=normalized_detail, headers=headers
-            )
-
-        return JSONResponse(
-            status_code=exc.status_code, content={"detail": detail}, headers=headers
-        )
 
     def custom_openapi():
         if app.openapi_schema:
@@ -376,160 +315,6 @@ def get_application():
 
     app.openapi = custom_openapi
 
-    @app.exception_handler(500)
-    async def custom_http_500_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        # Generate unique error ID for tracing
-        error_id = str(uuid.uuid4())[:8]
-
-        # Log the full exception with traceback
-        logger.error(
-            f"Internal Server Error [error_id={error_id}]",
-            extra={
-                "error_id": error_id,
-                "path": request.url.path,
-                "method": request.method,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "traceback": traceback.format_exc(),
-            },
-        )
-
-        # Build error response
-        settings = get_settings()
-        is_dev = settings.is_development
-
-        error_content: dict[str, Any] = {
-            "error": "Internal server error",
-            "error_id": error_id,
-            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
-        }
-
-        # In development mode, include more details
-        if is_dev:
-            error_content["detail"] = {
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "path": request.url.path,
-                "method": request.method,
-            }
-
-        # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
-        # Solving this like this response:
-        #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-        response = JSONResponse(status_code=500, content=error_content)
-
-        # Attach trace_id so the client can correlate the error with backend logs
-        trace_id = current_trace_id()
-        if trace_id:
-            response.headers["X-Trace-Id"] = trace_id
-            response.headers["X-Correlation-ID"] = trace_id
-
-        origin = request.headers.get("origin")
-
-        if origin:
-            # Have the middleware do the heavy lifting for us to parse
-            # all the config, then update our response headers
-            cors = CORSMiddleware(
-                app=app,
-                allow_origins=[],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-                expose_headers=list(_TRACE_EXPOSE_HEADERS),
-                callback=get_origin,
-            )
-
-            # Logic directly from Starlette's CORSMiddleware:
-            # https://github.com/encode/starlette/blob/master/starlette/middleware/cors.py#L152
-
-            response.headers.update(cors.simple_headers)
-
-            if cors.allow_all_origins and cors.allow_credentials:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-            elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin, request_headers=request.headers, request_url=request.url
-            ):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-
-        return response
-
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        """Catch-all handler for unhandled exceptions"""
-        # Generate unique error ID for tracing
-        error_id = str(uuid.uuid4())[:8]
-
-        # Log the full exception with traceback
-        logger.error(
-            f"Unhandled Exception [error_id={error_id}]",
-            extra={
-                "error_id": error_id,
-                "path": request.url.path,
-                "method": request.method,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "traceback": traceback.format_exc(),
-            },
-        )
-
-        # Build error response
-        settings = get_settings()
-        is_dev = settings.is_development
-
-        error_content: dict[str, Any] = {
-            "error": "Internal server error",
-            "error_id": error_id,
-            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
-        }
-
-        # In development mode, include more details
-        if is_dev:
-            error_content["detail"] = {
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "path": request.url.path,
-                "method": request.method,
-            }
-
-        response = JSONResponse(status_code=500, content=error_content)
-
-        # Attach trace_id so the client can correlate the error with backend logs
-        trace_id = current_trace_id()
-        if trace_id:
-            response.headers["X-Trace-Id"] = trace_id
-            response.headers["X-Correlation-ID"] = trace_id
-
-        origin = request.headers.get("origin")
-
-        if origin:
-            cors = CORSMiddleware(
-                app=app,
-                allow_origins=[],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-                expose_headers=list(_TRACE_EXPOSE_HEADERS),
-                callback=get_origin,
-            )
-            response.headers.update(cors.simple_headers)
-
-            if cors.allow_all_origins and cors.allow_credentials:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-            elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin, request_headers=request.headers, request_url=request.url
-            ):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-
-        return response
-
     @app.get(
         "/api/livez",
         include_in_schema=False,
@@ -561,8 +346,6 @@ def get_application():
     )
     async def get_healthz():
         from datetime import datetime, timezone
-
-        from fastapi import HTTPException
 
         from eneo.worker.redis import get_worker_health
 
@@ -794,10 +577,11 @@ def get_application():
             version=get_settings().app_version, revision=get_settings().app_revision
         )
 
+    from eneo.server.browser_platform import install_browser_platform
+
+    install_browser_platform(app)
+
     _registered_endpoints = (
-        http_exception_handler,
-        custom_http_500_exception_handler,
-        unhandled_exception_handler,
         get_livez,
         get_healthz,
         get_readyz,

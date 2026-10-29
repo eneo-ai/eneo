@@ -3,11 +3,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Text } from "@astryxdesign/core/Text";
+import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -64,9 +64,7 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
         event.preventDefault();
         if (save.isPending) return;
         if (parsedMaxAge === undefined) {
-          // Rendered before focus moves, so the field is read with its error.
-          flushSync(() => setSubmitted(true));
-          maxAgeRef.current?.focus();
+          revealProblems(() => setSubmitted(true), maxAgeRef.current);
           return;
         }
         save.mutate({ max_age_days: parsedMaxAge });

@@ -1,7 +1,8 @@
 "use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { usePathname, useSearchParams } from "next/navigation";
+import { blockingError } from "@/components/composites/query-state";
+import { usePathname, useSearchParams } from "@/lib/navigation";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
@@ -35,12 +36,10 @@ export function useNavSpaces() {
       spaces: (query?.data ?? []).filter((space) => !space.personal && !space.organization),
       // Before hydration there is no query yet: loading, as the server rendered it.
       isPending: query?.isPending ?? true,
-      // A retry without cached data temporarily becomes "pending" and clears
-      // isError. Keep the recovery control mounted until the retry succeeds, so
-      // keyboard focus does not fall off its button.
-      isError: query
-        ? query.isError || (query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt)
-        : false,
+      // Any failure, beside the cached links (which stay), and a failure
+      // without cached spaces also while its retry runs (blockingError), so
+      // keyboard focus does not fall off the recovery button.
+      isError: query ? query.isError || blockingError(query) : false,
       isFetching: query?.isFetching ?? false,
       refetch: query?.refetch
     })

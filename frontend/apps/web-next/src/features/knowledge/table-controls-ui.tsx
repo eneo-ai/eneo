@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import type { ReactNode } from "react";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -90,7 +90,13 @@ export function KnowledgeTableControls({
         resultCount={resultCount}
         className="sm:w-72"
       />
-      {children ? <div className="flex flex-wrap justify-end gap-2">{children}</div> : null}
+      {/* contents on a phone: a docked action leaves the flow (no gap for it),
+          and the others keep to the end. */}
+      {children ? (
+        <div className="flex flex-wrap justify-end gap-2 max-md:contents max-md:*:self-end">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

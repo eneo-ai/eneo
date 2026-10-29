@@ -3,7 +3,8 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
-import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@/components/astryx/switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -21,7 +22,7 @@ import {
   Search,
   SendHorizontal
 } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import {
   type Dispatch,
   type SetStateAction,
@@ -31,14 +32,14 @@ import {
   useRef,
   useState
 } from "react";
-import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
@@ -130,7 +131,7 @@ function AnalysisTab({
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const questionProblem = asked && !question.trim() ? t("required_field") : null;
   const [answer, setAnswer] = useState("");
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   const ask = useMutation({
     mutationFn: (text: string) =>
@@ -139,8 +140,7 @@ function AnalysisTab({
     onSuccess: (text) => {
       setAnswer(text);
       announce(t("chat_announce_answer_ready"));
-    },
-    onError: () => announce(t("request_failed"))
+    }
   });
 
   return (
@@ -154,8 +154,7 @@ function AnalysisTab({
             if (ask.isPending) return;
             if (!text) {
               // An empty question shows at the field, which takes focus.
-              flushSync(() => setAsked(true));
-              questionRef.current?.focus();
+              revealProblems(() => setAsked(true), questionRef.current);
               return;
             }
             setAnswer("");
@@ -203,16 +202,16 @@ function AnalysisTab({
                     <Copy className="size-4" aria-hidden="true" />
                   )
                 }
-                onClick={async () => {
-                  if (!(await copy(answer))) toast.error(t("chat_copy_failed"));
-                }}
+                onClick={() => void copy(answer)}
               />
             ) : null}
           </div>
           {ask.isPending ? (
             <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
           ) : ask.isError ? (
-            <p className="text-ax-error text-sm">{t("request_failed")}</p>
+            // No retry here: it would unmount under focus while the question
+            // runs; asking again from the field is the retry.
+            <ListError error={ask.error} compact />
           ) : answer ? (
             <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
           ) : (
@@ -348,39 +347,30 @@ function QuestionsTab({
         <span className="text-ax-text-secondary text-sm">{countLabel}</span>
       </div>
 
-      {query.isPending ? (
-        <LoadingState rows={5} />
-      ) : query.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
-      ) : items.length === 0 ? (
-        <p className="text-ax-text-secondary text-sm">{t("no_questions_found_current_settings")}</p>
-      ) : (
-        <Table
-          aria-label={t("question_history")}
-          data={items}
-          columns={columns}
-          idKey="id"
-          verticalAlign="top"
-        />
-      )}
+      <QueryStateBoundary query={query} rows={5}>
+        {() =>
+          items.length === 0 ? (
+            <p className="text-ax-text-secondary text-sm">
+              {t("no_questions_found_current_settings")}
+            </p>
+          ) : (
+            <Table
+              aria-label={t("question_history")}
+              data={items}
+              columns={columns}
+              idKey="id"
+              verticalAlign="top"
+            />
+          )
+        }
+      </QueryStateBoundary>
 
-      <div className="flex items-center justify-end gap-2">
-        {!query.hasNextPage && items.length > 0 ? (
-          <span className="text-ax-text-secondary text-sm">
-            {t("loaded_all_questions", { total })}
-          </span>
-        ) : null}
-        <Button
-          label={t("load_more_questions")}
-          isDisabled={!query.hasNextPage}
-          // Stays focusable while the next page loads.
-          isLoading={query.isFetchingNextPage}
-          isInterruptible
-          onClick={() => {
-            if (!query.isFetchingNextPage) void query.fetchNextPage();
-          }}
-        />
-      </div>
+      {!query.hasNextPage && items.length > 0 ? (
+        <span className="text-ax-text-secondary self-end text-sm">
+          {t("loaded_all_questions", { total })}
+        </span>
+      ) : null}
+      <LoadMore query={query} label={t("load_more_questions")} />
     </Card>
   );
 }

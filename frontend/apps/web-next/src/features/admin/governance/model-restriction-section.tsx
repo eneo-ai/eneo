@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, Cpu } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";

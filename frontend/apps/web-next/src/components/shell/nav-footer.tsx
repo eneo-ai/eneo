@@ -1,14 +1,14 @@
 "use client";
 
-import { SideNavItem } from "@astryxdesign/core/SideNav";
+import { SideNavItem, useSideNavRenderMode } from "@astryxdesign/core/SideNav";
 import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ComponentProps } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
 import { useNavTarget } from "./nav-data";
 import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
-import { ProfileMenu } from "./profile-menu";
+import { ProfileLink, ProfileMenu } from "./profile-menu";
 import type { NavVariant } from "./routes";
 
 function OrganizationItem() {
@@ -53,11 +53,16 @@ function HelpCenterItem({ href }: { href: string }) {
   );
 }
 
-/** "Organisation" and "Administration" (admins), the help centre, then the profile button. */
+/**
+ * "Organisation" and "Administration" (admins), the help centre, then the
+ * profile: a button and its menu in the SideNav, a link to Konto in the
+ * drawer (decision 22).
+ */
 export function NavFooter({ variant }: { variant: NavVariant }) {
   const t = useTranslations();
   const { can, links } = useAppContext();
   const isAdmin = can("admin");
+  const isInDrawer = useSideNavRenderMode() === "drawer-content";
 
   return (
     <div className={cn("flex flex-col gap-0.5", NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}>
@@ -68,9 +73,7 @@ export function NavFooter({ variant }: { variant: NavVariant }) {
         </>
       ) : null}
       {links.helpCenter ? <HelpCenterItem href={links.helpCenter} /> : null}
-      <div className="mt-1.5">
-        <ProfileMenu />
-      </div>
+      <div className="mt-1.5">{isInDrawer ? <ProfileLink /> : <ProfileMenu />}</div>
     </div>
   );
 }

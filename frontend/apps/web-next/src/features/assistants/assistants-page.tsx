@@ -2,12 +2,12 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Bot, SearchX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
-import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { ResourceCollection } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -18,13 +18,11 @@ import { ChatAppTile } from "./tile";
 
 function TileGrid({ items, showStatus }: { items: ChatAppItem[]; showStatus: boolean }) {
   return (
-    <ul className={RESOURCE_GRID_CLASS}>
+    <ResourceCollection>
       {items.map((item) => (
-        <li key={item.id} className="min-w-0">
-          <ChatAppTile item={item} showStatus={showStatus} />
-        </li>
+        <ChatAppTile key={item.id} item={item} showStatus={showStatus} />
       ))}
-    </ul>
+    </ResourceCollection>
   );
 }
 

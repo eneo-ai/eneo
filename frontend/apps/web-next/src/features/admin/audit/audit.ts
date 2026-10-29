@@ -40,7 +40,7 @@ export function categoryLabel(t: (key: string) => string, category: CategoryType
 export function auditLogsQueryOptions(api: EneoClient, filters: AuditFilters) {
   const search = filters.search.trim();
   return queryOptions({
-    queryKey: ["audit-logs", filters],
+    queryKey: ["audit-logs", { ...filters, search }],
     retry: false, // a 401 here means "needs an access session", not a transient error
     queryFn: () => {
       // Actor-by-user filter (GDPR Art. 15 view): the per-user endpoint only

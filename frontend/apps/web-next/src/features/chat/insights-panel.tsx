@@ -5,9 +5,9 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { History, SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { revealProblems } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -224,8 +224,7 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
           if (ask.isPending) return;
           if (!text) {
             // An empty question shows at the field, which takes focus.
-            flushSync(() => setAsked(true));
-            questionRef.current?.focus();
+            revealProblems(() => setAsked(true), questionRef.current);
             return;
           }
           setAnswer("");

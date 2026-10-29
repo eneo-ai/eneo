@@ -10,14 +10,13 @@ import { Table } from "@/components/astryx/table";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { toastApiError } from "@/lib/api/toast";
 import { CrawlRunDetailsContent } from "@/features/knowledge/crawl-run-details";
@@ -123,20 +122,17 @@ function HistoryTab({
           {t("refresh")}
         </Button>
       </div>
-      {history.isError ? (
-        <ListError
-          error={history.error}
-          title={t("admin_crawler_history_error")}
-          isRetrying={history.isFetching}
-          onRetry={() => void history.refetch()}
-        />
-      ) : history.isPending ? (
-        <LoadingState rows={3} />
-      ) : runs.length === 0 ? (
-        <p className="text-ax-text-secondary py-6 text-sm">{t("admin_crawler_history_empty")}</p>
-      ) : (
-        <Table data={runs} columns={columns} idKey="id" aria-label={t("history")} />
-      )}
+      <QueryStateBoundary query={history} rows={3} errorTitle={t("admin_crawler_history_error")}>
+        {() =>
+          runs.length === 0 ? (
+            <p className="text-ax-text-secondary py-6 text-sm">
+              {t("admin_crawler_history_empty")}
+            </p>
+          ) : (
+            <Table data={runs} columns={columns} idKey="id" aria-label={t("history")} />
+          )
+        }
+      </QueryStateBoundary>
       {history.data && (stack.page > 1 || history.data.next_cursor) ? (
         <Pagination
           variant="none"
@@ -185,34 +181,29 @@ function MatchesTab({
           {t("refresh")}
         </Button>
       </div>
-      {matches.isError ? (
-        <ListError
-          error={matches.error}
-          title={t("admin_crawler_matches_error")}
-          isRetrying={matches.isFetching}
-          onRetry={() => void matches.refetch()}
-        />
-      ) : matches.isPending ? (
-        <LoadingState rows={2} />
-      ) : items.length === 0 ? (
-        <p className="text-ax-text-secondary py-6 text-sm">
-          {t("admin_crawler_same_address_empty")}
-        </p>
-      ) : (
-        <ul className="divide-ax-border flex flex-col divide-y">
-          {items.map((source) => (
-            <li
-              key={source.website_id}
-              className="flex min-w-0 flex-wrap items-start justify-between gap-3 py-3"
-            >
-              <MatchItem source={source} onSelect={onSelect} />
-              <span className="text-ax-text-secondary text-sm tabular-nums">
-                {formatBytes(source.indexed_size, locale)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <QueryStateBoundary query={matches} rows={2} errorTitle={t("admin_crawler_matches_error")}>
+        {() =>
+          items.length === 0 ? (
+            <p className="text-ax-text-secondary py-6 text-sm">
+              {t("admin_crawler_same_address_empty")}
+            </p>
+          ) : (
+            <ul className="divide-ax-border flex flex-col divide-y">
+              {items.map((source) => (
+                <li
+                  key={source.website_id}
+                  className="flex min-w-0 flex-wrap items-start justify-between gap-3 py-3"
+                >
+                  <MatchItem source={source} onSelect={onSelect} />
+                  <span className="text-ax-text-secondary text-sm tabular-nums">
+                    {formatBytes(source.indexed_size, locale)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryStateBoundary>
       {matches.data && (stack.page > 1 || matches.data.next_cursor) ? (
         <Pagination
           variant="none"
@@ -380,7 +371,7 @@ export function CrawlDetailsDialog({
   const baseId = useId();
   const [view, setView] = useState<DetailsView>("details");
   const [confirmation, setConfirmation] = useState<"start" | "cancel" | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
   const details = useQuery({ ...crawlerDetailsQueryOptions(browserApi, runId), enabled: isOpen });
   const data = details.data;
   const requestedAt = useClientTimeText(data?.run.created_at, "date_time");
@@ -410,7 +401,7 @@ export function CrawlDetailsDialog({
       // The confirmation stays open so the user can retry or cancel; the
       // reason is toasted (it stays until closed) and shown in the footer.
       toastApiError(error, t);
-      setActionError(getErrorMessage(error, t));
+      setActionError(error);
     }
   });
 
@@ -451,93 +442,90 @@ export function CrawlDetailsDialog({
           }
           content={
             <LayoutContent>
-              {details.isError ? (
-                <ListError
-                  error={details.error}
-                  title={t("admin_crawler_details_error")}
-                  isRetrying={details.isFetching}
-                  onRetry={() => void details.refetch()}
-                />
-              ) : !data ? (
-                <LoadingState rows={4} />
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <TabList
-                    role="tablist"
-                    aria-label={t("crawl_details_description")}
-                    value={view}
-                    onChange={(value) => setView(value as DetailsView)}
-                    hasDivider
-                  >
-                    {views.map((item) => (
-                      <Tab
-                        key={item.id}
-                        id={tabId(item.id)}
-                        value={item.id}
-                        label={item.label}
-                        panelId={panelId}
-                      />
-                    ))}
-                  </TabList>
-                  <div role="tabpanel" id={panelId} aria-labelledby={tabId(view)}>
-                    {view === "details" ? (
-                      <div className="flex flex-col gap-4">
-                        <div>
-                          <h3 className="font-medium">
-                            {t("crawl_details_title", { date: requestedAt ?? "" })}
-                          </h3>
-                          {data.started_at ? (
-                            <p className="text-ax-text-secondary mt-1 text-xs">
-                              {t("admin_crawler_started", { time: startedAt ?? "—" })}
-                            </p>
-                          ) : null}
-                        </div>
-                        <p className="text-ax-text-secondary text-sm">
-                          {t("admin_crawler_initiated_by")}:{" "}
-                          {data.run.origin === "scheduled"
-                            ? t("crawl_origin_scheduled")
-                            : data.initiated_by?.username ||
-                              data.initiated_by?.email ||
-                              t("admin_crawler_not_recorded")}
-                        </p>
-                        <CrawlRunDetailsContent
-                          key={runId}
-                          run={data.run}
-                          failuresQuery={(id, kind) =>
-                            crawlerFailuresQueryOptions(browserApi, id, kind)
-                          }
-                          onRefresh={() => details.refetch()}
-                          onRunUpdate={(run) =>
-                            queryClient.setQueryData(
-                              crawlerDetailsQueryOptions(browserApi, runId).queryKey,
-                              (current) => (current ? { ...current, run } : current)
-                            )
-                          }
+              <QueryStateBoundary
+                query={details}
+                rows={4}
+                errorTitle={t("admin_crawler_details_error")}
+              >
+                {(data) => (
+                  <div className="flex flex-col gap-3">
+                    <TabList
+                      role="tablist"
+                      aria-label={t("crawl_details_description")}
+                      value={view}
+                      onChange={(value) => setView(value as DetailsView)}
+                      hasDivider
+                    >
+                      {views.map((item) => (
+                        <Tab
+                          key={item.id}
+                          id={tabId(item.id)}
+                          value={item.id}
+                          label={item.label}
+                          panelId={panelId}
                         />
-                      </div>
-                    ) : view === "source" ? (
-                      <SourceTab
-                        details={data}
-                        refreshing={details.isFetching}
-                        onRefresh={() => void details.refetch()}
-                        onSelect={selectRun}
-                      />
-                    ) : view === "history" ? (
-                      <HistoryTab websiteId={data.website_id} onSelect={selectRun} />
-                    ) : (
-                      <MatchesTab websiteId={data.website_id} onSelect={selectRun} />
-                    )}
+                      ))}
+                    </TabList>
+                    <div role="tabpanel" id={panelId} aria-labelledby={tabId(view)}>
+                      {view === "details" ? (
+                        <div className="flex flex-col gap-4">
+                          <div>
+                            <h3 className="font-medium">
+                              {t("crawl_details_title", { date: requestedAt ?? "" })}
+                            </h3>
+                            {data.started_at ? (
+                              <p className="text-ax-text-secondary mt-1 text-xs">
+                                {t("admin_crawler_started", { time: startedAt ?? "—" })}
+                              </p>
+                            ) : null}
+                          </div>
+                          <p className="text-ax-text-secondary text-sm">
+                            {t("admin_crawler_initiated_by")}:{" "}
+                            {data.run.origin === "scheduled"
+                              ? t("crawl_origin_scheduled")
+                              : data.initiated_by?.username ||
+                                data.initiated_by?.email ||
+                                t("admin_crawler_not_recorded")}
+                          </p>
+                          <CrawlRunDetailsContent
+                            key={runId}
+                            run={data.run}
+                            failuresQuery={(id, kind) =>
+                              crawlerFailuresQueryOptions(browserApi, id, kind)
+                            }
+                            onRefresh={() => details.refetch()}
+                            onRunUpdate={(run) =>
+                              queryClient.setQueryData(
+                                crawlerDetailsQueryOptions(browserApi, runId).queryKey,
+                                (current) => (current ? { ...current, run } : current)
+                              )
+                            }
+                          />
+                        </div>
+                      ) : view === "source" ? (
+                        <SourceTab
+                          details={data}
+                          refreshing={details.isFetching}
+                          onRefresh={() => void details.refetch()}
+                          onSelect={selectRun}
+                        />
+                      ) : view === "history" ? (
+                        <HistoryTab websiteId={data.website_id} onSelect={selectRun} />
+                      ) : (
+                        <MatchesTab websiteId={data.website_id} onSelect={selectRun} />
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </QueryStateBoundary>
             </LayoutContent>
           }
           footer={
             data ? (
               <LayoutFooter>
                 <div className="flex flex-col gap-3">
-                  {actionError && !confirmation ? (
-                    <p className="text-ax-error text-sm">{actionError}</p>
+                  {actionError != null && !confirmation ? (
+                    <ListError error={actionError} compact />
                   ) : null}
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-col items-start gap-1">

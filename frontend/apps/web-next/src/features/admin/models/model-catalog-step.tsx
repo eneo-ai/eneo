@@ -12,7 +12,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -25,6 +25,7 @@ import {
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import {
   type CatalogModel,
@@ -202,12 +203,11 @@ export function ModelCatalogStep({
   // Picks added by id are not in the catalog; they head the list so they can
   // be seen and unticked like the others.
   const listed = useMemo(() => {
-    const query = search.trim().toLowerCase();
     const added = [...selected.values()].filter(
       (model) => !catalog.some((item) => item.name === model.name)
     );
-    return [...added, ...catalog].filter(
-      (model) => !query || `${model.name} ${model.display_name ?? ""}`.toLowerCase().includes(query)
+    return [...added, ...catalog].filter((model) =>
+      matchesSearch([model.name, model.display_name], search)
     );
   }, [catalog, search, selected]);
 

@@ -6,7 +6,7 @@ import { renderHookInApp, testQueryClient } from "@/test/render";
 
 const toastApiError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/toast", () => ({ toastApiError }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { useSettingSwitch, type SettingSwitchOptions } from "./use-setting-switch";
 

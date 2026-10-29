@@ -8,11 +8,10 @@ import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { flattenPages } from "@/lib/api/pagination";
 import {
@@ -161,63 +160,48 @@ export function CrawlRunDetailsContent({
         </Collapsible>
       ) : null}
 
-      {items.length > 0 ? (
-        <ul aria-labelledby={headingId} className="divide-ax-border divide-y text-sm">
-          {items.map((failure) => {
-            const href = resourceLink(failure.url);
-            return (
-              <li key={failure.id} className="flex flex-col gap-1.5 py-3">
-                <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-ax-text-secondary text-xs">
-                    {failure.kind === "page" ? t("page") : t("crawl_failure_file")}
-                  </span>
-                  <span className="text-ax-error break-words">
-                    {crawlFailureReasonLabel(t, failure.reason)}
-                  </span>
-                </p>
-                {href ? (
-                  <Link href={href} isExternalLink hasUnderline>
-                    <span className="break-all">{failure.url}</span>
-                  </Link>
-                ) : (
-                  <span className="break-all">{failure.url}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : failures.isPending ? (
-        <LoadingState rows={3} />
-      ) : failures.isError ? null : (
-        <p className="text-ax-text-secondary py-4 text-sm">
-          {detailsAvailable
-            ? kind
-              ? t("crawl_failures_filter_empty")
-              : t("crawl_failures_empty")
-            : t("crawl_failures_unavailable")}
-        </p>
-      )}
-
-      {failures.isError ? (
-        <ListError
-          error={failures.error}
-          title={t("crawl_failures_load_failed")}
-          isRetrying={loading}
-          onRetry={() => void (pages ? failures.fetchNextPage() : failures.refetch())}
-        />
-      ) : null}
-      {failures.hasNextPage && !failures.isError ? (
-        <div>
-          <Button
-            label={t("crawl_failures_load_more", { current: items.length, total })}
-            isLoading={failures.isFetchingNextPage}
-            isInterruptible
-            onClick={() => {
-              if (!failures.isFetchingNextPage) void failures.fetchNextPage();
-            }}
-          />
-        </div>
-      ) : null}
+      <QueryStateBoundary query={failures} rows={3} errorTitle={t("crawl_failures_load_failed")}>
+        {() =>
+          items.length > 0 ? (
+            <ul aria-labelledby={headingId} className="divide-ax-border divide-y text-sm">
+              {items.map((failure) => {
+                const href = resourceLink(failure.url);
+                return (
+                  <li key={failure.id} className="flex flex-col gap-1.5 py-3">
+                    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-ax-text-secondary text-xs">
+                        {failure.kind === "page" ? t("page") : t("crawl_failure_file")}
+                      </span>
+                      <span className="text-ax-error break-words">
+                        {crawlFailureReasonLabel(t, failure.reason)}
+                      </span>
+                    </p>
+                    {href ? (
+                      <Link href={href} isExternalLink hasUnderline>
+                        <span className="break-all">{failure.url}</span>
+                      </Link>
+                    ) : (
+                      <span className="break-all">{failure.url}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-ax-text-secondary py-4 text-sm">
+              {detailsAvailable
+                ? kind
+                  ? t("crawl_failures_filter_empty")
+                  : t("crawl_failures_empty")
+                : t("crawl_failures_unavailable")}
+            </p>
+          )
+        }
+      </QueryStateBoundary>
+      <LoadMore
+        query={failures}
+        label={t("crawl_failures_load_more", { current: items.length, total })}
+      />
     </div>
   );
 }

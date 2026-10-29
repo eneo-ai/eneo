@@ -52,6 +52,19 @@ describe("BlobTable", () => {
     expect(marks[0]?.closest("tr")?.textContent).toContain("Ny.pdf");
   });
 
+  it("fits a phone, its name held in view where a narrower screen scrolls it", () => {
+    renderInApp(<BlobTable blobs={[blob("1", "a.pdf", 1)]} canEdit labelledBy="files" />);
+    const table = screen.getByRole("table");
+    // A 390 px phone less 16 px gutters and a border: the table fits even
+    // framed (on a phone it runs edge to edge, with more room).
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(356);
+    // The row-status gutter (Astryx offsets pinned cells from the start) and the name.
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.at(-1)?.textContent).toBe("Namn");
+  });
+
   it("keeps the upload order until a header sorts it", async () => {
     const { container } = renderInApp(
       <>

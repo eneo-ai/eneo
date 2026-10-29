@@ -57,7 +57,7 @@ describe("SecurityClassificationsPage", () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the switch enabled while the change saves, and ignores a toggle meanwhile", async () => {
+  it("keeps the switch enabled and the confirmation open while the change saves", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<SecurityClassificationsPage />);
     const toggle = await screen.findByRole("switch", { name: /Aktiverad/ });
@@ -69,13 +69,11 @@ describe("SecurityClassificationsPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Inaktivera" }));
     await waitFor(() => expect(toggle.getAttribute("aria-busy")).toBe("true"));
 
-    // Closed while it saves: focus returns to the switch, which stays enabled.
+    // Escape cannot close it while it saves, and a second press is ignored.
     fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Inaktivera" }));
     expect(toggle.hasAttribute("disabled")).toBe(false);
-    await waitFor(() => expect(document.activeElement).toBe(toggle));
-    fireEvent.click(toggle);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(post).toHaveBeenCalledTimes(1);
   });
 });

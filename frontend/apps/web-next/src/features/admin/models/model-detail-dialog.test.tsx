@@ -54,6 +54,18 @@ const rerankModel = {
 } as AdminModel;
 
 describe("ModelDetailDialog", () => {
+  it("formats the context window in the UI language", async () => {
+    renderInApp(
+      <ModelDetailDialog
+        model={{ ...model, max_input_tokens: 12345 } as AdminModel}
+        kind="completion"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    expect(await screen.findByText("12 345")).toBeTruthy();
+  });
+
   it("names the usage table by the text above it", async () => {
     renderInApp(<ModelDetailDialog model={model} kind="completion" open onOpenChange={() => {}} />);
 

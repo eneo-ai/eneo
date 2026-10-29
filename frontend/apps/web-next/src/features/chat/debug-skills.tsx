@@ -6,7 +6,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { ChevronDown } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { CopyableValue, DebugSection } from "./debug-section";

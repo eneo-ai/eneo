@@ -2,8 +2,8 @@
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import Link from "@/lib/link";
 import { useId, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -24,6 +24,7 @@ import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import {
   type HelperKind,
   type HelperTemplate,
@@ -230,11 +231,9 @@ export function HelpAssistantsPage() {
   const { data: templates } = useSuspenseQuery(helpTemplatesQueryOptions(browserApi));
   const [filter, setFilter] = useState("");
 
-  const normalizedFilter = filter.trim().toLowerCase();
-  const filteredRoles = roles.filter((role) => {
-    const haystack = `${role.assistant_name ?? ""} ${roleKindLabel(role.kind, t)}`.toLowerCase();
-    return haystack.includes(normalizedFilter);
-  });
+  const filteredRoles = roles.filter((role) =>
+    matchesSearch([role.assistant_name, roleKindLabel(role.kind, t)], filter)
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">

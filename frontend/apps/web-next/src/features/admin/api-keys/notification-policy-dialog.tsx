@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,7 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import type { Schema } from "@/lib/api/models";
 import { browserApi } from "@/lib/api/browser";
@@ -146,7 +146,7 @@ export function NotificationPolicyDialog({
           <DialogDescription>{t("notification_policy_hint")}</DialogDescription>
         </DialogHeader>
         {isPending || !data ? (
-          <Skeleton className="h-56 w-full" />
+          <LoadingState rows={1} height={224} />
         ) : (
           <PolicyForm policy={data} onClose={() => onOpenChange(false)} />
         )}

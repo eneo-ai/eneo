@@ -1,7 +1,6 @@
 "use client";
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
@@ -20,16 +19,18 @@ import { useRecentInfoBlobIds } from "@/features/jobs/recent-results";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,12 +46,12 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
-import { matchesSearch } from "@/features/spaces/resource-filter";
+import { matchesSearch } from "@/lib/search";
 import type { InfoBlob } from "./knowledge";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 
 const PAGE_SIZE = 100;
 
@@ -79,16 +80,17 @@ export function BlobPreviewDialog({
   properties?: readonly SourceMetadataEntry[];
 }) {
   const t = useTranslations();
-  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
+  const content = useQuery({
     queryKey: ["info-blobs", blob.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
     enabled: open
   });
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const data = content.data;
+  const { copy, isCopied } = useCopy();
 
   async function copyText() {
-    if (data?.text && !(await copy(data.text))) toast.error(t("chat_copy_failed"));
+    if (data?.text) await copy(data.text);
   }
 
   return (
@@ -99,18 +101,14 @@ export function BlobPreviewDialog({
         </DialogHeader>
         <SourceMetadataList entries={properties} />
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
-          {isPending ? (
-            <LoadingState variant="text" rows={4} />
-          ) : isError ? (
-            <ListError
-              error={error}
-              title={t("attachment_error_loading_content")}
-              isRetrying={isFetching}
-              onRetry={() => void refetch()}
-            />
-          ) : (
-            <Streamdown>{data.text ?? ""}</Streamdown>
-          )}
+          <QueryStateBoundary
+            query={content}
+            variant="text"
+            rows={4}
+            errorTitle={t("attachment_error_loading_content")}
+          >
+            {(blobContent) => <Streamdown>{blobContent.text ?? ""}</Streamdown>}
+          </QueryStateBoundary>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => void copyText()} disabled={!data?.text}>
@@ -195,12 +193,7 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
               {t("cancel")}
             </Button>
             {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-            <Button
-              aria-busy={rename.isPending || undefined}
-              onClick={() => {
-                if (!rename.isPending) rename.mutate();
-              }}
-            >
+            <Button aria-busy={rename.isPending || undefined} onClick={() => rename.mutate()}>
               {rename.isPending ? t("saving") : t("save_changes")}
             </Button>
           </DialogFooter>
@@ -317,21 +310,21 @@ export function BlobTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(4),
+      width: proportional(1),
       sortable: true,
       renderCell: (blob) => <BlobNameCell blob={blob} />
     },
     {
       key: "size",
       header: t("size"),
-      width: proportional(1),
+      width: pixel(96),
       sortable: true,
       renderCell: (blob) => formatBytes(blob.metadata.size, locale)
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (blob) => (canEdit ? <BlobActions blob={blob} /> : null)
     }
@@ -352,15 +345,16 @@ export function BlobTable({
       {filtered.length === 0 ? (
         <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           <Table
             data={paginateData(sortedData, currentPage, PAGE_SIZE)}
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
+            pinnedColumn="name"
             plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
     </div>
   );
@@ -411,9 +405,7 @@ export function AddTextDialog({
     if (create.isPending) return;
     const firstProblem = !title ? "text-title" : !text ? "text-content" : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(firstProblem)?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem);
       return;
     }
     create.mutate();

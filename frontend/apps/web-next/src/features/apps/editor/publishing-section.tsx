@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
 import { appQueryOptions, type App } from "../apps";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
 /** Publish/unpublish row; apps have no insights toggle (unlike assistants). */
 export function PublishingSection({ app }: { app: App }) {
@@ -31,6 +32,7 @@ export function PublishingSection({ app }: { app: App }) {
     onSuccess: (updated) => {
       queryClient.setQueryData(appQueryOptions(browserApi, app.id).queryKey, updated);
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      void invalidateExpiringApiKeys(queryClient);
       setShowDialog(false);
     },
     onError: (error) => toastApiError(error, t)

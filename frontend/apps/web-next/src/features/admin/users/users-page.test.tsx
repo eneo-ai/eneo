@@ -4,16 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { replaceUrl } from "@/test/navigation";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const searchParams = vi.hoisted(() => ({ value: "role_id=custom" }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(searchParams.value)
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("./user-editor", () => ({
+  UserEditorDialog: () => null,
+  IssuedPasswordDialog: () => null
 }));
-vi.mock("./user-editor", () => ({ UserEditorDialog: () => null }));
 
 import { AdminUsersPage } from "./users-page";
 
@@ -48,7 +50,7 @@ const users = [
   })
 ];
 
-type Page = { items: unknown[]; totalPages?: number; page?: number };
+type Page = { items: unknown[]; totalPages?: number; page?: number; totalCount?: number };
 
 /** Answers the users endpoint with `pages(query)`, the roles endpoint with one role. */
 function serve(pages: (query: Record<string, unknown>) => Page) {
@@ -64,13 +66,19 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
         return ok({ max_age_days: null });
       }
       const query = init?.params?.query ?? {};
-      const { items, totalPages = 1, page = Number(query.page) } = pages(query);
+      const {
+        items,
+        totalPages = 1,
+        page = Number(query.page),
+        totalCount = items.length
+      } = pages(query);
       return ok({
         items,
         metadata: {
           page,
+          page_size: 100,
           total_pages: totalPages,
-          total_count: items.length,
+          total_count: totalCount,
           counts: { active: 1, inactive: 3 },
           has_next: page < totalPages,
           has_previous: page > 1
@@ -80,9 +88,16 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
   );
 }
 
+function renderUsers() {
+  return renderInApp(<AdminUsersPage />, {
+    appContext,
+    route: `/admin/users${searchParams.value ? `?${searchParams.value}` : ""}`
+  });
+}
+
 function renderPage(items: unknown[] = []) {
   serve(() => ({ items }));
-  return renderInApp(<AdminUsersPage />, { appContext });
+  return renderUsers();
 }
 
 function usersQuery(overrides: Record<string, unknown>) {
@@ -92,6 +107,7 @@ function usersQuery(overrides: Record<string, unknown>) {
         page: 1,
         page_size: 100,
         search_email: undefined,
+        search_name: undefined,
         state_filter: "active",
         role_id: undefined,
         ...overrides
@@ -114,7 +130,36 @@ afterEach(() => {
 });
 
 describe("AdminUsersPage", () => {
-  it("filters users by the selected role and can return to all users", async () => {
+  it("follows external filters and discards pending search drafts", async () => {
+    serve(() => ({ items: users, totalPages: 8 }));
+    renderUsers();
+    await screen.findByText("anna.lind@kommun.se");
+    const email = screen.getByRole("textbox", { name: "E-post" });
+    const username = screen.getByRole("textbox", { name: "Användarnamn" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(email, { target: { value: "old-draft" } });
+      fireEvent.change(username, { target: { value: "other-draft" } });
+      act(() => replaceUrl("/admin/users?tab=inactive&search=restored&search_name=anna&page=3"));
+      expect(email).toHaveProperty("value", "restored");
+      expect(username).toHaveProperty("value", "anna");
+      act(() => vi.advanceTimersByTime(300));
+      expect(window.location.search).toBe("?tab=inactive&search=restored&search_name=anna&page=3");
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({
+          page: 3,
+          state_filter: "inactive",
+          search_email: "restored",
+          search_name: "anna"
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("filters users by the role a link names and can return to all users", async () => {
     renderPage();
     await waitFor(() =>
       expect(api.GET).toHaveBeenCalledWith(
@@ -122,11 +167,107 @@ describe("AdminUsersPage", () => {
         usersQuery({ role_id: "custom" })
       )
     );
-    expect(await screen.findByText("Manager")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Visa alla användare" }));
+    expect(await screen.findByRole("combobox", { name: "Roll" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Roll" }).textContent).toContain("Manager")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
     await waitFor(() =>
       expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/users/", usersQuery({}))
     );
+    expect(screen.getByRole("combobox", { name: "Roll" }).textContent).toContain("Alla roller");
+  });
+
+  it("filters by a role chosen from the dropdown", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Roll" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Manager" }));
+
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({ role_id: "custom" })
+      )
+    );
+  });
+
+  it("searches by username and e-mail together, from three characters, and clears both", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+    const email = screen.getByRole("textbox", { name: "E-post" });
+    const username = screen.getByRole("textbox", { name: "Användarnamn" });
+    // Both say what the search needs (at least three characters).
+    expect(email.getAttribute("aria-describedby")).toContain(
+      username.getAttribute("aria-describedby")!.split(" ").at(-1)!
+    );
+
+    fireEvent.change(username, { target: { value: "an" } });
+    fireEvent.change(email, { target: { value: "kommun" } });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_email: "kommun" })
+        ),
+      { timeout: 2000 }
+    );
+    // Two characters are not sent (the backend rejects them).
+    expect(api.GET).not.toHaveBeenCalledWith(
+      "/api/v1/admin/users/",
+      usersQuery({ search_email: "kommun", search_name: "an" })
+    );
+
+    fireEvent.change(username, { target: { value: "anna" } });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_email: "kommun", search_name: "anna" })
+        ),
+      { timeout: 2000 }
+    );
+    expect(window.location.search).toBe("?search=kommun&search_name=anna");
+
+    api.GET.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
+    expect((email as HTMLInputElement).value).toBe("");
+    expect((username as HTMLInputElement).value).toBe("");
+    // The unfiltered list is cached from the first load.
+    await waitFor(() => expect(window.location.search).toBe(""));
+    // Once the old drafts' debounce runs out, the cleared search stays cleared.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(window.location.search).toBe("");
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/admin/users/", expect.anything());
+  });
+
+  it("shows each user's groups", async () => {
+    searchParams.value = "";
+    renderPage([
+      user({
+        user_groups: [
+          { id: "g1", name: "Ekonomi" },
+          { id: "g2", name: "Arkiv" }
+        ]
+      }),
+      user({ id: "u2", email: "per.berg@kommun.se", user_groups: [] })
+    ]);
+    const table = await screen.findByRole("table", { name: "Aktiva användare" });
+    expect(within(table).getByRole("columnheader", { name: "Användargrupper" })).toBeTruthy();
+    const [, anna, per] = within(table).getAllByRole("row");
+    expect(within(anna!).getByTitle("Ekonomi")).toBeTruthy();
+    expect(within(anna!).getByTitle("Arkiv")).toBeTruthy();
+    expect(within(per!).getAllByText("Ingen").length).toBeGreaterThan(0);
+  });
+
+  it("tells the admin to filter when the list runs past the page cap", async () => {
+    searchParams.value = "";
+    serve(() => ({ items: users, totalPages: 100, totalCount: 10_500 }));
+    renderUsers();
+    expect(await screen.findByText(/Listan visar högst 100 sidor/)).toBeTruthy();
   });
 
   it("lists users with avatar, roles, status and a named row menu", async () => {
@@ -144,14 +285,30 @@ describe("AdminUsersPage", () => {
     ).toBeTruthy();
     // Without a username the email is the name.
     expect(within(per!).getByText("per.berg@kommun.se")).toBeTruthy();
-    expect(within(per!).getByText("Inbjuden")).toBeTruthy();
+    // In the status column, and on a phone under the name too.
+    expect(within(per!).getAllByText("Inbjuden")).toHaveLength(2);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användare" })).toBeTruthy();
     // The breadcrumb names the section as the admin navigation does.
     expect(screen.getByText("Organisation")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Sök användare på e-post" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "E-post" })).toBeTruthy();
+    expect(screen.queryByText(/Listan visar högst 100 sidor/)).toBeNull();
     expect(screen.getByText("2 användare")).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("holds each user's name in view where the table scrolls sideways (decision 9)", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    const table = await screen.findByRole("table", { name: "Aktiva användare" });
+    // Every column stays; the name is pinned, so a phone scrolls the rest.
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.map((cell) => cell.textContent)).toEqual(["Användare"]);
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(5);
+    // Its scroll region is named after the table.
+    expect(screen.getByRole("group", { name: "Aktiva användare" })).toBeTruthy();
   });
 
   it("switches between active and inactive users with the tabs", async () => {
@@ -177,12 +334,12 @@ describe("AdminUsersPage", () => {
   it("announces the result count of a search once its results are in", async () => {
     searchParams.value = "";
     serve((query) => ({ items: query.search_email ? [users[0]] : users }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("2 användare");
     // Not on first load.
     expect(liveRegion()).toBe("");
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Sök användare på e-post" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
       target: { value: "anna" }
     });
 
@@ -199,7 +356,7 @@ describe("AdminUsersPage paging", () => {
   it("keeps the pressed page button enabled and focused while the page loads", async () => {
     let release: () => void = () => {};
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 3 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("sida1@kommun.se");
 
     // Page 2 answers only when released: the list is still loading.
@@ -227,7 +384,7 @@ describe("AdminUsersPage paging", () => {
 
   it("moves focus to the list when the next-page button disables at the last page", async () => {
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("sida1@kommun.se");
 
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
@@ -253,7 +410,7 @@ describe("AdminUsersPage paging", () => {
         ? { items: [], totalPages: 2 }
         : { items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }
     );
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
 
     expect(await screen.findByText("sida2@kommun.se")).toBeTruthy();
     expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/users/", usersQuery({ page: 2 }));
@@ -262,7 +419,7 @@ describe("AdminUsersPage paging", () => {
   it("fits a phone: page x of y instead of page numbers below the sm breakpoint", async () => {
     setViewport("phone");
     serve(() => ({ items: users, totalPages: 12 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
 
     const pagination = await screen.findByRole("navigation", { name: "Sidnumrering" });
     expect(within(pagination).getByText("Sida 1 av 12")).toBeTruthy();
@@ -288,7 +445,7 @@ describe("AdminUsersPage row actions", () => {
   it("deactivates a user, confirms it and keeps focus in the list", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     list = users.slice(1); // The deactivated user leaves the active tab.
@@ -311,7 +468,7 @@ describe("AdminUsersPage row actions", () => {
 
   it("does not let admins deactivate or delete themselves", async () => {
     serve(() => ({ items: [user({ id: "me" })] }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     const menu = openRowMenu("anna.lind@kommun.se");
@@ -325,7 +482,7 @@ describe("AdminUsersPage row actions", () => {
   it("reactivates an inactive user", async () => {
     searchParams.value = "tab=inactive";
     serve(() => ({ items: [user({ state: "inactive", is_active: false })] }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     fireEvent.click(
@@ -345,7 +502,7 @@ describe("AdminUsersPage row actions", () => {
   it("deletes a user after confirmation", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("per.berg@kommun.se");
 
     fireEvent.click(

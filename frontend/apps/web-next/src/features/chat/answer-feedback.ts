@@ -2,7 +2,7 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

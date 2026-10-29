@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";

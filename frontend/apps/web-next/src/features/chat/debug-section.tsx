@@ -1,11 +1,11 @@
 "use client";
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Copy } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 /**
  * One disclosure section of the Felsök tab: a heading with an optional count,
@@ -49,7 +49,7 @@ export function DebugSection({
 /** A technical value (an id, a route) in a definition list, with a copy button. */
 export function CopyableValue({ label, value }: { label: string; value: string }) {
   const t = useTranslations();
-  const { copy } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy } = useCopy();
   return (
     <div className="min-w-0">
       <dt className="text-ax-text-secondary text-xs">{label}</dt>

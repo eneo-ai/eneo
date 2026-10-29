@@ -11,19 +11,10 @@ import {
   Trash2
 } from "lucide-react";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -155,35 +146,24 @@ function EnableToggle({ enabled }: { enabled: boolean }) {
           }}
         />
       </Label>
-      <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirm === "disable"
-                ? t("disable_security_classifications")
-                : t("enable_security_classifications")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirm === "disable"
-                ? t("disable_security_classifications_dialog_description")
-                : t("enable_security_classifications_dialog_description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={toggle.isPending}>{t("cancel")}</AlertDialogCancel>
-            {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-            <Button
-              variant={confirm === "disable" ? "destructive" : "default"}
-              aria-busy={toggle.isPending || undefined}
-              onClick={() => {
-                if (!toggle.isPending) toggle.mutate(confirm === "enable");
-              }}
-            >
-              {confirm === "disable" ? t("disable") : t("enable")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialogControlled
+        open={confirm !== null}
+        onOpenChange={(open) => !open && setConfirm(null)}
+        title={
+          confirm === "disable"
+            ? t("disable_security_classifications")
+            : t("enable_security_classifications")
+        }
+        description={
+          confirm === "disable"
+            ? t("disable_security_classifications_dialog_description")
+            : t("enable_security_classifications_dialog_description")
+        }
+        confirmLabel={confirm === "disable" ? t("disable") : t("enable")}
+        variant={confirm === "disable" ? "destructive" : "default"}
+        pending={toggle.isPending}
+        onConfirm={() => toggle.mutate(confirm === "enable")}
+      />
     </SettingsRow>
   );
 }

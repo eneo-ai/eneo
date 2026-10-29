@@ -2,7 +2,7 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -191,7 +191,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
 
   // ---- Save lifecycle ------------------------------------------------------
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const announce = useAnnounce();
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmKey[] | null>(null);
 
@@ -216,7 +216,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       setPendingConfirm(null);
       announce(t("governance_save_success"));
     } catch (error) {
-      setSaveError((error as { message?: string }).message ?? t("governance_save_error"));
+      setSaveError(error);
       announce(t("governance_save_failure"));
     } finally {
       setSaving(false);

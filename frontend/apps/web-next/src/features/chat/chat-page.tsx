@@ -1,24 +1,26 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { mapSessionMessages } from "@/lib/chat/map-session";
+import { useElementWidth } from "@/lib/hooks/use-element-width";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
 import { ChatView, type ActivityState } from "./chat-view";
 import { setContextUsagePinned, useContextUsagePinned } from "./context-usage-bar";
-import { HistoryAside } from "./history-panel";
+import { HISTORY_WIDTH, HistoryAside } from "./history-panel";
 import { InsightsPanel } from "./insights-panel";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
+import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "./side-panel/side-panel";
+import { readChatTab } from "./chat-url";
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -36,6 +38,19 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
   type: "assistant" | "group-chat";
 } {
   return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
+}
+
+/**
+ * How the history fits beside the conversation in a row of `width` px
+ * (decision 14: the conversation keeps 480 px): not at all; only while no
+ * side panel is open beside the conversation; or always (a panel fits next
+ * to it too, or covers the conversation anyway). Where it does not fit, the
+ * history is a sheet.
+ */
+function fitOfHistory(width: number): "none" | "alone" | "always" {
+  const rest = width - HISTORY_WIDTH;
+  if (rest < CONVERSATION_MIN_WIDTH) return "none";
+  return panelFitsBeside(rest) || !panelFitsBeside(width) ? "always" : "alone";
 }
 
 let conversationCounter = 0;
@@ -100,14 +115,15 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  // History is an inline panel from 768px up, an overlay drawer below.
-  const historyInline = useMediaQuery("(min-width: 768px)");
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(urlSessionId);
   const [followedUrlSession, setFollowedUrlSession] = useState<string | null>(urlSessionId);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The row that holds the conversation, its side panel and the history.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
@@ -136,14 +152,8 @@ export function ChatPage({
       }
     }
   }
-  const [tab, setTab] = useState<"chat" | "insights">(() =>
-    typeof window !== "undefined" &&
-    window.location.search.includes("tab=insights") &&
-    partner.insightEnabled &&
-    partner.type !== "default-assistant"
-      ? "insights"
-      : "chat"
-  );
+  const searchParams = useSearchParams();
+  const tab = hasInsights(partner) ? readChatTab(searchParams) : "chat";
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
@@ -172,19 +182,22 @@ export function ChatPage({
   }
 
   function updateUrl(sessionId: string | null) {
-    // Shallow history update on purpose: router.replace would start an RSC
-    // navigation whose transition holds back streaming re-renders until the
-    // server render resolves (the answer would then paint in one chunk).
-    if (buildSessionUrl) window.history.replaceState(null, "", buildSessionUrl(sessionId));
+    // The navigation seam commits same-route updates without waiting for
+    // background session refreshes, so streaming stays responsive.
+    if (buildSessionUrl) {
+      const url = new URL(buildSessionUrl(sessionId), window.location.href);
+      if (tab === "insights") url.searchParams.set("tab", "insights");
+      else url.searchParams.delete("tab");
+      replaceUrl(url);
+    }
   }
 
   const selectTab = useCallback((next: "chat" | "insights") => {
-    setTab(next);
     setActivity(null);
     const url = new URL(window.location.href);
     if (next === "insights") url.searchParams.set("tab", "insights");
     else url.searchParams.delete("tab");
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
   }, []);
 
   const closeHistory = useCallback(() => {
@@ -244,6 +257,37 @@ export function ChatPage({
 
   const insightPartner = hasInsights(partner) ? partner : null;
   const effectiveTab = insightPartner ? tab : "chat";
+
+  // Measured as how the history fits, so a resize re-renders the page only
+  // when that changes. A panel open in the conversation behind Insikter
+  // takes no room.
+  const historyFit = useElementWidth(rowRef, fitOfHistory);
+  const panelHere = panelOpen && effectiveTab === "chat";
+  const historyInline = historyFit === "always" || (historyFit === "alone" && !panelHere);
+  // The history beside the conversation would turn into a sheet only because
+  // a panel is open beside it (the panel opened, or the window narrowed): it
+  // gives way instead, in the same frame (ChatView reports the panel before
+  // paint), rather than become a modal sheet over the panel. Opened next to
+  // such a panel, it is a sheet; where it does not fit at all, it turns into
+  // one.
+  const historyBeside = historyOpen && historyInline;
+  const [historyWasBeside, setHistoryWasBeside] = useState(historyBeside);
+  const [gaveWay, setGaveWay] = useState(0);
+  if (historyBeside !== historyWasBeside) {
+    setHistoryWasBeside(historyBeside);
+    if (historyWasBeside && historyOpen && historyFit === "alone" && panelHere) {
+      setHistoryOpen(false);
+      setGaveWay((count) => count + 1);
+    }
+  }
+  // It had the focus (a view that opened by itself): the focus goes back to
+  // what opened the history.
+  useLayoutEffect(() => {
+    if (gaveWay === 0 || document.activeElement !== document.body) return;
+    const trigger = historyTrigger.current;
+    historyTrigger.current = null;
+    if (trigger?.isConnected) trigger.focus();
+  }, [gaveWay]);
   const sessionId = active?.sessionId ?? null;
   const started = Boolean(active?.started);
   // The page has one h1: the conversation title in the header, the start
@@ -308,7 +352,7 @@ export function ChatPage({
         menuItems={menuItems}
         minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
       />
-      <div className="flex min-h-0 flex-1">
+      <div ref={rowRef} className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {insightPartner && effectiveTab === "insights" && (
             <InsightsPanel partner={insightPartner} />
@@ -340,6 +384,14 @@ export function ChatPage({
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}
+                onPanelOpenChange={setPanelOpen}
+                layout={{
+                  row: rowRef,
+                  aside: historyBeside
+                    ? { width: HISTORY_WIDTH, yields: historyFit === "alone" }
+                    : null,
+                  hidden: effectiveTab !== "chat"
+                }}
               />
             ) : detail.isError ? (
               <div className="flex flex-col items-center gap-3 p-6 text-center">

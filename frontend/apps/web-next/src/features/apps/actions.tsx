@@ -4,8 +4,8 @@ import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
@@ -15,6 +15,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
 import type { AppSparse } from "./apps";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
 /** Edit/publish/delete menu for an app, shown on its tile. */
 export function AppActions({ app }: { app: AppSparse }) {
@@ -37,6 +38,7 @@ export function AppActions({ app }: { app: AppSparse }) {
       ),
     onSuccess: () => {
       void invalidate();
+      void invalidateExpiringApiKeys(queryClient);
       setShowPublish(false);
     },
     onError: (error) => toastApiError(error, t)

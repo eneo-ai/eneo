@@ -2,8 +2,8 @@
 
 import { SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { ArrowLeft } from "lucide-react";
-import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { usePathname } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
 import { adminNavGroups, isAdminItemActive } from "./admin-nav-items";

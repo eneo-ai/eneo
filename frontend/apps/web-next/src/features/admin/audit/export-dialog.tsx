@@ -3,7 +3,7 @@
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
@@ -24,19 +24,20 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { API_BASE } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
+import { saveUrl } from "@/features/files/signed-file-url";
 import { auditExportRequest, type AuditExportFormat, type AuditFilters } from "./audit";
 
 const POLL_MS = 2000;
 const RUNNING = new Set(["pending", "processing"]);
 
 /**
- * Async CSV export: start a job, poll its progress, then download through the
- * proxy (which streams the file with its content-disposition). The four
- * SvelteKit BFF endpoints are unnecessary here — the generic /api/eneo proxy
- * already attaches the bearer.
+ * Refresh the authorized status before each download, then let the browser
+ * stream its signed file. Large exports never need a browser-sized blob.
  */
 export function ExportDialog({
   open,
@@ -73,7 +74,7 @@ export function ExportDialog({
   } = useQuery({
     queryKey: ["audit-export", jobId],
     enabled: jobId !== null,
-    refetchInterval: (query) => (RUNNING.has(query.state.data?.status ?? "") ? POLL_MS : false),
+    refetchInterval: pollWhile((job) => RUNNING.has(job?.status ?? ""), POLL_MS),
     queryFn: () =>
       unwrap(
         browserApi.GET("/api/v1/audit/logs/export/{job_id}/status", {
@@ -92,6 +93,29 @@ export function ExportDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["audit-export", jobId] });
     },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const download = useMutation({
+    mutationFn: async () => {
+      const latest = await unwrap(
+        browserApi.GET("/api/v1/audit/logs/export/{job_id}/status", {
+          params: { path: { job_id: jobId as string } }
+        })
+      );
+      if (!latest.download_url)
+        throw new EneoApiError("Export is no longer available", { status: 404 });
+      const url = new URL(latest.download_url, window.location.origin);
+      if (
+        url.pathname !==
+          `/api/v1/audit/logs/export/${encodeURIComponent(jobId as string)}/signed-download` ||
+        !url.searchParams.get("token")
+      ) {
+        throw new Error("Unexpected audit export URL");
+      }
+      return `${API_BASE}${url.pathname}${url.search}`;
+    },
+    onSuccess: (url) => saveUrl(url, ""),
     onError: (error) => toastApiError(error, t)
   });
 
@@ -192,10 +216,8 @@ export function ExportDialog({
               <Button variant="outline" onClick={reset}>
                 {t("close")}
               </Button>
-              <Button asChild>
-                <a href={`/api/eneo/api/v1/audit/logs/export/${jobId}/download`}>
-                  <Download className="size-4" /> {t("download")}
-                </a>
+              <Button aria-busy={download.isPending || undefined} onClick={() => download.mutate()}>
+                <Download className="size-4" /> {t("download")}
               </Button>
             </>
           ) : running ? (
@@ -204,9 +226,7 @@ export function ExportDialog({
               variant="destructive"
               disabled={!jobId}
               aria-busy={cancel.isPending || undefined}
-              onClick={() => {
-                if (!cancel.isPending) cancel.mutate();
-              }}
+              onClick={() => cancel.mutate()}
             >
               {t("cancel")}
             </Button>
@@ -222,12 +242,7 @@ export function ExportDialog({
               <Button variant="outline" onClick={reset}>
                 {t("cancel")}
               </Button>
-              <Button
-                aria-busy={start.isPending || undefined}
-                onClick={() => {
-                  if (!start.isPending) start.mutate();
-                }}
-              >
+              <Button aria-busy={start.isPending || undefined} onClick={() => start.mutate()}>
                 {t("export")}
               </Button>
             </>

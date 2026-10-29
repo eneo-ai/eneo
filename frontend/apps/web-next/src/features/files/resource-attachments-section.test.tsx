@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { ResourceAttachmentsSection } from "./resource-attachments-section";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 
@@ -23,6 +23,18 @@ const second = {
   inline_text: true
 };
 const restrictions = { accepted_file_types: [], limit: { max_files: 10, max_size: 1000 } };
+
+it("formats compact token counts in the UI language", () => {
+  renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[{ ...first, token_count: 1200 }]}
+      allowedAttachments={restrictions}
+      description="Files"
+      onSave={vi.fn()}
+    />
+  );
+  expect(screen.getByText(/1,2\s+tn/)).toBeTruthy();
+});
 
 it("preserves an existing on-demand read mode when another attachment is removed", async () => {
   const save = vi.fn().mockResolvedValue({});

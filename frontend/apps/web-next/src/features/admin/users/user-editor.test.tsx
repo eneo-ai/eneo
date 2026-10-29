@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { brokenRule, readPasswordPolicy } from "@/features/auth/password-policy";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
-const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   info: vi.fn(),
@@ -16,7 +16,7 @@ const toast = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
-import { UserEditorDialog } from "./user-editor";
+import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
 import type { AdminUser } from "./users";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
@@ -35,8 +35,14 @@ const existing = {
   id: "user-2",
   username: "bo.ek",
   email: "bo.ek@example.se",
-  roles: []
+  roles: [],
+  user_groups: [{ id: "g1", name: "Ekonomi" }]
 } as unknown as AdminUser;
+
+const groups = [
+  { id: "g1", name: "Ekonomi", users: [] },
+  { id: "g2", name: "Arkiv", users: [] }
+];
 
 async function renderEditor(
   user?: AdminUser,
@@ -45,10 +51,12 @@ async function renderEditor(
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/users/password-policy/"
       ? policyResponse
-      : ok({
-          predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
-          roles: { items: [] }
-        })
+      : path === "/api/v1/user-groups/"
+        ? ok({ items: groups })
+        : ok({
+            predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
+            roles: { items: [] }
+          })
   );
   const { queryClient } = renderInApp(<Harness user={user} />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -59,9 +67,16 @@ async function renderEditor(
   return { dialog, invalidate };
 }
 
+/** The editor and, as the users page has it, the one-time password view. */
 function Harness({ user }: { user?: AdminUser }) {
   const [open, setOpen] = useState(true);
-  return <UserEditorDialog open={open} onOpenChange={setOpen} user={user} />;
+  const [issued, setIssued] = useState<IssuedPassword | null>(null);
+  return (
+    <>
+      <UserEditorDialog open={open} onOpenChange={setOpen} user={user} onIssued={setIssued} />
+      <IssuedPasswordDialog issued={issued} onClose={() => setIssued(null)} />
+    </>
+  );
 }
 
 /** The password a save sent, checked against the policy the backend sent. */
@@ -78,12 +93,15 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 const type = (dialog: HTMLElement, name: RegExp, value: string) =>
   fireEvent.change(field(dialog, name), { target: { value } });
 const replaceSwitch = (dialog: HTMLElement) =>
-  within(dialog).getByRole("switch", { name: /^Generera ett nytt lösenord/ });
+  within(dialog).getByRole("checkbox", { name: /^Generera ett nytt lösenord/ }) as HTMLInputElement;
+/** The submit button sits in the footer, outside the form it names. */
 const submit = (dialog: HTMLElement) =>
   fireEvent.submit(
-    within(dialog)
-      .getByRole("button", { name: /^(Skapa användare|Spara ändringar)$/ })
-      .closest("form")!
+    (
+      within(dialog).getByRole("button", {
+        name: /^(Skapa användare|Spara ändringar)$/
+      }) as HTMLButtonElement
+    ).form!
   );
 /** The field's error: the Astryx status message its aria-describedby names. */
 const errorOf = (input: HTMLInputElement) =>
@@ -97,6 +115,27 @@ const errorOf = (input: HTMLInputElement) =>
     : null;
 
 afterEach(() => vi.clearAllMocks());
+
+describe("UserEditorDialog's fields", () => {
+  it("keeps username editing and marks only optional fields", async () => {
+    const { dialog } = await renderEditor(existing);
+
+    const username = field(dialog, /^Användarnamn/);
+    expect(username.readOnly).toBe(false);
+    expect(username.disabled).toBe(false);
+    within(dialog).getByText(/loggar ut och in igen/);
+    // Required is the default and unmarked (decision 40).
+    const email = within(dialog).getByRole("textbox", { name: "E-post" });
+    expect(email.getAttribute("aria-required")).toBe("true");
+    expect(dialog.textContent).not.toContain("Obligatoriskt");
+    // The new password is a choice made on save: a checkbox, not a switch.
+    expect(replaceSwitch(dialog).checked).toBe(false);
+    // The roles in named groups, each a whole-row checkbox.
+    const standard = within(dialog).getByRole("group", { name: "Standardroller" });
+    expect(within(standard).getByRole("checkbox", { name: "Användare" })).toBeTruthy();
+    await expectNoAxeViolations(dialog);
+  });
+});
 
 describe("UserEditorDialog", () => {
   it("offers no field for typing a password and says one is generated", async () => {
@@ -231,6 +270,51 @@ describe("UserEditorDialog", () => {
     expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/admin/users/{username}/");
   });
 
+  it("stays open on Escape, without its close button, while the save runs", async () => {
+    let release: () => void = () => {};
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ data: {}, response: new Response("{}") });
+        })
+    );
+    const { dialog } = await renderEditor(existing);
+    expect(within(dialog).getByRole("button", { name: "Stäng" })).toBeTruthy();
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    // Closed now, the password the save sets would have nowhere to show.
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
+    expect(within(dialog).queryByRole("button", { name: "Stäng" })).toBeNull();
+
+    await act(async () => release());
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    within(reveal).getByText(sentPassword(0));
+  });
+
+  it("hands the password over to the e-mail that was saved, not one typed meanwhile", async () => {
+    let release: () => void = () => {};
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ data: {}, response: new Response("{}") });
+        })
+    );
+    const { dialog } = await renderEditor();
+    type(dialog, /^Användarnamn/, "eva.ek");
+    type(dialog, /^E-post/, "eva.ek@example.se");
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    type(dialog, /^E-post/, "anna.lind@example.se");
+    await act(async () => release());
+
+    const reveal = await screen.findByRole("dialog", { name: "Kontot har skapats" });
+    within(reveal).getByText(/^Lämna lösenordet till eva\.ek@example\.se\./);
+  });
+
   it("refreshes the list when the one-time view is closed with its close button", async () => {
     api.POST.mockImplementation(() => ok({}));
     const { dialog, invalidate } = await renderEditor(existing);
@@ -285,5 +369,111 @@ describe("UserEditorDialog", () => {
     );
     expect(api.POST).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("UserEditorDialog username", () => {
+  it("changes an existing user's username, sent only when it changed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    const username = field(dialog, /^Användarnamn/);
+    expect(username.disabled).toBe(false);
+    within(dialog).getByText(/loggar ut och in igen/);
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(
+      (api.POST.mock.calls[0]?.[1] as { body: { username?: string } }).body.username
+    ).toBeUndefined();
+  });
+
+  it("sends a new username under the current one", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^Användarnamn/, "bo.lind");
+
+    submit(dialog);
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
+        params: { path: { username: "bo.ek" } },
+        body: expect.objectContaining({ username: "bo.lind" })
+      })
+    );
+  });
+
+  it("does not let an existing username be emptied", async () => {
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^Användarnamn/, " ");
+
+    submit(dialog);
+
+    expect(errorOf(field(dialog, /^Användarnamn/))).toContain("Ange ett användarnamn.");
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+});
+
+describe("UserEditorDialog user groups", () => {
+  // With a search field the trigger is a button that opens a listbox.
+  const picker = (dialog: HTMLElement) =>
+    within(dialog).getByRole("button", { name: /^Användargrupper/ });
+
+  it("has no group field when creating a user", async () => {
+    const { dialog } = await renderEditor();
+    expect(within(dialog).queryByRole("button", { name: /^Användargrupper/ })).toBeNull();
+  });
+
+  it("assigns a group at once, apart from the save", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+    await within(dialog).findByRole("button", { name: "Tilldela" });
+    within(dialog).getByText("Tilldelning och borttagning av grupper sparas direkt.");
+
+    // Nothing picked: pressing says so at the picker.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
+    expect(await within(dialog).findByText("Välj en användargrupp.")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+
+    fireEvent.click(picker(dialog));
+    // Ekonomi is assigned already, so only Arkiv is offered.
+    expect(screen.queryByRole("option", { name: "Ekonomi" })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "Arkiv" }));
+    // The trigger's name carries the pick (Astryx names it by its label alone).
+    expect(within(dialog).getByRole("button", { name: "Användargrupper: Arkiv" })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/user-groups/{id}/users/{user_id}/", {
+        params: { path: { id: "g2", user_id: "user-2" } }
+      })
+    );
+    expect(
+      await within(dialog).findByRole("button", { name: "Ta bort från gruppen Arkiv" })
+    ).toBeTruthy();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["user-groups"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] });
+    // The dialog stays open: the save is a separate step.
+    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(dialog);
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("removes a group at once", async () => {
+    api.DELETE.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort från gruppen Ekonomi" }));
+
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/user-groups/{id}/users/{user_id}/", {
+        params: { path: { id: "g1", user_id: "user-2" } }
+      })
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole("button", { name: "Ta bort från gruppen Ekonomi" })
+      ).toBeNull()
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] });
+    expect(api.POST).not.toHaveBeenCalled();
   });
 });

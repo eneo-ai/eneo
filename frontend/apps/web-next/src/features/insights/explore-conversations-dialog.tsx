@@ -1,28 +1,27 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/features/chat/chat-message";
 import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./insights-range";
 
 const PAGE_SIZE = 50;
-const SEARCH_DEBOUNCE_MS = 250;
 
 type Partner = ChatPartner & { type: "assistant" | "group-chat" };
 
@@ -42,17 +41,11 @@ function SessionList({
   const headingId = useId();
   const listRef = useRef<HTMLUListElement>(null);
   const [searchInput, setSearchInput] = useState("");
-  const [filter, setFilter] = useState("");
   const params = insightRangeParams(range);
   const query = insightPartnerQuery(partner);
 
   // The name filter is sent once typing pauses.
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => setFilter(searchInput.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput]);
+  const filter = useDebouncedValue(searchInput.trim());
 
   const sessions = useInfiniteQuery({
     ...cursorPagination,
@@ -108,7 +101,6 @@ function SessionList({
   }, [pageCount, pages, announce, t, rows.length, total, sessions.hasNextPage]);
 
   function loadMore() {
-    if (sessions.isFetchingNextPage) return;
     focusPage.current = pageCount;
     void sessions.fetchNextPage();
   }
@@ -165,18 +157,13 @@ function SessionList({
                   })}
                 </ul>
                 <div className="text-ax-text-secondary flex flex-col items-center gap-2 py-3 text-xs">
+                  <LoadMore
+                    query={sessions}
+                    label={t("load_more_conversations")}
+                    onLoad={loadMore}
+                  />
                   {sessions.hasNextPage ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        label={t("load_more_conversations")}
-                        isLoading={sessions.isFetchingNextPage}
-                        isInterruptible
-                        onClick={loadMore}
-                      />
-                      <span>{t("loaded_conversations_count", { loaded: rows.length, total })}</span>
-                    </>
+                    <span>{t("loaded_conversations_count", { loaded: rows.length, total })}</span>
                   ) : (
                     <span>{t("loaded_all_conversations", { total })}</span>
                   )}

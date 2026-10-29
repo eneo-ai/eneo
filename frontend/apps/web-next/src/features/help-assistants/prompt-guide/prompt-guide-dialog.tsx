@@ -1,6 +1,5 @@
 "use client";
 
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   Check,
@@ -12,7 +11,7 @@ import {
   SendHorizontal,
   Sparkles
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -46,7 +45,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { cn } from "@/lib/utils";
 import { extractFinalPrompt } from "./extract-final-prompt";
 import { extractStructuredQuestion, type PromptGuideQuestion } from "./extract-structured-question";
@@ -457,10 +456,10 @@ function PromptGuideFinalCard({
   onApply: (text: string) => void;
 }) {
   const t = useTranslations();
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   async function copyToClipboard() {
-    if (!(await copy(prompt))) toast.error(t("chat_copy_failed"));
+    await copy(prompt);
   }
 
   return (

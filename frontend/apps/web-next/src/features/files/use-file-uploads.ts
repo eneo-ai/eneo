@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -201,6 +201,15 @@ export function useFileUploads({ previews = false } = {}) {
     });
   }
 
+  /**
+   * The list as it is now, before React renders it. Plan additions against
+   * this, so two that land before a render still count each other (limits,
+   * duplicates).
+   */
+  function current(): FileUpload[] {
+    return owned.current;
+  }
+
   function remove(key: string) {
     const removed = owned.current.filter((file) => file.key === key);
     replace(owned.current.filter((file) => file.key !== key));
@@ -232,5 +241,5 @@ export function useFileUploads({ previews = false } = {}) {
     replace([...taken, ...owned.current.filter((file) => !keys.has(file.key))]);
   }
 
-  return { files, add, reuse, awaitUploads, remove, discard, detach, restore };
+  return { files, current, add, reuse, awaitUploads, remove, discard, detach, restore };
 }

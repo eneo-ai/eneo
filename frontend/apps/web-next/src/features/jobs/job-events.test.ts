@@ -2,6 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { JOB_EVENTS_PATH } from "@/lib/api/base";
 import { FakeEventSource, installFakeEventSource } from "./job-events.test-support";
 
 type Module = typeof import("./job-events");
@@ -27,7 +28,7 @@ it("opens one feed for every subscriber and closes it with the last one", () => 
   const stopA = events.subscribeJobEvents(() => {});
   const stopB = events.subscribeJobEvents(() => {});
   expect(FakeEventSource.instances).toHaveLength(1);
-  expect(latest().url).toBe("/api/jobs/events");
+  expect(latest().url).toBe(JOB_EVENTS_PATH);
 
   stopA();
   expect(latest().closed).toBe(false);

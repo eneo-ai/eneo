@@ -76,6 +76,11 @@ class AuditMetadata:
     """Factory for standardized audit metadata structures."""
 
     @staticmethod
+    def actor(actor: Any) -> dict[str, Any]:
+        """The ``actor`` block alone, for metadata with its own target shape."""
+        return _actor_snapshot(actor)
+
+    @staticmethod
     def standard(
         actor: Any,
         target: Any,
@@ -286,7 +291,7 @@ class AuditMetadata:
                 method="password",
                 success=False,
                 failure_reason="Invalid password",
-                extra={"ip_address": request.client.host, "attempts": 3}
+                extra={"ip_address": get_request_context()["ip_address"], "attempts": 3}
             )
         """
         metadata: dict[str, Any] = {

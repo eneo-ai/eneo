@@ -2,10 +2,9 @@
 
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import Link from "@/lib/link";
+import { useFormatter, useTranslations } from "use-intl";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -25,15 +24,11 @@ import {
   tenantAssistantsQueryOptions
 } from "@/features/admin/insights/insights";
 
-const NUMBER = new Intl.NumberFormat("sv-SE");
 const PRESET_DAYS = [7, 30, 90] as const;
 const CHART_HEIGHT = 320;
-const UsageAreaChart = dynamic(
-  () => import("./usage-area-chart").then((module) => module.UsageAreaChart),
-  {
-    loading: () => <LoadingState rows={1} height={CHART_HEIGHT} />,
-    ssr: false
-  }
+// recharts loads with the first chart, once its series has arrived.
+const UsageAreaChart = lazy(() =>
+  import("./usage-area-chart").then((module) => ({ default: module.UsageAreaChart }))
 );
 
 function presetRange(days: number): InsightsRange {
@@ -64,19 +59,24 @@ function UsageChart({ range }: { range: InsightsRange }) {
   const query = useQuery(insightAggregatedQueryOptions(browserApi, range));
   return (
     <QueryStateBoundary query={query} rows={1} height={CHART_HEIGHT}>
-      {(data) => <UsageAreaChart data={data} />}
+      {(data) => (
+        <Suspense fallback={<LoadingState rows={1} height={CHART_HEIGHT} />}>
+          <UsageAreaChart data={data} />
+        </Suspense>
+      )}
     </QueryStateBoundary>
   );
 }
 
 function Delta({ current, prior }: { current: number; prior?: number }) {
+  const format = useFormatter();
   if (prior == null) return null;
   const diff = current - prior;
   if (diff === 0) return <span className="text-muted-foreground text-xs">±0</span>;
   const up = diff > 0;
   return (
     <span className={up ? "text-success text-xs" : "text-destructive text-xs"}>
-      {up ? "▲" : "▼"} {NUMBER.format(Math.abs(diff))}
+      {up ? "▲" : "▼"} {format.number(Math.abs(diff))}
     </span>
   );
 }
@@ -94,6 +94,7 @@ function presetLabel(days: (typeof PRESET_DAYS)[number], t: (key: string) => str
 
 function ActivityCards({ range, compare }: { range: InsightsRange; compare: boolean }) {
   const t = useTranslations();
+  const format = useFormatter();
   const { data, isPending } = useQuery(insightActivityQueryOptions(browserApi, range));
   const prior = useQuery({
     ...insightActivityQueryOptions(browserApi, priorRange(range)),
@@ -109,8 +110,8 @@ function ActivityCards({ range, compare }: { range: InsightsRange; compare: bool
         <span className="text-muted-foreground text-sm">{t("active_assistants")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
-            {NUMBER.format(data.active_assistant_count)} /{" "}
-            {NUMBER.format(data.total_trackable_assistants)}
+            {format.number(data.active_assistant_count)} /{" "}
+            {format.number(data.total_trackable_assistants)}
           </span>
           <Delta current={data.active_assistant_count} prior={priorData?.active_assistant_count} />
         </span>
@@ -119,12 +120,12 @@ function ActivityCards({ range, compare }: { range: InsightsRange; compare: bool
         <span className="text-muted-foreground text-sm">{t("active_users")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
-            {NUMBER.format(data.active_user_count)}
+            {format.number(data.active_user_count)}
           </span>
           <Delta current={data.active_user_count} prior={priorData?.active_user_count} />
         </span>
       </Card>
-      <Stat label={t("total_assistants")} value={NUMBER.format(data.total_trackable_assistants)} />
+      <Stat label={t("total_assistants")} value={format.number(data.total_trackable_assistants)} />
     </div>
   );
 }
@@ -163,6 +164,7 @@ function AssistantActivityRows({
   assistantNames: Map<string, string>;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   return (
     <Card className="overflow-hidden p-0">
       <div className="divide-y">
@@ -176,7 +178,7 @@ function AssistantActivityRows({
                 {assistantNames.get(row.assistantId) ?? row.assistantId}
               </p>
               <p className="text-muted-foreground text-sm">
-                {NUMBER.format(row.questions)} {t("questions")} · {NUMBER.format(row.sessions)}{" "}
+                {format.number(row.questions)} {t("questions")} · {format.number(row.sessions)}{" "}
                 {t("sessions")}
               </p>
             </div>
@@ -200,6 +202,7 @@ function AssistantActivityRows({
  */
 export function InsightsPage() {
   const t = useTranslations();
+  const format = useFormatter();
   const { data: counts } = useSuspenseQuery(insightCountsQueryOptions(browserApi));
   const [range, setRange] = useState<InsightsRange>(() => presetRange(30));
   const [activePreset, setActivePreset] = useState<(typeof PRESET_DAYS)[number] | null>(30);
@@ -210,9 +213,9 @@ export function InsightsPage() {
       <PageHeader title={t("insights")} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("assistants")} value={NUMBER.format(counts.assistants)} />
-        <Stat label={t("sessions")} value={NUMBER.format(counts.sessions)} />
-        <Stat label={t("questions")} value={NUMBER.format(counts.questions)} />
+        <Stat label={t("assistants")} value={format.number(counts.assistants)} />
+        <Stat label={t("sessions")} value={format.number(counts.sessions)} />
+        <Stat label={t("questions")} value={format.number(counts.questions)} />
       </div>
 
       <Card className="flex flex-col gap-4 p-6">

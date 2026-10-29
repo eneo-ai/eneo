@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";

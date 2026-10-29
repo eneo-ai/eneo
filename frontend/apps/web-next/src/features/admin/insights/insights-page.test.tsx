@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IntlProvider } from "use-intl";
+import en from "@/lib/i18n/messages/en.json";
 import { EneoApiError } from "@/lib/api/errors";
 import { renderInApp } from "@/test/render";
 
@@ -11,7 +13,7 @@ vi.mock("@/lib/api/browser", () => ({
       const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
       switch (path) {
         case "/api/v1/analysis/counts/":
-          return ok({ assistants: 3, sessions: 12, questions: 40 });
+          return ok({ assistants: 3, sessions: 12, questions: 40123 });
         case "/api/v1/analysis/metadata-statistics/aggregated/":
           if (state.aggregated === "fail") {
             return Promise.reject(new EneoApiError("boom", { status: 500, code: 9024 }));
@@ -47,6 +49,15 @@ const busyRegions = () =>
   screen.getAllByRole("status").filter((region) => region.getAttribute("aria-busy") === "true");
 
 describe("InsightsPage", () => {
+  it("formats totals in the selected UI language", async () => {
+    renderInApp(
+      <IntlProvider locale="en" messages={en}>
+        <InsightsPage />
+      </IntlProvider>
+    );
+    expect(await screen.findByText("40,123")).toBeTruthy();
+  });
+
   it("shows a chart-sized skeleton while the usage series loads", async () => {
     renderInApp(<InsightsPage />);
     // The activity cards and list have loaded: the one busy region left is the chart's.

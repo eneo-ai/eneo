@@ -6,7 +6,7 @@ import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 import type { IntegrationKnowledge } from "../knowledge";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: vi.fn(), POST: vi.fn() } }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => ({ trackJob: vi.fn() }) }));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -70,7 +70,7 @@ function list(
         progress={progress}
         queued={queued}
         progressLoaded
-        labelledBy="sources"
+        name={{ "aria-labelledby": "sources" }}
       />
     </>
   );

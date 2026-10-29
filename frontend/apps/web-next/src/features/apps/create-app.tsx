@@ -2,8 +2,8 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LayoutTemplate } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {

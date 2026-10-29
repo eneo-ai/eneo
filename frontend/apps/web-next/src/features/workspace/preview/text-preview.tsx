@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /** A plain-text file, with a notice when only its beginning was read. */
 export function TextPreview({ text, truncated }: { text: string; truncated: boolean }) {

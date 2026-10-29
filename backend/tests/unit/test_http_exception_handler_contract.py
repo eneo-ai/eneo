@@ -12,9 +12,10 @@ from eneo.authentication.endpoint_access import (
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.server.main import get_application
+from eneo.server.middleware import cors as cors_module
 
 
-def _build_client_for_exception(detail):
+def _build_client_for_exception(detail, status_code=503):
     app = get_application()
 
     @app.get("/_test-http-exc")
@@ -24,18 +25,26 @@ def _build_client_for_exception(detail):
         reason="Test-only route for HTTP exception handling.",
     )
     async def _test_http_exc():
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(status_code=status_code, detail=detail)
 
     return TestClient(app)
 
 
-def test_http_exception_string_detail_preserves_legacy_shape():
+def test_http_exception_string_detail_answers_in_the_envelope():
+    """The message becomes the envelope's `message`; the string stays in
+    `detail` for one release. No numeric category is inferred: both clients
+    prefer a category's catalog text over the specific message."""
     client = _build_client_for_exception("Temporary outage")
     response = client.get("/_test-http-exc", headers={"X-Correlation-ID": "req-1"})
 
     assert response.status_code == 503
     payload = response.json()
-    assert payload == {"detail": "Temporary outage"}
+    assert payload == {
+        "message": "Temporary outage",
+        "request_id": "req-1",
+        "detail": "Temporary outage",
+    }
+    assert GeneralError.model_validate(payload).eneo_error_code is None
 
 
 def test_http_exception_code_message_preserved_and_request_id_added():
@@ -49,6 +58,7 @@ def test_http_exception_code_message_preserved_and_request_id_added():
     assert payload["code"] == "insufficient_scope"
     assert payload["message"] == "Denied"
     assert payload["request_id"] == "req-2"
+    assert payload["detail"] == {"code": "insufficient_scope", "message": "Denied"}
 
 
 def test_http_exception_structured_detail_is_unchanged():
@@ -61,7 +71,18 @@ def test_http_exception_structured_detail_is_unchanged():
 
     assert response.status_code == 503
     payload = response.json()
-    assert payload == {"detail": detail}
+    assert payload["detail"] == detail
+    assert payload["message"] == "Something went wrong."
+    assert GeneralError.model_validate(payload).details == detail
+
+
+def test_dict_detail_message_without_code_is_the_envelope_message():
+    detail = {"error": "missing_credential", "message": "Add a key.", "hint": "h"}
+    client = _build_client_for_exception(detail)
+    payload = client.get("/_test-http-exc").json()
+
+    assert payload["message"] == "Add a key."
+    assert payload["detail"] == detail
 
 
 @pytest.mark.parametrize(
@@ -180,3 +201,149 @@ def test_conflict_does_not_borrow_a_domain_category():
     assert payload["eneo_error_code"] == ErrorCodes.BAD_REQUEST.value
     assert payload["code"] == "approval_conflict"
     assert payload["existing_status"] == "approved"
+
+
+def _contract_app():
+    app = get_application()
+
+    @app.get("/_test-status/{status_code}")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the error envelope contract.",
+    )
+    async def _test_status(status_code: int):
+        raise HTTPException(status_code=status_code, detail=f"Refused {status_code}")
+
+    @app.post("/_test-post-only")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the 405 error envelope.",
+    )
+    async def _test_post_only():
+        return {}
+
+    @app.get("/_test-unhandled")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the unhandled error envelope.",
+    )
+    async def _test_unhandled():
+        raise RuntimeError("boom")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 409, 413, 429, 503])
+def test_every_raised_status_answers_in_the_documented_envelope(status_code):
+    response = _contract_app().get(
+        f"/_test-status/{status_code}", headers={"X-Request-ID": "req-c"}
+    )
+
+    assert response.status_code == status_code
+    error = GeneralError.model_validate(response.json())
+    assert error.message == f"Refused {status_code}"
+    assert error.request_id == "req-c"
+
+
+def test_unknown_route_answers_in_the_documented_envelope():
+    """Starlette raises its own HTTPException for routing misses; the one
+    handler is registered on that base class, so it shapes those too."""
+    response = _contract_app().get("/_test-no-such-route")
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert GeneralError.model_validate(payload).message == "Not Found"
+    assert payload["detail"] == "Not Found"
+
+
+def test_wrong_method_answers_in_the_documented_envelope():
+    response = _contract_app().get("/_test-post-only")
+
+    assert response.status_code == 405
+    assert GeneralError.model_validate(response.json()).message == (
+        "Method Not Allowed"
+    )
+    assert response.headers["allow"] == "POST"
+
+
+def test_validation_error_keeps_its_list_shape():
+    response = _contract_app().get("/_test-status/not-a-number")
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
+def _origin_checks(monkeypatch, *results):
+    """Answer the CORS origin checks in order: a bool, or an exception to raise."""
+    answers = iter(results)
+
+    async def check(*_args, **_kwargs):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setitem(cors_module.CORS_OPTIONS, "callback", check)
+
+
+def test_unhandled_error_carries_cors_trace_and_error_id(monkeypatch):
+    # The middleware's check, then the 500 handler's own.
+    _origin_checks(monkeypatch, True, True)
+    response = _contract_app().get(
+        "/_test-unhandled", headers={"Origin": "https://app.example.com"}
+    )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert len(payload["error_id"]) == 8
+    GeneralError.model_validate(payload)
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"
+    assert response.headers["x-trace-id"]
+    expose = response.headers["access-control-expose-headers"].lower()
+    assert "x-trace-id" in expose and "x-correlation-id" in expose
+
+
+def test_unhandled_error_keeps_its_json_body_when_the_origin_check_fails(monkeypatch):
+    """The origin check can need the database the 500 came from."""
+    _origin_checks(monkeypatch, True, RuntimeError("database unavailable"))
+    response = _contract_app().get(
+        "/_test-unhandled", headers={"Origin": "https://app.example.com"}
+    )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert len(payload["error_id"]) == 8
+    GeneralError.model_validate(payload)
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_rate_limit_body_is_readable_flat_and_through_detail():
+    """Production Svelte reads `body.detail.code`; web-next reads the flat
+    `retry_after_seconds`. Both stay readable."""
+    detail = {
+        "code": "rate_limit_exceeded",
+        "message": "Too many attempts.",
+        "retry_after_seconds": 30,
+    }
+    client = _build_client_for_exception(detail=detail, status_code=429)
+
+    response = client.get("/_test-http-exc")
+
+    assert response.status_code == 429
+    payload = response.json()
+    GeneralError.model_validate(payload)
+    assert payload["code"] == "rate_limit_exceeded"
+    assert payload["retry_after_seconds"] == 30
+    assert payload["detail"]["code"] == "rate_limit_exceeded"
+
+
+def test_raised_detail_is_not_mutated_by_the_handler():
+    detail = {"code": "insufficient_scope", "message": "Denied"}
+    client = _build_client_for_exception(detail)
+
+    client.get("/_test-http-exc", headers={"X-Correlation-ID": "req-3"})
+
+    assert detail == {"code": "insufficient_scope", "message": "Denied"}

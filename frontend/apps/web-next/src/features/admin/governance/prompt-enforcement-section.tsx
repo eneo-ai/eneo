@@ -1,8 +1,8 @@
 "use client";
 
 import { AlertCircle, Info, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import Link from "@/lib/link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";

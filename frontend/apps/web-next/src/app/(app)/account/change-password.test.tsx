@@ -67,6 +67,13 @@ describe("ChangePasswordCard", () => {
     expect(account?.getAttribute("aria-hidden")).toBe("true");
     expect(account?.tabIndex).toBe(-1);
     expect(field(/^Nuvarande lösenord/).getAttribute("autocomplete")).toBe("current-password");
+    // Every field is required, so none is marked (decision 40); assistive
+    // technology is still told.
+    for (const name of ["Nuvarande lösenord", "Nytt lösenord", "Bekräfta lösenord"]) {
+      const input = screen.getByLabelText(name, { exact: true, selector: "input" });
+      expect(input.getAttribute("aria-required")).toBe("true");
+    }
+    expect(container.textContent).not.toContain("Obligatoriskt");
     for (const input of [field(/^Nytt lösenord/), field(/^Bekräfta lösenord/)]) {
       expect(input.getAttribute("autocomplete")).toBe("new-password");
     }

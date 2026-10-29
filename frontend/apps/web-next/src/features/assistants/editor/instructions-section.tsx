@@ -2,11 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useFormatter, useTranslations } from "use-intl";
+import { useRef, useState } from "react";
 import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
 import { SettingsGroup } from "@/components/composites/settings-rows";
-import { useAutosave, useDirtySaveStatus } from "@/components/composites/use-autosave";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,7 +36,8 @@ const PROMPT_AUTOSAVE_DEBOUNCE_MS = 1500;
 /** Right-aligned muted line: character count + a markdown hint. */
 function PromptMeta({ text }: { text: string }) {
   const t = useTranslations();
-  const characters = new Intl.NumberFormat(undefined).format(Math.round(text.length));
+  const format = useFormatter();
+  const characters = format.number(text.length);
 
   return (
     <span className="text-muted-foreground inline-flex items-center gap-3 text-xs">
@@ -65,11 +66,10 @@ export function InstructionsSection({
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
-  const autosave = useAutosave("assistant-prompt");
   const savedPrompt = assistant.prompt?.text ?? "";
   const promptLocked = isPromptLocked(assistant.effective_config);
-  const [prompt, setPrompt] = useState(savedPrompt);
-  const [promptDescription, setPromptDescription] = useState("");
+  // Only read when a save starts; Prompt Guide sets it for the version it applies.
+  const promptDescription = useRef("");
   const [showHistory, setShowHistory] = useState(false);
   const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -78,45 +78,27 @@ export function InstructionsSection({
     enabled: promptGuide
   });
 
-  const dirty = prompt !== savedPrompt;
-  useDirtySaveStatus("assistant-prompt", dirty);
-
-  // Adopt the saved prompt when it changes server-side (our save landing, or a
-  // version restored elsewhere) unless the user has unsaved local edits.
-  const serverRef = useRef(savedPrompt);
-  useEffect(() => {
-    if (serverRef.current === savedPrompt) return;
-    const previous = serverRef.current;
-    serverRef.current = savedPrompt;
-    setPrompt((current) => (current === previous ? savedPrompt : current));
-  }, [savedPrompt]);
-
-  // Each save creates a new prompt version, so commit on blur or an explicit
-  // apply rather than on every keystroke.
-  const commit = useCallback(
-    async (text = prompt, description = promptDescription) => {
-      if (promptLocked) return;
-      if (text === savedPrompt) return;
-      const result = await autosave(() => update.mutateAsync({ prompt: { text, description } }));
-      if (result !== undefined) setPromptDescription("");
+  // Each save creates a new prompt version, so commit on blur, after a pause,
+  // or on an explicit apply rather than on every keystroke.
+  const promptField = useAutosaveField({
+    key: "assistant-prompt",
+    value: savedPrompt,
+    validate: () => !promptLocked,
+    save: (text) =>
+      update.mutateAsync({ prompt: { text, description: promptDescription.current } }),
+    onSaved: () => {
+      promptDescription.current = "";
     },
-    [autosave, prompt, promptDescription, promptLocked, savedPrompt, update]
-  );
+    commitDebounceMs: PROMPT_AUTOSAVE_DEBOUNCE_MS,
+    commitOnVisibilityChange: true
+  });
+  const prompt = promptField.value;
+  const dirty = promptField.dirty;
 
-  useEffect(() => {
-    if (!dirty) return;
-    const timer = window.setTimeout(() => void commit(), PROMPT_AUTOSAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [commit, dirty]);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = () => {
-      if (document.visibilityState === "hidden") void commit();
-    };
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, [commit, dirty]);
+  function editPrompt(text: string) {
+    promptField.setValue(text);
+    promptDescription.current = "";
+  }
 
   const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
   const attachmentTokens = (assistant.attachments ?? []).reduce(
@@ -159,14 +141,15 @@ export function InstructionsSection({
   return (
     <SettingsGroup title={t("instructions")}>
       <div className="flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
+        {/* The buttons move under the label where both do not fit on a line. */}
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
             <label htmlFor="assistant-prompt" className="text-sm font-medium">
               {t("prompt")}
             </label>
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -219,11 +202,8 @@ export function InstructionsSection({
           disabled={promptLocked}
           rows={12}
           className="min-h-72 w-full resize-y text-base leading-6"
-          onChange={(event) => {
-            setPrompt(event.target.value);
-            setPromptDescription("");
-          }}
-          onBlur={() => void commit()}
+          onChange={(event) => editPrompt(event.target.value)}
+          onBlur={() => void promptField.commit()}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -243,9 +223,9 @@ export function InstructionsSection({
           const description = t("prompt_guide_apply_description", {
             date: formatDateTime(new Date().toISOString())
           });
-          setPrompt(text);
-          setPromptDescription(description);
-          void commit(text, description);
+          promptField.setValue(text);
+          promptDescription.current = description;
+          void promptField.commit(text);
         }}
       />
       <PromptVersionDialog
@@ -254,9 +234,8 @@ export function InstructionsSection({
         onOpenChange={setShowHistory}
         onUseVersion={(text) => {
           if (promptLocked) return;
-          setPrompt(text);
-          setPromptDescription("");
-          void commit(text, "");
+          editPrompt(text);
+          void promptField.commit(text);
         }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>
@@ -270,11 +249,8 @@ export function InstructionsSection({
             value={prompt}
             disabled={promptLocked}
             className="min-h-0 flex-1 resize-none text-base leading-6"
-            onChange={(event) => {
-              setPrompt(event.target.value);
-              setPromptDescription("");
-            }}
-            onBlur={() => void commit()}
+            onChange={(event) => editPrompt(event.target.value)}
+            onBlur={() => void promptField.commit()}
           />
           <div className="flex justify-end">
             <PromptMeta text={prompt} />

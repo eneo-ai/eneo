@@ -9,6 +9,7 @@
     "dev:restart": "bun scripts/frontend-dev.mjs restart",
     "dev:clean": "bun run dev:stop && bun run clean:cache && bun run dev",
     "dev:web-next": "NODE_ENV=development FORCE_COLOR=1 bun run --cwd apps/web-next dev",
+    "dev:web-next:vite": "NODE_ENV=development FORCE_COLOR=1 bun run --cwd apps/web-next dev:vite",
     "dev:web-next:clean": "bun run clean:cache:web-next && bun run dev:web-next",
     "clean:cache": "rm -rf apps/web/node_modules/.vite apps/web/.svelte-kit packages/ui/.svelte-kit",
     "clean:cache:web-next": "rm -rf apps/web-next/.next apps/web-next/node_modules/.cache",
@@ -46,11 +47,10 @@
     "esbuild": ">0.25.0",
     "prettier": "3.9.4",
     "@xmldom/xmldom": "0.9.12",
-    "postcss": "8.5.28",
+    "postcss": "8.5.31",
     "mermaid": "11.16.1",
     "sharp": "0.35.5",
-    "seroval": "1.6.9",
-    "vite": "^6.4.4",
+    "seroval": "1.6.11",
     "@modelcontextprotocol/client": "^2.3.1"
   },
   "workspaces": [

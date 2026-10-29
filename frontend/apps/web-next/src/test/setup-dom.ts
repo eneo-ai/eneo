@@ -1,5 +1,5 @@
 /**
- * Vitest setup (vitest.config.ts → setupFiles): what jsdom lacks and the app
+ * Vitest setup (vitest.config.mts → setupFiles): what jsdom lacks and the app
  * uses, installed once for every jsdom test file and kept faithful to the
  * browser (Chromium, which the e2e tests drive), so a test passes only when
  * users get the same:
@@ -43,6 +43,17 @@ export type Viewport = {
 export const DESKTOP_VIEWPORT: Viewport = { width: 1280, height: 800, pointer: "fine" };
 /** A phone held upright, as in the e2e phone scans (tests/a11y.spec.ts). */
 export const PHONE_VIEWPORT: Viewport = { width: 390, height: 844, pointer: "coarse" };
+/** An iPad held upright (iPad Air 11"), as in the e2e tablet scans. */
+export const TABLET_PORTRAIT_VIEWPORT: Viewport = { width: 820, height: 1180, pointer: "coarse" };
+/** The same iPad turned sideways. */
+export const TABLET_LANDSCAPE_VIEWPORT: Viewport = { width: 1180, height: 820, pointer: "coarse" };
+
+const PRESETS = {
+  desktop: DESKTOP_VIEWPORT,
+  phone: PHONE_VIEWPORT,
+  "tablet-portrait": TABLET_PORTRAIT_VIEWPORT,
+  "tablet-landscape": TABLET_LANDSCAPE_VIEWPORT
+} as const;
 
 let viewport = DESKTOP_VIEWPORT;
 
@@ -206,10 +217,11 @@ function applyViewportSize() {
  * already mounted. Resets to the desktop after each test.
  *
  * @example setViewport("phone"); // 390 × 844, touch
+ * @example setViewport("tablet-portrait"); // 820 × 1180, touch
  * @example setViewport({ width: 600, height: 800, pointer: "fine" }); // a narrow window
  */
-export function setViewport(next: "desktop" | "phone" | Viewport): void {
-  viewport = next === "desktop" ? DESKTOP_VIEWPORT : next === "phone" ? PHONE_VIEWPORT : next;
+export function setViewport(next: keyof typeof PRESETS | Viewport): void {
+  viewport = typeof next === "string" ? PRESETS[next] : next;
   applyViewportSize();
   for (const list of listening) list.update();
   window.dispatchEvent(new Event("resize"));

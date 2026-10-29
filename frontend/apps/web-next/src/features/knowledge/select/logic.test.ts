@@ -147,6 +147,13 @@ describe("availableKnowledge", () => {
     expect(m1?.websites).toHaveLength(0);
     expect(m1?.collections.map((item) => item.id)).toEqual(["c1"]);
   });
+
+  it("trims the text filter and finds every word in any order", () => {
+    const { sections } = availableKnowledge(space, none, " example W1 ");
+    const m1 = sections.find((section) => section.modelId === "m1");
+    expect(m1?.websites.map((item) => item.id)).toEqual(["w1"]);
+    expect(m1?.collections).toHaveLength(0);
+  });
 });
 
 describe("selected knowledge blob counts", () => {

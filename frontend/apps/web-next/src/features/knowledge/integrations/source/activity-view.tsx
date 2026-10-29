@@ -7,7 +7,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Check, History, LoaderCircle, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";

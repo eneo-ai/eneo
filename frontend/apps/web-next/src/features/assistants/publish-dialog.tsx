@@ -1,20 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { useTranslations } from "use-intl";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 
 /**
- * Publish/unpublish confirmation shared by assistants, group chats and (later)
- * apps. Ported from the Svelte PublishingDialog.
+ * Publish/unpublish confirmation shared by assistants, group chats and apps.
+ * Ported from the Svelte PublishingDialog.
  */
 export function PublishDialog({
   open,
@@ -37,35 +28,21 @@ export function PublishDialog({
   const t = useTranslations();
   const action = published ? t("unpublish") : t("publish");
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {action} {name}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {published
-              ? t("do_you_really_want_to_unpublish", { name })
-              : t("do_you_want_to_publish", { name })}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {!published && publishHint && (
-          <p className="text-muted-foreground text-xs">{publishHint}</p>
-        )}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-          <Button
-            variant={published ? "destructive" : "default"}
-            aria-busy={pending || undefined}
-            onClick={() => {
-              if (!pending) onConfirm();
-            }}
-          >
-            {pending ? t("loading") : action}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialogControlled
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`${action} ${name}`}
+      description={
+        published
+          ? t("do_you_really_want_to_unpublish", { name })
+          : t("do_you_want_to_publish", { name })
+      }
+      confirmLabel={pending ? t("loading") : action}
+      variant={published ? "destructive" : "default"}
+      pending={pending}
+      onConfirm={onConfirm}
+    >
+      {!published && publishHint && <p className="text-muted-foreground text-xs">{publishHint}</p>}
+    </ConfirmDialogControlled>
   );
 }

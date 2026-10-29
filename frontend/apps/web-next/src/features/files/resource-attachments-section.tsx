@@ -23,16 +23,16 @@ import {
   UploadCloud,
   type LucideIcon
 } from "lucide-react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
-import { signedFileUrl } from "./signed-file-url";
+import { saveUrl, signedFileUrl, toastDownloadError } from "./signed-file-url";
 import { FileFormatDetails } from "@/features/files/file-format-details";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -40,6 +40,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
@@ -81,12 +82,6 @@ function attachmentTypeLabel(file: Attachment): string {
   if (extension) return extension.toUpperCase().slice(0, 5);
   const subtype = file.mimetype.split("/").pop() ?? file.mimetype;
   return (subtype.split(/[.+]/).pop() ?? subtype).toUpperCase().slice(0, 5);
-}
-
-function compactTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
-    Math.round(value)
-  );
 }
 
 async function deleteUploadedFile(id: string): Promise<void> {
@@ -270,7 +265,6 @@ export function ResourceAttachmentsSection({
   const saved: Attachment[] = useMemo(() => attachments, [attachments]);
   const [files, setFiles] = useState<Attachment[]>(saved);
   const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [query, setQuery] = useState("");
   const [sortAscending, setSortAscending] = useState(true);
@@ -312,15 +306,8 @@ export function ResourceAttachmentsSection({
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 
   const filteredFiles = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     return files
-      .filter((file) => {
-        if (!needle) return true;
-        return (
-          file.name.toLowerCase().includes(needle) ||
-          attachmentTypeLabel(file).toLowerCase().includes(needle)
-        );
-      })
+      .filter((file) => matchesSearch([file.name, attachmentTypeLabel(file)], query))
       .sort((first, second) =>
         sortAscending
           ? first.name.localeCompare(second.name)
@@ -332,7 +319,9 @@ export function ResourceAttachmentsSection({
     return [
       attachmentTypeLabel(file),
       formatBytes(file.size, locale),
-      file.token_count != null ? `${compactTokens(file.token_count)} ${t("tokens")}` : null,
+      file.token_count != null
+        ? `${format.number(Math.round(file.token_count), { notation: "compact", maximumFractionDigits: 1 })} ${t("tokens")}`
+        : null,
       file.created_at
         ? format.dateTime(new Date(file.created_at), { day: "numeric", month: "short" })
         : null
@@ -344,16 +333,9 @@ export function ResourceAttachmentsSection({
   async function downloadFile(file: Attachment) {
     setDownloadingId(file.id);
     try {
-      const url = await signedFileUrl(browserApi, file.id, "attachment");
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.name;
-      anchor.rel = "noreferrer";
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
+      saveUrl(await signedFileUrl(browserApi, file.id, "attachment"), file.name);
     } catch (error) {
-      toastApiError(error, t);
+      toastDownloadError(error, t);
     } finally {
       setDownloadingId(null);
     }
@@ -401,6 +383,10 @@ export function ResourceAttachmentsSection({
       setUploading(false);
     }
   }
+
+  const { dragging, handlers } = useFileDrop((dropped) => void uploadFiles(dropped), {
+    onError: (error) => toastApiError(error, t)
+  });
 
   return (
     <SettingsGroup
@@ -511,21 +497,10 @@ export function ResourceAttachmentsSection({
           </div>
 
           <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              void collectDroppedFiles(event.dataTransfer)
-                .then(uploadFiles)
-                .catch((error: unknown) => toastApiError(error, t));
-            }}
+            {...handlers}
             className={cn(
               "flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-5 text-center",
-              dragActive && "border-primary bg-primary/5"
+              dragging && "border-primary bg-primary/5"
             )}
           >
             <span className="bg-muted grid size-10 place-items-center rounded-full">
@@ -543,9 +518,7 @@ export function ResourceAttachmentsSection({
               // Uploading, it stays enabled so it keeps focus (the busy
               // spinner replaces its icon); a press meanwhile is ignored.
               aria-busy={uploading || undefined}
-              onClick={() => {
-                if (!uploading) fileInput.current?.click();
-              }}
+              onClick={() => fileInput.current?.click()}
             >
               {!uploading && <Paperclip className="size-4" />}
               {t("attach_files")}

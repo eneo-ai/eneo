@@ -3,9 +3,8 @@
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQuery } from "@tanstack/react-query";
-import Image from "next/image";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { availableIntegrationsQueryOptions, type UserIntegration } from "../queries";
-import { VENDOR } from "../vendor";
+import { VENDOR, VendorIcon } from "../vendor";
 import { ConfluenceImportDialog } from "./confluence-import";
 import { SharePointImportDialog } from "./sharepoint-import";
 
@@ -58,7 +57,7 @@ function integrationOption(integration: UserIntegration, t: ReturnType<typeof us
       key={integration.tenant_integration_id}
       value={integration.tenant_integration_id}
       isDisabled={!integration.connected}
-      startContent={<Image src={vendor.logo} alt="" width={32} height={32} className="shrink-0" />}
+      startContent={<VendorIcon type={integration.integration_type} size={32} />}
       label={
         <span className="flex items-center gap-2">
           <span className="font-semibold">{integration.name}</span>

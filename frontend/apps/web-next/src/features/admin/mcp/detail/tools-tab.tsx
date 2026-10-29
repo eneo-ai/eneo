@@ -13,8 +13,9 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,11 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch, searchTerms } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -323,10 +324,9 @@ export function ToolsTab({ serverId }: { serverId: string }) {
   const pending = useMemo(() => (tools ?? []).filter((tool) => tool.requires_approval), [tools]);
   const active = useMemo(() => (tools ?? []).filter((tool) => !tool.requires_approval), [tools]);
   const filteredActive = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return active;
+    if (searchTerms(search).length === 0) return active;
     return active.filter((tool) =>
-      [tool.name, tool.title ?? "", tool.description ?? ""].join(" ").toLowerCase().includes(query)
+      matchesSearch([tool.name, tool.title, tool.description], search)
     );
   }, [active, search]);
 
@@ -341,9 +341,7 @@ export function ToolsTab({ serverId }: { serverId: string }) {
           variant="outline"
           size="sm"
           aria-busy={sync.isPending || undefined}
-          onClick={() => {
-            if (!sync.isPending) sync.mutate();
-          }}
+          onClick={() => sync.mutate()}
         >
           {!sync.isPending && <RefreshCw className="size-4" />}
           {sync.isPending ? t("syncing") : t("sync_tools")}
@@ -351,7 +349,7 @@ export function ToolsTab({ serverId }: { serverId: string }) {
       </div>
 
       {isPending ? (
-        <Skeleton className="h-40 w-full" />
+        <LoadingState rows={1} height={160} />
       ) : !tools || tools.length === 0 ? (
         <EmptyState title={t("no_tools_found")} description={t("click_sync_to_discover_tools")} />
       ) : (

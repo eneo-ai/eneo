@@ -2,11 +2,14 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
+import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
+import { Kbd } from "@astryxdesign/core/Kbd";
 import { Popover } from "@astryxdesign/core/Popover";
 import {
   ArrowUp,
   BookOpen,
   ChevronDown,
+  CircleAlert,
   Folder,
   Globe,
   Plus,
@@ -15,17 +18,18 @@ import {
   TextQuote,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useId,
   useRef,
   useState,
   type ClipboardEvent,
-  type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref
 } from "react";
+import { useFileDrop } from "@/features/files/use-file-drop";
+import { revealProblems } from "@/components/composites/field-problem";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -41,25 +45,28 @@ const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
  * The composer's text field. A real <textarea> (e2e and assistive tech rely
- * on it) wired to Astryx ChatComposer's context: Enter sends, Shift+Enter adds
- * a line (the hint is in its description), IME composition is respected,
- * pasted files become attachments and Backspace in an empty field removes the
- * last attachment.
+ * on it) wired to Astryx ChatComposer's context. Return adds a line, as in
+ * any text field, and ⌘ or Ctrl+Return sends (decision 3: a half-written
+ * question is never sent by accident); the hint is in its description. IME
+ * composition is respected, pasted files become attachments and Backspace in
+ * an empty field removes the last attachment.
  */
 function ComposerTextarea({
   label,
-  hintId,
+  describedBy,
+  invalid,
   placeholder,
-  onEnter,
+  onSend,
   onPasteFiles,
   onBackspaceEmpty,
   rows,
   ref
 }: {
   label: string;
-  hintId: string;
+  describedBy: string;
+  invalid: boolean;
   placeholder: string;
-  onEnter: () => void;
+  onSend: () => void;
   onPasteFiles: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   rows: number;
@@ -69,10 +76,10 @@ function ComposerTextarea({
   const [composing, setComposing] = useState(false);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       if (composing || event.nativeEvent.isComposing) return;
       event.preventDefault();
-      onEnter();
+      onSend();
       return;
     }
     if (event.key === "Backspace" && event.currentTarget.value === "") {
@@ -106,51 +113,15 @@ function ComposerTextarea({
       onCompositionStart={() => setComposing(true)}
       onCompositionEnd={() => setComposing(false)}
       aria-label={label}
-      aria-describedby={hintId}
+      aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
       placeholder={placeholder}
       // The Astryx ChatComposer around this textarea draws the 3:1 focus ring
       // (focus-within), so the field itself has none.
       // eslint-disable-next-line eneo/no-weak-focus-indicator -- ring drawn by ChatComposer
-      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-48 min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-[15px] leading-normal focus:outline-none"
+      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-[min(12rem,30dvh)] min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-base leading-normal focus:outline-none"
     />
   );
-}
-
-/** Tracks a file drag over the composer for drop feedback. */
-function useFileDrop(onFiles: (files: File[]) => void, enabled: boolean) {
-  const [dragging, setDragging] = useState(false);
-  const depth = useRef(0);
-  const hasFiles = (event: DragEvent) => event.dataTransfer?.types?.includes("Files") ?? false;
-
-  return {
-    dragging: enabled && dragging,
-    handlers: enabled
-      ? {
-          onDragEnter: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current += 1;
-            setDragging(true);
-          },
-          onDragOver: (event: DragEvent) => {
-            if (hasFiles(event)) event.preventDefault();
-          },
-          onDragLeave: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            depth.current = Math.max(0, depth.current - 1);
-            if (depth.current === 0) setDragging(false);
-          },
-          onDrop: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current = 0;
-            setDragging(false);
-            const files = Array.from(event.dataTransfer.files ?? []);
-            if (files.length > 0) onFiles(files);
-          }
-        }
-      : {}
-  };
 }
 
 /**
@@ -210,9 +181,14 @@ function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
 export type ComposerProps = {
   value: string;
   onChange: (value: string) => void;
-  /** Sends the current value (the caller validates and clears). */
+  /** Sends the current value (the caller clears it). Never called with an empty draft. */
   onSubmit: () => void;
-  canSubmit: boolean;
+  /**
+   * Why the question cannot be sent now, besides an empty draft (the context
+   * is full). Shown at the field and announced when the user tries; Send
+   * stays enabled (ACCESSIBILITY.md, forms).
+   */
+  sendBlocked?: string | null;
   busy: boolean;
   onStop: () => void;
   /** Persistent accessible name of the text field. */
@@ -296,7 +272,7 @@ export function Composer({
   value,
   onChange,
   onSubmit,
-  canSubmit,
+  sendBlocked = null,
   busy,
   onStop,
   label,
@@ -314,16 +290,36 @@ export function Composer({
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const hintId = useId();
+  const problemId = useId();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useMergedRefs(field, textareaRef);
+  // What stopped the last send, shown at the field until the draft changes.
+  const [problem, setProblem] = useState<string | null>(null);
   const canAttach = attachments.maxFiles !== 0;
-  const { dragging, handlers } = useFileDrop(
-    (files) => void attachments.addFiles(files),
-    canAttach && attachments.canAddMore
-  );
+  const { dragging, handlers } = useFileDrop((files) => void attachments.addFiles(files), {
+    enabled: canAttach && attachments.canAddMore
+  });
   const hasAttachments = attachments.attachments.length > 0;
 
+  const change = (next: string) => {
+    setProblem(null);
+    onChange(next);
+  };
+
+  // Send is never disabled (decision 44): an attempt that cannot go says why
+  // at the field, out loud, and leaves focus there to fix it.
   const send = () => {
-    if (busy || !canSubmit) return;
+    if (busy) return;
+    const missing = value.trim() === "" ? t("chat_composer_empty") : sendBlocked;
+    if (missing) {
+      // Rendered first, so the field is read with its new description.
+      revealProblems(() => setProblem(missing), field.current);
+      announce(missing);
+      return;
+    }
+    setProblem(null);
     onSubmit();
   };
 
@@ -334,9 +330,9 @@ export function Composer({
       <div className="relative" {...handlers}>
         <ChatComposer
           value={value}
-          onChange={onChange}
-          // Submission runs through `send` (the textarea's Enter and the send
-          // button) so a blocked send never clears the field.
+          onChange={change}
+          // Submission runs through `send` (the textarea's ⌘/Ctrl+Return and
+          // the send button) so a blocked send never clears the field.
           onSubmit={send}
           onStop={onStop}
           isStopShown={busy}
@@ -357,12 +353,13 @@ export function Composer({
           }
           input={
             <ComposerTextarea
-              ref={textareaRef}
+              ref={fieldRef}
               label={label}
-              hintId={hintId}
+              describedBy={problem ? `${problemId} ${hintId}` : hintId}
+              invalid={problem !== null}
               placeholder={placeholder}
               rows={variant === "start" ? 2 : 1}
-              onEnter={send}
+              onSend={send}
               onPasteFiles={(files) => void attachments.addFiles(files)}
               onBackspaceEmpty={() => {
                 const last = attachments.attachments.at(-1);
@@ -392,7 +389,16 @@ export function Composer({
               {mention}
             </div>
           }
-          sendActions={modelSelector}
+          sendActions={
+            <>
+              {modelSelector}
+              {/* The shortcut beside the button it stands for, where there is a
+                  keyboard to press it; the field's description says it in words. */}
+              <span aria-hidden="true" className="hidden pointer-fine:inline-flex">
+                <Kbd keys="mod+enter" />
+              </span>
+            </>
+          }
           sendButton={
             <Button
               label={busy ? t("stop_generating") : t("send_message")}
@@ -405,7 +411,6 @@ export function Composer({
                   <ArrowUp aria-hidden="true" className="size-[17px]" strokeWidth={2.3} />
                 )
               }
-              isDisabled={!busy && !canSubmit}
               onClick={busy ? onStop : send}
               className="size-[34px] shrink-0 rounded-full pointer-coarse:size-11"
             />
@@ -420,6 +425,12 @@ export function Composer({
           </div>
         )}
       </div>
+      {problem && (
+        <p id={problemId} className="text-ax-error flex items-center gap-1.5 px-1 text-xs">
+          <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+          {problem}
+        </p>
+      )}
       <span id={hintId} className="sr-only">
         {t("chat_composer_hint")}
       </span>

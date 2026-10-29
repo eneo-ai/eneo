@@ -1,7 +1,7 @@
 "use client";
 
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useHydrated } from "@/lib/hooks/use-hydrated";

@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";

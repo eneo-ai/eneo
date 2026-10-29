@@ -6,6 +6,7 @@ import { ShellContext } from "@/components/shell/shell-context";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
 import { noopShell, renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 
 const api = vi.hoisted(() => ({
   spaces: [] as unknown[],
@@ -13,7 +14,9 @@ const api = vi.hoisted(() => ({
   created: [] as unknown[]
 }));
 
-vi.mock("next/navigation", () => ({
+// The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: () => {}, prefetch: () => {} })
 }));
 vi.mock("@/lib/api/browser", () => ({
@@ -203,5 +206,28 @@ describe("SpacesList", () => {
     fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: " Ny yta " } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Skapa yta" }));
     await waitFor(() => expect(api.created).toEqual([{ name: "Ny yta" }]));
+  });
+});
+
+describe("SpacesList on a phone (decision 9)", () => {
+  it("lists the spaces as rows, each row one link with what it holds", async () => {
+    setViewport("phone");
+    api.spaces = [
+      space({}),
+      space({ id: "s2", name: "HR", description: null, permissions: ["read"], applications: null })
+    ];
+    const { container } = await show();
+    const rows = within(screen.getAllByRole("list")[0]!).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    const upphandling = within(rows[1]!).getByRole("link", { name: /^Upphandling/ });
+    expect(upphandling.getAttribute("href")).toBe("/spaces/s1/overview");
+    expect(upphandling.textContent).toContain("3 assistenter · 1 app");
+    expect(within(rows[0]!).getByRole("link", { name: /^HR/ }).textContent).toContain(
+      "Ingen beskrivning"
+    );
+    expect(
+      within(rows[1]!).getByRole("button", { name: "Fler åtgärder för Upphandling" })
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 });

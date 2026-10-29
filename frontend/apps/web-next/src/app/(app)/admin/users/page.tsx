@@ -4,7 +4,7 @@ import { eneoApi } from "@/lib/api/server";
 import {
   adminPasswordPolicyQueryOptions,
   adminUsersQueryOptions,
-  type StateFilter
+  readUsersFilters
 } from "@/features/admin/users/users";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { pageTitle } from "@/lib/page-metadata";
@@ -15,17 +15,27 @@ export const generateMetadata = pageTitle("users");
 export default async function AdminUsersRoute({
   searchParams
 }: {
-  searchParams: Promise<{ tab?: string; search?: string; page?: string; role_id?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    search?: string;
+    search_name?: string;
+    page?: string;
+    role_id?: string;
+  }>;
 }) {
-  const { tab, search, page, role_id } = await searchParams;
+  const raw = await searchParams;
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== undefined) search.set(key, value);
+  }
+  const filters = readUsersFilters(search);
   const queryClient = getQueryClient();
   const api = eneoApi();
 
   const params = {
-    page: Math.max(1, Number(page) || 1),
-    stateFilter: (tab === "inactive" ? "inactive" : "active") as StateFilter,
-    roleId: role_id,
-    search: search ?? ""
+    ...filters,
+    roleId: filters.roleId ?? undefined,
+    searchName: filters.searchName || undefined
   };
 
   await Promise.all([

@@ -2,12 +2,12 @@
 
 import { useCollator } from "@astryxdesign/core/i18n";
 import { AppWindow, SearchX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
-import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { ResourceCollection } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -18,13 +18,11 @@ import { AppTile } from "./tile";
 
 function TileGrid({ items, showStatus }: { items: AppSparse[]; showStatus: boolean }) {
   return (
-    <ul className={RESOURCE_GRID_CLASS}>
+    <ResourceCollection>
       {items.map((app) => (
-        <li key={app.id} className="min-w-0">
-          <AppTile app={app} showStatus={showStatus} />
-        </li>
+        <AppTile key={app.id} app={app} showStatus={showStatus} />
       ))}
-    </ul>
+    </ResourceCollection>
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { Paperclip } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { PolicySection } from "./policy-section";

@@ -1,7 +1,7 @@
 "use client";
 
 import { DateInput, type DateInputProps } from "@astryxdesign/core/DateInput";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { KEY_EXPIRY_WARNING_DAYS } from "./key-expiry";
 
 type IsoDate = NonNullable<DateInputProps["value"]>;

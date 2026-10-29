@@ -1,5 +1,6 @@
-import { useFormatter, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import type { StatusTone } from "@/components/composites/status-label";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { type KeyExpiry, keyExpiry, localIsoDate } from "./key-expiry";
 import type { ConnectionCheckError, ModelProvider } from "./model-providers";
@@ -16,7 +17,7 @@ export type ProviderNotice = { tone: StatusTone; label: string };
  */
 export function useProviderNotices() {
   const t = useTranslations();
-  const format = useFormatter();
+  const locale = useLocale();
   const hydrated = useHydrated();
   const today = hydrated ? localIsoDate(new Date()) : null;
 
@@ -76,12 +77,11 @@ export function useProviderNotices() {
 
   /** "Nyckeln går ut 12 okt." or "Nyckeln har gått ut 3 okt.". */
   function expiryNotice(expiry: KeyExpiry): ProviderNotice {
-    const date = format.dateTime(new Date(`${expiry.date}T00:00:00Z`), {
+    const date = formatCalendarDate(expiry.date, locale, {
       day: "numeric",
       month: "short",
       // The year only when it isn't this one: "12 okt." but "12 jan. 2027".
-      year: expiry.date.slice(0, 4) === today?.slice(0, 4) ? undefined : "numeric",
-      timeZone: "UTC"
+      year: expiry.date.slice(0, 4) === today?.slice(0, 4) ? undefined : "numeric"
     });
     return expiry.state === "expired"
       ? { tone: "error", label: t("provider_status_key_expired", { date }) }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, type MutationKey } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { createContext, use, useMemo, useRef, type RefObject } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";

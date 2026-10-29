@@ -1,6 +1,6 @@
 import type { IntegrationKnowledge } from "../knowledge";
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import sv from "@/lib/i18n/messages/sv.json";
 import { buildSourceProblems, isCredentialsError, type SkippedDocuments } from "./source-problems";
 import type { SkipReasonCode } from "./skip-reasons";

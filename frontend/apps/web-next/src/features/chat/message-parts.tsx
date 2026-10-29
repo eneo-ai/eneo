@@ -4,20 +4,24 @@ import { Button as AxButton } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { useMutation } from "@tanstack/react-query";
-import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
-import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { toastApiError } from "@/lib/api/toast";
 import { asString, hostOf } from "@/lib/chat/metadata";
-import type { EneoUIMessage, SessionData, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
+import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
+import { sanitizeImageSrc, sanitizeWebHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 import { FileTypeTile, useSignedUrl } from "./attachments";
+import {
+  pendingTools,
+  ToolArguments,
+  toolDecision,
+  toolLabel,
+  useToolApprovals
+} from "./tool-approvals";
 import { fileExtension, formatBytes } from "@/lib/format";
 
 type Part = EneoUIMessage["parts"][number];
@@ -65,10 +69,6 @@ function isMcpImageReference(ref: McpToolReference): boolean {
   return (ref.mime_type ?? "").startsWith("image/");
 }
 
-function isHttpUrl(uri: string): boolean {
-  return /^https?:\/\//i.test(uri);
-}
-
 /** Knowledge references identify excerpts by zero-based chunk number in their URI. */
 function knowledgeExcerptNumber(uri: string): number | undefined {
   const match = /^eneo:\/\/info-blob\/[^#]+#chunk-(\d+)$/.exec(uri);
@@ -84,18 +84,6 @@ function mcpSnippetContent(
 ): string | null | undefined {
   if (!content || !uri.startsWith("eneo://info-blob/")) return content;
   return content.replace(/^Title:[^\r\n]*\r?\ndocument_id:[^\r\n]*\r?\n\r?\n/, "");
-}
-
-function safeImageSrc(src: string): string | undefined {
-  const normalized = src
-    .split("")
-    .filter((char) => char.charCodeAt(0) > 0x20)
-    .join("")
-    .toLowerCase();
-  const match = /^([a-z][a-z0-9+.-]*):/.exec(normalized);
-  if (!match) return src;
-  if (match[1] === "data") return /^data:image\//.test(normalized) ? src : undefined;
-  return match[1] === "http" || match[1] === "https" ? src : undefined;
 }
 
 export function sessionDataFromParts(parts: Part[]): SessionData | null {
@@ -154,7 +142,7 @@ export function mergeSources(
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
         // A document's stored url is whatever its editor wrote; only http(s) links out.
-        url: url && isHttpUrl(url) ? url : undefined,
+        url: sanitizeWebHref(url),
         sourceId: source.sourceId
       };
     });
@@ -162,7 +150,7 @@ export function mergeSources(
     (ref) => ({
       key: `web-${ref.id}`,
       title: ref.title || ref.url,
-      url: isHttpUrl(ref.url) ? ref.url : undefined,
+      url: sanitizeWebHref(ref.url),
       sourceId: ref.id
     })
   );
@@ -173,7 +161,7 @@ export function mergeSources(
       const sourceType = asString(meta.sourceType);
       const pageRange = asString(meta.pageRange);
       const section = asString(meta.section);
-      const externalUrl = sourceType === "crawl-page" && isHttpUrl(ref.uri) ? ref.uri : undefined;
+      const externalUrl = sourceType === "crawl-page" ? sanitizeWebHref(ref.uri) : undefined;
       const excerptNumber = knowledgeExcerptNumber(ref.uri);
       return {
         key: `mcp-${ref.id}`,
@@ -211,6 +199,7 @@ export function McpSnippetButton({
   const excerptLabel = snippet.excerptNumber
     ? t("chat_source_excerpt", { number: snippet.excerptNumber })
     : null;
+  const externalHref = sanitizeWebHref(snippet.uri);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Astryx returns focus to what had it at open; this also covers a tap that
@@ -261,12 +250,12 @@ export function McpSnippetButton({
           footer={
             <LayoutFooter>
               <HStack gap={2} hAlign="end">
-                {isHttpUrl(snippet.uri) && (
+                {externalHref && (
                   <AxButton
                     label={t("mcp_resource_open_external")}
                     variant="secondary"
                     icon={<ExternalLink aria-hidden="true" className="size-4" />}
-                    href={snippet.uri}
+                    href={externalHref}
                     target="_blank"
                     rel="noreferrer"
                   />
@@ -282,69 +271,26 @@ export function McpSnippetButton({
 }
 
 /**
- * MCP tool approval card for the data-tool-approval part. Each tool can be
- * approved/denied individually (the backend accepts a partial array of
- * decisions and tracks the remainder); "Godkänn alla" / "Avvisa alla" appear
- * when more than one tool is still pending. The still-open stream continues
- * server-side as decisions arrive. The decisions stay on the card as a record.
+ * MCP tool approval card for the data-tool-approval part. Each tool shows
+ * what it is and what it will be given (decision 12), and can be approved or
+ * denied on its own; "Godkänn alla" / "Avvisa alla" appear when more than one
+ * is still pending. Decisions come from the chat view's one owner
+ * (tool-approvals.tsx), which the phone's decision bar shares, and stay on the
+ * card as a record.
  */
-export function ToolApprovalCard({
-  data,
-  onResolved
-}: {
-  data: ToolApprovalData;
-  onResolved?: () => void;
-}) {
+export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
   const t = useTranslations();
   const headingId = useId();
-  const [decisions, setDecisions] = useState<Record<string, "approved" | "denied">>({});
-  // The button whose decision is being sent: busy, it stays enabled (Astryx
-  // isInterruptible) so it keeps focus, and presses while one is sent are
-  // ignored.
-  const [running, setRunning] = useState<string | null>(null);
-
-  const submit = useMutation({
-    mutationFn: (items: { tool_call_id: string; approved: boolean }[]) =>
-      unwrap(
-        browserApi.POST("/api/v1/conversations/approve-tools/", {
-          params: { query: { approval_id: data.approval_id } },
-          body: items
-        })
-      ),
-    onSuccess: (_, items) => {
-      setDecisions((prev) => {
-        const next = { ...prev };
-        for (const item of items) {
-          next[item.tool_call_id] = item.approved ? "approved" : "denied";
-        }
-        return next;
-      });
-      onResolved?.();
-    },
-    onError: (error) => toastApiError(error, t),
-    onSettled: () => setRunning(null)
-  });
-
+  const { decisions, running, decide, barApprovalId } = useToolApprovals();
+  // On a phone the decision bar asks (decision 26): the card shows what is
+  // asked and records the answer, without a second set of buttons.
+  const asksHere = barApprovalId !== data.approval_id;
   const timedOut = data.status === "timeout_denied";
-  // A decision made here wins while its request is in flight; otherwise the
-  // stream's decided part (data-tool-approval with status approved/denied,
-  // e.g. decided from another tab) names each tool's outcome.
-  const decisionFor = (tool: ToolCallInfo): "approved" | "denied" | undefined => {
-    const local = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
-    if (local) return local;
-    if (data.status === "pending" || timedOut) return undefined;
-    return tool.approved ? "approved" : "denied";
-  };
-  const pending = timedOut
-    ? []
-    : data.tools.filter((tool) => tool.tool_call_id && !decisionFor(tool));
-  function decide(control: string, items: { tool_call_id: string; approved: boolean }[]) {
-    if (running !== null || submit.isPending) return;
-    setRunning(control);
-    submit.mutate(items);
-  }
+  const pending = pendingTools(data, decisions);
+  const send = (control: string, items: { tool_call_id: string; approved: boolean }[]) =>
+    decide(data.approval_id, control, items);
   const decideAll = (approved: boolean) =>
-    decide(
+    send(
       approved ? "accept-all" : "deny-all",
       pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved }))
     );
@@ -360,79 +306,97 @@ export function ToolApprovalCard({
           <h3 id={headingId} className="text-[13.5px] font-semibold">
             {pending.length > 0 ? t("chat_tool_awaiting_approval") : t("chat_tool_approval_record")}
           </h3>
-          {pending.length > 0 && (
+          {pending.length > 0 && asksHere && (
             <p className="text-ax-text-secondary text-[13px]">{t("chat_tool_approval_hint")}</p>
           )}
         </div>
       </div>
       <ul className="flex flex-col gap-1.5">
         {data.tools.map((tool, index) => {
-          const decision = decisionFor(tool);
-          const name = `${tool.server_name}/${tool.tool_name}`;
+          const decision = toolDecision(tool, data, decisions);
+          const name = toolLabel(tool);
+          const titled = Boolean(tool.title?.trim());
           return (
             <li
               key={tool.tool_call_id ?? index}
-              className="bg-ax-muted rounded-ax-element flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
+              className="bg-ax-muted rounded-ax-element flex flex-col gap-1.5 px-2.5 py-2"
             >
-              <span className="min-w-0 font-mono text-xs break-all">{name}</span>
-              {timedOut ? (
-                <span className="text-ax-text-secondary flex items-center gap-1 text-xs font-medium">
-                  <ShieldX aria-hidden="true" className="size-3.5" />
-                  {t("chat_tool_approval_timed_out")}
-                </span>
-              ) : decision ? (
-                <span
-                  className={cn(
-                    "flex items-center gap-1 text-xs font-medium",
-                    decision === "approved" ? "text-ax-success" : "text-ax-error"
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-col">
+                  <span
+                    className={cn(
+                      "min-w-0 break-all",
+                      titled ? "text-[13.5px] font-medium" : "font-mono text-xs"
+                    )}
+                  >
+                    {name}
+                  </span>
+                  {titled && (
+                    <span className="text-ax-text-secondary font-mono text-xs break-all">
+                      {tool.server_name}/{tool.tool_name}
+                    </span>
                   )}
-                >
-                  {decision === "approved" ? (
-                    <ShieldCheck aria-hidden="true" className="size-3.5" />
-                  ) : (
+                </span>
+                {timedOut ? (
+                  <span className="text-ax-text-secondary flex items-center gap-1 text-xs font-medium">
                     <ShieldX aria-hidden="true" className="size-3.5" />
-                  )}
-                  {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
-                </span>
-              ) : (
-                // Astryx Button names itself from `label` (aria-label) and shows
-                // the children: each button names its tool, the text stays short.
-                <span className="flex gap-1.5">
-                  <AxButton
-                    label={t("chat_tool_accept_named", { tool: name })}
-                    variant="primary"
-                    size="sm"
-                    isLoading={running === `accept:${tool.tool_call_id}`}
-                    isInterruptible
-                    onClick={() =>
-                      decide(`accept:${tool.tool_call_id}`, [
-                        { tool_call_id: tool.tool_call_id ?? "", approved: true }
-                      ])
-                    }
+                    {t("chat_tool_approval_timed_out")}
+                  </span>
+                ) : decision ? (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 text-xs font-medium",
+                      decision === "approved" ? "text-ax-success" : "text-ax-error"
+                    )}
                   >
-                    {t("tool_accept")}
-                  </AxButton>
-                  <AxButton
-                    label={t("chat_tool_deny_named", { tool: name })}
-                    variant="secondary"
-                    size="sm"
-                    isLoading={running === `deny:${tool.tool_call_id}`}
-                    isInterruptible
-                    onClick={() =>
-                      decide(`deny:${tool.tool_call_id}`, [
-                        { tool_call_id: tool.tool_call_id ?? "", approved: false }
-                      ])
-                    }
-                  >
-                    {t("tool_deny")}
-                  </AxButton>
-                </span>
-              )}
+                    {decision === "approved" ? (
+                      <ShieldCheck aria-hidden="true" className="size-3.5" />
+                    ) : (
+                      <ShieldX aria-hidden="true" className="size-3.5" />
+                    )}
+                    {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
+                  </span>
+                ) : !asksHere ? null : (
+                  // Astryx Button names itself from `label` (aria-label) and shows
+                  // the children: each button names its tool, the text stays short.
+                  <span className="flex gap-1.5">
+                    <AxButton
+                      label={t("chat_tool_accept_named", { tool: name })}
+                      variant="primary"
+                      size="sm"
+                      isLoading={running === `accept:${tool.tool_call_id}`}
+                      isInterruptible
+                      onClick={() =>
+                        send(`accept:${tool.tool_call_id}`, [
+                          { tool_call_id: tool.tool_call_id ?? "", approved: true }
+                        ])
+                      }
+                    >
+                      {t("tool_accept")}
+                    </AxButton>
+                    <AxButton
+                      label={t("chat_tool_deny_named", { tool: name })}
+                      variant="secondary"
+                      size="sm"
+                      isLoading={running === `deny:${tool.tool_call_id}`}
+                      isInterruptible
+                      onClick={() =>
+                        send(`deny:${tool.tool_call_id}`, [
+                          { tool_call_id: tool.tool_call_id ?? "", approved: false }
+                        ])
+                      }
+                    >
+                      {t("tool_deny")}
+                    </AxButton>
+                  </span>
+                )}
+              </div>
+              {!decision && !timedOut && <ToolArguments tool={tool} />}
             </li>
           );
         })}
       </ul>
-      {pending.length > 1 && (
+      {asksHere && pending.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <AxButton
             label={t("tool_accept_all", { count: pending.length })}
@@ -512,66 +476,13 @@ export const FILE_CHIP_CLASS =
 /** A file chip that does something when pressed: opens, downloads. */
 export const FILE_TOKEN_CLASS = `${FILE_CHIP_CLASS} focus-visible:outline-ring transition-colors hover:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2`;
 
-function providerFile(part: Extract<Part, { type: "file" }>): Partial<Schema<"FilePublic">> {
-  return ((part.providerMetadata?.eneo ?? {}) as Partial<Schema<"FilePublic">>) ?? {};
-}
-
-function fileNameFromPart(part: Extract<Part, { type: "file" }>): string {
-  return part.filename ?? providerFile(part).name ?? part.mediaType;
-}
-
-function DownloadFileToken({
-  name,
-  mimetype,
-  size,
-  url
-}: {
-  name: string;
-  mimetype: string;
-  size?: number | null;
-  url: string;
-}) {
-  const t = useTranslations();
-  return (
-    <a href={url} target="_blank" rel="noreferrer" download={name} className={FILE_TOKEN_CLASS}>
-      <FileTokenBody name={name} mimetype={mimetype} size={size} />
-      <Download aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
-      <span className="sr-only">{t("download")}</span>
-    </a>
-  );
-}
-
-export function MessageFilePart({ part }: { part: Extract<Part, { type: "file" }> }) {
-  const name = fileNameFromPart(part);
-
-  if (part.mediaType.startsWith("image/")) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL or local data URL
-      <img
-        src={part.url}
-        alt={name}
-        className="border-ax-border rounded-ax-container max-h-96 border"
-      />
-    );
-  }
-
-  return (
-    <DownloadFileToken
-      name={name}
-      mimetype={part.mediaType}
-      size={providerFile(part).size}
-      url={part.url}
-    />
-  );
-}
-
 /** Display-only image references returned from MCP resource_link blocks. */
 export function McpImageStrip({ references }: { references: McpToolReference[] }) {
   const images = references
     .filter(isMcpImageReference)
     .map((reference) => ({
       reference,
-      src: safeImageSrc(reference.uri),
+      src: sanitizeImageSrc(reference.uri),
       title: mcpReferenceTitle(reference)
     }))
     .filter((image): image is { reference: McpToolReference; src: string; title: string } =>
@@ -593,28 +504,4 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
       ))}
     </div>
   );
-}
-
-/** Renders a generated file from an assistant message (images inline, others as download tokens). */
-export function GeneratedFile({ file }: { file: Schema<"FilePublic"> }) {
-  if (file.mimetype.startsWith("image/")) return <InlineImage file={file} />;
-  return <GeneratedFileDownload file={file} />;
-}
-
-function GeneratedFileDownload({ file }: { file: Schema<"FilePublic"> }) {
-  const { url, error } = useSignedUrl(file.id);
-  const t = useTranslations();
-
-  if (error)
-    return (
-      <span className="text-muted-foreground text-sm">{t("attachment_error_loading_content")}</span>
-    );
-  if (!url) {
-    return (
-      <span className={FILE_TOKEN_CLASS}>
-        <FileTokenBody name={file.name} mimetype={file.mimetype} size={file.size} />
-      </span>
-    );
-  }
-  return <DownloadFileToken name={file.name} mimetype={file.mimetype} size={file.size} url={url} />;
 }

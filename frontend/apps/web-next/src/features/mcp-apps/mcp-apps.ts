@@ -1,4 +1,3 @@
-import { buildAllowAttribute as sdkAllowAttribute } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import {
   messageToolCalls,
@@ -127,15 +126,4 @@ export function findAppCall(
     if (call) return { call, inLastMessage: index === messages.length - 1 };
   }
   return null;
-}
-
-/**
- * Map declared spec permissions onto the iframe `allow` attribute. Writing to
- * the clipboard is the only one granted: camera, microphone and geolocation
- * would hand a server's HTML the user's device without the user being asked.
- */
-export function buildAllowAttribute(permissions: Record<string, unknown> | undefined): string {
-  return sdkAllowAttribute(
-    permissions && "clipboardWrite" in permissions ? { clipboardWrite: {} } : undefined
-  );
 }

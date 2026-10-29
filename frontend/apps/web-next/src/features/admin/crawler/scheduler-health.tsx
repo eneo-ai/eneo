@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";

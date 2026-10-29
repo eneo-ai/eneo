@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import {
+  pixel,
   proportional,
   useTableSortable,
   useTableSortableState,
@@ -9,12 +10,12 @@ import {
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { SearchX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { crawlRunState, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
@@ -136,21 +137,21 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "started",
       header: t("fix_crawl_started_column"),
-      width: proportional(1),
+      width: pixel(216),
       sortable: true,
       renderCell: (run) => <CrawlStartedCell run={run} onSelect={() => select(run, null)} />
     },
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      width: pixel(136),
       sortable: true,
       renderCell: (run) => <CrawlRunStatusLabel run={run} />
     },
     {
       key: "results",
       header: t("results"),
-      width: proportional(2),
+      width: proportional(1, { minWidth: 200 }),
       sortable: true,
       renderCell: (run) => (
         <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
@@ -159,7 +160,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "duration",
       header: t("duration"),
-      width: proportional(1),
+      width: pixel(128),
       sortable: true,
       renderCell: (run) => <CrawlDurationCell crawl={run} />
     }
@@ -181,7 +182,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
           isCompact
         />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           {/* No heading above it: the table fills the website page's
               "Indexeringar" tab, so it takes the tab's name. */}
           <Table
@@ -189,9 +190,10 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
             columns={columns}
             idKey="id"
             aria-label={t("crawls")}
+            pinnedColumn="started"
             plugins={{ sort: sortPlugin }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
       {selection ? (
         <CrawlRunDetailsDialog

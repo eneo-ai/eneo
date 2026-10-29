@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQueryClient } from "@tanstack/react-query";
-import { cleanup, screen } from "@testing-library/react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { act, cleanup, screen } from "@testing-library/react";
+import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAppContext } from "@/components/providers/app-context";
 import { useShell } from "@/components/shell/shell-context";
-import { router } from "./navigation";
+import { Link, replaceUrl, router } from "./navigation";
 import { renderHookInApp, renderInApp, renderToHtml, testAppContext } from "./render";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 
@@ -57,6 +57,23 @@ it("records where the app navigates", () => {
   expect(router.push).toHaveBeenCalledWith("/dashboard");
 });
 
+it("moves the route with replaceUrl and rerenders, as the app does", () => {
+  renderInApp(<Probe />, { route: "/spaces/s1/knowledge?tab=websites" });
+  act(() => replaceUrl("/a?tab=x"));
+  expect(screen.getByText("Logga in | Anna Lind | no admin | /a | x | 30000")).toBeTruthy();
+  expect(window.location.pathname + window.location.search).toBe("/a?tab=x");
+});
+
+it("links with a plain anchor, without the router's options", () => {
+  renderInApp(
+    <Link href="/a?tab=x" prefetch={false} replace>
+      A
+    </Link>
+  );
+  const link = screen.getByRole("link", { name: "A" });
+  expect(link.outerHTML).toBe('<a href="/a?tab=x">A</a>');
+});
+
 it("starts every test at / with fresh router mocks", () => {
   const { result } = renderHookInApp(() => usePathname());
   expect(result.current).toBe("/");
@@ -75,4 +92,14 @@ it("merges overrides into each part of the app context", () => {
     display_name: "Sundsvalls kommun",
     show_model_pricing: true
   });
+});
+
+// Last: it unmocks the navigation for the rest of this file.
+it("asks for the navigation mock when a test sets a route without it", async () => {
+  vi.doUnmock("@/lib/navigation");
+  vi.resetModules();
+  const { renderInApp: renderUnmocked } = await import("./render");
+  expect(() => renderUnmocked(<p />, { route: "/x" })).toThrow(
+    'renderInApp({ route }) needs vi.mock("@/lib/navigation", () => import("@/test/navigation")).'
+  );
 });

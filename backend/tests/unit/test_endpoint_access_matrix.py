@@ -41,6 +41,9 @@ from eneo.server.main import app as production_app
 from eneo.tenants.presentation.tenant_self_credentials_router import (
     check_feature_enabled,
 )
+from eneo.tenants.presentation.tenant_self_federation_router import (
+    require_federation_enabled,
+)
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
 from tests.unit.api_key_test_utils import make_api_key
@@ -121,6 +124,7 @@ def request_operation(
     # Test this optional feature in its enabled state; disabling a feature is
     # an independent 404 gate, not proof that authorization works.
     app.dependency_overrides[check_feature_enabled] = lambda: None
+    app.dependency_overrides[require_federation_enabled] = lambda: None
 
     source = operation.route.context
     endpoint = source.endpoint

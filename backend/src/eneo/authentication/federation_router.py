@@ -10,7 +10,7 @@ from typing import Annotated, Any, Optional, Protocol, cast
 from uuid import UUID
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 from typing_extensions import NotRequired, TypedDict
@@ -26,7 +26,7 @@ from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
-from eneo.main.request_context import set_request_context
+from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
@@ -441,6 +441,7 @@ async def list_tenants(
     reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def initiate_auth(
+    response: Response,
     container: Annotated[Container, Depends(get_container())],
     tenant: Annotated[
         Optional[str],
@@ -597,8 +598,10 @@ async def initiate_auth(
             detail=f"No identity provider configured for tenant '{tenant}'",
         )
 
-    correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
-    set_request_context(correlation_id=correlation_id)
+    correlation_id = ensure_correlation_id()
+    # The id the callback restores from the state; the trace middleware only
+    # sets this header when a span is active.
+    response.headers["X-Correlation-ID"] = correlation_id
 
     # Resolve redirect_uri server-side
     try:
@@ -919,7 +922,8 @@ async def auth_callback(
 
     if redis_client and state_cache_key:
         try:
-            cached_raw = await redis_client.get(state_cache_key)
+            # The state is single-use: GETDEL admits exactly one callback.
+            cached_raw = await redis_client.getdel(state_cache_key)
             if cached_raw:
                 cached_state = cast(OIDCStateCache, json.loads(cached_raw))
             await _log_oidc_debug(

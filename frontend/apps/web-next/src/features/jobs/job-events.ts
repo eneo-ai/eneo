@@ -1,17 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { createApiEventSource, JOB_EVENTS_PATH, type ApiEventSource } from "@/lib/api/base";
 import type { Job } from "./jobs";
 
 /**
  * The live feed of the signed-in user's job updates: one EventSource per tab
- * on the app's `/api/jobs/events` proxy, shared by every subscriber. The
- * browser reconnects on its own after a dropped connection; after an HTTP
- * refusal (a session that expired) it stops, and this module tries again
- * later. While the feed is down, JobsProvider's polling carries on, so a
- * missed event only costs a few seconds, never a reload.
+ * on JOB_EVENTS_PATH, shared by every subscriber. The browser reconnects on
+ * its own after a dropped connection; after an HTTP refusal (a session that
+ * expired) it stops, and this module tries again later. While the feed is
+ * down, JobsProvider's polling carries on, so a missed event only costs a
+ * few seconds, never a reload.
  */
-export const JOB_EVENTS_PATH = "/api/jobs/events";
 export const JOB_EVENT_NAME = "job";
 /** How long to wait before reopening a feed the server refused. */
 const RETRY_AFTER_REFUSAL_MS = 30_000;
@@ -19,7 +19,7 @@ const RETRY_AFTER_REFUSAL_MS = 30_000;
 type JobListener = (job: Job) => void;
 type Listener = () => void;
 
-let source: EventSource | null = null;
+let source: ApiEventSource | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let connected = false;
 /** True once the feed has been open at least once: the next open is a reconnect. */
@@ -36,7 +36,7 @@ function setConnected(next: boolean): void {
 
 function open(): void {
   if (source !== null || typeof EventSource === "undefined") return;
-  source = new EventSource(JOB_EVENTS_PATH);
+  source = createApiEventSource(JOB_EVENTS_PATH);
   source.addEventListener("open", () => {
     setConnected(true);
     // Anything that happened while the feed was down is fetched again by

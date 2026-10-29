@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { Bot, Inbox } from "lucide-react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
 import { ENTITY_TONES, entityAccent, entityTone } from "@/lib/entity-accent";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -120,9 +120,9 @@ describe("IconTile", () => {
 describe("LoadingState", () => {
   it("is a busy status region with a translated label", () => {
     render(
-      <NextIntlClientProvider locale="sv" messages={{ loading: "Laddar..." }}>
+      <IntlProvider locale="sv" messages={{ loading: "Laddar..." }}>
         <LoadingState rows={2} />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     const region = screen.getByRole("status");
     expect(region.getAttribute("aria-busy")).toBe("true");
@@ -198,10 +198,10 @@ describe("accessibility", () => {
 
   it("LoadingState in both variants", async () => {
     const { container } = render(
-      <NextIntlClientProvider locale="sv" messages={{ loading: "Laddar..." }}>
+      <IntlProvider locale="sv" messages={{ loading: "Laddar..." }}>
         <LoadingState rows={2} />
         <LoadingState variant="text" label="Laddar svar" />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     await expectNoAxeViolations(container);
   });

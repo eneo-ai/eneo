@@ -2,13 +2,14 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Lock } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
+import { revealProblems } from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
@@ -100,9 +101,7 @@ export function CredentialsTab({ server }: { server: McpServer }) {
           ? confirmationRef
           : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     saveToken.mutate();

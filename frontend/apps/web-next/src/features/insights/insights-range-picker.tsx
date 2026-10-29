@@ -1,14 +1,10 @@
 "use client";
 
 import { DateRangeInput, type DateRangePreset } from "@astryxdesign/core/DateRangeInput";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo } from "react";
-import {
-  INSIGHT_PRESET_DAYS,
-  insightRangeOfDays,
-  isoDate,
-  type InsightRange
-} from "./insights-range";
+import { isoDate } from "@/lib/calendar-date";
+import { INSIGHT_PRESET_DAYS, insightRangeOfDays, type InsightRange } from "./insights-range";
 
 const PRESET_KEY: Record<(typeof INSIGHT_PRESET_DAYS)[number], string> = {
   7: "audit_last_7_days",

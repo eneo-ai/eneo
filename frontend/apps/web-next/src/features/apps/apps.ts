@@ -12,6 +12,10 @@ export type InputField = Schema<"InputFieldPublic">;
 export type InputFieldType = Schema<"InputFieldType">;
 export type AppRunStatus = Schema<"Status">;
 
+export function readAppTab(search: Pick<URLSearchParams, "get">): "run" | "results" {
+  return search.get("tab") === "results" ? "results" : "run";
+}
+
 export const UPLOAD_INPUT_TYPES: InputFieldType[] = [
   "text-upload",
   "audio-upload",

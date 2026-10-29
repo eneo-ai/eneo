@@ -3,15 +3,16 @@
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { FileTypeTile } from "@/features/chat/attachments";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { fileExtension, formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
 import type { SidePanelStore } from "./side-panel-store";
@@ -122,10 +123,9 @@ export function PanelContentsList({
   async function download(file: PreviewFile) {
     setDownloading(file.id);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
-      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
-    } catch {
-      toast.error(t("attachment_error_loading_content"));
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    } catch (error) {
+      toastDownloadError(error, t);
     } finally {
       setDownloading(null);
     }
@@ -193,12 +193,11 @@ export function PanelContentsList({
   const types = [...typeCounts]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const needle = query.trim().toLowerCase();
   const shownUploads = filterable
     ? contents.uploads.filter(
         (file) =>
           (selectedType === null || typeOf(file) === selectedType) &&
-          (!needle || displayFileName(file).toLowerCase().includes(needle))
+          matchesSearch([displayFileName(file)], query)
       )
     : contents.uploads;
 

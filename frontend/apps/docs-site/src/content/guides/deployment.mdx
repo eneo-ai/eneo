@@ -478,9 +478,8 @@ value and a comment.
     `OIDC_*`/federation keys so the two files can be kept in sync; the web app
     itself needs only `PUBLIC_ORIGIN` for the login flow.
 
-    **Optional:** the web app reads the UI flags `SHOW_WEB_SEARCH` and
-    `SHOW_HELP_CENTER`, plus `HELP_CENTER_URL` and
-    `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
+    **Optional:** the web app reads the UI flag `SHOW_HELP_CENTER`, plus
+    `HELP_CENTER_URL` and `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
     `env_frontend.template` (`FEEDBACK_FORM_URL`, `SUPPORT_EMAIL`,
     `SALES_EMAIL`) and `LOGLEVEL` are not read by the current web app.
 
@@ -682,10 +681,25 @@ These are the exact prefixes the shipped Traefik labels route to the backend.
 - `X-Forwarded-For` - client IP address
 - `Host` - original host header
 
+Behind TLS termination the backend sees browser requests as `http`. A request
+whose `Origin` is `https://` on the same `Host` still passes CORS without an
+`allowed_origins` entry; `X-Forwarded-Host` is never compared. Requests that
+carry an API key keep their key and tenant origin policies. Existing
+`allowed_origins` entries for the app's own host can stay.
+
+A page on `localhost`, `127.0.0.1` or `[::1]` no longer passes CORS by default:
+only with `ENVIRONMENT=development`. A deployment that serves the web app to
+browsers from a loopback address on another port than the backend registers
+that origin in `allowed_origins`.
+
 **Requirements:**
 
 - WebSocket support (for real-time features)
 - TLS termination with valid certificate
+- No response compression on backend routes (for Traefik: no `compress`
+  middleware). The backend gzips JSON, HTML, JavaScript, CSS and SVG itself and
+  leaves downloads, streams and Range responses untouched; compressing again at
+  the proxy would undo that.
 
 ### Using nginx Instead of Traefik
 
@@ -1380,6 +1394,33 @@ No additional database, Redis, worker or backend instance is needed.
    permissions and both integration providers in each UI before inviting users.
    Each UI has its own host-only session cookie. SSO can reuse the provider session,
    but a local logout in one UI does not necessarily log out the other.
+
+### Settings for the backend-served web app (not active yet)
+
+The backend now reads these optional variables. Nothing needs to be set: they
+prepare the move of the beta to a web app served by the backend, and later
+releases say when to turn them on.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
+| `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. |
+| `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
+| `HELP_CENTER_URL`, `LEGACY_APP_URL`, `ACCESSIBILITY_STATEMENT_URL`, `REQUEST_INTEGRATION_FORM_URL` | unset | Same values as in `env_web_next.env`; blank counts as unset. |
+
+The backend gives these to the web app at `GET /api/v1/runtime-config`. When a
+release says to, set them in `env_backend.env` with the same values as in
+`env_web_next.env`; once the backend serves the main host, only the backend copy
+is used. Links must be absolute `http(s)` URLs: the backend drops any other and,
+with either flag on, names it in a startup warning. The web app frames MCP app
+views from the origin of `MCP_APP_CONTENT_BASE_URL`, so `MCP_APP_CONTENT_ORIGIN`
+is not needed in the backend.
+
+With `ENVIRONMENT=development`, the backend refuses to start with
+`BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
+`127.0.0.1` URL, so the development cookie, which is not marked Secure, never
+reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`: an absolute
+lifetime with no inactivity limit, and logout is local.
 
 ### Enable the invitation banner
 

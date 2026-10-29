@@ -4,8 +4,8 @@ import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, FolderInput, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
@@ -16,6 +16,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { AssistantSparse, GroupChatSparse } from "./assistants";
 import { PublishDialog } from "./publish-dialog";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
 function useSpaceInvalidation() {
   const { routeId } = useSpace();
@@ -81,6 +82,7 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
   const router = useRouter();
   const { routeId } = useSpace();
   const invalidate = useSpaceInvalidation();
+  const queryClient = useQueryClient();
   const [showPublish, setShowPublish] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -96,6 +98,7 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
       ),
     onSuccess: () => {
       void invalidate();
+      void invalidateExpiringApiKeys(queryClient);
       setShowPublish(false);
     },
     onError: (error) => toastApiError(error, t)

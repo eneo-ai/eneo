@@ -1,5 +1,7 @@
+"use client";
+
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 
 export type LoadingStateProps = {

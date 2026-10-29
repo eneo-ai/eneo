@@ -3,7 +3,7 @@
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, type Ref } from "react";
 import { cn } from "@/lib/utils";
 

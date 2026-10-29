@@ -3,8 +3,8 @@
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { FileText, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -25,10 +25,11 @@ import {
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
-import { AppRunStatusBadge } from "../status-badge";
+import { AppRunStatusToken } from "../status-token";
 
 const RESULTS_POLL_MS = 5_000;
 
@@ -128,8 +129,10 @@ export function ResultsTable({
   const live = useJobEventsConnected();
   const { data: runs } = useSuspenseQuery({
     ...appRunsQueryOptions(browserApi, appId),
-    refetchInterval: (query) =>
-      !live && query.state.data?.some((run) => isRunActive(run.status)) ? RESULTS_POLL_MS : false
+    refetchInterval: pollWhile(
+      (runs) => !live && !!runs?.some((run) => isRunActive(run.status)),
+      RESULTS_POLL_MS
+    )
   });
 
   if (runs.length === 0) {
@@ -157,7 +160,7 @@ export function ResultsTable({
                 </Link>
               </TableCell>
               <TableCell>
-                <AppRunStatusBadge status={run.status} />
+                <AppRunStatusToken status={run.status} />
               </TableCell>
               <TableCell className="text-muted-foreground font-mono text-sm">
                 {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}

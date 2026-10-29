@@ -1,7 +1,9 @@
 import { expect, test } from "./csp";
 import { askChatQuestion, conversationLog, MOCK_REPLY, uniqueName } from "./helpers";
 
-test("personal chat streams an answer and reloads the saved session", async ({ page }) => {
+test("personal chat streams, reloads and returns focus after deleting the saved session", async ({
+  page
+}) => {
   const question = uniqueName("e2e chat round-trip");
 
   await page.goto("/spaces/personal/chat");
@@ -19,4 +21,14 @@ test("personal chat streams an answer and reloads the saved session", async ({ p
   await page.reload();
   await expect(log.getByText(question, { exact: true })).toBeVisible();
   await expect(log.getByText(MOCK_REPLY)).toBeVisible();
+
+  const more = page
+    .getByRole("button", { name: "Fler alternativ", exact: true })
+    .filter({ visible: true });
+  await more.click();
+  await page.getByRole("menuitem", { name: "Ta bort konversationen", exact: true }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Ta bort konversationen", exact: true });
+  await dialog.getByRole("button", { name: "Bekräfta borttagning", exact: true }).click();
+  await expect(log).not.toBeVisible();
+  await expect(more).toBeFocused();
 });

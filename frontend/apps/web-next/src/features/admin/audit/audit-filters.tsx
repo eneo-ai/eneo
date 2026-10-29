@@ -11,13 +11,17 @@ import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { MultiSelector, type MultiSelectorOptionType } from "@astryxdesign/core/MultiSelector";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Token } from "@astryxdesign/core/Token";
-import { Typeahead, type SearchableItem, type SearchSource } from "@astryxdesign/core/Typeahead";
+import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
+import { formatCalendarDate } from "@/lib/calendar-date";
+import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
   actionLabel,
@@ -55,13 +59,9 @@ function daysAgo(days: number): Date {
   return date;
 }
 
-/** "25 sep. 2026" for a YYYY-MM-DD string; noon UTC so no time zone moves the day. */
+/** "25 sep. 2026" for a YYYY-MM-DD string. */
 function formatDate(date: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(`${date}T12:00:00Z`));
+  return formatCalendarDate(date, locale, { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** The filters the "Filter" button counts: user, each action and the period (search is visible). */
@@ -125,6 +125,7 @@ function UserField({
         )
       }
       minQueryLength={MIN_SEARCH_LENGTH}
+      debounceMs={SEARCH_DEBOUNCE_MS}
       emptySearchResultsText={t("audit_user_search_empty")}
       width="100%"
     />
@@ -229,7 +230,7 @@ function AuditFilterFields({
 function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: OnChange }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const wide = useMediaQuery("(min-width: 768px)");
+  const wide = useMediaQuery(MEDIA.md);
   const count = activeFilterCount(filters);
   const label = count > 0 ? t("audit_filters_button_count", { count }) : t("audit_filters_button");
   const fields = (

@@ -9,7 +9,7 @@ import {
   type TableSortState
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";

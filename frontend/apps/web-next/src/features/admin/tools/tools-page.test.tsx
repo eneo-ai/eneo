@@ -6,7 +6,7 @@ import { renderInApp } from "@/test/render";
 
 const get = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: vi.fn() } }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { ToolsPage } from "./tools-page";
 import { toolsTabOf } from "./tools-tabs";

@@ -2,7 +2,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Link } from "@astryxdesign/core/Link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /** Why a crawl can miss content, with a link to request an integration instead. */
 export function CrawlLimitationsBanner({

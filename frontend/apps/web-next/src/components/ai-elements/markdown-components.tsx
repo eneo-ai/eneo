@@ -1,7 +1,7 @@
 "use client";
 
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, type ComponentProps } from "react";
 import type { StreamdownTranslations } from "streamdown";
 import { cn } from "@/lib/utils";

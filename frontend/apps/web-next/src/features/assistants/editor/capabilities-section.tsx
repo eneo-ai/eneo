@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Label } from "@/components/ui/label";
@@ -16,15 +16,20 @@ import { useSpace } from "@/features/spaces/use-space";
 import { assistantToolModel } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
+/** The capabilities the assistant has: the policy's where a policy governs them. */
+export function selectedCapabilities(assistant: Assistant) {
+  return assistant.effective_config?.mcp_enforced === true
+    ? (assistant.effective_config?.enabled_capabilities ?? [])
+    : (assistant.enabled_capabilities ?? []);
+}
+
 export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("capabilities");
   const governed = assistant.effective_config?.mcp_enforced === true;
-  const selected = governed
-    ? (assistant.effective_config?.enabled_capabilities ?? [])
-    : (assistant.enabled_capabilities ?? []);
+  const selected = selectedCapabilities(assistant);
   const editable = assistant.permissions?.includes("edit") ?? false;
   // A picked model without tool calling never receives a capability: it reads
   // as unavailable, and only an already-enabled one can be switched off. No

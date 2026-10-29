@@ -2,7 +2,7 @@
 
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Check, Loader2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { useProgressText } from "../source-status";

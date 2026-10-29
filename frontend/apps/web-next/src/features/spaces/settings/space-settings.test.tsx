@@ -9,7 +9,7 @@ import { makeSpace } from "../testing/space-fixture";
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space, state.routeId) };
@@ -180,7 +180,7 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
 
   expect((retention as HTMLInputElement).value).toBe("1.5");
   expect(retention.getAttribute("aria-invalid")).toBe("true");
-  expect(screen.getByText(/Ange ett helt antal dagar större än noll/)).toBeTruthy();
+  expect(screen.getByText(/Ange ett helt antal dagar från 1 till 2555/)).toBeTruthy();
   expect(api.PATCH).not.toHaveBeenCalled();
   await expectNoAxeViolations(container);
 

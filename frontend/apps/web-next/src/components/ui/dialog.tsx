@@ -5,7 +5,7 @@ import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog";
 import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { XIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Portal, Slot } from "radix-ui";
 import * as React from "react";
 

@@ -12,10 +12,6 @@ from eneo.assistants.api.assistant_models import AskAssistant
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitExceededError,
-    RateLimitResult,
-)
 from eneo.conversations.conversations_router import (
     approve_tools,
     call_tool_from_app_view,
@@ -31,6 +27,10 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalSubmitResult,
 )
 from eneo.questions.question import ToolCallInfo
+from eneo.redis.rate_limit import (
+    RateLimitExceededError,
+    RateLimitResult,
+)
 from eneo.sessions.session import DocumentExportRequest, ViewToolCallRequest
 
 
@@ -318,6 +318,7 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
         current_count=21,
         max_requests=20,
         window_seconds=60,
+        retry_after_seconds=37,
     )
 
     with patch(
@@ -334,10 +335,10 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
 
     assert exc_info.value.status_code == 429
     assert exc_info.value.headers is not None
-    assert exc_info.value.headers["Retry-After"] == "60"
+    assert exc_info.value.headers["Retry-After"] == "37"
     detail = exc_info.value.detail
     assert detail["code"] == "rate_limit_exceeded"
-    assert detail["retry_after_seconds"] == 60
+    assert detail["retry_after_seconds"] == 37
 
 
 @pytest.mark.asyncio

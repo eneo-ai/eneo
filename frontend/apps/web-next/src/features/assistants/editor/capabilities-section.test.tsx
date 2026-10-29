@@ -17,7 +17,7 @@ vi.mock("@/features/spaces/use-space", () => ({
 vi.mock("@/components/composites/use-autosave", () => ({
   useAutosave: () => (operation: () => Promise<unknown>) => operation()
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 import { CapabilitiesSection } from "./capabilities-section";
 

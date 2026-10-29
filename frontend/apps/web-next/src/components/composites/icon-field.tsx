@@ -2,23 +2,27 @@
 
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
 async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
-  const response = await fetch("/api/eneo/api/v1/icons/", { method: "POST", body: form });
-  if (!response.ok) throw new Error(`icon upload failed: ${response.status}`);
+  const url = `${API_BASE}/api/v1/icons/`;
+  const response = await apiFetch(url, { method: "POST", body: form });
+  if (!response.ok) {
+    throw new Error(`icon upload failed: ${response.status}`);
+  }
   return (await response.json()) as { id: string };
 }
 
-/** Icon uploads are served through the auth-injecting proxy. */
+/** Icon uploads are served under the API base, which authenticates the request. */
 export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `/api/eneo/api/v1/icons/${iconId}/` : null;
+  return iconId ? `${API_BASE}/api/v1/icons/${iconId}/` : null;
 }
 
 /**

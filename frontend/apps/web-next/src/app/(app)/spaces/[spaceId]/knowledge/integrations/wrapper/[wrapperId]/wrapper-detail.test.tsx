@@ -35,7 +35,7 @@ const toasts = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/toast", () => ({ toast: toasts }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 /** The props each next/link gets: Astryx's links too, through the app's LinkProvider. */
 const links = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("next/link", async (importOriginal) => {
@@ -191,6 +191,14 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+/** Headers of the columns held in view (Astryx offsets them from the start). */
+function pinnedHeaders(table: HTMLElement) {
+  return within(table)
+    .getAllByRole("columnheader")
+    .filter((cell) => cell.style.insetInlineStart)
+    .map((cell) => cell.textContent);
+}
+
 function liveRegion() {
   return document.querySelector("[data-astryx-live-region='polite']")?.textContent ?? "";
 }
@@ -271,6 +279,8 @@ describe("WrapperDetail", () => {
     expect(within(nav).queryByRole("link", { name: /Protokoll/ })).toBeNull();
 
     const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    // The folder stays in view while its row scrolls sideways on a phone.
+    expect(pinnedHeaders(overview)).toEqual(["Mapp"]);
     expect(within(overview).getByRole("link", { name: "Protokoll" }).getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i2"
     );
@@ -320,6 +330,7 @@ describe("WrapperDetail", () => {
 
     const documents = await screen.findByRole("table", { name: "Dokument i Mallar" });
     expect(within(documents).getByRole("button", { name: /Avtalsmall\.docx/ })).toBeTruthy();
+    expect(pinnedHeaders(documents)).toEqual(["Namn"]);
     expect(within(documents).getByText("Sökbar")).toBeTruthy();
     await expectNoAxeViolations(container);
 
@@ -657,8 +668,7 @@ describe("WrapperDetail navigation", () => {
   });
 
   it("switches tabs and folders in place and keeps real addresses on the folder links", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
-    const search = () => new URL(String(replaceState.mock.lastCall?.[2])).search;
+    const search = () => window.location.search;
     show([mall, protokoll]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Aktivitet" }));
@@ -891,8 +901,7 @@ describe("WrapperDetail navigation", () => {
   });
 
   it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
-    const search = () => new URL(String(replaceState.mock.lastCall?.[2])).search;
+    const search = () => window.location.search;
     const sync = (id: string, startedAt: string, error: string | null = null) => ({
       id,
       integration_knowledge_id: "i2",

@@ -15,7 +15,7 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import type { Activity, ActivityStep, StepStatus, ToolCall } from "./activity";

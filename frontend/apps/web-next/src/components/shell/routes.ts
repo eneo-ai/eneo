@@ -1,7 +1,6 @@
 /**
  * Route knowledge the shell needs, kept pure so it can be unit tested: which
- * routes usually render their own mobile header, which navigation item a URL
- * selects, and the links the shell builds.
+ * navigation item a URL selects, and the links the shell builds.
  */
 
 import type { RecentConversation } from "@/lib/api/conversations";
@@ -42,20 +41,6 @@ export function conversationHref({ id, partner, space }: ConversationLink): stri
 
 function segmentsOf(pathname: string): string[] {
   return pathname.split("/").filter(Boolean);
-}
-
-/**
- * Chat routes render their own compact mobile header (menu, assistant, new
- * conversation): `/spaces/[spaceId]/chat…` and `/dashboard/[assistantId]…`
- * (not the `/dashboard` catalog or `/dashboard/app/…`). The shell only uses
- * this before hydration, to leave its top bar out of the server render there;
- * afterwards the mounted header decides (`useOwnMobileHeader`).
- */
-export function isChatRoute(pathname: string): boolean {
-  const [first, second, third] = segmentsOf(pathname);
-  if (first === "spaces") return second !== undefined && third === "chat";
-  if (first === "dashboard") return second !== undefined && second !== "app";
-  return false;
 }
 
 /** Which navigation the SideNav shows. */

@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { useTranslations } from "next-intl";
+import type { useTranslations } from "use-intl";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";

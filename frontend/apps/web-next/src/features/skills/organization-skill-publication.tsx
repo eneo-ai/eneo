@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -15,8 +15,9 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 import {
@@ -49,7 +50,7 @@ export function OrganizationSkillPublication({
   // focus; a second press is ignored.
   const [running, setRunning] = useState<"publication" | "restart" | "recover" | null>(null);
   const busy = running !== null;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [rollout, setRollout] = useState<RolloutProgress | null>(null);
   const [rolloutScope, setRolloutScope] = useState<RolloutScope | null>(null);
   const [rolloutRevisionId, setRolloutRevisionId] = useState<string | null>(null);
@@ -154,7 +155,7 @@ export function OrganizationSkillPublication({
         await refresh();
       }
     } catch (cause) {
-      setError(getErrorMessage(cause, t));
+      setError(cause);
       setRunning(null);
     }
   }
@@ -400,11 +401,8 @@ export function OrganizationSkillPublication({
               </label>
             </div>
           )}
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("organization_skills_publication_error_title")}</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          {error != null && (
+            <ListError error={error} title={t("organization_skills_publication_error_title")} />
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
