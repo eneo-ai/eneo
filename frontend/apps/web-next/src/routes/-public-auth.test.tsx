@@ -269,7 +269,9 @@ it.each(["invalid%2Fslug", "first&tenant=second"])(
 it("retries the callback's remembered tenant or clears it to choose another organisation", async () => {
   multiTenant();
   sessionStorage.setItem("eneo-last-tenant-slug", "first");
-  const router = await route("/login?tenant=first&message=oidc_callback_failed&next=%2Fadmin");
+  const router = await route(
+    "/login?tenant=first&message=oidc_callback_failed&info=old-failure&next=%2Fadmin"
+  );
   const retry = await screen.findByRole("link", { name: messages.oidc_retry_login });
   expect(retry.getAttribute("href")).toBe(
     "/api/v1/auth/browser/initiate?tenant=first&next=%2Fadmin"
@@ -279,7 +281,7 @@ it("retries the callback's remembered tenant or clears it to choose another orga
   chooseAnother.focus();
   fireEvent.click(chooseAnother);
   expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBeNull();
-  expect(screen.getByRole("link", { name: "Second" })).toBeTruthy();
+  expect(await screen.findByRole("link", { name: "Second" })).toBeTruthy();
   await waitFor(() =>
     expect(document.activeElement).toBe(screen.getByText(messages.select_your_organization))
   );
@@ -617,16 +619,51 @@ it.each(["getItem", "setItem"] as const)(
   }
 );
 
-it("keeps password login available and recovers SSO discovery through an explicit retry", async () => {
-  replies.set("/api/v1/auth/federation-status", new Response(null, { status: 503 }));
-  await route("/login");
-  expect(await screen.findByRole("button", { name: messages.login })).toBeTruthy();
-  const retry = await screen.findByRole("button", { name: /Försök igen/ });
-  replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
-  fireEvent.click(retry);
-  expect(await screen.findByRole("link", { name: messages.login_with_sso })).toBeTruthy();
-  expect(callsTo("/api/v1/auth/federation-status")).toHaveLength(2);
-  expect(screen.getByRole("button", { name: messages.login })).toBeTruthy();
+it.each(["single", "multi"])(
+  "preserves credentials when discovery recovers into %s federation",
+  async (mode) => {
+    replies.set("/api/v1/auth/federation-status", new Response(null, { status: 503 }));
+    await route("/login");
+    expect(await screen.findByRole("button", { name: messages.login })).toBeTruthy();
+    const email = screen.getByLabelText(/^E-post/);
+    const password = screen.getByLabelText(/^Lösenord/);
+    fireEvent.change(email, { target: { value: "person@example.com" } });
+    fireEvent.change(password, { target: { value: "entered-value" } });
+    const retry = await screen.findByRole("button", { name: /Försök igen/ });
+    if (mode === "multi") multiTenant();
+    else replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
+    fireEvent.click(retry);
+    expect(
+      await screen.findByRole("link", {
+        name: mode === "multi" ? "First" : messages.login_with_sso
+      })
+    ).toBeTruthy();
+    expect(callsTo("/api/v1/auth/federation-status")).toHaveLength(2);
+    expect((screen.getByLabelText(/^E-post/) as HTMLInputElement).value).toBe("person@example.com");
+    expect((screen.getByLabelText(/^Lösenord/) as HTMLInputElement).value).toBe("entered-value");
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);
+
+it("keeps explicit callback recovery available when the tenant catalog is unavailable", async () => {
+  multiTenant();
+  replies.set("/api/v1/auth/tenants", new Response(null, { status: 503 }));
+  await route("/login?tenant=first&message=oidc_callback_failed&next=%2Fadmin");
+  expect(
+    (await screen.findByRole("link", { name: messages.oidc_retry_login })).getAttribute("href")
+  ).toBe("/api/v1/auth/browser/initiate?tenant=first&next=%2Fadmin");
+  expect(callsTo("/api/v1/auth/tenants")).toHaveLength(0);
+  const choose = screen.getByRole("button", { name: messages.oidc_choose_another_org });
+  choose.focus();
+  fireEvent.click(choose);
+  expect(await screen.findByText(messages.failed_to_load_organizations)).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByText(messages.select_your_organization))
+  );
+  multiTenant();
+  fireEvent.click(screen.getByRole("button", { name: /Försök igen/ }));
+  expect(await screen.findByRole("link", { name: "Second" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
 });
 
 it.each([

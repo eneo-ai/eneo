@@ -1,6 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -41,14 +41,12 @@ export function TenantFederationLogin({
   next,
   tenant,
   suppressAuto,
-  failed,
-  children
+  failed
 }: {
   next?: string;
   tenant?: string;
   suppressAuto: boolean;
   failed: boolean;
-  children?: ReactNode;
 }) {
   const t = useTranslations();
   const [remembered] = useState(rememberedTenant);
@@ -59,9 +57,14 @@ export function TenantFederationLogin({
   const rescueFocus = useFocusRescue();
   const explicit = tenant || undefined;
   const direct = explicit && !suppressAuto && !showSelector;
-  const query = useQuery({ ...tenantsQuery, enabled: !direct });
+  const explicitRecovery = failed && !showSelector ? explicit : undefined;
+  const query = useQuery({ ...tenantsQuery, enabled: !direct && !explicitRecovery });
   const tenants = query.data?.tenants ?? [];
   const previous = tenants.find((item) => item.slug === (explicit ?? remembered.slug));
+  const selectedSlug =
+    !showSelector && (tenant === undefined || explicit)
+      ? explicitRecovery || previous?.slug
+      : undefined;
   const onlyTenant = tenants.length === 1 ? tenants[0] : undefined;
 
   useEffect(() => {
@@ -91,83 +94,79 @@ export function TenantFederationLogin({
 
   if (direct) return <FederationPending href={federationHref(next, explicit)} />;
 
+  if (selectedSlug) {
+    return (
+      <>
+        <Button
+          label={
+            failed
+              ? t("oidc_retry_login")
+              : `${t("continue")} · ${previous?.display_name || previous?.name}`
+          }
+          href={federationHref(next, selectedSlug)}
+          as={DocumentLink}
+          onClick={() => remember(selectedSlug)}
+        />
+        <Button
+          label={t("oidc_choose_another_org")}
+          variant="ghost"
+          onClick={() => {
+            try {
+              sessionStorage.removeItem(LAST_TENANT_KEY);
+            } catch {
+              /* The explicit selector still works when storage is blocked. */
+            }
+            rescueFocus(() => selectorHeading.current);
+            setShowSelector(true);
+            const params = new URLSearchParams(search.toString());
+            for (const key of [
+              "tenant",
+              "message",
+              "error",
+              "info",
+              "detailCode",
+              "correlation",
+              "rawDetail"
+            ])
+              params.delete(key);
+            replaceUrl(`/login${params.size ? `?${params}` : ""}`);
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <>
+      <p ref={selectorHeading} tabIndex={-1} className="text-ax-text-secondary text-center text-sm">
+        {t("select_your_organization")}
+      </p>
       <QueryStateBoundary
         query={query}
         rows={2}
         loadingLabel={t("loading_organizations")}
         errorTitle={t("failed_to_load_organizations")}
       >
-        {() => (
-          <div className="flex flex-col gap-2">
-            {previous && !showSelector && (tenant === undefined || explicit) ? (
-              <>
+        {() =>
+          tenants.length === 0 ? (
+            <p className="text-ax-text-secondary text-center text-sm">
+              {t("no_organizations_available")}
+            </p>
+          ) : (
+            <div className="grid max-h-64 gap-2 overflow-y-auto">
+              {tenants.map((tenant) => (
                 <Button
-                  label={
-                    failed
-                      ? t("oidc_retry_login")
-                      : `${t("continue")} · ${previous.display_name || previous.name}`
-                  }
-                  href={federationHref(next, previous.slug)}
+                  key={tenant.slug}
+                  label={tenant.display_name || tenant.name}
+                  href={federationHref(next, tenant.slug)}
                   as={DocumentLink}
-                  onClick={() => remember(previous.slug)}
+                  onClick={() => remember(tenant.slug)}
                 />
-                <Button
-                  label={t("oidc_choose_another_org")}
-                  variant="ghost"
-                  onClick={() => {
-                    try {
-                      sessionStorage.removeItem(LAST_TENANT_KEY);
-                    } catch {
-                      /* The explicit selector still works when storage is blocked. */
-                    }
-                    rescueFocus(() => selectorHeading.current);
-                    setShowSelector(true);
-                    const params = new URLSearchParams(search.toString());
-                    for (const key of [
-                      "tenant",
-                      "message",
-                      "error",
-                      "detailCode",
-                      "correlation",
-                      "rawDetail"
-                    ])
-                      params.delete(key);
-                    replaceUrl(`/login${params.size ? `?${params}` : ""}`);
-                  }}
-                />
-              </>
-            ) : tenants.length === 0 ? (
-              <p className="text-ax-text-secondary text-center text-sm">
-                {t("no_organizations_available")}
-              </p>
-            ) : (
-              <>
-                <p
-                  ref={selectorHeading}
-                  tabIndex={-1}
-                  className="text-ax-text-secondary text-center text-sm"
-                >
-                  {t("select_your_organization")}
-                </p>
-                <div className="grid max-h-64 gap-2 overflow-y-auto">
-                  {tenants.map((tenant) => (
-                    <Button
-                      key={tenant.slug}
-                      label={tenant.display_name || tenant.name}
-                      href={federationHref(next, tenant.slug)}
-                      as={DocumentLink}
-                      onClick={() => remember(tenant.slug)}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+              ))}
+            </div>
+          )
+        }
       </QueryStateBoundary>
-      {children}
     </>
   );
 }

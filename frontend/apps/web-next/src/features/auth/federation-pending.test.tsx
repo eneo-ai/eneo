@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { StrictMode } from "react";
 import { act, cleanup, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import { FederationPending } from "./federation-pending";
+
+const announce = vi.hoisted(() => vi.fn());
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => announce
+}));
+beforeEach(() => announce.mockClear());
 
 afterEach(() => {
   cleanup();
@@ -26,6 +33,9 @@ it("offers an explicit retry after ten seconds and clears its timer on unmount u
   expect(screen.getByRole("link", { name: messages.retry }).getAttribute("href")).toBe(
     "/api/v1/auth/browser/initiate?tenant=first"
   );
+  expect(announce).toHaveBeenCalledExactlyOnceWith(messages.connection_slow_warning);
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(announce).toHaveBeenCalledTimes(1);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
 });

@@ -88,7 +88,8 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
   }
   if (!showCredentials) credentialSearch.set("showUsernameAndPassword", "true");
   const credentialHref = `/login${credentialSearch.size ? `?${credentialSearch}` : ""}`;
-  const credentials = <LoginForm next={search.next} />;
+  const enteringTenant =
+    federation.data?.has_multi_tenant_federation && search.tenant && !suppressAuto;
 
   return (
     <PublicPage
@@ -117,9 +118,7 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
                     tenant={search.tenant}
                     suppressAuto={suppressAuto}
                     failed={diagnostics !== null}
-                  >
-                    {credentials}
-                  </TenantFederationLogin>
+                  />
                 ) : ssoHref ? (
                   <Button label={t("login_with_sso")} href={ssoHref} as={DocumentLink} />
                 ) : null}
@@ -129,9 +128,9 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
               </>
             )}
           </QueryStateBoundary>
-          {!federation.data?.has_multi_tenant_federation &&
-            (showCredentials || (!federation.isPending && !ssoHref)) &&
-            credentials}
+          {(showCredentials || (!federation.isPending && !ssoHref && !enteringTenant)) && (
+            <LoginForm next={search.next} />
+          )}
           {ssoHref ? (
             <Button
               as={DocumentLink}
