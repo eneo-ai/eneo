@@ -1,15 +1,15 @@
 """grant personal skills permission to the predefined Owner role
 
-Revision ID: 202610221000
-Revises: 202610161000
+Revision ID: 202610291800
+Revises: 202610261300
 """
 
 from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "202610221000"
-down_revision: str | None = "202610161000"
+revision: str = "202610291800"
+down_revision: str | None = "202610261300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -12,7 +12,11 @@
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
   import { activationModeLabel } from "$lib/features/skills/personalChatSkills";
   import { m } from "$lib/paraglide/messages";
-  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Search from "@lucide/svelte/icons/search";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
   import { onDestroy, untrack } from "svelte";
 
   const CREATE_SKILL_PERMISSION: ResourcePermission = "create";

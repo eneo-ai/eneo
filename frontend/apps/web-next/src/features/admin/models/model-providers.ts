@@ -304,7 +304,7 @@ export interface ProviderOption {
 
 /**
  * Provider types as gallery options, sorted by display name. The wizard can add
- * completion, embedding, transcription and image tenant models, so each option
+ * completion, embedding, transcription, image and rerank tenant models, so each option
  * keeps its supported mode list for filtering and initial model-type selection.
  */
 export function providerOptions(caps: ProviderCapabilities): ProviderOption[] {

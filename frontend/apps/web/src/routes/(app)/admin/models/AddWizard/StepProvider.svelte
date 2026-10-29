@@ -17,7 +17,8 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Search, Star } from "@lucide/svelte";
+  import Search from "@lucide/svelte/icons/search";
+  import Star from "@lucide/svelte/icons/star";
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
@@ -30,6 +31,7 @@
   import {
     formatProviderLabel,
     listProviderOptions,
+    offeredFavoriteTypes,
     type ModelProviderCapabilities
   } from "../modelProviderCapabilities";
 
@@ -71,7 +73,7 @@
   const loadingCapabilities = $derived(!capabilities);
 
   const favoriteCards = $derived(
-    localFavorites.map((value) => {
+    offeredFavoriteTypes(localFavorites, capabilities).map((value) => {
       const found = allCapabilityProviders.find((p) => p.value === value);
       return { value, label: found?.label ?? formatProviderLabel(value) };
     })

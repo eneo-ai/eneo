@@ -867,12 +867,14 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     (
         "POST",
         "/icons/",
-    ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id. "
+    ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id "
+    "and require_user_for_creation refuses service keys. "
     "Basic method check (POST→write) blocks read keys.",
     (
         "DELETE",
         "/icons/{id}/",
-    ): "Tenant-wide icon delete; service layer enforces tenant via user.tenant_id. "
+    ): "Deletes only an unreferenced icon of the key owner's tenant; service layer "
+    "refuses icons any resource still shows. "
     "Basic method check (DELETE→admin) blocks non-admin keys.",
     (
         "POST",

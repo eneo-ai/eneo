@@ -1,0 +1,25 @@
+name: Set up frontend dependencies
+description: Use the production Node runtime, the Bun pinned in package.json, and a shared package download cache.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.23.4
+    - name: Read the pinned Bun version
+      id: bun
+      shell: bash
+      # package.json "packageManager" is the single source for the Bun pin.
+      run: echo "version=$(node -p "require('./frontend/package.json').packageManager.split('@')[1]")" >> "$GITHUB_OUTPUT"
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      with:
+        bun-version: ${{ steps.bun.outputs.version }}
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.version }}-${{ hashFiles('frontend/bun.lock') }}
+        restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.version }}-
+    - name: Install locked workspace dependencies
+      shell: bash
+      working-directory: frontend
+      run: timeout --kill-after=15s 300s bun install --frozen-lockfile

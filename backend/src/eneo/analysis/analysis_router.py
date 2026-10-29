@@ -3,7 +3,6 @@ from typing import Annotated, AsyncIterator, Optional, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
-from sse_starlette import EventSourceResponse
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.analysis import analysis_protocol
@@ -41,6 +40,7 @@ from eneo.questions.question import Message
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 from eneo.sessions.session import SessionMetadataPublic, SessionPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
@@ -417,12 +417,15 @@ async def ask_question_about_questions(
 
         async def event_stream():
             completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async for chunk in completion_stream:
-                if chunk.stop:
-                    continue
-                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
+            async with closing(completion_stream, "analysis stream") as chunks:
+                async for chunk in chunks:
+                    if chunk.stop:
+                        continue
+                    yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
-        return EventSourceResponse(event_stream())
+        return ClosingEventSourceResponse(
+            event_stream(), closes=[ai_response.completion]
+        )
 
     completion = ai_response.completion
     if not isinstance(completion, Completion):
@@ -548,12 +551,15 @@ async def ask_unified_questions_about_questions(
 
         async def event_stream():
             completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async for chunk in completion_stream:
-                if chunk.stop:
-                    continue
-                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
+            async with closing(completion_stream, "analysis stream") as chunks:
+                async for chunk in chunks:
+                    if chunk.stop:
+                        continue
+                    yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
-        return EventSourceResponse(event_stream())
+        return ClosingEventSourceResponse(
+            event_stream(), closes=[ai_response.completion]
+        )
 
     completion = ai_response.completion
     if not isinstance(completion, Completion):

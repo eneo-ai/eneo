@@ -112,6 +112,170 @@ class TestDestinationNormalization:
         assert effective_endpoint("hosted_vllm", {}) is None
 
 
+class TestStoredKeyIsNormalised:
+    """Surrounding whitespace, including a pasted trailing newline, never
+    reaches the row: it would come back as an illegal header value."""
+
+    async def test_create_stores_the_trimmed_key(self):
+        service, repository = _service(_provider())
+        repository.create.side_effect = lambda created: created
+
+        created = await service.create(
+            tenant_id=uuid4(),
+            name="new",
+            provider_type="openai",
+            credentials={"api_key": " sk-abc\n"},
+            config={},
+        )
+
+        assert created.credentials["api_key"] == "enc(sk-abc)"
+
+    async def test_update_stores_the_trimmed_key(self):
+        provider = _provider()
+        service, _ = _service(provider)
+
+        updated = await service.update(
+            provider.id, credentials={"api_key": " sk-abc\n"}
+        )
+
+        assert updated.credentials["api_key"] == "enc(sk-abc)"
+
+    async def test_create_still_rejects_a_whitespace_only_required_key(self):
+        service, repository = _service(_provider())
+
+        with pytest.raises(BadRequestException, match="required"):
+            await service.create(
+                tenant_id=uuid4(),
+                name="new",
+                provider_type="openai",
+                credentials={"api_key": " \n"},
+                config={},
+            )
+
+        repository.create.assert_not_awaited()
+
+    async def test_a_whitespace_only_optional_key_is_stored_as_no_key(self):
+        provider = _provider("hosted_vllm", config={"endpoint": "http://vllm:8000"})
+        service, _ = _service(provider)
+
+        updated = await service.update(provider.id, credentials={"api_key": " \n"})
+
+        assert "api_key" not in updated.credentials
+        assert service.masked_api_key(updated) is None
+
+
+class TestUpdateValidatesRequiredFields:
+    """An edit is checked against the settings the provider ends up with, so
+    a blank required key or endpoint is a 400 on update as on create."""
+
+    async def test_a_whitespace_only_required_key_is_rejected_before_writing(self):
+        provider = _provider()
+        service, repository = _service(provider)
+
+        with pytest.raises(BadRequestException, match="'api_key' is required"):
+            await service.update(provider.id, credentials={"api_key": " \n"})
+
+        repository.update.assert_not_awaited()
+        assert provider.credentials == {"api_key": "encrypted"}
+
+    async def test_a_config_edit_blanking_a_required_endpoint_is_rejected(self):
+        provider = _provider("hosted_vllm", config={"endpoint": "http://vllm:8000"})
+        service, repository = _service(provider)
+
+        with pytest.raises(BadRequestException, match="'endpoint' is required"):
+            await service.update(provider.id, config={"endpoint": "  "})
+
+        repository.update.assert_not_awaited()
+        assert provider.config == {"endpoint": "http://vllm:8000"}
+
+    async def test_a_valid_key_passes_and_is_stored_trimmed(self):
+        provider = _provider()
+        service, repository = _service(provider)
+
+        updated = await service.update(
+            provider.id, credentials={"api_key": " sk-abc\n"}, config={}
+        )
+
+        repository.update.assert_awaited_once()
+        assert updated.credentials["api_key"] == "enc(sk-abc)"
+
+    async def test_an_edit_without_credentials_or_config_is_not_checked(self):
+        provider = _provider()
+        service, repository = _service(provider)
+
+        updated = await service.update(provider.id, name="renamed", is_active=False)
+
+        repository.update.assert_awaited_once()
+        assert updated.name == "renamed"
+        assert updated.is_active is False
+
+
+class TestCreateChecksTheProviderType:
+    """A type LiteLLM cannot route, or one that needs an interactive sign-in,
+    is refused before anything is stored (#1258)."""
+
+    @pytest.mark.parametrize(
+        ("provider_type", "reason"),
+        [
+            ("bedrock_converse", "cannot route"),
+            ("vertex_ai-language-models", "cannot route"),
+            ("github_copilot", "interactive sign-in"),
+            ("chatgpt", "interactive sign-in"),
+        ],
+    )
+    async def test_an_unusable_type_is_refused(self, provider_type, reason):
+        service, repository = _service(_provider())
+
+        with pytest.raises(BadRequestException, match=reason):
+            await service.create(
+                tenant_id=uuid4(),
+                name="new",
+                provider_type=provider_type,
+                credentials={"api_key": "sk-abc"},
+                config={},
+            )
+
+        repository.get_by_name.assert_not_awaited()
+        repository.create.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("sent", "stored", "config"),
+        [
+            ("vllm", "hosted_vllm", {"endpoint": "http://vllm:8000"}),
+            ("OpenAI", "openai", {}),
+        ],
+    )
+    async def test_the_canonical_type_is_stored(self, sent, stored, config):
+        service, repository = _service(_provider())
+        repository.create.side_effect = lambda created: created
+
+        created = await service.create(
+            tenant_id=uuid4(),
+            name="new",
+            provider_type=sent,
+            credentials={"api_key": "sk-abc"},
+            config=config,
+        )
+
+        assert created.provider_type == stored
+
+    async def test_a_stored_provider_of_a_refused_type_stays_editable(self):
+        provider = _provider("bedrock_converse")
+        service, repository = _service(provider)
+
+        updated = await service.update(
+            provider.id,
+            name="renamed",
+            credentials={"api_key": "sk-new"},
+            is_active=False,
+        )
+
+        repository.update.assert_awaited_once()
+        assert updated.provider_type == "bedrock_converse"
+        assert updated.name == "renamed"
+        assert updated.is_active is False
+
+
 class TestUpdateWithNewDestination:
     async def test_endpoint_change_without_credentials_is_rejected_before_writing(self):
         provider = _provider(config={"endpoint": "https://api.example.com"})

@@ -4,7 +4,7 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { RotateCcw } from "@lucide/svelte";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { invalidate } from "$app/navigation";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo.js";

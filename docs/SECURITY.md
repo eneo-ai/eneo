@@ -6,7 +6,13 @@ public GitHub issues, pull requests, or discussions.
 
 ## Reporting a Vulnerability
 
-Email security reports to `security@sundsvall.se`.
+Report a vulnerability privately in one of two ways:
+
+- On GitHub, through **Security → Report a vulnerability**
+  (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
+  visible only to you and the maintainers, and the fix can be coordinated in a
+  private advisory.
+- By email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
 
@@ -130,9 +136,53 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
-Branch protection should require `CI` and `Dependency Review`. While code
-scanning is paused, remove `CodeQL gate` from the GitHub ruleset; otherwise pull
-requests can wait for a check that no longer runs.
+The `develop` ruleset requires `CI` and `Dependency Review`, and the PR label
+classification ruleset requires `PR labels` on `develop`, `main` and
+`release/**`. While code scanning is paused, remove `CodeQL gate` from the
+GitHub ruleset; otherwise pull requests can wait for a check that no longer
+runs.
+
+## Repository Access and Change Control
+
+Access to the `eneo-ai` organisation follows least privilege. Core Maintainers
+(the Eneo team at Sundsvalls kommun) steward the platform and are accountable
+for what is merged and released. Collaborators from partner municipalities and
+agencies contribute through pull requests. The contributor-facing explanation,
+including the role table, diagrams and an FAQ, is
+[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+on the documentation site.
+
+- **Roles.** `@eneo-ai/core-maintainers` is the only team with write-level
+  (Maintain) access. It also holds the organisation's Security manager and
+  CI/CD admin roles. Collaborators (`@eneo-ai/collaborators`) have Triage
+  access and contribute from forks. A small number of organisation owners hold
+  Admin rights for rulesets, team access and repository settings. The
+  organisation base permission is read.
+- **`develop`.** Changes arrive only through pull requests. At least one
+  approval from `@eneo-ai/core-maintainers` is required, enforced by the
+  ruleset and requested automatically through `.github/CODEOWNERS`. New
+  commits dismiss earlier approvals, review conversations must be resolved,
+  and merges go through the merge queue.
+- **Releases.** Only Core Maintainers can create, update or delete
+  `release/**` branches and `v*` tags. A `v*` tag starts image publication,
+  so this restriction controls who can publish a release.
+- **`main`.** Protected against deletion and force pushes.
+- **Bypass.** Core Maintainers can bypass the `develop` ruleset for a single
+  pull request when a fix is urgent or no second Core Maintainer can review.
+  A bypass also skips the merge queue and required checks, so use it only when
+  every check has passed on the pull request, record the reason in the pull
+  request, and have another Core Maintainer review the change afterwards.
+  Repository administrators are not exempt from rulesets unless they are on
+  the bypass list.
+- **Workflow trust.** Pull requests from forks run with a read-only
+  `GITHUB_TOKEN` and without repository secrets. Workflows started from
+  branches in this repository can request package write permissions, which is
+  why write access is not granted outside Core Maintainers. Keep repository
+  and organisation secrets limited to those referenced by workflows; when a
+  secret is no longer used, delete it and revoke it at its source.
+- **Changes to access.** Only organisation owners change team roles, rulesets
+  or bypass lists. Record each change in a GitHub issue so the access history
+  is reviewable.
 
 ## Alert Triage
 

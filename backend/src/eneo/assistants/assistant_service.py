@@ -76,6 +76,11 @@ from eneo.main.models import (
     ResourcePermission,
     is_provided,
 )
+from eneo.main.stream_lifecycle import (
+    OwnedAsyncGenerator,
+    aclose_if_possible,
+    finalizing,
+)
 from eneo.mcp_servers.application.bundled_tools import with_live_bundled_tools
 from eneo.mcp_servers.application.capability_resolver import (
     general_servers_for_space,
@@ -1751,6 +1756,7 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        previous_icon_id = assistant.icon_id
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -1830,6 +1836,12 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         # The person's own Skills in the personal chat are authorized by
         # PERSONAL_SKILLS alone; broad Assistant editing never stands in for it.
@@ -2264,6 +2276,7 @@ class AssistantService:
                 document_template=document_template,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
@@ -2573,7 +2586,6 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
-        icon_id = assistant.icon_id
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
@@ -2592,10 +2604,10 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        await self.repo.delete(assistant_id, space.id)
+        icon_id = await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -3065,7 +3077,17 @@ class AssistantService:
                             f"answer_chars={len(response_string)}"
                         )
 
-            return response_stream()
+                    # An abort leaves the completion stream suspended; closing
+                    # it releases the model request and the tool connections
+                    # behind it on this task.
+                    with finalizing("completion stream"):
+                        await aclose_if_possible(response.completion)
+
+            async def release_unstarted() -> None:
+                with finalizing("completion stream"):
+                    await aclose_if_possible(response.completion)
+
+            return OwnedAsyncGenerator(response_stream(), release=release_unstarted)
         else:
             reasoning_token_count = 0
             final_answer = ""

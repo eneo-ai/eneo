@@ -12,6 +12,7 @@ matters.
 | Upgrade to 2.2.0 (renamed variables)     | [Upgrading to 2.2.0](/guides/upgrade-2-2-0)                            |
 | Upgrade to 1.7.0 (tenant models)         | [Upgrading to 1.7.0](/guides/upgrade-1-7-0)                            |
 | Upgrade legacy File/Icon storage         | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)       |
+| Free quota after upgrading from 2.2      | [Free Space from Earlier Versions](/guides/free-space-earlier-versions) |
 | Choose where durable bytes live          | [Choose Content Storage](/guides/object-content-storage)               |
 | Configure login and access               | [Authentication & OIDC](/guides/oidc-federation)                        |
 | Give each tenant its own IdP             | [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)   |
@@ -127,6 +128,14 @@ Run the one-time legacy content adoption safely:
 - Estimate PostgreSQL disk, WAL headroom, and wall time
 - Pause or restore when capacity runs low
 - Record a release-candidate result and verify completion before cleanup
+
+### [Free Space Held by Earlier Versions](/guides/free-space-earlier-versions)
+
+Remove the search data that 2.2 kept for replaced versions, once:
+
+- What went wrong, what is fixed and who needs the cleanup
+- Run, follow, stop and verify the cleanup while Eneo keeps running
+- Results, vacuum, and what changes for quota and disk
 
 ### [Choose Content Storage](/guides/object-content-storage)
 

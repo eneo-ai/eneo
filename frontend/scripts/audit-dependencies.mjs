@@ -30,6 +30,14 @@ const ACCEPTED = [
     reason:
       "affects prerendered pages only; web prerenders none. Fixed only in SvelteKit 3",
   },
+  {
+    name: "deepmerge",
+    url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+    vulnerable_versions: ">=4.2.0 <=4.3.1",
+    expires: "2026-11-27",
+    reason:
+      "build-time only: @sveltejs/vite-plugin-svelte and adapter-node's @rollup/plugin-node-resolve merge the build's own config, never request input, and nothing ships it to the runtime. No fixed release exists (4.3.1 is the latest)",
+  },
 ];
 for (const entry of ACCEPTED) {
   assert.ok(

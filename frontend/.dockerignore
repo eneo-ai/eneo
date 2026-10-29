@@ -1,2 +1,8 @@
 **/node_modules
 **/.svelte-kit
+**/.svelte-kit-e2e
+**/.next
+**/build
+**/coverage
+**/playwright-report
+**/test-results

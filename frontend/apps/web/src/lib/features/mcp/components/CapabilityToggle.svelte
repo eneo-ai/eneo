@@ -4,7 +4,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import { LockKeyhole } from "@lucide/svelte";
+  import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import type { components } from "@eneo/eneo-js";
   import type { CapabilityDescriptor, CapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling, readinessMessage } from "$lib/features/mcp/readiness";
