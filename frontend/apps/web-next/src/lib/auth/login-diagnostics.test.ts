@@ -48,6 +48,9 @@ describe("login diagnostics", () => {
       "oidc_error_unauthorized"
     );
     expect(loginDiagnosticMessageKey({ detailCode: "server_error" })).toBe("oidc_error_generic");
+    expect(loginDiagnosticMessageKey({ detailCode: "invalid_login_attempt" })).toBe(
+      "oidc_error_attempt_rejected"
+    );
   });
 
   it("builds bounded diagnostic redirect URLs", () => {

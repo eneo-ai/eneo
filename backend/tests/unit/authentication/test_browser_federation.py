@@ -287,6 +287,15 @@ def test_callback_rejects_invalid_transaction(
     )
     assert response.status_code == 303
     assert detail_code(response) == "invalid_login_attempt"
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert "next" not in query
+    if case == "expired-state":
+        assert query["rawDetail"] == [
+            "Authorization session expired. Please try logging in again."
+        ]
+        assert query["correlation"]
+    else:
+        assert "rawDetail" not in query
     assert expected_set_cookie(
         "__Host-eneo_oidc_txn", '""', 0, production=True
     ) in response.headers.get_list("set-cookie")
@@ -297,14 +306,18 @@ def test_callback_rejects_invalid_transaction(
     "params,expected",
     [({"error": "access_denied"}, "identity_provider_error"), ({}, "no_code_received")],
 )
+@pytest.mark.parametrize("next_path", ["/dashboard?tab=team", "https://evil.example"])
 def test_callback_reports_provider_and_missing_code(
-    federation: Federation, params: dict[str, str], expected: str
+    federation: Federation, params: dict[str, str], expected: str, next_path: str
 ) -> None:
     federation.client.cookies.set("__Host-eneo_oidc_txn", TXN)
     response = federation.client.get(
-        CALLBACKS[0], params={"state": signed_state(), **params}
+        CALLBACKS[0], params={"state": signed_state(next_path), **params}
     )
     assert detail_code(response) == expected
+    assert parse_qs(urlsplit(response.headers["location"]).query)["next"] == [
+        safe_next_path(next_path)
+    ]
     federation.callback.assert_not_awaited()
 
 
@@ -322,7 +335,9 @@ def test_callback_maps_backend_failure(
 ) -> None:
     federation.client.cookies.set("__Host-eneo_oidc_txn", TXN)
     federation.callback.side_effect = HTTPException(
-        status, "internal", headers={"X-Correlation-ID": "test-correlation"}
+        status,
+        "public-detail-" + "x" * 1200,
+        headers={"X-Correlation-ID": "test-correlation"},
     )
     response = federation.client.get(
         CALLBACKS[0], params={"state": signed_state(), "code": "one-time-code"}
@@ -331,6 +346,12 @@ def test_callback_maps_backend_failure(
     assert parse_qs(urlsplit(response.headers["location"]).query)["correlation"] == [
         "test-correlation"
     ]
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert query["next"] == ["/dashboard"]
+    if status in (401, 403):
+        assert "rawDetail" not in query
+    else:
+        assert query["rawDetail"] == [("public-detail-" + "x" * 1200)[:1000]]
     assert not any(
         cookie.startswith("__Host-eneo_web=")
         for cookie in response.headers.get_list("set-cookie")
@@ -391,6 +412,9 @@ def test_callback_never_exposes_unexpected_error(federation: Federation) -> None
     )
     assert detail_code(response) == "http_500"
     assert "private-upstream-sentinel" not in response.headers["location"]
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert query["next"] == ["/dashboard"]
+    assert "rawDetail" not in query
     assert expected_set_cookie(
         "__Host-eneo_oidc_txn", '""', 0, production=True
     ) in response.headers.get_list("set-cookie")
@@ -434,6 +458,9 @@ def test_callback_commit_failure_cannot_send_session(
     federation.callback.assert_awaited_once()
     assert detail_code(response) == expected
     assert response.content == b""
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert query["next"] == ["/dashboard"]
+    assert "rawDetail" not in query
     assert response.headers["referrer-policy"] == "no-referrer"
     assert not any(
         cookie.startswith("__Host-eneo_web=")
@@ -442,6 +469,38 @@ def test_callback_commit_failure_cannot_send_session(
     assert expected_set_cookie(
         "__Host-eneo_oidc_txn", '""', 0, production=True
     ) in response.headers.get_list("set-cookie")
+
+
+def test_callback_http_failure_rolls_back_before_redirect(
+    federation: Federation,
+) -> None:
+    outcomes: list[str] = []
+
+    async def transaction():
+        try:
+            yield object()
+        except HTTPException:
+            outcomes.append("rollback")
+            raise
+        else:
+            outcomes.append("commit")
+
+    app = federation.client.app
+    for route in endpoint_routes(app.routes):
+        if route.path in CALLBACKS and route.dependant:
+            for dependency in route.dependant.dependencies:
+                if dependency.name == "container":
+                    app.dependency_overrides[dependency.call] = transaction
+    federation.callback.side_effect = HTTPException(400, "Public refusal")
+    federation.client.cookies.set("__Host-eneo_oidc_txn", TXN)
+    response = federation.client.get(
+        CALLBACKS[0], params={"state": signed_state(), "code": "one-time-code"}
+    )
+    assert outcomes == ["rollback"]
+    assert response.status_code == 303
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert query["next"] == ["/dashboard"]
+    assert query["rawDetail"] == ["Public refusal"]
 
 
 @pytest.mark.asyncio
