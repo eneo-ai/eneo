@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { revealProblems } from "@/components/composites/field-problem";
-import { useRouter } from "@/lib/navigation";
 import { useCallback, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -99,7 +98,6 @@ function StoragePolicyEditor({
   canEdit: boolean;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const locale = useLocale();
   const [baseline, setBaseline] = useState(initialPolicy);
@@ -297,10 +295,7 @@ function StoragePolicyEditor({
         capability={objectStoreCapability}
         canEdit={canEdit}
         onAuthorityRevoked={revokeAuthority}
-        onConnectionChanged={async () => {
-          await reload(dirty);
-          router.refresh();
-        }}
+        onConnectionChanged={() => reload(dirty)}
       />
 
       {(stale || loadError || targetUnavailable || saveOutcomeUnknown) && (

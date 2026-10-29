@@ -161,7 +161,10 @@ export function mergeSources(
       const sourceType = asString(meta.sourceType);
       const pageRange = asString(meta.pageRange);
       const section = asString(meta.section);
-      const externalUrl = sourceType === "crawl-page" ? sanitizeWebHref(ref.uri) : undefined;
+      const externalUrl =
+        sourceType === "crawl-page" || sourceType === "web-search"
+          ? sanitizeWebHref(ref.uri)
+          : undefined;
       const excerptNumber = knowledgeExcerptNumber(ref.uri);
       return {
         key: `mcp-${ref.id}`,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Heading } from "@astryxdesign/core/Heading";
+import { useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/astryx/switch";
 import {
   LayoutTemplate,
@@ -14,6 +15,7 @@ import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { sessionKeys } from "@/lib/api/session";
 import { useSettingSwitch } from "./use-setting-switch";
 
 type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new";
@@ -42,8 +44,21 @@ function SettingRow({
   icon: LucideIcon;
   tone: string;
 }) {
-  const [value, setValue] = useSettingSwitch(setting, initial, (enabled) =>
-    unwrap(patchSetting(setting, enabled))
+  const queryClient = useQueryClient();
+  const [value, setValue] = useSettingSwitch(
+    setting,
+    initial,
+    (enabled) => unwrap(patchSetting(setting, enabled)),
+    setting === "provisioning"
+      ? {
+          onSaved: async () => {
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: sessionKeys.settings }),
+              queryClient.invalidateQueries({ queryKey: sessionKeys.tenant })
+            ]);
+          }
+        }
+      : undefined
   );
   return (
     <div className="flex min-w-0 items-start gap-3">

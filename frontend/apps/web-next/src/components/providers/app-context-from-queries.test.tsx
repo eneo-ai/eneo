@@ -106,7 +106,7 @@ async function renderApp(browser = testQueryClient()) {
     ...view,
     html,
     rerender: () => view.rerender(tree()),
-    /** router.refresh(): the layout loads again and its new snapshot reaches the mounted boundary. */
+    /** A fresh server layout snapshot reaches the mounted hydration boundary. */
     refresh: async () => {
       state = await load();
       view.rerender(tree());

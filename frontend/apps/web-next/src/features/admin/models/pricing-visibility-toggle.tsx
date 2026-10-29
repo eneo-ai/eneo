@@ -1,12 +1,14 @@
 "use client";
 
 import { Heading } from "@astryxdesign/core/Heading";
+import { useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/astryx/switch";
 import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { sessionKeys } from "@/lib/api/session";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 
 /**
@@ -18,6 +20,7 @@ import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 export function PricingVisibilityToggle() {
   const t = useTranslations();
   const { tenant } = useAppContext();
+  const queryClient = useQueryClient();
   const headingId = useId();
 
   const [enabled, setEnabled] = useSettingSwitch(
@@ -28,7 +31,8 @@ export function PricingVisibilityToggle() {
         browserApi.PUT("/api/v1/admin/settings/model-pricing-visibility", {
           body: { show_model_pricing: show }
         })
-      )
+      ),
+    { onSaved: () => queryClient.invalidateQueries({ queryKey: sessionKeys.tenant }) }
   );
 
   return (
