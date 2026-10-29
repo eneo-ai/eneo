@@ -6,7 +6,7 @@ always closed. A file link the view passes on unsigned is signed again only
 for a file its own call was given and the conversation or assistant holds."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -384,6 +384,7 @@ async def test_re_signed_file_reaches_real_proxy(
     proxy = MCPProxySession([server], for_view=True)
     client = SimpleNamespace(
         call_tool=AsyncMock(return_value={"content": [], "is_error": False}),
+        request_disconnect=Mock(),
         disconnect=AsyncMock(),
     )
     proxy._clients[SERVER_ID] = client

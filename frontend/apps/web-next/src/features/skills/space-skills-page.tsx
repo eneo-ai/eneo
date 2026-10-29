@@ -32,6 +32,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { PersonalChatSkillStatus } from "./personal-chat-skills";
 import { skillQueryKey } from "./skill-revisions";
 
 type Skill = Schema<"SkillSparse">;
@@ -109,6 +110,14 @@ export function SpaceSkillsPage() {
             {skill.display_name}
           </Link>
           <span className="text-ax-text-secondary text-xs break-all">{skill.slug}</span>
+          {/* In the personal space: whether the person's personal chat uses it.
+              Here, not under Status: the name column never gets narrower than
+              240 px, room for the whole badge, where Status's 120 px cut it off. */}
+          {space.personal && (
+            <span className="mt-1.5 empty:hidden">
+              <PersonalChatSkillStatus skillId={skill.id} />
+            </span>
+          )}
         </span>
       )
     },

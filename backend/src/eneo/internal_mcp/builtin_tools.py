@@ -55,6 +55,7 @@ async def with_live_builtin_tools(server: MCPServer) -> list[MCPServerTool]:
                 is_enabled_by_default=(
                     stored.is_enabled_by_default if stored else True
                 ),
+                enabled_override=stored.enabled_override if stored else None,
             )
         )
     return live
