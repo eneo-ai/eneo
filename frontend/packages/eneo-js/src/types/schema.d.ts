@@ -9218,7 +9218,7 @@ export interface paths {
     };
     /**
      * List tenants for selector
-     * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+     * @description Public endpoint returning active tenants with slugs for the tenant selector. With federation enabled, only tenants with an IdP configuration are returned. No authentication required.
      */
     get: operations["list_tenants_api_v1_auth_tenants_get"];
     put?: never;

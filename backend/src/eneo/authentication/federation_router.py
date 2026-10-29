@@ -281,6 +281,10 @@ class FederationStatusResponse(BaseModel):
     }
 
 
+def _has_federation_config(config: dict[str, Any]) -> bool:
+    return bool(config.get("client_id") and config.get("discovery_endpoint"))
+
+
 @router.get(
     "/federation-status",
     response_model=FederationStatusResponse,
@@ -345,21 +349,16 @@ async def get_federation_status(
     has_single_federation = False
     if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
-        # Check if tenant has API-configured federation (non-empty federation_config JSONB)
-        tenant_federation_config = cast(dict[str, Any] | None, tenant.federation_config)
-        if tenant_federation_config and len(tenant_federation_config) > 0:
-            # Verify it has the required fields (avoid empty dicts)
-            required_fields = {"client_id", "discovery_endpoint"}
-            if required_fields.issubset(tenant_federation_config.keys()):
-                has_single_federation = True
-                logger.info(
-                    "Single-tenant API federation detected",
-                    extra={
-                        "tenant_id": str(tenant.id),
-                        "tenant_name": tenant.name,
-                        "provider": tenant_federation_config.get("provider", "unknown"),
-                    },
-                )
+        if _has_federation_config(tenant.federation_config):
+            has_single_federation = True
+            logger.info(
+                "Single-tenant API federation detected",
+                extra={
+                    "tenant_id": str(tenant.id),
+                    "tenant_name": tenant.name,
+                    "provider": tenant.federation_config.get("provider", "unknown"),
+                },
+            )
 
     return FederationStatusResponse(
         has_single_tenant_federation=has_single_federation,
@@ -374,8 +373,8 @@ async def get_federation_status(
     response_model=TenantListResponse,
     summary="List tenants for selector",
     description=(
-        "Public endpoint returning all active tenants for the tenant selector grid. "
-        "Only returns tenants with slugs configured for federation. "
+        "Public endpoint returning active tenants with slugs for the tenant selector. "
+        "With federation enabled, only tenants with an IdP configuration are returned. "
         "No authentication required."
     ),
     responses=responses.get_responses([]),
@@ -389,21 +388,23 @@ async def list_tenants(
     container: Annotated[Container, Depends(get_container())],
 ) -> TenantListResponse:
     """
-    Get list of all active tenants for selector grid.
+    Get the active tenants eligible for the selector grid.
 
     Returns only tenants that have:
     - Active status (not deleted)
     - Slug configured (required for federation routing)
+    - Client ID and discovery endpoint when federation is enabled
 
     Returns:
         TenantListResponse with slug, name, display_name for each tenant
     """
     tenant_repo = container.tenant_repo()
+    federation_enabled = get_settings().federation_enabled
 
     # Get all active tenants
     tenants = await tenant_repo.get_all_active()
 
-    # Map to public info (only include tenants with slugs)
+    # Keep only public selector fields, never the federation credentials.
     tenant_list = [
         TenantInfo(
             slug=tenant.slug,
@@ -411,7 +412,8 @@ async def list_tenants(
             display_name=tenant.display_name or tenant.name,
         )
         for tenant in tenants
-        if tenant.slug  # Only include tenants with slugs configured
+        if tenant.slug
+        and (not federation_enabled or _has_federation_config(tenant.federation_config))
     ]
 
     logger.info(f"Listed {len(tenant_list)} tenants for selector")
