@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { formatCalendarDate } from "@/lib/calendar-date";
+import { navigateTo } from "@/lib/navigate-to";
 import { toast } from "@/lib/toast";
 import {
   areasPresent,
@@ -88,7 +89,7 @@ export function WhatsNewPage({ title }: { title: string }) {
     setResetting(true);
     try {
       await resetState();
-      window.location.reload();
+      navigateTo(window.location.pathname + window.location.search);
     } catch {
       setResetting(false);
       toast.error(t("whats_new_dev_reset_failed"));

@@ -1,5 +1,5 @@
 import { DefaultChatTransport, type UIMessageChunk } from "ai";
-import { CHAT_API, onRawRefusal } from "@/lib/api/base";
+import { apiFetch, CHAT_API } from "@/lib/api/base";
 import { apiErrorFromResponse } from "@/lib/api/errors";
 import type { ConversationBody, EneoDataParts, EneoUIMessage } from "./types";
 
@@ -60,9 +60,8 @@ export function enforceStreamContract(): TransformStream<UIMessageChunk, UIMessa
  * (chat-error.ts).
  */
 async function fetchOrThrow(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
+  const response = await apiFetch(input, init);
   if (response.ok) return response;
-  await onRawRefusal(response.clone(), input instanceof Request ? input.url : String(input));
   let body: unknown;
   try {
     body = await response.json();

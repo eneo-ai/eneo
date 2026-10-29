@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { navigateTo } from "@/lib/navigate-to";
 
 /** Last resort for provider failures, independent of i18n and UI context. */
 export class RootErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -33,7 +34,7 @@ export class RootErrorBoundary extends Component<{ children: ReactNode }, { fail
         <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>Something went wrong</h1>
         <button
           type="button"
-          onClick={() => location.reload()}
+          onClick={() => navigateTo(location.pathname + location.search)}
           style={{
             cursor: "pointer",
             borderRadius: "0.5rem",

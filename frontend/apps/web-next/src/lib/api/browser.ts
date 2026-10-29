@@ -1,5 +1,5 @@
 import createClient, { type Client } from "openapi-fetch";
-import { API_BASE, onBrowserApiResponse } from "@/lib/api/base";
+import { API_BASE, onBrowserApiRequest, onBrowserApiResponse } from "@/lib/api/base";
 import type { paths } from "./schema";
 
 /** A typed Eneo API client, regardless of transport (direct or proxied). */
@@ -11,4 +11,4 @@ export type EneoClient = Client<paths>;
  */
 export const browserApi: EneoClient = createClient<paths>({ baseUrl: API_BASE });
 
-browserApi.use({ onResponse: onBrowserApiResponse });
+browserApi.use({ onRequest: onBrowserApiRequest, onResponse: onBrowserApiResponse });

@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { API_BASE, onRawRefusal } from "@/lib/api/base";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import type { EneoClient } from "@/lib/api/browser";
 import { apiErrorFromResponse, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -70,14 +70,13 @@ export async function updateHelperRunStatus(
   status: Exclude<HelperRunStatus, "in_progress">
 ): Promise<HelperRun> {
   const url = `${API_BASE}/api/v1/help-assistants/runs/${encodeURIComponent(runId)}/`;
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status })
   });
 
   if (!response.ok) {
-    await onRawRefusal(response.clone(), url);
     throw apiErrorFromResponse(response, await readJsonBody(response));
   }
   return (await readJsonBody(response)) as HelperRun;
@@ -106,7 +105,7 @@ async function streamHelperRun(
   }
 ): Promise<HelperRunResponse> {
   const url = `${API_BASE}${path}`;
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method: "POST",
     headers: {
       accept: "text/event-stream",
@@ -117,7 +116,6 @@ async function streamHelperRun(
   });
 
   if (!response.ok) {
-    await onRawRefusal(response.clone(), url);
     throw apiErrorFromResponse(response, await readJsonBody(response));
   }
 

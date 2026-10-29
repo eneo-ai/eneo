@@ -14,9 +14,9 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
-import { API_BASE } from "@/lib/api/base";
+import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { apiErrorFromResponse, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
@@ -112,19 +112,21 @@ type JobsContextValue = {
 
 const JobsContext = createContext<JobsContextValue | null>(null);
 
-function uploadInfoBlob(
+async function uploadInfoBlob(
   collectionId: string,
   file: File,
   onProgress: (progress: number) => void
 ): Promise<Job> {
   // XMLHttpRequest instead of browserApi: fetch cannot observe upload
-  // progress. Same proxy path and error body shapes as openapi-fetch calls.
+  // progress. Request preparation and response checks still use the API seam.
+  const url = `${API_BASE}/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`;
+  const request = await onBrowserApiRequest({
+    request: new Request(new URL(url, window.location.href), { method: "POST" })
+  });
   return new Promise<Job>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open(
-      "POST",
-      `${API_BASE}/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`
-    );
+    xhr.open("POST", url);
+    request.headers.forEach((value, name) => xhr.setRequestHeader(name, value));
     xhr.responseType = "json";
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && event.total > 0) {
@@ -132,24 +134,35 @@ function uploadInfoBlob(
       }
     });
     xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as Job);
-        return;
-      }
-      const body = xhr.response as Record<string, unknown> | null;
-      const message =
-        (typeof body?.message === "string" && body.message) ||
-        (typeof body?.detail === "string" && body.detail) ||
-        `Request failed with status ${xhr.status}`;
-      reject(
-        new EneoApiError(message, {
-          status: xhr.status,
-          code: typeof body?.eneo_error_code === "number" ? body.eneo_error_code : undefined,
-          details: body?.details
+      const response = new Response(JSON.stringify(xhr.response ?? null), {
+        status: xhr.status,
+        headers: new Headers(
+          xhr
+            .getAllResponseHeaders()
+            .trim()
+            .split(/[\r\n]+/)
+            .filter(Boolean)
+            .map((line): [string, string] => {
+              const separator = line.indexOf(":");
+              return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+            })
+        )
+      });
+      void onRawRefusal(response, url)
+        .then(() => {
+          if (response.ok) resolve(xhr.response as Job);
+          else reject(apiErrorFromResponse(response, xhr.response));
         })
-      );
+        .catch(reject);
     });
     xhr.addEventListener("error", () => reject(new Error("Network error")));
+    const abort = () => xhr.abort();
+    xhr.addEventListener("abort", () =>
+      reject(request.signal.reason ?? new DOMException("Upload cancelled", "AbortError"))
+    );
+    xhr.addEventListener("loadend", () => request.signal.removeEventListener("abort", abort));
+    request.signal.throwIfAborted();
+    request.signal.addEventListener("abort", abort, { once: true });
     const body = new FormData();
     body.append("file", file);
     xhr.send(body);

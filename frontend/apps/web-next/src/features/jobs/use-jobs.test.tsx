@@ -548,6 +548,9 @@ class UploadRequest {
   upload = { addEventListener: () => {} };
   private listeners = new Map<string, () => void>();
   open() {}
+  getAllResponseHeaders() {
+    return "content-type: application/json\r\n";
+  }
   addEventListener(type: string, listener: () => void) {
     this.listeners.set(type, listener);
   }
@@ -558,6 +561,7 @@ class UploadRequest {
     this.status = status;
     this.response = response;
     this.listeners.get("load")?.();
+    this.listeners.get("loadend")?.();
   }
 }
 
@@ -586,7 +590,7 @@ it("warns before a reload loses a queued or running upload, until every upload i
     expect(unloadIsGuarded()).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-    expect(UploadRequest.sent).toHaveLength(2);
+    await waitFor(() => expect(UploadRequest.sent).toHaveLength(2));
     expect(unloadIsGuarded()).toBe(true);
 
     act(() => UploadRequest.sent[0]!.answer(200, { ...job, id: "job-a" }));

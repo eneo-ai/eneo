@@ -22,6 +22,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.doUnmock("./boot");
   vi.doUnmock("./lib/runtime-config");
+  vi.doUnmock("./lib/api/refusal");
   vi.doUnmock("./render-app");
   vi.unstubAllGlobals();
   delete globalThis.__webpack_nonce__;
@@ -30,6 +31,8 @@ afterEach(() => {
 async function prepare() {
   const messages = deferred<Record<string, string>>();
   const config = deferred<object>();
+  const session = deferred<void>();
+  const initializeBrowserSession = vi.fn(() => session.promise);
   const loadMessages = vi.fn(() => messages.promise);
   const loadRuntimeConfig = vi.fn(() => config.promise);
   const setRuntimeConfig = vi.fn();
@@ -40,6 +43,7 @@ async function prepare() {
     loadMessages
   }));
   vi.doMock("./lib/runtime-config", () => ({ loadRuntimeConfig, setRuntimeConfig }));
+  vi.doMock("./lib/api/refusal", () => ({ initializeBrowserSession }));
   vi.doMock("./render-app", async () => {
     const { config } = await import("zod");
     evaluated(globalThis.__webpack_nonce__, config().jitless);
@@ -49,6 +53,8 @@ async function prepare() {
   return {
     messages,
     config,
+    session,
+    initializeBrowserSession,
     loadMessages,
     loadRuntimeConfig,
     setRuntimeConfig,
@@ -57,15 +63,19 @@ async function prepare() {
   };
 }
 
-it("loads catalogue and config concurrently, then evaluates UI with nonce and jitless Zod ready", async () => {
+it("loads catalogue, config and session concurrently, then evaluates UI with nonce and jitless Zod ready", async () => {
   const boot = await prepare();
   expect(boot.loadMessages).toHaveBeenCalledWith("en");
   expect(boot.loadRuntimeConfig).toHaveBeenCalledOnce();
+  expect(boot.initializeBrowserSession).toHaveBeenCalledOnce();
   expect(boot.evaluated).not.toHaveBeenCalled();
   boot.messages.resolve({ greeting: "Hello" });
   await Promise.resolve();
   expect(boot.renderApp).not.toHaveBeenCalled();
   boot.config.resolve({ version: "test" });
+  await Promise.resolve();
+  expect(boot.evaluated).not.toHaveBeenCalled();
+  boot.session.resolve();
   await waitFor(() => expect(boot.renderApp).toHaveBeenCalledOnce());
   expect(boot.setRuntimeConfig).toHaveBeenCalledWith({ version: "test" });
   expect(boot.evaluated).toHaveBeenCalledWith("boot-nonce", true);
@@ -76,13 +86,15 @@ it("loads catalogue and config concurrently, then evaluates UI with nonce and ji
   });
 });
 
-it.each(["messages", "config"] as const)(
+it.each(["messages", "config", "session"] as const)(
   "shows static recovery without loading React when %s fails",
   async (failed) => {
     const boot = await prepare();
     boot[failed].reject(new Error("Unavailable"));
     await waitFor(() => expect(document.querySelector('h1[lang="sv"]')).not.toBeNull());
-    boot[failed === "messages" ? "config" : "messages"].resolve({});
+    boot.messages.resolve({});
+    boot.config.resolve({});
+    boot.session.resolve();
     await Promise.resolve();
     expect(boot.evaluated).not.toHaveBeenCalled();
     expect(boot.renderApp).not.toHaveBeenCalled();

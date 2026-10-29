@@ -13,21 +13,22 @@ import type { EneoUIMessage } from "./types";
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
-// Reads the body it is handed, as a refusal owner may: the caller must still
-// be able to read its own copy.
-const rawRefusal = vi.hoisted(() =>
-  vi.fn<(response: Response, url: string) => Promise<void>>(async (response) => {
-    await response.text();
+// The selected transport may inspect an error without consuming the body.
+const transportFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async (input, init) => {
+    const response = await fetch(input, init);
+    if (!response.ok) await response.clone().text();
+    return response;
   })
 );
 vi.mock("@/lib/api/base", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/base")>()),
-  onRawRefusal: rawRefusal
+  apiFetch: transportFetch
 }));
 
 afterEach(() => {
   fetchMock.mockReset();
-  rawRefusal.mockClear();
+  transportFetch.mockClear();
 });
 
 const start = { type: "start", messageId: "q-1" };
@@ -109,13 +110,13 @@ describe("a refused response", () => {
     [401, 9001],
     [403, 9070]
   ])(
-    "reports a %i to the refusal owner once, then fails with its own error",
+    "reports a %i through the shared transport once, then fails with its own error",
     async (status, code) => {
       const result = await run(
         Response.json({ message: "Refused", eneo_error_code: code }, { status })
       );
-      expect(rawRefusal).toHaveBeenCalledTimes(1);
-      expect(rawRefusal).toHaveBeenCalledWith(expect.any(Response), CHAT_API);
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(CHAT_API, expect.anything());
       expectFailed(result);
       const error = result.chat.error as EneoApiError;
       expect(error.status).toBe(status);

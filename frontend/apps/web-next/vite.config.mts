@@ -25,6 +25,10 @@ export default defineConfig(({ command, mode }) => ({
       // other fences fall back to plain text. Only bare `shiki` is matched, so
       // `shiki/engine/javascript` still resolves normally.
       { find: /^shiki$/, replacement: "shiki/bundle/web" },
+      {
+        find: /^@\/lib\/api\/base$/,
+        replacement: path.resolve(import.meta.dirname, "src/lib/api/base.vite.ts")
+      },
       // The navigation seam's TanStack implementation; vitest keeps the Next
       // one (feature tests mock the seam with @/test/navigation).
       {

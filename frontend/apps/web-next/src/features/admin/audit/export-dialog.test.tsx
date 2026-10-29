@@ -6,6 +6,8 @@ import { renderInApp } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const save = vi.hoisted(() => vi.fn());
+vi.mock("@/features/files/signed-file-url", () => ({ saveUrl: save }));
 
 import { ExportDialog } from "./export-dialog";
 
@@ -21,9 +23,44 @@ afterEach(() => {
   vi.useRealTimers();
   api.GET.mockReset();
   api.POST.mockReset();
+  save.mockReset();
 });
 
 describe("ExportDialog", () => {
+  it("rechecks the bound session and gets a fresh signed URL when download is requested", async () => {
+    api.POST.mockResolvedValue({ data: { job_id: "job-1" }, response: new Response("{}") });
+    const completed = { job_id: "job-1", status: "completed", progress: 100 };
+    api.GET.mockResolvedValueOnce({
+      data: {
+        ...completed,
+        download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=old"
+      },
+      response: new Response("{}")
+    });
+    renderInApp(
+      <ExportDialog open onOpenChange={() => {}} filters={{ page: 1, actions: [], search: "" }} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Exportera" }));
+    await flush();
+    api.GET.mockResolvedValueOnce({
+      data: {
+        ...completed,
+        download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=fresh"
+      },
+      response: new Response("{}")
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ladda ner" }));
+    await flush();
+    expect(api.GET).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenCalledExactlyOnceWith(
+      "/api/eneo/api/v1/audit/logs/export/job-1/signed-download?token=fresh",
+      ""
+    );
+    api.GET.mockRejectedValueOnce(new EneoApiError("Session changed", { status: 401, code: 9080 }));
+    fireEvent.click(screen.getByRole("button", { name: "Ladda ner" }));
+    await flush();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
   it("stops polling an export job whose status is gone", async () => {
     api.POST.mockResolvedValue({ data: { job_id: "job-1" }, response: new Response("{}") });
     api.GET.mockResolvedValueOnce({

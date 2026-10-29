@@ -9,15 +9,17 @@ const api = vi.hoisted(() => ({ DELETE: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/toast", () => ({ toast: { error: toastError } }));
-// Reads the body it is handed, as a refusal owner may.
-const rawRefusal = vi.hoisted(() =>
-  vi.fn<(response: Response, url: string) => Promise<void>>(async (response) => {
-    await response.text();
+// The selected transport may inspect an error without consuming the body.
+const transportFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async (input, init) => {
+    const response = await fetch(input, init);
+    if (!response.ok) await response.clone().text();
+    return response;
   })
 );
 vi.mock("@/lib/api/base", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/base")>()),
-  onRawRefusal: rawRefusal
+  apiFetch: transportFetch
 }));
 
 afterEach(() => {
@@ -25,7 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   api.DELETE.mockReset();
   toastError.mockReset();
-  rawRefusal.mockClear();
+  transportFetch.mockClear();
 });
 
 function upload(
@@ -85,7 +87,7 @@ describe("IconField", () => {
     [401, 9001],
     [403, 9070]
   ])(
-    "reports a refused %i upload to the refusal owner once, then shows its own error",
+    "reports a refused %i upload through the shared transport once, then shows its own error",
     async (status, code) => {
       const onSave = vi.fn(async () => {});
       const refused = Response.json({ message: "Refused", eneo_error_code: code }, { status });
@@ -94,8 +96,8 @@ describe("IconField", () => {
 
       await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
       expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/icons/`, expect.anything());
-      expect(rawRefusal).toHaveBeenCalledTimes(1);
-      expect(rawRefusal).toHaveBeenCalledWith(expect.any(Response), `${API_BASE}/api/v1/icons/`);
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(`${API_BASE}/api/v1/icons/`, expect.anything());
       expect(onSave).not.toHaveBeenCalled();
       // The owner read its copy; the upload's own response is still unread.
       await expect(refused.json()).resolves.toMatchObject({ message: "Refused" });

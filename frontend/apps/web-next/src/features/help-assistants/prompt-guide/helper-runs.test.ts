@@ -3,16 +3,17 @@ import { API_BASE } from "@/lib/api/base";
 import { EneoApiError } from "@/lib/api/errors";
 import { startPromptGuideRun, updateHelperRunStatus, type HelperRun } from "./helper-runs";
 
-// Reads the body it is handed, as a refusal owner may: the caller must still
-// be able to read its own copy.
-const rawRefusal = vi.hoisted(() =>
-  vi.fn<(response: Response, url: string) => Promise<void>>(async (response) => {
-    await response.text();
+// The selected transport may inspect an error without consuming the body.
+const transportFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async (input, init) => {
+    const response = await fetch(input, init);
+    if (!response.ok) await response.clone().text();
+    return response;
   })
 );
 vi.mock("@/lib/api/base", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/base")>()),
-  onRawRefusal: rawRefusal
+  apiFetch: transportFetch
 }));
 
 function helperRun(overrides: Partial<HelperRun> = {}): HelperRun {
@@ -47,7 +48,7 @@ function eventStream(events: unknown[]): ReadableStream<Uint8Array> {
 describe("helper run transport", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    rawRefusal.mockClear();
+    transportFetch.mockClear();
   });
 
   test("starts a streamed prompt-guide run and accumulates answer chunks", async () => {
@@ -109,7 +110,7 @@ describe("helper run transport", () => {
   ] as const;
 
   test.each(refusals)(
-    "reports a refused %i run to the refusal owner once, then throws its own error",
+    "reports a refused %i run through the shared transport once, then throws its own error",
     async (status, code) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         Response.json({ message: "Refused", eneo_error_code: code }, { status })
@@ -123,10 +124,10 @@ describe("helper run transport", () => {
         (reason: unknown) => reason
       );
 
-      expect(rawRefusal).toHaveBeenCalledTimes(1);
-      expect(rawRefusal).toHaveBeenCalledWith(
-        expect.any(Response),
-        `${API_BASE}/api/v1/help-assistants/runs/`
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(
+        `${API_BASE}/api/v1/help-assistants/runs/`,
+        expect.anything()
       );
       expect(error).toBeInstanceOf(EneoApiError);
       expect(error).toMatchObject({ status, code, message: "Refused" });
@@ -134,7 +135,7 @@ describe("helper run transport", () => {
   );
 
   test.each(refusals)(
-    "reports a refused %i status update to the refusal owner once, then throws its own error",
+    "reports a refused %i status update through the shared transport once, then throws its own error",
     async (status, code) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         Response.json({ message: "Refused", eneo_error_code: code }, { status })
@@ -145,10 +146,10 @@ describe("helper run transport", () => {
         (reason: unknown) => reason
       );
 
-      expect(rawRefusal).toHaveBeenCalledTimes(1);
-      expect(rawRefusal).toHaveBeenCalledWith(
-        expect.any(Response),
-        `${API_BASE}/api/v1/help-assistants/runs/run-1/`
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(
+        `${API_BASE}/api/v1/help-assistants/runs/run-1/`,
+        expect.anything()
       );
       expect(error).toBeInstanceOf(EneoApiError);
       expect(error).toMatchObject({ status, code, message: "Refused" });

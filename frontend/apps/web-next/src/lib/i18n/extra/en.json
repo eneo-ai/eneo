@@ -1768,5 +1768,10 @@
   "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list.",
   "api_keys_allowlist_unadded": "“{value}” is not added yet. Choose it in the list below the field to add it, or clear the field.",
   "api_keys_extend_saved": "The expiration date is saved.",
-  "api_keys_rate_limit_unlimited": "Unlimited"
+  "api_keys_rate_limit_unlimited": "Unlimited",
+  "session_changed_title": "Your session has changed",
+  "session_changed_description": "Your session is no longer the one this page opened with. Reload to continue.",
+  "session_reload": "Reload page",
+  "session_check_failed": "Your session could not be checked",
+  "session_check_retry_description": "Try again before saving or loading new information."
 }

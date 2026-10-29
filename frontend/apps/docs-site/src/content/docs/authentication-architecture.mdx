@@ -102,8 +102,18 @@ document. Logout requires the expected generation whenever a session cookie
 is present, including an expired cookie; without a cookie it still returns 204
 and clears any remaining authentication cookies.
 A document must never adopt a replacement generation to retry a refused write.
-These backend rules do not yet establish complete cross-tab protection in the
-beta UI; its Vite transport and route migration must be completed before rollout.
+
+The Vite transport binds the document through `GET /api/v1/auth/session/`
+before rendering. Typed requests, raw fetches, job events and uploads share
+that binding. Resuming a hidden or cached page checks the session before more
+authenticated work. A changed session aborts active work, clears cached data
+and requests a new document; if the user cancels navigation, a blocking screen
+offers an explicit reload. A temporary network failure preserves the binding
+and unsaved form state, blocking new requests until a session check succeeds.
+Signed downloads use their resource token instead of adopting the current cookie.
+
+The retained Next frontend does not use this transport. The Vite route migration
+must still be completed before enabling the backend-served app in production.
 
 #### Deploying the identity contract
 

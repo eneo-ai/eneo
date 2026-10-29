@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 import { IntlProvider } from "use-intl";
 import { useBoot } from "@/boot-context";
 import { Providers } from "@/components/providers";
+import { BrowserSessionBoundary } from "@/components/providers/browser-session";
 import { ThemeColor } from "@/components/providers/theme-color";
 import { RouteAnnouncer } from "@/components/shell/route-announcer";
 import { Toaster } from "@/components/ui/sonner";
@@ -35,7 +36,9 @@ function Root() {
         <Providers nonce={nonce}>
           <HeadContent />
           <RouteAnnouncer />
-          <Outlet />
+          <BrowserSessionBoundary>
+            <Outlet />
+          </BrowserSessionBoundary>
         </Providers>
         <Toaster />
         <ThemeColor />

@@ -18,6 +18,23 @@ export const CHAT_API = "/api/chat";
 /** The signed-in user's job feed: Next's proxy route in front of the backend's. */
 export const JOB_EVENTS_PATH = "/api/jobs/events";
 
+/** Request preparation is specific to Vite's cookie session contract. */
+export async function onBrowserApiRequest({ request }: { request: Request }): Promise<Request> {
+  return request;
+}
+
+export const apiFetch: typeof fetch = (input, init) => fetch(input, init);
+
+export type ApiEventSource = {
+  readonly readyState: number;
+  addEventListener(type: string, listener: (event: Event) => void): void;
+  close(): void;
+};
+
+export function createApiEventSource(url: string): ApiEventSource {
+  return new EventSource(url);
+}
+
 const PASSWORD_CHANGE_REQUIRED = 9070;
 
 /** The typed browser client's response middleware (browser.ts). */
@@ -48,9 +65,8 @@ export async function onBrowserApiResponse({
 }
 
 /**
- * Called by hand-built fetches with a copy of a response they refuse, before
- * they report it themselves. Nothing to do in Next: those callers' own error
- * is all Next has ever shown for it.
+ * XHR response checks use the same Vite session owner as fetch. Next keeps
+ * its existing local upload errors until the proxy is removed.
  */
 export const onRawRefusal: (
   response: Response,

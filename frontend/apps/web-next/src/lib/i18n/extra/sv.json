@@ -1768,5 +1768,10 @@
   "api_keys_admin_policy_require_tenant_origin_desc": "Ett ursprung i en publik API-nyckel måste också finnas bland organisationens tillåtna ursprung. Stäng av för att lita på varje aktiv publik nyckels egen lista.",
   "api_keys_allowlist_unadded": "”{value}” är inte tillagd än. Välj den i listan under fältet för att lägga till den, eller töm fältet.",
   "api_keys_extend_saved": "Utgångsdatumet är sparat.",
-  "api_keys_rate_limit_unlimited": "Obegränsad"
+  "api_keys_rate_limit_unlimited": "Obegränsad",
+  "session_changed_title": "Sessionen har ändrats",
+  "session_changed_description": "Sessionen är inte längre densamma som när sidan öppnades. Ladda om för att fortsätta.",
+  "session_reload": "Ladda om sidan",
+  "session_check_failed": "Sessionen kunde inte kontrolleras",
+  "session_check_retry_description": "Försök igen innan du sparar eller hämtar ny information."
 }

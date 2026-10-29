@@ -5,7 +5,7 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { API_BASE, onRawRefusal } from "@/lib/api/base";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
@@ -13,9 +13,8 @@ async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
   const url = `${API_BASE}/api/v1/icons/`;
-  const response = await fetch(url, { method: "POST", body: form });
+  const response = await apiFetch(url, { method: "POST", body: form });
   if (!response.ok) {
-    await onRawRefusal(response.clone(), url);
     throw new Error(`icon upload failed: ${response.status}`);
   }
   return (await response.json()) as { id: string };

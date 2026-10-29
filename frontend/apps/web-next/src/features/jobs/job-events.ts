@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { JOB_EVENTS_PATH } from "@/lib/api/base";
+import { createApiEventSource, JOB_EVENTS_PATH, type ApiEventSource } from "@/lib/api/base";
 import type { Job } from "./jobs";
 
 /**
@@ -19,7 +19,7 @@ const RETRY_AFTER_REFUSAL_MS = 30_000;
 type JobListener = (job: Job) => void;
 type Listener = () => void;
 
-let source: EventSource | null = null;
+let source: ApiEventSource | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let connected = false;
 /** True once the feed has been open at least once: the next open is a reconnect. */
@@ -36,7 +36,7 @@ function setConnected(next: boolean): void {
 
 function open(): void {
   if (source !== null || typeof EventSource === "undefined") return;
-  source = new EventSource(JOB_EVENTS_PATH);
+  source = createApiEventSource(JOB_EVENTS_PATH);
   source.addEventListener("open", () => {
     setConnected(true);
     // Anything that happened while the feed was down is fetched again by
