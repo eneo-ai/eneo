@@ -310,7 +310,7 @@ class MCPProxySession:
         return prefixed_name
 
     @staticmethod
-    def _is_db_tool_enabled(tool: Any) -> bool:
+    def _is_db_tool_enabled(tool: MCPServerTool) -> bool:
         """Whether a DB-stored tool definition is exposed to the model.
 
         Admins disable tools per server; we also hide brand-new tools that have
@@ -318,9 +318,9 @@ class MCPProxySession:
         the live refresh so an admin-disabled tool is never re-exposed when a
         server's tool list is re-listed.
         """
-        if not tool.is_enabled_by_default:
+        if not tool.is_enabled:
             return False
-        if getattr(tool, "removed_from_remote", False) is True:
+        if tool.removed_from_remote:
             return False
         if (
             tool.requires_approval

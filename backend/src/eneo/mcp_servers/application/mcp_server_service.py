@@ -1552,20 +1552,8 @@ class MCPServerService:
         await self.repo.session.commit()
 
         # Return tool with tenant setting applied
-        tool.is_enabled_by_default = is_enabled
+        tool.enabled_override = is_enabled
         return tool
-
-    def _usable_tools(self, tools: list[MCPServerTool]) -> list[MCPServerTool]:
-        """Tools that can actually serve a request: enabled, present on the
-        remote, and with an admin-approved definition (a never-approved new
-        tool has no active description/schema yet)."""
-        return [
-            tool
-            for tool in tools
-            if tool.is_enabled_by_default
-            and not tool.removed_from_remote
-            and (tool.description is not None or tool.input_schema is not None)
-        ]
 
     @validate_permissions(Permission.ADMIN)
     async def activate_capability_server(
@@ -1598,8 +1586,7 @@ class MCPServerService:
             await self._resolve_builtin_image_model(
                 server.purpose, server.image_model_id
             )
-        tools = await self.get_tools_with_tenant_settings(mcp_server_id)
-        if not self._usable_tools(tools):
+        if not server.usable_tools:
             raise BadRequestException(
                 "Provider has no enabled tools. Sync and approve its tools "
                 "before activating."
@@ -1673,33 +1660,6 @@ class MCPServerService:
             NotFoundException: If server doesn't exist
             UnauthorizedException: If server belongs to a different tenant
         """
-        # Verify server exists and belongs to current tenant
-        await self._get_server_for_tenant(mcp_server_id)
-
-        import sqlalchemy as sa
-
-        from eneo.database.tables.mcp_server_table import MCPServerToolSettings
-
-        # Get all tools for this server
-        tools = await self.tool_repo.by_server(mcp_server_id)
-
-        # Load tenant-level tool settings
-        tenant_settings_query = sa.select(MCPServerToolSettings).where(
-            MCPServerToolSettings.tenant_id == self.user.tenant_id
-        )
-        tenant_settings_result = await self.repo.session.execute(tenant_settings_query)
-        tenant_settings_db = tenant_settings_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (tenant level)
-        tenant_tool_settings = {
-            setting.mcp_server_tool_id: setting.is_enabled
-            for setting in tenant_settings_db
-        }
-
-        # Apply tenant settings to tools
-        for tool in tools:
-            if tool.id in tenant_tool_settings:
-                # Override with tenant setting
-                tool.is_enabled_by_default = tenant_tool_settings[tool.id]
-
-        return tools
+        # The server read applies the tenant's tool settings.
+        server = await self._get_server_for_tenant(mcp_server_id)
+        return sorted(server.tools, key=lambda tool: tool.name)

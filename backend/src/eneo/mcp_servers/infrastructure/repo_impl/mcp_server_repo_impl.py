@@ -70,9 +70,7 @@ async def apply_tenant_tool_settings(
     }
     for server in servers:
         for tool in server.tools:
-            setting = enabled.get((server.tenant_id, tool.id))
-            if setting is not None:
-                tool.is_enabled_by_default = setting
+            tool.enabled_override = enabled.get((server.tenant_id, tool.id))
     return servers
 
 
@@ -82,9 +80,8 @@ class MCPServerRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
-        # The mapper reads an unloaded relationship as empty: without tools,
-        # readiness reports no approved tools, and without the classification
-        # the next update clears it.
+        # Repository reads provide the tools required by readiness and the
+        # classifications required by provider selection and API responses.
         self._options = [
             selectinload(self._db_model.tools),
             selectinload(self._db_model.user_groups),

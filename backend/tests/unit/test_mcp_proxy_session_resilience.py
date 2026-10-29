@@ -47,6 +47,19 @@ def _make_server(name: str = "server") -> MCPServer:
     )
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_tool_exposure_uses_override_without_replacing_the_default(enabled):
+    server = _make_server()
+    tool = server.tools[0]
+    tool.is_enabled_by_default = not enabled
+    tool.enabled_override = enabled
+
+    proxy = MCPProxySession([server])
+
+    assert bool(proxy.get_tool_info("server__tool")) is enabled
+    assert tool.is_enabled_by_default is not enabled
+
+
 def _make_identity_scoped_server(name: str = "identity-server") -> MCPServer:
     server_id = uuid4()
     tools = [
