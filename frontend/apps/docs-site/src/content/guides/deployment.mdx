@@ -1165,6 +1165,10 @@ content needs no second backup artifact.
 
 ### Pull and deploy
 
+Run these commands with the new release's `docker-compose.yml` in place.
+`crawler-worker` exists from 2.3, so Compose rejects it with the 2.2 file; with
+the 2.3 file and no running container, stopping it does nothing.
+
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
