@@ -1,6 +1,7 @@
 """FastAPI routes for audit logging."""
 
 import logging
+import time
 from datetime import datetime
 from typing import Annotated, Optional, Sequence, cast
 from uuid import UUID
@@ -30,11 +31,23 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.export_job import ExportJob
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.authentication.endpoint_access import Authentication, endpoint_access
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    authenticates,
+    endpoint_access,
+)
+from eneo.authentication.signed_urls import (
+    AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
+    generate_audit_export_download_token,
+    verify_audit_export_download_token,
+)
 from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import AuthenticationException, UnauthorizedException
 from eneo.redis.rate_limit import (
     RateLimitConfig,
     RateLimitExceededError,
@@ -1120,7 +1133,16 @@ async def get_export_status(
     # Build download URL if completed
     download_url = None
     if job.status.value == "completed" and job.file_path:
-        download_url = f"/api/v1/audit/logs/export/{job_id}/download"
+        issued_at = int(time.time())
+        token = generate_audit_export_download_token(
+            job_id,
+            issued_at + AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
+            current_user.tenant_id,
+            issued_at=issued_at,
+        )
+        download_url = (
+            f"/api/v1/audit/logs/export/{job_id}/signed-download?token={token}"
+        )
 
     return ExportJobStatusResponse(
         job_id=job.job_id,
@@ -1166,10 +1188,6 @@ async def download_export(
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
     """
-    import os
-
-    from fastapi.responses import FileResponse
-
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
 
     current_user = container.user()
@@ -1179,6 +1197,49 @@ async def download_export(
     export_job_manager = ExportJobManager(redis)
 
     job = await export_job_manager.get_job(current_user.tenant_id, job_id)
+
+    return _export_file_response(job)
+
+
+@authenticates(Authentication.SIGNED_URL)
+def authorize_export_token(
+    job_id: UUID,
+    token: Annotated[str, Query(description="Short-lived audit export token")],
+) -> UUID:
+    payload = verify_audit_export_download_token(token)
+    if payload is None:
+        raise AuthenticationException("Invalid or expired token")
+    if payload["job_id"] != str(job_id):
+        raise UnauthorizedException("Token not valid for this export")
+    return UUID(payload["tenant_id"])
+
+
+@router.get(
+    "/logs/export/{job_id}/signed-download",
+    response_model=None,
+    description="Stream a completed export using the short-lived URL returned by its status.",
+    responses=responses.get_responses([400, 401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SIGNED_URL,
+    authorization=Authorization.SIGNED_URL,
+    reason="An admin-issued token grants access only to one export and tenant for 60 seconds.",
+)
+async def download_export_signed(
+    job_id: UUID,
+    tenant_id: Annotated[UUID, Depends(authorize_export_token)],
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+):
+    from eneo.audit.infrastructure.export_job_manager import ExportJobManager
+
+    job = await ExportJobManager(container.redis_client()).get_job(tenant_id, job_id)
+    return _export_file_response(job)
+
+
+def _export_file_response(job: ExportJob | None):
+    import os
+
+    from fastapi.responses import FileResponse
 
     if not job:
         raise HTTPException(
@@ -1213,6 +1274,7 @@ async def download_export(
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
             "X-Total-Records": str(job.total_records),
+            "Referrer-Policy": "no-referrer",
         },
     )
 

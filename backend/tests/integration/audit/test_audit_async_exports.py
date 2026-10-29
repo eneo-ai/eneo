@@ -1,12 +1,74 @@
 """Integration tests for async audit log export endpoints."""
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 
 pytestmark = pytest.mark.integration
+
+
+async def test_completed_export_signed_download_is_independent_of_ambient_identity(
+    client, auth_headers, redis_client, db_container, tmp_path
+):
+    from eneo.audit.infrastructure.export_job_manager import ExportJobManager
+    from eneo.authentication import signed_urls
+
+    async with db_container() as container:
+        tenant_id = container.user().tenant_id
+    job_id = uuid4()
+    manager = ExportJobManager(redis_client)
+    content = b"action,user\nlogin,fixture\n"
+    path = tmp_path / "export.csv"
+    path.write_bytes(content)
+    await manager.create_job(job_id, tenant_id)
+    await manager.complete_job(tenant_id, job_id, str(path), len(content), 1)
+    base = f"/api/v1/audit/logs/export/{job_id}"
+    try:
+        status = await client.get(f"{base}/status", headers=auth_headers)
+        assert status.status_code == 200
+        url = status.json()["download_url"]
+        assert url.startswith(f"{base}/signed-download?token=")
+        # No cookie, API key or bearer is required for this already-authorized file.
+        response = await client.get(url)
+        assert response.status_code == 200
+        assert response.content == content
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["content-disposition"].startswith("attachment;")
+        # Unrelated invalid credentials cannot select another tenant for the link.
+        assert (
+            await client.get(url, headers={"Authorization": "Bearer unrelated"})
+        ).content == content
+        assert (
+            await client.get(url.replace(str(job_id), str(uuid4()), 1))
+        ).status_code == 403
+        now = int(time.time())
+        other_tenant = signed_urls.generate_audit_export_download_token(
+            job_id, now + 60, uuid4()
+        )
+        assert (
+            await client.get(f"{base}/signed-download", params={"token": other_tenant})
+        ).status_code == 404
+        expired = signed_urls.generate_audit_export_download_token(
+            job_id, now - 1, tenant_id, issued_at=now - 61
+        )
+        assert (
+            await client.get(f"{base}/signed-download", params={"token": expired})
+        ).status_code == 401
+        assert (
+            await client.get(f"{base}/signed-download", params={"token": "invalid"})
+        ).status_code == 401
+        # The existing credential-authenticated API remains available.
+        assert (
+            await client.get(f"{base}/download", headers=auth_headers)
+        ).content == content
+        path.unlink()
+        assert (await client.get(url)).status_code == 404
+    finally:
+        await redis_client.delete(f"audit_export:{tenant_id}:{job_id}")
 
 
 class TestAsyncExportAuthentication:

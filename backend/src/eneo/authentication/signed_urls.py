@@ -33,6 +33,10 @@ FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
 INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
 DOCUMENT_TEMPLATE_DOWNLOAD_AUDIENCE = "document_template_download"
 MCP_APP_VIEW_AUDIENCE = "mcp_app_view"
+AUDIT_EXPORT_DOWNLOAD_AUDIENCE = "audit_export_download"
+
+# Issued immediately before the browser starts a streaming download.
+AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS = 60
 
 # Longest life of the link that serves one MCP App view's HTML.
 MCP_APP_VIEW_TOKEN_MAXIMUM_EXPIRY_SECONDS = 60 * 60
@@ -51,6 +55,7 @@ _FILE_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:file-original-download:v2")
 _INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:info-blob-original-download:v2")
 _DOCUMENT_TEMPLATE_DOWNLOAD_KEY = _derive_key(b"eneo:document-template-download:v2")
 _MCP_APP_VIEW_KEY = _derive_key(b"eneo:mcp-app-view:v2")
+_AUDIT_EXPORT_DOWNLOAD_KEY = _derive_key(b"eneo:audit-export-download:v2")
 
 
 def _generate_token(
@@ -533,6 +538,37 @@ def build_signed_original_download_url(
     return (
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
         f"?token={token}"
+    )
+
+
+def generate_audit_export_download_token(
+    job_id: UUID,
+    expires_at: int,
+    tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
+) -> str:
+    """Authorize one completed export without adopting an ambient cookie."""
+    return _generate_token(
+        job_id,
+        expires_at,
+        ContentDisposition.ATTACHMENT,
+        signing_key=_AUDIT_EXPORT_DOWNLOAD_KEY,
+        audience=AUDIT_EXPORT_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="job_id",
+        maximum_lifetime_seconds=AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
+    )
+
+
+def verify_audit_export_download_token(token: str) -> dict[str, Any] | None:
+    return _verify_token(
+        token,
+        signing_key=_AUDIT_EXPORT_DOWNLOAD_KEY,
+        audience=AUDIT_EXPORT_DOWNLOAD_AUDIENCE,
+        resource_claim="job_id",
+        maximum_lifetime_seconds=AUDIT_EXPORT_DOWNLOAD_MAXIMUM_EXPIRY_SECONDS,
     )
 
 
