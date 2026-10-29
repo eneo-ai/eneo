@@ -283,7 +283,7 @@ When a bug is fixed on `develop` but also affects an older release, carry the fi
 
 ## Security Patches Across Multiple Releases
 
-When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): prepare the fixes privately, then open the public pull requests only when every line is ready, because the first one discloses the fix, and publish the patch releases and the advisory straight after.
+When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): prepare the fixes privately, then open the public pull requests only when every line is ready, because the first one discloses the fix, and publish the patch releases and the advisory as soon as practical after that.
 
 1. **Fix on the oldest affected release branch first**
 2. **Carry it forward** to each newer release branch, then to `develop`, with [the procedure above](#carrying-a-fix-to-another-branch)

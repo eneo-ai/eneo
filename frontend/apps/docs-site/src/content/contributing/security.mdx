@@ -70,9 +70,8 @@ history.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 
-The release review also scans the full Git history for secrets and confirms
-that any real historical credentials have been revoked. Automated scanning does
-not replace that check.
+Gitleaks scans only newly added history. If a real credential is found,
+revoke or rotate it; a scan cannot prove that it was revoked.
 
 ### Code scanning
 
@@ -163,7 +162,7 @@ Who can approve, merge and release, and how branches and tags are protected, is 
 
 ## Dependency Updates
 
-Dependabot alerts report vulnerable dependencies, and the `Security` workflow audits the lockfiles on pull requests into `develop` and the release branches, and every week. Maintainers patch what they find in focused `fix(deps)` pull requests and carry the fixes to the supported release lines. Automatic Dependabot version-update pull requests are paused: every ecosystem in `.github/dependabot.yml` has `open-pull-requests-limit: 0` and is re-enabled one at a time.
+Dependabot alerts report vulnerable dependencies, and the `Security` workflow audits the lockfiles on pull requests into `develop` and the release branches, and every week. Maintainers triage what they find, patch it in focused `fix(deps)` pull requests and backport applicable fixes to the supported release lines. Automatic Dependabot version-update pull requests are paused: every ecosystem in `.github/dependabot.yml` has `open-pull-requests-limit: 0`.
 
 For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
 

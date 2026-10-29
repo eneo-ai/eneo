@@ -26,13 +26,14 @@ links to the page that has the details.
 - Every change into `develop` passes CI, dependency and secret checks and the
   merge queue. Pull requests into a release branch or `main` need an approval
   from a second Core Maintainer.
-- In a running deployment, every endpoint declares who may call it, data is
-  kept within its tenant, and code written by the model runs in a separate,
-  isolated tool runtime.
-- Every release comes with a release bundle of exact image digests, SBOMs and
-  attestations that you can verify.
-- Vulnerabilities are reported privately, fixed on the supported releases and
-  published as GitHub Security Advisories.
+- In a running deployment, every endpoint declares who may call it, services
+  check access to each space and resource, and code written by the model runs
+  in a separate tool runtime whose isolation depends on how it is deployed.
+- Releases built by the current publication workflow come with a release
+  bundle of exact image digests, followed by SBOMs and attestations that you
+  can check.
+- Vulnerabilities are reported privately and handled as the security policy
+  describes; fixed ones are published as GitHub Security Advisories.
 
 **Where to start**
 
@@ -64,30 +65,33 @@ the permission table and the reasons behind them are in
 
 ## Protection in a deployment
 
-| Concern                       | How Eneo handles it                                                                                                                                                                    | Explanation                                                      | Configure or operate                                                                                                                            |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Signing in                    | Username and password, per-tenant OIDC federation, SCIM provisioning and scoped API keys.                                                                                              | [Authentication Architecture](/docs/authentication-architecture) | [Authentication & OIDC](/guides/oidc-federation), [SCIM Provisioning](/guides/scim-provisioning)                                                |
-| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check the tenant, space and resource.                                                         | [Security for Contributors](/contributing/security)              | Roles and permissions in **Admin**                                                                                                              |
-| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                    | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
-| Code and files from the model | Run in a separate tool runtime with no access to the database, keys or the internet. Each job is confined with Landlock where the host kernel supports it; operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
-| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                       | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
-| Network, TLS and secrets      | The database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                           | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
-| Traceability                  | A per-tenant audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                          | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
+| Concern                       | How Eneo handles it                                                                                                                                                                                                                                                        | Explanation                                                      | Configure or operate                                                                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signing in                    | Username and password, OIDC single sign-on, SCIM provisioning and scoped API keys.                                                                                                                                                                                         | [Authentication Architecture](/docs/authentication-architecture) | [Authentication & OIDC](/guides/oidc-federation), [SCIM Provisioning](/guides/scim-provisioning)                                                |
+| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check access to the space and resource.                                                                                                                                           | [Security for Contributors](/contributing/security)              | Roles and permissions in **Admin**                                                                                                              |
+| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                                                                                                        | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
+| Code and files from the model | Run in a separate tool runtime. The reference Compose stack gives it no route to the database, Redis or the internet; other deployments must provide the same isolation. Each job is confined to its own files when Landlock is available, and operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
+| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                                                                                                           | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
+| Network, TLS and secrets      | The database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                                                                                                               | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
+| Traceability                  | The audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                                                                                                                       | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
 
 ## Evidence you can inspect
 
-You do not have to take this page on trust:
+You can check these yourself. They apply to releases built by the current
+publication workflow; older releases may have fewer files, so check that the
+files you need are attached.
 
-- **Release bundle.** Each release publishes `release.json` and `release.env`
-  with the version, source revision and immutable image digests. Deploy by
-  digest from the bundle rather than from a moving tag.
-- **SBOMs.** Every release carries CycloneDX and SPDX SBOMs for each published
-  image, plus SBOMs of the backend's Python runtime and the frontend's source
-  dependencies. They show what is inside an image, not that it is free of
-  vulnerabilities.
+- **Release bundle.** A completed release publishes `release.json` and
+  `release.env` with the version, source revision and immutable image
+  digests. Deploy by digest from the bundle rather than from a moving tag.
+- **SBOMs.** A separate job then attaches CycloneDX and SPDX SBOMs for each
+  published image, plus SBOMs of the backend's Python runtime and the
+  frontend's source dependencies. They show what is inside an image, not that
+  it is free of vulnerabilities.
 - **Attestations.** Images, release bundles and SBOM files carry GitHub
-  artifact attestations, so you can verify with `gh attestation verify` that
-  they were built by Eneo's workflows from the stated source.
+  artifact attestations. `gh attestation verify` checks that a file or image
+  was built in the `eneo-ai/eneo` repository; add the signer workflow and
+  source commit to check the exact build.
 - **Rules and advisories.** The active
   [rulesets](https://github.com/eneo-ai/eneo/rules) and the published
   [security advisories](https://github.com/eneo-ai/eneo/security/advisories)
@@ -110,10 +114,10 @@ The rules are public at
   the organisation's administrators, can add a pull request to the merge
   queue, and nothing enters it without the required checks: **CI**,
   **Dependency Review** and **PR labels**. The queue tests each change again
-  against the latest `develop`. There is no bypass. A Core Maintainer reviews
-  and approves every contribution from outside the team before queueing it.
-  The Core Maintainers agree on their own changes together as a team; GitHub
-  does not require a formal approval for those.
+  against the latest `develop`, and the ruleset has no bypass. Our team rule
+  is that a Core Maintainer reviews and approves contributions from outside
+  the team before queueing them, and that Core Maintainers agree on their own
+  changes together; GitHub does not require a formal approval for either.
 - **Into a release.** A pull request into a `release/vX.Y` branch, or into
   `main`, needs an approval from a Core Maintainer other than its author. Only
   Core Maintainers can create release branches and `v*` tags.
@@ -128,13 +132,13 @@ The rules are public at
   call it, or the application refuses to start. GitHub secret scanning with
   push protection blocks known credential formats.
 - **AI code review.** We use a self-hosted
-  [Review Agent](https://github.com/CCimen/review-agent) that reviews pull
-  requests for security, correctness and other quality problems. A maintainer
-  starts it by commenting `/review`. It first looks for problems the change
-  introduces and then tries to disprove each one, so it reports only findings
-  that survive the evidence. The author fixes or answers each finding. The
-  review is advisory: it cannot change the repository, approve or merge, and
-  it is not a full security audit
+  [Review Agent](https://github.com/CCimen/review-agent) to get a second
+  opinion from another AI model on security and code quality. A maintainer
+  starts it on a pull request by commenting `/review`. It looks for problems
+  the change introduces and tries to disprove each one before reporting it;
+  findings can still be wrong. Our rule is to fix or answer its findings
+  before merging. The review is advisory: it cannot change the repository,
+  approve or merge, and it is not a full security audit
   ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work),
   [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)).
   A separate advisory report lists dead code and unused dependencies on pull
@@ -159,28 +163,27 @@ Some choices are deliberate, and some checks have known gaps:
 - **CodeQL is paused.** Its alerts were mostly false positives, so code
   scanning relies on Semgrep's security rules and on review.
 - **Dependabot update pull requests are paused.** They produced more noise
-  than fixes. Dependabot alerts stay on, and the Core Maintainers patch
-  vulnerable dependencies in focused pull requests.
-- **Not every artefact is scanned yet.** The backend image is covered by the
-  audit of its Python lockfile, not by an image scan, and the tool runtime's
-  own lockfile is not yet part of the automated audit.
+  than fixes. Dependabot alerts stay on, and the Core Maintainers triage them.
+- **Not every artefact is scanned.** The backend image is covered by the audit
+  of its Python lockfile, not by an image scan, and the tool runtime's own
+  lockfile is not part of the automated audit.
 
-Automated checks find known patterns and known vulnerabilities, not design
-flaws; that is what review is for.
+Automated checks catch known patterns and known vulnerabilities. They do not
+replace review.
 
 ## Vulnerabilities and updates
 
-![Five steps. In private: report on GitHub, or by e-mail as a fallback, triage to confirm and rate the severity, and prepare the fix for every affected supported release. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
+![Five steps. In private: report on GitHub, or by e-mail as a fallback, triage to confirm and rate the severity, and prepare the fix for the affected supported releases. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
 
 A reported vulnerability stays private while the Core Maintainers confirm it
-and prepare the fix for every affected supported release line, in a private
-GitHub Security Advisory. The fix then lands through ordinary pull requests,
-with the same checks, merge queue and release review as any other change. The
-first public pull request is the moment of disclosure, so the maintainers open
-them only when everything is ready and publish the patch releases and the
-advisory straight after. The advisory names the affected and patched versions
-and credits the reporter. A vulnerability that is already public is fixed in
-ordinary pull requests.
+and prepare a fix or mitigation for the affected supported release lines, in a
+private GitHub Security Advisory. The fix then lands through ordinary pull
+requests, with the same checks, merge queue and release review as any other
+change. The first public pull request discloses the fix, so our procedure is
+to open them when the fixes are ready and to publish the patch releases and the
+advisory as soon as practical after that. The advisory names the affected and
+patched versions and credits the reporter, unless they ask not to be named. A
+vulnerability that is already public is fixed in ordinary pull requests.
 
 - **If you report:** say which version and component are affected and how to
   reproduce it, test only on an installation you run yourself, and keep the
@@ -194,11 +197,12 @@ ordinary pull requests.
   to upgrade to.
 
 The security policy owns the response targets, the supported versions and how
-exceptions are recorded.
+delayed fixes and accepted risks are recorded.
 
 Vulnerable dependencies are reported by Dependabot alerts and by the lockfile
-audit in CI, which also runs every week. The Core Maintainers patch them in
-focused pull requests and carry the fixes to the supported release lines.
+audit in CI, which also runs every week. The Core Maintainers triage them,
+patch them in focused pull requests and backport applicable fixes to the
+supported release lines.
 
 For operators, staying secure means installing patch releases. A new base image
 does not change an image that is already published: fixes reach a deployment

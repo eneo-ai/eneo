@@ -37,7 +37,7 @@ Key fields include:
 - `metadata` (JSONB)
 - `outcome`, `timestamp`
 
-All metadata uses the `AuditMetadata` schema, so every entry has the same shape. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
+Metadata varies by event. The shared `AuditMetadata` helpers add actor and target snapshots where an event records them, so those entries remain meaningful even if users or entities are renamed or deleted.
 
 ## Configuration model
 

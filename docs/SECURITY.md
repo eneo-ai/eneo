@@ -10,8 +10,8 @@ Report a vulnerability privately. GitHub is the preferred way:
 
 - **Preferred: on GitHub**, through **Security → Report a vulnerability**
   (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
-  visible only to you and the maintainers, and the fix is coordinated with you
-  in the same private advisory.
+  visible only to you, the maintainers and anyone they invite to help, and the
+  fix is coordinated with you in the same private advisory.
 - **If you cannot use GitHub**, by email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
@@ -31,17 +31,19 @@ available and maintainers have had a reasonable coordination window.
 ## What Happens After You Report
 
 1. **Triage.** A report made through GitHub opens a private security advisory
-   that only you and the maintainers can see. A Core Maintainer answers within
-   the first-response target below and either accepts it or closes it with an
-   explanation, for example when it is out of scope or a duplicate. An e-mail
-   report is moved into a private advisory, and you are added to it if you
-   have a GitHub account.
-2. **Fix.** The maintainers rate the severity and prepare the fix for every
-   affected supported release line. The conversation stays in the advisory,
-   where you can follow the work and check the fix.
-3. **Publish.** The fix lands, patch releases are published and the advisory
-   follows straight after. The advisory names the affected and patched
-   versions and credits you as the reporter, unless you ask not to be named.
+   that only you, the maintainers and anyone they invite can see. A Core
+   Maintainer aims to respond within the first-response targets below. Triage
+   decides whether the report is accepted or closed with an explanation, for
+   example when it is out of scope or a duplicate. For an e-mail report, the
+   maintainers can open a private advisory and add you to it if you have a
+   GitHub account.
+2. **Fix.** The maintainers rate the severity and prepare a fix or mitigation
+   for the affected supported release lines. The conversation stays in the
+   advisory, where you can follow the work and check the fix.
+3. **Publish.** When the fix has landed and the patch releases are out, the
+   advisory is published as soon as practical. It names the affected and
+   patched versions and credits you as the reporter, unless you ask not to be
+   named.
 
 ## Scope
 
@@ -97,9 +99,10 @@ canonical support policy; other guides link here.
 
 ## Fixing a Vulnerability
 
-Every affected supported line receives the fix: `develop` and each supported
-`release/vX.Y` branch. How the fix is prepared depends on whether the
-vulnerability is already public.
+Our policy is to prepare a fix or mitigation for `develop` and each affected
+supported `release/vX.Y` branch, and to record any delayed fix or accepted risk
+under [Tracking and Exceptions](#tracking-and-exceptions). How the fix is
+prepared depends on whether the vulnerability is already public.
 
 - **Reported privately.** Keep the work private until it is ready. Confirm and
   rate the report in a private GitHub Security Advisory, and prepare and review
@@ -126,18 +129,18 @@ The repository uses GitHub security features and CI to prevent regressions:
 
 - Dependabot alerts are enabled. Dependabot version updates are configured for
   backend, frontend, GitHub Actions, Dockerfiles, and devcontainer
-  configuration, but paused (`open-pull-requests-limit: 0`) until they are
-  re-enabled one ecosystem at a time. Dependabot security updates are off, so
-  maintainers patch vulnerable dependencies in focused `fix(deps)` pull
-  requests. The tool runtime (`tool-runtime/`) has no Dependabot entry yet.
+  configuration, but paused (`open-pull-requests-limit: 0`). Dependabot
+  security updates are off, so maintainers triage alerts and patch vulnerable
+  dependencies in focused `fix(deps)` pull requests. The tool runtime
+  (`tool-runtime/`) has no Dependabot entry.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
-- The self-hosted [Review Agent](https://github.com/CCimen/review-agent)
-  reviews a pull request for security, correctness and other quality problems
-  when a maintainer comments `/review`. It reads the exact commits through
-  bounded read tools, reports only findings that survive a second, disproving
-  pass, and has no write access or merge authority; it does not gate the merge
-  and is not a full security audit
+- The self-hosted [Review Agent](https://github.com/CCimen/review-agent) gives
+  a second opinion from another AI model on security and code quality when a
+  maintainer comments `/review` on a pull request. It reads the exact commits
+  through bounded read tools and tries to disprove each candidate finding
+  before reporting it; findings can still be wrong. It has no write access or
+  merge authority, does not gate the merge and is not a full security audit
   ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work)). Its findings are fixed or answered in the pull
   request.
 - The reusable `Security` workflow audits the complete runtime Python lock and
@@ -159,8 +162,8 @@ The repository uses GitHub security features and CI to prevent regressions:
   only to the named rule, survive squash commits and line moves, and do not
   exclude entire files, directories or rules. The security workflow tests that
   changed values and values outside their reviewed files are still detected.
-  Release review includes a full-history audit and confirmation that any real
-  historical credentials have been revoked; a diff scan cannot prove revocation.
+  The scan covers newly added history only. Revoke or rotate any real
+  credential that is found; a scan cannot prove that a credential was revoked.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
@@ -220,7 +223,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   images. Fork pull requests get a read-only token; the tool runtime image job
   still requests package write, OIDC, and attestation permissions on
   same-repository pull requests although it publishes only when the
-  coordinator calls it, so narrowing that is open work. Do not make the
+  coordinator calls it. Do not make the
   path-filtered SeaweedFS workflow a required status check. The canonical
   image/SBOM owners remain `.github/workflows/build_and_push_images.yml`,
   `.github/workflows/seaweedfs_image.yml`, and

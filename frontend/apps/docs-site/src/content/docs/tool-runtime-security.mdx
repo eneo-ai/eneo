@@ -12,7 +12,8 @@ and what the operator must provide.
 **In short**
 
 - The runtime runs JavaScript and SQL that the model wrote and parses files
-  that users uploaded. It has no path to the database, Redis, the signing key,
+  that users uploaded. In the reference Compose stack it has no route to the
+  database, Redis, the signing key,
   the model providers or the internet.
 - The model never holds a download link: the backend swaps each file handle
   for a short-lived signed URL, and only for files in the same conversation.
@@ -54,7 +55,8 @@ The runtime protects four things:
   parsed sheets or outputs of another job; this is fully enforced with
   Landlock (see below).
 - **Eneo's credentials and data.** The runtime has no path to the database,
-  Redis, the signing key, the model providers or the internet.
+  Redis, the signing key, the model providers or the internet, given the
+  network isolation described in [Layer 5](#layer-5-the-container).
 - **The host and the rest of the deployment.** One job's resource use stays
   within the runtime's own limits and cannot affect the backend or other
   containers.
@@ -69,7 +71,7 @@ but jobs are not confined to their own files; see
 
 The runtime's own code and the engines it bundles are part of the Eneo release
 and are updated by the maintainers in dependency pull requests. The runtime's
-lockfile is not yet covered by Dependabot or by the lockfile audit in CI. A
+lockfile is not covered by Dependabot or by the lockfile audit in CI. A
 candidate image is scanned for fixable high and critical vulnerabilities
 before publication, and the published digest is scanned again before the
 release bundle is completed. The layers below are about what those engines are

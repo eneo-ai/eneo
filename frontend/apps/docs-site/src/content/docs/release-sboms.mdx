@@ -9,12 +9,15 @@ security controls, see [Security at Eneo](/docs/security).
 
 **In short**
 
-- Each release attaches SBOMs (CycloneDX, SPDX and a readable table) for every
-  published image to its GitHub Release.
+- A release built by the current publication workflow gets SBOMs (CycloneDX,
+  SPDX and a readable table) for every published image on its GitHub Release,
+  attached by a job that runs after the release bundle. Older releases may have
+  fewer files.
 - The SBOMs are made from immutable image digests, not tags;
   `IMAGE-DIGESTS.txt` lists every digest that was scanned.
-- Use `gh attestation verify` to check that a file or image was built by Eneo's
-  workflows from the stated source; the commands are in
+- `gh attestation verify` with `--repo eneo-ai/eneo` checks that a file or
+  image was built in Eneo's repository. Add `--signer-workflow` and the source
+  commit to check the exact build; the commands are in
   [Which file should you use?](#which-file-should-you-use).
 - An SBOM is an inventory, not a vulnerability verdict: scan it with a tool
   such as Grype or Trivy.
@@ -193,7 +196,7 @@ dependency inventory, not as a byte-for-byte inventory of the runtime image.
 
 ## Files on the release page
 
-Each release publishes these files:
+A release built by the current publication workflow publishes these files:
 
 | File | Purpose |
 | --- | --- |

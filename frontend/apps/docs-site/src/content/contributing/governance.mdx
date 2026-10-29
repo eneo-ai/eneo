@@ -93,8 +93,9 @@ Each step is described for contributors in
 
 ## How we protect the platform
 
-The rules are enforced by GitHub team roles and repository rulesets. They do not
-depend on anyone remembering them.
+GitHub team roles and repository rulesets enforce who can merge and release,
+and the required checks. Reviewing outside contributions and agreeing on
+changes within the team are our own procedures; the list says which is which.
 
 - **Least privilege.** Core Maintainers is the only team with write access to
   the repository. Everyone else contributes from forks. Administrator rights
@@ -109,7 +110,8 @@ depend on anyone remembering them.
   looked at again.
 - **Green checks, no shortcuts.** Nothing reaches `develop` without passing the
   required checks. The ruleset has no bypass, so there is no way to skip CI or
-  the merge queue.
+  the merge queue. Merging from a security advisory's private fork would skip the
+  ruleset, so we do not use it.
 - **Two people on every release.** A pull request into a release branch or
   `main` needs an approval from a Core Maintainer other than its author.
   `.github/CODEOWNERS` makes the Core Maintainers the required reviewers, and
