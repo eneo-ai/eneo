@@ -69,6 +69,20 @@ download policy or an engine's limits.
   other fonts fall back to the nearest of these. Text headers and footers, one logo and
   the template's own body text, tables and pictures around the content are reproduced;
   table-based or multi-column headers are not.
+- `POST /mcp/forecast` (`create_forecast`) forecasts a daily series in a CSV or XLSX
+  source: P10, P50 and P90 for each of up to 180 days after the last date, and the same
+  forecast made before the last days, scored against what happened and against last
+  week's values. The source must hold one row per ISO date with no missing days; it is
+  read as text (`readSource(..., { asText: true })`), so dates and numbers are validated
+  by the tool (`src/tools/forecast/series.ts`) rather than guessed by the reader.
+  Timestral runs in a Python venv the image installs at `/opt/forecast`
+  (`scripts/forecast.py`, pinned with hashes in `scripts/requirements-forecast.txt`,
+  CPU-only torch). The image holds no weights: the operator mounts a checkpoint
+  (`config.json` and `model.safetensors`) at `FORECAST_MODEL_PATH`, and a call without
+  one fails with `MODEL_UNAVAILABLE`; nothing is ever downloaded. Forecasts queue on
+  their own (`FORECAST_CONCURRENCY`, default 1) with `FORECAST_THREADS` torch threads
+  each. `FORECAST_PYTHON` points a developer machine at another interpreter; engine
+  tests build a tiny random checkpoint and skip when none is found.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout
@@ -84,6 +98,8 @@ download policy or an engine's limits.
 | `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, Word templates |
 | `scripts/render_pdf.py`      | The WeasyPrint sidecar the PDF renderer spawns            |
 | `src/tools/charts/`    | Chart spec, ECharts app and SVG/resvg image export       |
+| `src/tools/forecast/`        | Daily-series validation, holdout scoring, the Timestral adapter and `create_forecast` |
+| `scripts/forecast.py`        | The Timestral sidecar the forecast engine spawns          |
 | `src/tools/files/`           | Signed Eneo file references shared by all file inputs    |
 
 The compute engine was ported from eneo-tools (`packages/compute`, commit

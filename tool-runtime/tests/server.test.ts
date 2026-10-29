@@ -77,6 +77,9 @@ describe("authentication", () => {
     expect(() => loadConfig({ TOOL_RUNTIME_TOKEN: "short" })).toThrow();
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).port).toBe(3010);
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).tabular.allowedFileOrigins).toEqual([]);
+    // A Compose default such as FORECAST_MODEL_NAME=${FORECAST_MODEL_NAME:-} is unset, not fatal.
+    const forecast = loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN, FORECAST_MODEL_NAME: "", FORECAST_MODEL_PATH: "" }).forecast;
+    expect(forecast).toMatchObject({ model_path: "/models/forecast", model_name: "Timestral" });
     expect(
       loadConfig({
         TOOL_RUNTIME_TOKEN: TOKEN,
@@ -89,6 +92,20 @@ describe("authentication", () => {
         TOOL_RUNTIME_FILE_ORIGINS: "http://backend:8000/api",
       }),
     ).toThrow();
+  });
+  test("the forecast model is read from a mounted directory the operator can move", () => {
+    const defaults = loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN });
+    expect(defaults.forecast).toMatchObject({ model_path: "/models/forecast", model_name: "Timestral", threads: 2 });
+    expect(defaults.forecastConcurrency).toBe(1);
+    const moved = loadConfig({
+      TOOL_RUNTIME_TOKEN: TOKEN,
+      FORECAST_MODEL_PATH: "/srv/models/timestral-28m",
+      FORECAST_MODEL_NAME: "Timestral 28M",
+      FORECAST_THREADS: "4",
+      FORECAST_CONCURRENCY: "2",
+    });
+    expect(moved.forecast).toMatchObject({ model_path: "/srv/models/timestral-28m", model_name: "Timestral 28M", threads: 4 });
+    expect(moved.forecastConcurrency).toBe(2);
   });
   test("the parsed-sheet lifetime is configurable but never shorter than a call", () => {
     const ttl = (seconds?: string) =>
