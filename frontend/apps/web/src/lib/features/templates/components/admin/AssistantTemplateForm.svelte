@@ -83,7 +83,10 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title {title} parent={{ href: "/admin/templates", title: m.templates() }} />
+    <Page.Title
+      {title}
+      parent={{ href: "/admin/templates", title: m.assistant_and_app_templates() }}
+    />
 
     <Page.Flex>
       <Button variant="outline" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>

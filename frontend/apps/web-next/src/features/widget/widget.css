@@ -1,0 +1,299 @@
+/*
+ * The widget's own looks: everything painted in the host organisation's
+ * colours (the CSS variables embed-app.tsx sets) or tied to the loader's
+ * panel, which the app's tokens and utilities cannot express. Colours that
+ * are not the widget's come from the Astryx tokens, so both schemes and
+ * forced colours work. Unlayered on purpose: these win over the utilities.
+ */
+
+.widget-root {
+  /* Boundaries that must read at 3:1 on both schemes (WCAG 1.4.11): the
+     theme's hairlines are far below that. */
+  --widget-outline: color-mix(in srgb, var(--color-text-primary) 50%, transparent);
+}
+
+/* One focus indicator for every control in the widget, the dialogs included:
+   the text colour reaches at least 3:1 against every surface the chat uses,
+   in both schemes (WCAG 1.4.11, 2.4.7). */
+.widget-root :focus-visible,
+.astryx-dialog :focus-visible {
+  outline: 2px solid var(--widget-focus, var(--color-text-primary));
+  outline-offset: 2px;
+}
+
+/* Conversation and composer keep a readable measure when the panel is wide:
+   expanded over the host page, or the stand-alone page on a desktop. The
+   header stays edge to edge so its controls sit where the panel's corners
+   are. In a 400px panel the column is simply the panel. */
+.widget-column {
+  width: 100%;
+  max-width: 42rem;
+  margin-inline: auto;
+}
+
+.widget-chat {
+  overscroll-behavior: contain;
+  overflow-y: auto;
+}
+
+.widget-chat > header,
+.widget-chat > footer {
+  flex-shrink: 0;
+}
+
+.widget-log {
+  /* Keep the conversation flexible when the keyboard shortens the panel.
+     A minimum reading area makes oversized text scroll the whole panel
+     instead of clipping the header/composer or losing the conversation. */
+  min-height: 6rem;
+  overscroll-behavior-y: contain;
+}
+
+.widget-chat > footer {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@media (pointer: coarse) {
+  .widget-chat:has(.widget-composer textarea:focus) .widget-suggestions {
+    display: none;
+  }
+}
+
+/* In a wide panel the conversation reads as a sheet on a faint ground. */
+@media (min-width: 48em) {
+  .widget-log {
+    background: var(--color-background-muted);
+  }
+}
+
+/* A tinted header uses the widget's own colours; text is derived for contrast. */
+.widget-header-tinted {
+  background: var(--widget-header);
+  color: var(--widget-on-header);
+  border-color: transparent;
+}
+
+.widget-header-button {
+  display: flex;
+  width: max(44px, 2.75rem);
+  height: max(44px, 2.75rem);
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--color-text-primary);
+  background: transparent;
+}
+
+.widget-header-button:hover {
+  background: var(--color-background-muted);
+}
+
+.widget-header-tinted .widget-header-button {
+  color: inherit;
+}
+
+.widget-header-tinted .widget-header-button:hover {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.widget-header-muted {
+  color: var(--color-text-secondary);
+}
+
+/* Full opacity: the derived text colour is what passes the contrast check. */
+.widget-header-tinted .widget-header-muted {
+  color: inherit;
+}
+
+.widget-subtitle {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.widget-subtitle-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.widget-subtitle-toggle {
+  margin-top: 0.125rem;
+  /* WCAG 2.5.8 counts CSS pixels, so no rem here. */
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The visitor's own message, in the widget's accent colour. */
+.widget-bubble {
+  background: var(--widget-accent);
+  color: var(--widget-on-accent);
+  border-radius: var(--widget-radius);
+  border-bottom-right-radius: 4px;
+}
+
+.widget-composer {
+  border-radius: calc(var(--widget-radius) + 4px);
+  /* The box is the field's only boundary, so it must read at 3:1 on both
+     surfaces (WCAG 1.4.11). */
+  border-color: var(--widget-outline);
+}
+
+.widget-composer textarea {
+  /* Keep phone inputs readable without disabling zoom. */
+  font-size: max(16px, 1rem);
+  min-height: max(44px, 2.75rem);
+}
+
+/* The field is the whole box, so the box carries the focus indicator. */
+.widget-composer:has(textarea:focus-visible) {
+  outline: 2px solid var(--widget-focus, var(--color-text-primary));
+  outline-offset: 2px;
+}
+
+.widget-composer textarea:focus-visible {
+  outline: none;
+}
+
+.widget-send {
+  min-width: 44px;
+  min-height: 44px;
+  /* Transparent, so forced colours draw the button's edge. */
+  border: 1px solid transparent;
+  background: var(--widget-accent);
+  color: var(--widget-on-accent);
+}
+
+.widget-send:not(:disabled):hover {
+  filter: brightness(0.92);
+}
+
+.widget-new-question {
+  border-color: var(--widget-accent);
+  border-radius: var(--widget-radius);
+}
+
+/* Inline citation inside an answer: a small numbered marker. */
+.widget-citation {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3rem;
+  margin-left: 0.125rem;
+  border-radius: 9999px;
+  background: var(--widget-accent);
+  color: var(--widget-on-accent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: 0.2em;
+}
+
+.widget-citation:hover {
+  outline: 2px solid var(--widget-accent);
+  outline-offset: 1px;
+}
+
+.widget-notice-close {
+  display: flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+}
+
+/* A narrow panel on someone else's page: 14px body, tight lists, quiet headings. */
+.widget-answer > * + * {
+  margin-top: 0.5rem;
+}
+
+.widget-answer :is(ul, ol) {
+  padding-left: 1.125rem;
+  margin-top: 0.25rem;
+}
+
+.widget-answer li {
+  margin: 0.125rem 0;
+}
+
+.widget-answer li > p {
+  margin: 0;
+}
+
+.widget-answer :is(h1, h2, h3, h4) {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+
+.widget-answer :is(code, pre) {
+  font-size: 0.8125rem;
+}
+
+/* Three pulsing dots while an answer is on its way. */
+.widget-typing {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  height: 1.25rem;
+}
+
+.widget-typing > span {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--color-text-secondary);
+  animation: widget-typing 1.2s ease-in-out infinite;
+}
+
+.widget-typing > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.widget-typing > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes widget-typing {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* New turns and acknowledgements settle in rather than appear. */
+.widget-enter {
+  animation: widget-enter 0.16s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes widget-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-enter,
+  .widget-typing > span {
+    animation: none;
+  }
+}

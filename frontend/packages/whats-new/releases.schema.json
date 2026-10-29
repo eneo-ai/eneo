@@ -147,6 +147,7 @@
         "api_keys",
         "storage",
         "modules",
+        "widgets",
         "assistant_debug",
         "web_search",
         "image_generation",

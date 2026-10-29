@@ -42,15 +42,20 @@ describe("error page on the server", () => {
     expect(body).toContain('role="alert"');
     expect(body).toContain("<h1");
     expect(head).toContain("Upstream server error");
+    expect(body).toContain('method="POST"');
+    expect(body).toContain("/logout?/clearCookies");
+    expect(body).not.toContain("clear_cookies=");
   });
 
-  test("renders nothing for a failure that resolves by navigating away", () => {
-    // 401 sends the user to /logout; rendering the error first would flash it.
+  test("an expired session has a POST recovery form even without JavaScript", () => {
     state.page.set({ error: { status: 401, message: "Unauthorized", code: 0 }, url: FAILED_URL });
 
     const { body } = render(ErrorPage);
 
     expect(body).not.toContain("Unauthorized");
     expect(body).not.toContain('role="alert"');
+    expect(body).toContain('method="POST"');
+    expect(body).toContain("/logout?/logout");
+    expect(body).toContain('name="message" value="expired"');
   });
 });

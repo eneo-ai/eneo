@@ -35,6 +35,6 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
     } catch {
       parsed = { message: "", eneo_error_code: 0 };
     }
-    throw new PartialError("RESPONSE", response.status, parsed);
+    throw new PartialError("RESPONSE", response.status, parsed, response.headers);
   }
 }

@@ -92,9 +92,14 @@ function parseErrorBody(body: unknown): {
     return { message: messages.join("; ") || "Validation error", details: detail };
   }
   if (isRecord(detail)) {
+    // The widget API answers with `detail: { code: "<string>", message, … }`
+    // plus a payload of its own (violations, blockers): the code is the
+    // reason, and the whole detail stays readable as the details.
     return {
       message: typeof detail.message === "string" ? detail.message : undefined,
-      code: typeof detail.code === "number" ? detail.code : undefined
+      code: typeof detail.code === "number" ? detail.code : undefined,
+      reason: typeof detail.code === "string" ? detail.code : undefined,
+      details: detail
     };
   }
 

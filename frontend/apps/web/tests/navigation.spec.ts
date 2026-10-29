@@ -21,9 +21,8 @@ test("primary navigation and account menu reach their main destinations", async 
   await expect(page.locator("main pre").filter({ hasText: /^e2e@example\.com$/ })).toBeVisible();
 });
 
-// Hover preloading is enabled inside the authenticated shell only. A hovered
-// link runs its page load early; the logout link opts out because its load
-// clears the session cookies (see routes/(app)/+layout.svelte).
+// Hover preloading is enabled inside the authenticated shell. Logout is an
+// explicit POST action, so hovering its menu item cannot change the session.
 test("hovering in the app shell preloads the page but never runs the logout", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/spaces\/personal\/chat/);
@@ -44,7 +43,7 @@ test("hovering in the app shell preloads the page but never runs the logout", as
   await expect(page).toHaveURL(/\/spaces\/personal\/chat/);
 
   await page.locator('header nav button[aria-haspopup="menu"]').last().click();
-  await page.locator('a[href$="/logout"]').hover();
+  await page.getByRole("menuitem", { name: /^(Logga ut|Logout)$/ }).hover();
   // SvelteKit debounces hover preloading by 20 ms; leave room for it to fire if it were enabled.
   await page.waitForTimeout(250);
 

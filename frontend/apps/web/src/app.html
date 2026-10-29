@@ -27,8 +27,10 @@
     />
     %sveltekit.head%
     <script nonce="%sveltekit.nonce%">
+      // Pages that carry their own scheme (the widget embed page) must not
+      // inherit the signed-in user's preference from this origin's storage.
       const theme = localStorage.getItem("theme");
-      if (theme) {
+      if (theme && !document.documentElement.hasAttribute("data-theme-locked")) {
         document.documentElement.dataset.theme = theme;
       }
     </script>

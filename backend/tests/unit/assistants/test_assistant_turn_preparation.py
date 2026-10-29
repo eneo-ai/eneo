@@ -18,12 +18,14 @@ from eneo.actors import ActorFactory, ActorManager
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
+from eneo.collections.domain.collection import Collection
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
     SecurityClassificationMismatchException,
@@ -36,6 +38,7 @@ from eneo.roles.role import RoleInDB
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
+from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.skill import (
     SkillRuntimePolicy,
@@ -46,6 +49,8 @@ from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB, UserState
+from eneo.widgets.application.visitor_user import build_visitor_user
+from eneo.widgets.domain.widget import Widget
 
 
 @dataclass
@@ -322,6 +327,75 @@ async def test_current_space_classification_rejects_before_inference_or_history(
         )
     assert turn.requests == []
     assert turn.history.mock_calls == []
+
+
+@pytest.mark.parametrize("existing", [False, True])
+async def test_widget_ask_preserves_retrieval_limit_and_adds_instructions_per_turn(
+    turn: TurnFixture,
+    existing: bool,
+):
+    widget = Widget.create(
+        tenant_id=turn.user.tenant_id,
+        space_id=turn.space.id,
+        target_id=turn.assistant.id,
+        name="Procurement widget",
+    ).model_copy(update={"id": uuid4()})
+    visitor = build_visitor_user(widget, uuid4(), turn.user.tenant)
+    turn.service.user = visitor
+    turn.service.actor_manager = ActorManager(user=visitor, factory=ActorFactory())
+    turn.space.members.clear()
+    turn.space.security_classification = None
+    embedding_model = EmbeddingModel(
+        id=uuid4(),
+        created_at=None,
+        updated_at=None,
+        user=turn.user,
+        nickname="Policy search",
+        name="text-embedding-3-small",
+        family="openai",
+        hosting=None,
+        org=None,
+        stability=None,
+        open_source=False,
+        description=None,
+        hf_link=None,
+        is_deprecated=False,
+        is_org_enabled=True,
+        max_input=8192,
+        dimensions=1536,
+        security_classification=None,
+    )
+    turn.space.embedding_models = [embedding_model]
+    turn.assistant.collections = [
+        Collection.create(
+            space_id=turn.space.id,
+            name="Procurement policy",
+            embedding_model=embedding_model,
+            user=turn.user,
+        )
+    ]
+    retrieval = AsyncMock(
+        return_value=DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+    )
+    turn.service.references_service.get_references = retrieval
+
+    response = await turn.service.ask(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id if existing else None,
+        version=2,
+        num_chunks_override=7,
+        prompt_addendum="Keep the widget answer brief.",
+    )
+
+    assert response.answer == "Check the policy."
+    assert retrieval.await_args.kwargs["num_chunks_override"] == 7
+    assert retrieval.await_args.kwargs["version"] == 2
+    messages = str(turn.requests[0]["messages"])
+    assert "Use the procurement policy." in messages
+    assert "Keep the widget answer brief." in messages
+    assert turn.assistant.get_prompt_text() == "Use the procurement policy."
+    assert turn.history.complete_question_with_answer.call_count == 1
 
 
 async def test_governed_personal_ask_keeps_effective_model_and_instructions(

@@ -41,6 +41,9 @@ WORKDIR /repo/apps/web-next
 # collection) passes the build; real values are injected at runtime.
 ENV ENEO_BACKEND_URL=http://build.invalid \
     SESSION_SECRET=build-time-placeholder-build-time-placeholder
+# The widget loader the app serves at /widget/<version>/ (src/lib/server/
+# widget-loader.ts): built here, traced into the standalone output.
+RUN bun run --filter '@eneo/widget-loader' build
 # Run via npm (not `bun run`) so the next CLI executes under Node, not Bun.
 RUN npm run build
 

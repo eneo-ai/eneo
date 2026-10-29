@@ -5,7 +5,7 @@ import { DASHBOARD_URL } from "$lib/core/constants";
 import { assertDeploymentEnv } from "$lib/core/deploymentEnv.server";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
-import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
+import { authenticateUser } from "$lib/features/auth/auth.server";
 import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
 import { toAppError } from "$lib/core/errors";
 import {
@@ -15,6 +15,7 @@ import {
   type HandleServerError,
   type ServerInit
 } from "@sveltejs/kit";
+import { EMBED_ROUTE_PREFIX, WIDGET_LOADER_ROUTE_PREFIX, withFramePolicy } from "$lib/core/csp";
 import {
   getEnvironmentConfig,
   getBackendUrl,
@@ -35,16 +36,18 @@ function routeRequiresLogin(route: { id: string | null }): boolean {
   return !routeIsPublic;
 }
 
-const authHandle: Handle = async ({ event, resolve }) => {
-  // Clear authentication cookies if the 'clear_cookies' URL parameter is present
-  if (event.url.searchParams.get("clear_cookies")) {
-    clearFrontendCookies(event);
-  }
-
+export const authHandle: Handle = async ({ event, resolve }) => {
   // Load feature flags and environment BEFORE authentication check
   // This ensures login page has access to federation configuration flags
-  // Pass event.fetch so URL rewriting in handleFetch works correctly
-  event.locals.featureFlags = await getFeatureFlags(event.fetch);
+  // Pass event.fetch so URL rewriting in handleFetch works correctly.
+  // The widget embed page and loader script never show a login, so they
+  // skip the federation-status call to the backend on every request.
+  const routeId = event.route.id ?? "";
+  const isWidgetSurface =
+    routeId.startsWith(EMBED_ROUTE_PREFIX) || routeId.startsWith(WIDGET_LOADER_ROUTE_PREFIX);
+  event.locals.featureFlags = await getFeatureFlags(event.fetch, {
+    checkFederation: !isWidgetSurface
+  });
   event.locals.environment = getEnvironmentConfig();
 
   const tokens = authenticateUser(event);
@@ -103,7 +106,41 @@ export const headerFilterHandle: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
+/**
+ * Deny framing everywhere except the widget embed page, which sets
+ * `locals.frameAncestors` from the widget's allowed origins in its load.
+ * SvelteKit's own CSP header (script-src nonces) is merged, not replaced.
+ */
+export const framePolicyHandle: Handle = async ({ event, resolve }) => {
+  const isEmbed = event.route.id?.startsWith(EMBED_ROUTE_PREFIX) ?? false;
+  const response = await resolve(event, {
+    // The embed page decides its own scheme (widget setting, then the host
+    // page); lock it so app.html's theme bootstrap leaves it alone.
+    transformPageChunk: isEmbed
+      ? ({ html }) =>
+          html.replace(
+            'data-theme="system">',
+            `data-theme="${event.locals.embedScheme ?? "system"}" data-theme-locked>`
+          )
+      : undefined
+  });
+  const frameAncestors = isEmbed ? event.locals.frameAncestors : undefined;
+  response.headers.set(
+    "content-security-policy",
+    withFramePolicy(response.headers.get("content-security-policy"), {
+      frameAncestors: frameAncestors ?? "'none'",
+      allowBlobWorkers: isEmbed,
+      harden: isEmbed,
+      embedSources: isEmbed ? (event.locals.embedSources ?? { img: [], connect: [] }) : undefined
+    })
+  );
+  if (!frameAncestors) {
+    response.headers.set("x-frame-options", "DENY");
+  }
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, framePolicyHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, event, status, message }) => {
   const appError = toAppError(error, { status, message });

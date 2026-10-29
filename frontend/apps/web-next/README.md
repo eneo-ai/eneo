@@ -34,6 +34,30 @@ it invalidates existing Next sessions. Do not reuse the backend JWT secret.
 Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
 `NEXT_PUBLIC_*` backend URL by design: all backend calls go through the server.
 
+## Embeddable widget
+
+The chat a visitor of another site sees (`/embed/<public id>`, `/en/embed/…`)
+and what the loader needs (`/widget/v1/eneo.js`, `eneo.css`,
+`/widget/settings/<public id>`) live in `src/features/widget` and the matching
+routes; the visitor API is proxied under this origin
+(`src/app/api/v1/widgets`, `src/app/api/v1/icons`), since the browser never
+reaches the backend. `src/proxy.ts` decides an embed page's frame policy,
+language and colour scheme from the widget's configuration, and the root
+layout renders it without the app's chrome. The loader bundle is read from
+`packages/widget-loader` (build it with `bun run --filter '@eneo/widget-loader'
+build`; the image does).
+
+The widget's admin page lives under its assistant
+(`/spaces/<space>/assistants/<assistant>/widget`, `src/features/widget/admin`):
+the editor with its autosave store, the live preview (the embed page framed
+with a preview token, so the app's CSP allows same-origin frames), "Test in
+Eneo" with the real loader, the install snippet (pointing at `APP_ORIGIN`)
+and the usage table. The organisation's side is under `/admin/widgets`
+(`src/features/widget/admin/org`): the overview of every widget with its
+usage and the pause/activate actions, the policy every widget stays within,
+and the templates with their editor (`/admin/widgets/templates/<id>`), whose
+preview is a static mock since a template has no widget behind it.
+
 ## Auth
 
 - **Password and tenant federation** use the existing backend authentication

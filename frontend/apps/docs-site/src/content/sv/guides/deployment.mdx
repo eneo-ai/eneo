@@ -1,0 +1,332 @@
+---
+title: Driftsätt Eneo
+translationSource: guides/deployment.mdx@5bcb0a191fe7
+---
+
+import { Callout } from "nextra/components";
+
+# Driftsätt Eneo
+
+Den här guiden hjälper dig att installera en ny Eneo-instans med Docker Compose
+på en egen server. Referenskonfigurationen använder Traefik för HTTPS,
+PostgreSQL med pgvector för databasen, Redis för köer, separata workers för
+bakgrundsjobb och crawlning samt en isolerad körmiljö för inbyggda verktyg.
+
+<Callout type="warning">
+  Exempelfilerna måste anpassas. Ersätt alla förekomster av `your-domain.com`,
+  `changeme` och `CHANGEME`. Använd installationsfiler från den källrevision som
+  releasens `release.json` anger, så att mallarna matchar avbildningarna.
+</Callout>
+
+## Förberedelser
+
+Du behöver Docker med Compose v2 eller senare, ett domännamn med DNS till
+servern, öppna portar 80 och 443 och en API-nyckel till minst en AI-leverantör.
+Referensinstallationen använder Let's Encrypt. En egen reverse proxy och egna
+certifikat går också bra om routningen nedan bevaras.
+
+Räkna med minst 2 CPU-kärnor, 4 GB RAM och 20 GB disk för att utvärdera
+referensinstallationen. Anpassa kapaciteten efter belastning och datamängd.
+
+Du behöver inte en S3-tjänst för att börja. Standardinställningen lagrar
+varaktigt innehåll inom storleksgränser i PostgreSQL. Välj SeaweedFS, MinIO eller
+annan S3-kompatibel lagring först när kapacitet och återställningskrav motiverar
+det. Följ då [lagringsguiden](/guides/object-content-storage).
+
+## Installera en ny instans
+
+### Hämta rätt installationsfiler
+
+Varje release på [GitHub Releases](https://github.com/eneo-ai/eneo/releases)
+har ett paket med `release.env` och `release.json`. Paketet låser alla
+applikationsavbildningar till sina digest-värden och publiceras först när de
+gemensamma avbildningskontrollerna har gått igenom. Det finns inga `latest`-taggar
+för applikationen. Hämta paketet till en egen katalog och ta installationsfilerna
+från exakt den källrevision som `release.json` anger:
+
+```bash
+mkdir eneo-deployment && cd eneo-deployment
+# Ladda ner release.json och release.env från den valda releasen till den här katalogen.
+ENEO_SOURCE_REVISION=$(python3 -c 'import json; print(json.load(open("release.json"))["revision"])')
+for f in docker-compose.yml docker-compose.object-content.yml docker-compose.without-tools.yml \
+  env_backend.template env_frontend.template env_db.template .env.template setup.py; do
+  curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/$f"
+done
+cp env_backend.template env_backend.env
+cp env_frontend.template env_frontend.env
+cp env_db.template env_db.env
+cp .env.template .env
+python3 setup.py
+chmod 600 .env env_backend.env env_frontend.env env_db.env
+```
+
+`python3 setup.py` skapar den körmiljöhemlighet som saknas utan att ändra
+befintliga inställningar eller skriva ut hemligheter. Klonar du i stället
+repot, checka ut revisionen i `release.json` innan du kopierar filerna. Alla
+Compose-kommandon tar båda miljöfilerna, även de som nedan skrivs utan dem:
+`docker compose --env-file .env --env-file release.env …`. För att slippa
+upprepa dem kan du köra `export COMPOSE_ENV_FILES=.env,release.env` en gång i
+skalet (Docker Compose 2.24 eller senare). Eneos image-taggar har inget
+`v`-prefix.
+
+### Skapa hemligheter
+
+Generera separata värden och spara dem i miljöfilerna:
+
+```bash
+openssl rand -hex 32     # JWT_SECRET i env_backend.env
+openssl rand -hex 32     # URL_SIGNING_KEY i env_backend.env
+openssl rand -base64 24  # POSTGRES_PASSWORD i env_backend.env OCH env_db.env
+```
+
+Databaslösenordet måste vara identiskt i backendens och databasens miljöfiler.
+Behåll mallarnas `POSTGRES_USER=postgres` och `POSTGRES_DB=eneo` om du inte också
+anpassar alla anslutningar. Redis nås bara på det interna nätverket och körs
+utan lösenord som standard; vill du kräva ett sätter du `REDIS_PASSWORD` i `.env`
+bredvid `docker-compose.yml`, så läser Redis, backend, worker och
+databasinitieringen samma värde.
+
+För att spara AI-leverantörernas autentiseringsuppgifter krävs en
+`ENCRYPTION_KEY`. Backend-containern ansluter till det externa nätverket
+`proxy_tier`, så skapa nätverket först och generera sedan nyckeln med samma
+backendavbildning som ska köras. Releasepaketet avgör vilken avbildning det blir:
+
+```bash
+docker network create proxy_tier
+docker compose --env-file .env --env-file release.env run --rm --no-deps backend python -m eneo.cli.generate_encryption_key
+```
+
+Spara resultatet som `ENCRYPTION_KEY` i `env_backend.env` och behåll en säker
+kopia för återställning. Nyckeln används också för andra krypterade
+integrationshemligheter.
+
+### Ställ in adresser och TLS
+
+I `env_backend.env`, sätt `PUBLIC_ORIGIN` till den externa adressen, exempelvis
+`https://eneo.example.se`.
+
+I `env_frontend.env`:
+
+| Variabel                     | Värde i referensinstallationen |
+| ---------------------------- | ------------------------------ |
+| `PUBLIC_ORIGIN` och `ORIGIN` | `https://eneo.example.se`      |
+| `ENEO_BACKEND_URL`           | `https://eneo.example.se`      |
+| `ENEO_BACKEND_SERVER_URL`    | `http://backend:8000`          |
+| `PUBLIC_ENEO_BACKEND_URL`    | `https://eneo.example.se`      |
+
+Lägg inte till `/api` i `PUBLIC_ENEO_BACKEND_URL`: klienten lägger till API-sökvägen.
+SSR-anrop till `ENEO_BACKEND_URL` skrivs om till `ENEO_BACKEND_SERVER_URL` och
+går därmed förbi proxyn; lämna variabeln tom för att i stället gå via proxyn.
+När `ENEO_BACKEND_URL` är appens egen adress, som ovan, är dessa anrop rena
+server-till-server-anrop utan webbläsarens `Origin`-huvud och beror inte på
+CORS-tillåtelselistan. En backend på en annan adress måste tillåta appens
+adress, precis som för webbläsaren.
+Byt alla fyra förekomster av `your-domain.com` i Compose-filen och ersätt
+`your-email@domain.com` med adressen för Let's Encrypt.
+
+Lämna det valfria objektlagringsblocket i `.env` utkommenterat om du använder
+PostgreSQL. För inbyggd objektlagring krävs både profil och overlay enligt
+[lagringsguiden](/guides/object-content-storage); använd samma Compose-val vid
+start, stopp, uppgradering och återställning.
+
+### Starta och kontrollera
+
+```bash
+docker compose --env-file .env --env-file release.env up -d
+docker compose ps
+docker compose logs --tail=100 backend worker db-init
+curl -fsS https://eneo.example.se/api/livez
+curl -fsS https://eneo.example.se/api/healthz
+curl -fsS https://eneo.example.se/version
+```
+
+`/api/livez` visar att API-processen svarar. `/api/healthz` kontrollerar också
+worker och innehållslagring. På aktuella avbildningar finns `/api/readyz` som
+alias; äldre utgåvor har bara `/api/healthz`.
+
+Om objektlagring är konfigurerad ska du även kontrollera att
+`detail.object_content.code` är `ready`. Enbart HTTP 200 kan betyda att inline-
+innehåll fungerar medan objektlagringen är degraderad.
+
+Öppna den domän du har konfigurerat. Referensstacken har ingen localhost-route.
+Standardkontot är `user@example.com` med lösenordet `ChangeMePassword1!`.
+`DEFAULT_USER_PASSWORD` måste innehålla minst 12 tecken, annars stoppar
+`db-init` med ett fel. Lösenordet är ett engångslösenord: kontot måste välja
+ett eget vid första inloggningen. `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED`
+är `true` som standard; sätt det till `false` endast i testmiljöer där det
+förvalda lösenordet behöver fortsätta fungera.
+
+Lägg sedan till en leverantör och aktivera modeller under **Admin → Modeller**.
+Se [Konfigurera AI-leverantörer](/guides/ai-providers). Skapa därefter en yta och
+en assistent.
+
+Standardstacken innehåller den isolerade körmiljön för inbyggda verktyg. Under
+**Admin → Verktyg** visas dess anslutning, uppgifter, version och eventuella
+problem; att körmiljön finns aktiverar inga funktioner i sig. Vill du köra utan
+den lägger du till `-f docker-compose.yml -f docker-compose.without-tools.yml`
+i Compose-kommandona. Dokumentuppladdning kräver den allmänna workern och
+webbcrawlning kräver både den allmänna workern och crawler-workern.
+
+## Reverse proxy och nätverk
+
+En egen reverse proxy behöver vidarebefordra `/api/*`, `/scim/*`, `/version`,
+`/openapi.json` och `/docs` till backend. Övrig webbtrafik går till frontend. Bevara
+strömmande svar; buffring kan hindra att chattsvaren visas löpande. Läs den
+engelska versionens avsnitt _Reverse Proxy Requirements_ för detaljer och
+konfigurationsexempel.
+
+Databas och Redis ligger på det interna nätverket `data_net`. Frontend och
+Traefik har ingen direkt åtkomst dit. Moduler använder `module_net`, verktygens
+körmiljö använder `tool_runtime_net` (utan väg till internet, databas eller
+Redis) och valfri objektlagring använder `object_content_net`. Externa backupjobb som
+förut anslöt till databasen via `proxy_tier` behöver köras genom `docker exec`
+eller anslutas till `eneo_data_net`.
+
+## Uppgradera och återställ
+
+Ta databasbackup och, om objektlagrade poster finns, en matchande ögonblicksbild
+av objektlagringen medan skrivningar är stoppade. Behandla dem som en gemensam
+återställningspunkt. Inline-innehåll följer med PostgreSQL-backupen.
+
+```bash
+docker compose exec -T db pg_dump -U postgres eneo | gzip > eneo-backup.sql.gz
+```
+
+En uppgradering som inför varaktiga kunskapsoriginal och äldre fil-/ikonlagring
+kräver en kontrollerad dränering av jobb och stopp av gamla skrivare före
+migrering. Kör inte en rullande uppdatering för den övergången. Följ
+[uppgraderingsguiden för filer och ikoner](/guides/file-icon-storage-upgrade)
+och [backup- och återställningsrutinen](/guides/object-content-storage#back-up-and-restore).
+
+Vid uppgradering byter du ut hela releasepaketet (`release.env` och
+`release.json`) på en gång och behåller det gamla för återställning. Uppdatera
+inte verktygsavbildningen för sig. Från 2.2 vägrar `db-init`, backend, worker
+och webbappen att starta medan en omdöpt miljövariabel är satt utan sin
+ersättare; följ [Uppgradera till 2.2.0](/guides/upgrade-2-2-0) innan du
+uppgraderar dit.
+
+Behåll en kopia av miljöfiler, krypteringsnyckel, releasepaket och exakt
+Compose-kommando. Vid återställning ska databasen och objektlagringen höra
+till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
+
+Vid uppgradering från 2.2 eller från 2.3.0-rc.3 eller tidigare: de utgåvorna
+behöll sökdata (textbitar och inbäddningar) för varje ersatt dokumentversion.
+De räknas mot lagringskvoten men söks aldrig. När den nya versionen kör, ta
+bort dem en gång enligt [Frigör utrymme från tidigare
+versioner](/guides/free-space-earlier-versions). Eneo är tillgängligt under
+tiden, och rensningen kan stoppas och köras igen.
+
+Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
+`stop_grace_period: 2m`, som referensfilen gör; se nästa avsnitt.
+
+## Felsökning och nästa steg
+
+- **502 från proxyn:** kontrollera domänen, containrarnas status och backendloggar.
+- **Inloggning misslyckas:** kontrollera `PUBLIC_ORIGIN` och identitetsleverantörens
+  callback-adress. Se [OIDC-guiderna](/guides/oidc-federation).
+- **Modell saknas eller kan inte sparas:** kontrollera leverantörens uppgifter,
+  att modellen är aktiverad och att `ENCRYPTION_KEY` är satt.
+- **Jobb fastnar:** läs loggarna för båda workrarna och `/api/healthz/crawler`,
+  som kräver installationens super-API-nyckel i `X-API-Key`. Kontrollera
+  kapacitet och anslutning till databas och Redis.
+- **Delat minne i databasen tar slut:** vissa anrop ger HTTP 500 och
+  databasloggen visar `could not resize shared memory segment ... No space left
+  on device`. Disken är inte full: PostgreSQL har slut på `/dev/shm`, ett litet
+  minnesområde i containern som Docker och Podman begränsar till 64 MB om
+  tjänsten inte sätter `shm_size`. Sätt `shm_size: 1gb` på tjänsten `db`, som
+  referensfilens `docker-compose.yml` gör, och skapa om containern med
+  `docker compose up -d db`. Värdet är ett tak, inte reserverat minne. Sätt
+  också `stop_grace_period: 2m`, annars kan en upptagen databas dödas innan
+  dess checkpoint är klar. Tills containern kan skapas om: stoppa parallella
+  frågor utan omstart med `ALTER SYSTEM SET max_parallel_workers_per_gather =
+  0;` följt av `SELECT pg_reload_conf();` i `psql`, starta om backend så att
+  anslutningarna görs om, och återställ med `ALTER SYSTEM RESET
+  max_parallel_workers_per_gather;` när `shm_size` är höjt.
+
+För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till
+**English** på den här sidan. Andra fördjupningar finns i guiderna om
+[SCIM](/guides/scim-provisioning), [SharePoint](/guides/sharepoint-integration)
+och [modulinloggning](/docs/module-authentication).
+
+## Kör Next-betan bredvid den befintliga appen
+
+Den ordinarie Svelte-appen använder `ghcr.io/eneo-ai/eneo-frontend`. Den valfria
+Next-appen använder `ghcr.io/eneo-ai/eneo-web-next`, låst av `ENEO_WEB_NEXT_IMAGE`
+i samma releasepaket. Kör båda mot **en gemensam backend** från det paketet.
+Konton, behörigheter, konversationer, assistenter, filer, workers och databas
+delas. Ändringar i betan påverkar alltså samma data som i den ordinarie appen.
+
+Använd ett separat HTTPS-värdnamn, exempelvis `beta.example.com`, inte ett
+sökvägsprefix. Behåll den ordinarie appens och backendens `PUBLIC_ORIGIN`.
+Betan vidarebefordrar API-anrop och strömmande svar på serversidan. Ingen
+ytterligare databas, Redis, worker eller backend behövs.
+
+1. Ta backup av databas och lagring och prova uppgraderingen i en testmiljö.
+   Kör backendens migreringar en gång för releasen. Betans migreringar för
+   återkoppling och leverantörsstatus ingår i samma kedja; kontrollera att
+   `alembic heads` visar ett enda huvud.
+2. Kopiera `docs/deployment/env_web_next.template` till `env_web_next.env`.
+   Generera en separat `SESSION_SECRET` med `openssl rand -base64 48` och sätt
+   `LEGACY_APP_URL=https://app.example.com` för profilmenyns länk tillbaka.
+   Skydda filen på samma sätt som övriga hemligheter.
+3. Sätt `WEB_NEXT_HOST=beta.example.com` i installationens `.env`. Avbildningen
+   kommer från releasepaketets `ENEO_WEB_NEXT_IMAGE`. Starta med overlay-filen:
+
+   ```bash
+   docker compose --env-file .env --env-file release.env \
+     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+   ```
+
+4. Använd backendhanterad federation vid utrullningen. Lägg till
+   `https://beta.example.com/login/callback` i federationens
+   `additional_redirect_uris` och registrera samma URI hos identitetsleverantören.
+   Behåll den befintliga callback-adressen. Frontendhanterad OIDC är fortfarande
+   experimentell: samtidiga anrop kan återanvända en roterande engångstoken och
+   göra sessionen ogiltig. Förnyelsen samordnas inte mellan anrop eller repliker.
+   Innan det läget släpps krävs gemensam samordning och verifiering av leverantörens
+   tokenrotation. Utvecklingskonfigurationen använder betans `OIDC_*`-variabler
+   och `https://beta.example.com/auth/callback`.
+5. För SharePoint och Confluence behåller du `OAUTH_CALLBACK_URL` för den
+   ordinarie appen och lägger till följande i backendens miljö:
+
+   ```dotenv
+   OAUTH_CALLBACK_URLS=["https://beta.example.com/integrations/callback/token/"]
+   ```
+
+   Registrera båda fullständiga callback-adresserna hos leverantören, inklusive
+   avslutande snedstreck. Backend accepterar bara exakt registrerade adresser
+   och binder valet till den inloggade användarens OAuth-engångstillstånd.
+   Klienter som inte skickar en adress använder standardadressen. Starta om
+   backend efter miljöändringen och slutför eller starta om pågående
+   integrationsinloggningar vid uppgraderingen.
+6. Kontrollera lösenordsinloggning, federerad inloggning, utloggning, strömmande
+   chatt, filer, organisationsbehörigheter och båda integrationsleverantörerna i
+   respektive app innan användare bjuds in. Varje app har en egen sessionskaka
+   för sitt värdnamn. SSO kan återanvända leverantörens session, men lokal
+   utloggning ur en app loggar inte nödvändigtvis ut ur den andra.
+
+### Visa inbjudan till betan
+
+Sätt följande körmiljövariabler för **Svelte-appen** och starta om den:
+
+```dotenv
+SHOW_NEW_APP_BANNER=true
+NEW_APP_URL=https://beta.example.com
+```
+
+Flaggan är `false` som standard. Både en aktiverad flagga och en giltig
+HTTP(S)-adress krävs. Inbjudan visas för inloggade användare och öppnar en ny
+flik. `false` döljer inbjudan, men betan är fortfarande nåbar via sin adress:
+bannern styr upptäckbarhet, inte åtkomst.
+
+För att dra tillbaka betan döljer du inbjudan och stoppar `web-next` eller tar
+bort dess ingress. Låt gemensam backend och databas fortsätta köras. Nedgradera
+inte databasen för att stänga betan; återställning av backend kräver en separat,
+testad migrerings- eller återställningsplan som bevarar användarnas data.
+
+Inför release krävs ordinarie CI/E2E-kontroller, granskning av källkod,
+beroenden och hemligheter samt installationens säkerhetskontroller av
+avbildningar. Läs den tillfälliga beroendeåtgärden i
+`frontend/patches/SECURITY.md`. Automatiska kontroller ersätter inte provning av
+autentisering, organisationsisolering och tillgänglighet i testmiljön med de
+konfigurerade leverantörerna.

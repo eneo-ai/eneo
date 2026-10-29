@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.orm import InstrumentedAttribute
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import Apps
@@ -13,18 +15,47 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.widget_templates_table import WidgetTemplates
+from eneo.database.tables.widgets_table import Widgets
 from eneo.icons.icon import IconMetadata, IconMetadataCreate, IconNotAttachableError
 from eneo.main.models import NotProvided, is_provided
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
+
+def _json_icon_id(
+    column: InstrumentedAttribute[Any], *keys: str
+) -> sa.ColumnElement[Any]:
+    """An icon id stored inside a JSONB document, as a uuid for comparison."""
+    expr: Any = column
+    for key in keys:
+        expr = expr[key]
+    return sa.cast(expr.astext, sa.Uuid())
+
+
 # Every column that shows an icon. Their foreign keys are ON DELETE SET NULL and
-# icon ids are public, so an icon is only deleted once none of them references it.
-ICON_REFERENCES = (
+# icon ids are public, so an icon is only deleted once nothing references it.
+ICON_REFERENCE_COLUMNS: tuple[InstrumentedAttribute[Any], ...] = (
     Assistants.icon_id,
     Apps.icon_id,
     Spaces.icon_id,
     GroupChatsTable.icon_id,
+)
+
+# Icons shown from inside JSONB documents: the widget persona avatar on a
+# widget, on a template's draft and in its published release. A template's
+# document is copied onto every follower, so a foreign key could not express
+# these; no cascade clears them either, which is why the delete must refuse
+# while one remains.
+ICON_REFERENCE_DOCUMENTS: tuple[sa.ColumnElement[Any], ...] = (
+    _json_icon_id(Widgets.persona, "avatar_icon_id"),
+    _json_icon_id(WidgetTemplates.persona, "avatar_icon_id"),
+    _json_icon_id(WidgetTemplates.published, "persona", "avatar_icon_id"),
+)
+
+ICON_REFERENCES: tuple[InstrumentedAttribute[Any] | sa.ColumnElement[Any], ...] = (
+    *ICON_REFERENCE_COLUMNS,
+    *ICON_REFERENCE_DOCUMENTS,
 )
 
 
@@ -190,8 +221,8 @@ class IconRepository:
                 .where(
                     Icons.id == icon_id,
                     *(
-                        ~sa.exists().where(column == Icons.id)
-                        for column in ICON_REFERENCES
+                        ~sa.exists().where(reference == Icons.id)
+                        for reference in ICON_REFERENCES
                     ),
                 )
                 .returning(Icons.id)
@@ -263,9 +294,9 @@ class IconRepository:
         await self.delete_if_unreferenced(previous)
 
     async def lock_shown_in_space(self, space_id: UUID) -> list[UUID]:
-        """Lock the space, then the assistants, apps and group chats in it, as
-        deleting the space would, and return the icons they show in id order.
-        Their icons cannot change until the delete commits."""
+        """Lock the space, then the assistants, apps, group chats and widgets
+        in it, as deleting the space would, and return the icons they show in
+        id order. Their icons cannot change until the delete commits."""
         icon_ids: set[UUID | None] = set()
         for shown in (
             sa.select(Spaces.icon_id).where(Spaces.id == space_id),
@@ -273,6 +304,9 @@ class IconRepository:
             sa.select(Apps.icon_id).where(Apps.space_id == space_id),
             sa.select(GroupChatsTable.icon_id).where(
                 GroupChatsTable.space_id == space_id
+            ),
+            sa.select(_json_icon_id(Widgets.persona, "avatar_icon_id")).where(
+                Widgets.space_id == space_id
             ),
         ):
             icon_ids.update(await self.session.scalars(shown.with_for_update()))

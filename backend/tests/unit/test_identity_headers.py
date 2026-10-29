@@ -39,6 +39,12 @@ class TestBuildIdentityHeaders:
     def test_returns_empty_when_no_user(self):
         assert build_identity_headers(None, None) == {}
 
+    def test_returns_empty_for_widget_visitor(self):
+        # The synthetic visitor user carries the widget's name and a made-up
+        # email; none of it describes a person a server could act for.
+        visitor = _user(active_widget=SimpleNamespace(widget_id=uuid4()))
+        assert build_identity_headers(visitor, None) == {}
+
     def test_emits_all_headers_when_populated(self):
         user = _user()
         headers = build_identity_headers(user, user.tenant)

@@ -5,7 +5,7 @@ Which pages on [docs.eneo.ai](https://docs.eneo.ai) describe which parts of the 
 - **Changing code?** Find the rows whose paths you touched and update those pages in the same pull request when user-visible behaviour, configuration, endpoints, defaults, commands or UI labels change. Follow [AUTHORING.md](AUTHORING.md) to choose the target branch. This map is a review aid, not an automated guarantee that the prose is current.
 - **Changing docs?** Verify claims against the files listed for that page.
 
-Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths are relative to the repository root. Globs are indicative, not exhaustive — when in doubt, the page whose subject matches wins.
+Page paths are relative to `frontend/apps/docs-site/src/content/`. Swedish translations use the same relative page paths under `src/content/sv/`; update existing translations together with the English page. Code paths are relative to the repository root. Globs are indicative, not exhaustive — when in doubt, the page whose subject matches wins.
 
 ## Release announcements
 
@@ -88,6 +88,9 @@ result guards.
 | `frontend/apps/web/src/lib/features/file-preview/**`, `frontend/apps/web/src/lib/features/chat/documentVersions.ts`, `backend/src/eneo/conversations/document_export.py`                                                                                                                                           | `guides/capabilities.mdx` (native document workspace, versions, previews and exports)                                                 |
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                                                                                                                                | `guides/skills.mdx`                                                                                                                   |
 | `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/integrations/**`                                                                                                                       | `guides/sharepoint-integration.mdx`                                                                                                   |
+| `backend/src/eneo/widgets/**`, `backend/src/eneo/server/dependencies/widget_auth.py`, `frontend/packages/widget-loader/**`, `frontend/apps/web/src/lib/features/widget/**`, `frontend/apps/web/src/routes/(public)/embed/**`, `frontend/apps/web/src/routes/(app)/admin/widgets/**`                                | `guides/embed-widget.mdx`                                                                                                             |
+| `frontend/apps/web/src/routes/(public)/widget/**` (loader, saved settings), `frontend/apps/web/src/routes/(app)/documents/**` (source references), `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/widget/**`, `WIDGET_*` in `backend/src/eneo/main/config.py`                       | `guides/embed-widget.mdx`                                                                                                             |
+| Visitor reach: `VISITOR_CAPABILITY_PURPOSES` in `backend/src/eneo/assistants/assistant_service.py`, `backend/src/eneo/mcp_servers/infrastructure/identity_headers.py`, the `/{id}/widget-status/` route in `backend/src/eneo/assistants/api/assistant_router.py`                                                   | `guides/embed-widget.mdx`, `guides/capabilities.mdx`, `guides/mcp-servers.mdx`                                                        |
 
 ## Storage, workers and operations
 
@@ -109,7 +112,7 @@ result guards.
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`, `.github/ISSUE_TEMPLATE/**` (template choice and contact links), `.github/pull_request_template.md`                                     | `contributing/index.mdx`            |
 | `.github/CODEOWNERS`, team roles and repository rulesets (GitHub settings), the "Repository Access and Change Control" section of `docs/SECURITY.md`                                                                   | `contributing/governance.mdx`       |
-| `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
+| `frontend/apps/docs-site/**`, `frontend/apps/web/src/lib/core/docs.ts` (site languages, publication and app docs links)                                                                                                | `frontend/apps/docs-site/README.md` |
 
 Bundled runtime lifecycle and diagnostics (`mcp_servers/application/runtime_status.py`,
 deployment setup and Compose) are documented in `docs/builtin-tool-servers.mdx`,

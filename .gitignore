@@ -38,6 +38,8 @@ REVIEW_PLAN.md
 REVIEW_REPORT.md
 chat-*.png
 frontend/apps/web/src/**/__screenshots__/
+frontend/packages/widget-loader/src/**/__screenshots__/
+frontend/packages/widget-loader/.vitest-attachments/
 notes/
 !docs/goals/*/notes/
 !docs/goals/*/notes/*.md

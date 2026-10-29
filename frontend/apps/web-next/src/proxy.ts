@@ -8,6 +8,13 @@ import {
   type SessionPayload
 } from "@/lib/auth/session-codec";
 import { OIDC_SESSION_MAX_AGE_SECONDS, SESSION_COOKIE } from "@/lib/auth/session";
+import {
+  EMBED_LOCALE_HEADER,
+  EMBED_SCHEME_HEADER,
+  embedPolicy,
+  parseEmbedPath,
+  type EmbedPolicy
+} from "@/features/widget/server/embed-policy";
 
 /**
  * Optimistic auth gating + the sliding OIDC refresh. Real authorization is
@@ -28,7 +35,16 @@ const PUBLIC_PREFIXES = [
   "/invite",
   // Gates the session itself so its login redirect carries its own headers.
   "/module-login",
-  "/integrations/callback"
+  "/integrations/callback",
+  // The embeddable widget: the chat a visitor of another site sees, the
+  // loader's script, stylesheet and settings, and the visitor API behind
+  // them (src/app/api/v1/widgets, src/app/api/v1/icons). None of it has a
+  // session; a visitor's token is its own bearer header.
+  "/embed",
+  "/en/embed",
+  "/widget",
+  "/api/v1/widgets",
+  "/api/v1/icons"
 ];
 
 function createNonce(): string {
@@ -56,9 +72,9 @@ export function buildContentSecurityPolicy(
     "font-src 'self' data:",
     "media-src 'self' blob: data:",
     // Signed file previews are fetched through our API proxy and framed from
-    // an in-memory blob; interactive tool views come from their own origin.
-    // Other frame origins remain blocked.
-    ["frame-src blob:", ...frameOrigins].join(" "),
+    // an in-memory blob; the widget editor frames its own embed page; tool
+    // views come from their own origin. Other frame origins remain blocked.
+    ["frame-src 'self' blob:", ...frameOrigins].join(" "),
     `connect-src 'self'${isDevelopment ? " ws: http: https:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
@@ -70,6 +86,37 @@ export function buildContentSecurityPolicy(
     ...(isDevelopment ? [] : ["upgrade-insecure-requests"])
   ];
   return directives.join("; ");
+}
+
+/** `csp` with these directives set (replacing any with the same name). */
+function withDirectives(csp: string, directives: Record<string, string>): string {
+  const kept = csp.split("; ").filter((directive) => !(directive.split(" ")[0]! in directives));
+  return [...kept, ...Object.entries(directives).map(([name, value]) => `${name} ${value}`)].join(
+    "; "
+  );
+}
+
+/**
+ * The policy of an embed page: the app's own, framed only where the widget's
+ * configuration allows (the loader's host sites; never on the stand-alone
+ * page), showing no image from outside Eneo and connecting to nothing but
+ * itself: answer Markdown can carry any image URL, and an injected one would
+ * ship the visitor's question to a third party (the visitor API is proxied
+ * under this origin). The proof-of-work widget (ALTCHA) spawns its workers
+ * from blob: URLs. The page never frames anything itself.
+ */
+export function buildEmbedContentSecurityPolicy(
+  nonce: string,
+  policy: Pick<EmbedPolicy, "frameAncestors">,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): string {
+  return withDirectives(buildContentSecurityPolicy(nonce, nodeEnv, []), {
+    "frame-ancestors": policy.frameAncestors,
+    "img-src": "'self' blob: data:",
+    "frame-src": "'none'",
+    "worker-src": "'self' blob:",
+    "base-uri": "'none'"
+  });
 }
 
 function createSecurityRequestHeaders(request: NextRequest, nonce: string, csp: string): Headers {
@@ -113,8 +160,19 @@ function loginRedirect(request: NextRequest, csp: string) {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const nonce = createNonce();
-  const csp = buildContentSecurityPolicy(nonce);
+  // An embed page is framed by other sites and starts in the language and
+  // colour scheme of its widget, so its policy is decided here from the
+  // widget's configuration, before the page renders.
+  const embed = parseEmbedPath(pathname);
+  const embedHeaders = embed ? await embedPolicy(embed, request.nextUrl.searchParams) : null;
+  const csp = embedHeaders
+    ? buildEmbedContentSecurityPolicy(nonce, embedHeaders)
+    : buildContentSecurityPolicy(nonce);
   const securityRequestHeaders = createSecurityRequestHeaders(request, nonce, csp);
+  if (embedHeaders) {
+    securityRequestHeaders.set(EMBED_LOCALE_HEADER, embedHeaders.locale);
+    securityRequestHeaders.set(EMBED_SCHEME_HEADER, embedHeaders.scheme);
+  }
 
   // SameSite cookies also accompany requests from sibling subdomains. Bind
   // mutations to the configured app origin, never a forwarded Host header.

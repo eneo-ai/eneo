@@ -1610,6 +1610,7 @@
   "integration_announce_sync_stopped": "Sync of {name} is no longer running",
   "file_preview_previous_version": "Previous version",
   "file_preview_next_version": "Next version",
+  "templates": "Templates",
   "integration_activity_reconcile_warning": "<label>Reconciliation warning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}",
   "integration_source_collapse_folder": "Collapse {name}",
@@ -1622,5 +1623,9 @@
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself.",
+  "widget_admin_snippet_description": "Paste this once on the website, preferably at the end of the page's body. The floating version updates automatically with Eneo.",
+  "widget_admin_overview_failed": "The overview could not be loaded.",
+  "widget_admin_policy_failed": "The policy could not be loaded.",
+  "widget_admin_template_failed": "The template could not be loaded."
 }

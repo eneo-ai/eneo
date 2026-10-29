@@ -1610,6 +1610,7 @@
   "integration_announce_sync_stopped": "Synk av {name} pågår inte längre",
   "file_preview_previous_version": "Föregående version",
   "file_preview_next_version": "Nästa version",
+  "templates": "Mallar",
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}",
   "integration_source_collapse_folder": "Fäll ihop {name}",
@@ -1622,5 +1623,9 @@
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
   "chat_md_diagram_label": "Diagram",
-  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv.",
+  "widget_admin_snippet_description": "Klistra in detta en gång på webbplatsen, helst sist i sidans body. Den flytande versionen uppdateras automatiskt med Eneo.",
+  "widget_admin_overview_failed": "Översikten kunde inte laddas.",
+  "widget_admin_policy_failed": "Policyn kunde inte laddas.",
+  "widget_admin_template_failed": "Mallen kunde inte laddas."
 }

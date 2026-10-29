@@ -262,7 +262,7 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+      - name: Verify File/Icon upgrade, optional cleanup and widget migrations on PostgreSQL 13
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
         # restore rehearsal needs its own application/database session.
@@ -270,7 +270,8 @@ jobs:
         run: |
           uv run pytest -v --durations=25 -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
-            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            tests/integration/migrations/test_widget_migrations.py
           uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
@@ -317,8 +318,11 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # The web app's server tests read the loader's dist like the app does.
       - name: Build workspace dependencies
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Run type checks
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' check
@@ -342,7 +346,16 @@ jobs:
         run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
+        # Usually ~2 min. Vitest browser mode has no per-file timeout: a test
+        # that unloads the tester iframe (e.g. a real navigation) stalls the
+        # run silently, so the step bounds it.
+        timeout-minutes: 10
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
+
+      # Builds the loader first (its size budget is enforced by the build) and
+      # runs its element tests in the same Chromium.
+      - name: Run widget loader tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test
 
   frontend-web-next:
     name: Frontend (web-next)
@@ -403,7 +416,9 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Install Playwright Chromium
         uses: ./.github/actions/setup-playwright

@@ -116,6 +116,8 @@ describe("spaceRoute", () => {
     expect(spaceRoute(["assistants", "a1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["apps", "p1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["group-chats", "g1", "edit"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["assistants", "a1", "widget"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["apps", "p1", "widget"])).not.toEqual({ kind: "editor" });
     // Only the editor itself: an app's run page and results keep the frame.
     expect(spaceRoute(["apps", "p1", "results", "r1"])).toMatchObject({ kind: "page" });
     expect(spaceRoute(["skills", "s1", "edit"])).toMatchObject({ kind: "page", section: "skills" });
