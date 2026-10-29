@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
-import { EneoError, type Conversation, type UploadedFile } from "@eneo/eneo-js";
+import {
+  EneoError,
+  type Conversation,
+  type ConversationSparse,
+  type Paginated,
+  type UploadedFile
+} from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { writable } from "svelte/store";
 import { UploadsNotReadyError } from "$lib/features/attachments/AttachmentManager";
@@ -33,6 +39,7 @@ function chatService(
     get?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
     initialConversation?: Conversation | null;
+    initialHistory?: Paginated<ConversationSparse>;
   } = {}
 ) {
   return new ChatService({
@@ -52,9 +59,55 @@ function chatService(
     } as never,
     chatPartner: assistantPartner(),
     initialConversation: overrides.initialConversation ?? null,
-    initialHistory: { items: [], count: 0, total_count: 0 }
+    initialHistory: overrides.initialHistory ?? { items: [], count: 0, total_count: 0 }
   });
 }
+
+describe("ChatService loaded page data", () => {
+  it("makes the selected conversation and first history page available immediately", () => {
+    const conversation = { id: "session-1", name: "Saved", messages: [] };
+    const history = {
+      items: [{ id: "session-1", name: "Saved" }],
+      count: 1,
+      total_count: 2,
+      next_cursor: "next-page"
+    };
+    const chat = chatService(vi.fn(), {
+      initialConversation: conversation,
+      initialHistory: history
+    });
+
+    expect(chat.currentConversation).toEqual(conversation);
+    expect(chat.loadedConversations).toEqual(history.items);
+    expect(chat.totalConversations).toBe(2);
+    expect(chat.hasMoreConversations).toBe(true);
+  });
+
+  it("clears the previous conversation, history and diagnostics on an empty context replacement", () => {
+    const chat = chatService(vi.fn(), {
+      initialConversation: { id: "session-1", name: "Saved", messages: [] },
+      initialHistory: {
+        items: [{ id: "session-1", name: "Saved" }],
+        count: 1,
+        total_count: 2,
+        next_cursor: "next-page"
+      }
+    });
+    chat.debugPanelOpen = true;
+    chat.lockedInputTokens = 42;
+
+    chat.init({ eneo: {} as never, chatPartner: assistantPartner({ id: "assistant-2" }) });
+
+    expect(chat.partner.id).toBe("assistant-2");
+    expect(chat.currentConversation.id).toBe("");
+    expect(chat.currentConversation.messages).toEqual([]);
+    expect(chat.loadedConversations).toEqual([]);
+    expect(chat.totalConversations).toBe(0);
+    expect(chat.hasMoreConversations).toBe(false);
+    expect(chat.debugPanelOpen).toBe(false);
+    expect(chat.lockedInputTokens).toBe(0);
+  });
+});
 
 function completedAsk() {
   return vi.fn().mockImplementation(async ({ callbacks }) => {
