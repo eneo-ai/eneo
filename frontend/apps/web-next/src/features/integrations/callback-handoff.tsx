@@ -1,11 +1,12 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useTranslations } from "use-intl";
+import { useEffect, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { INTEGRATION_CALLBACK_MESSAGE_TYPE } from "@/features/integrations/callback-message";
 import { SHAREPOINT_OAUTH_STATE_KEY } from "@/features/admin/integrations/integrations";
+import { navigateTo } from "@/lib/navigate-to";
 
 type View = { status: "processing" | "done" | "error"; errorMessage?: string };
 
@@ -57,7 +58,7 @@ async function completeServiceAccount(stored: string): Promise<View | null> {
         body: { auth_code: code, state }
       })
     );
-    window.location.href = "/admin/integrations";
+    navigateTo("/admin/integrations", { replace: true });
     return { status: "done" };
   } catch (error) {
     return { status: "error", errorMessage: error instanceof Error ? error.message : undefined };
@@ -67,27 +68,25 @@ async function completeServiceAccount(stored: string): Promise<View | null> {
 export function CallbackHandoff() {
   const t = useTranslations();
   const [view, setView] = useState<View>({ status: "processing" });
+  const started = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    const stored = sessionStorage.getItem(SHAREPOINT_OAUTH_STATE_KEY);
-
-    if (stored) {
-      void completeServiceAccount(stored).then((result) => {
-        if (!cancelled) setView(result ?? runPopupHandoff());
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const result = runPopupHandoff();
-    queueMicrotask(() => {
-      if (!cancelled) setView(result);
+    if (started.current) return;
+    started.current = true;
+    void Promise.resolve().then(async () => {
+      try {
+        // A popup belongs to its opener, even if it inherited a stored state
+        // from a separate full-page service-account sign-in.
+        if (window.opener || new URL(window.location.href).searchParams.has("error")) {
+          setView(runPopupHandoff());
+          return;
+        }
+        const stored = sessionStorage.getItem(SHAREPOINT_OAUTH_STATE_KEY);
+        setView((stored && (await completeServiceAccount(stored))) || { status: "error" });
+      } catch {
+        setView({ status: "error" });
+      }
     });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   return (

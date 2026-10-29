@@ -11,7 +11,8 @@ const SESSION_MISMATCH = 9080;
 
 export type SessionSnapshot =
   | { status: "unbound" }
-  | { status: "bound"; generation: string | null; checkError?: unknown }
+  | { status: "bound"; generation: string | null; logoutGeneration?: string; checkError?: unknown }
+  | { status: "deactivated"; generation: string }
   | { status: "stale"; destination: string };
 
 let snapshot: SessionSnapshot = { status: "unbound" };
@@ -40,6 +41,9 @@ function staleError(): EneoApiError {
 
 function assertCurrent(): void {
   if (snapshot.status === "stale") throw staleError();
+  if (snapshot.status === "deactivated") {
+    throw new EneoApiError("The organisation is deactivated.", { status: 403, code: 9025 });
+  }
 }
 
 function publicAuthPage(): boolean {
@@ -113,6 +117,7 @@ export const handleRefusal: (response: Response, requestUrl: string) => Promise<
 /** Cookie requests and cache-only route gates share this document's session check. */
 export async function requireBrowserSession(): Promise<string> {
   if (pendingProbe) await pendingProbe;
+  assertCurrent();
   if (snapshot.status === "unbound") {
     throw new EneoApiError("The browser session has not been checked.", { status: 503 });
   }
@@ -142,7 +147,7 @@ export function initializeBrowserSession(): Promise<void> {
   if (snapshot.status !== "unbound") return Promise.resolve();
   return checkBrowserSession().catch((error: unknown) => {
     // Render the blocking state if initial navigation could not leave.
-    if (snapshot.status !== "stale") throw error;
+    if (snapshot.status !== "stale" && snapshot.status !== "deactivated") throw error;
   });
 }
 
@@ -163,8 +168,10 @@ async function probeSession(): Promise<void> {
   assertCurrent();
   const before = snapshot;
   const headers = new Headers();
-  if (before.status === "bound" && before.generation !== null) {
-    headers.set(SESSION_GENERATION_HEADER, before.generation);
+  const expected =
+    before.status === "bound" ? (before.generation ?? before.logoutGeneration) : undefined;
+  if (expected) {
+    headers.set(SESSION_GENERATION_HEADER, expected);
   }
   try {
     // Deliberately native fetch: this is the check that prepares other requests.
@@ -176,6 +183,7 @@ async function probeSession(): Promise<void> {
     });
     assertCurrent();
     let generation: string | null;
+    let logoutGeneration: string | undefined;
     if (response.status === 204) {
       generation = response.headers.get(SESSION_GENERATION_HEADER);
       if (!generation)
@@ -183,7 +191,26 @@ async function probeSession(): Promise<void> {
     } else if (response.status === 401) {
       if ((await errorCodeFromResponse(response)) === SESSION_MISMATCH) makeStale();
       generation = null;
+      // An expired cookie still needs a binding for logout. It never grants
+      // authenticated reads or lets this document adopt a later session.
+      logoutGeneration = response.headers.get(SESSION_GENERATION_HEADER) ?? undefined;
     } else {
+      if (
+        before.status === "unbound" &&
+        response.status === 403 &&
+        (await errorCodeFromResponse(response)) === 9025
+      ) {
+        // No identity was admitted. Only public recovery may render; retrying
+        // starts a new document, just as recovering a stale bound session does.
+        const generation = response.headers.get(SESSION_GENERATION_HEADER);
+        if (!generation)
+          throw new EneoApiError("The session probe returned no generation.", { status: 502 });
+        publish({ status: "deactivated", generation });
+        if (!["/deactivated", "/logout"].includes(window.location.pathname)) {
+          navigateTo("/deactivated");
+        }
+        return;
+      }
       await handleRefusal(response, SESSION_PROBE);
       let body: unknown;
       try {
@@ -194,8 +221,12 @@ async function probeSession(): Promise<void> {
       throw apiErrorFromResponse(response, body);
     }
     assertCurrent();
-    if (before.status === "bound" && before.generation !== generation) makeStale();
-    publish({ status: "bound", generation });
+    if (
+      before.status === "bound" &&
+      (before.generation !== generation || before.logoutGeneration !== logoutGeneration)
+    )
+      makeStale();
+    publish({ status: "bound", generation, ...(logoutGeneration ? { logoutGeneration } : {}) });
   } catch (error) {
     if (snapshot.status === "bound") publish({ ...snapshot, checkError: error });
     throw error;

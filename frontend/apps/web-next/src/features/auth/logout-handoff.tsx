@@ -17,9 +17,14 @@ export function logoutTarget({ reason, next }: { reason?: string; next?: string 
 
 async function signOut(): Promise<boolean> {
   const session = getSessionSnapshot();
+  if (session.status === "stale" || session.status === "unbound") return false;
   const headers: Record<string, string> = {};
-  if (session.status === "bound" && session.generation !== null) {
-    headers[SESSION_GENERATION_HEADER] = session.generation;
+  const generation =
+    session.status === "deactivated"
+      ? session.generation
+      : (session.generation ?? session.logoutGeneration);
+  if (generation) {
+    headers[SESSION_GENERATION_HEADER] = generation;
   }
   // Public identity operation: it must also work when no cookie is present.
   const response = await fetch("/api/v1/auth/session/logout/", {

@@ -2,6 +2,8 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { DeactivatedNotice } from "@/features/auth/deactivated-page";
+import { runtimeConfig } from "@/lib/runtime-config";
 import {
   checkBrowserSession,
   getSessionSnapshot,
@@ -19,6 +21,23 @@ export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (session.status === "stale") heading.current?.focus();
   }, [session.status]);
+
+  if (session.status === "deactivated" && window.location.pathname === "/logout") {
+    // This fresh document has no admitted identity or private data. The public
+    // logout endpoint checks its cookie fingerprint. A stale bound page cannot.
+    return children;
+  }
+  if (
+    session.status === "deactivated" ||
+    (session.status === "stale" && session.destination === "/deactivated")
+  ) {
+    return (
+      <DeactivatedNotice
+        headingRef={heading}
+        accessibilityStatementUrl={runtimeConfig().accessibility_statement_url}
+      />
+    );
+  }
 
   if (session.status === "stale") {
     return (

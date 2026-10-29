@@ -70,7 +70,8 @@ def safe_next_path(value: str | None) -> str:
 
 
 # The session generation: on a response, the cookie session the request was
-# admitted with; on a request, the one the sending page was loaded with. A
+# admitted with (the bootstrap probe also names a rejected cookie for logout);
+# on a request, the one the sending page was loaded with. A
 # fingerprint, neither a credential nor a CSRF token.
 SESSION_GENERATION_HEADER = "Eneo-Session-Generation"
 # Request-state keys: the generation of the cookie OAUTH2_SCHEME selected, and
@@ -209,6 +210,20 @@ def admit_session(connection: HTTPConnection) -> None:
 
 def admitted_session_generation(scope: Scope) -> str | None:
     return scope.get("state", {}).get(_ADMITTED_GENERATION)
+
+
+def response_session_generation(scope: Scope) -> str | None:
+    """Name an admitted session, or the bootstrap cookie that logout may clear.
+
+    A rejected probe must still let its fresh document clear an expired or
+    restricted cookie without risking a replacement session. Selection already
+    checked the origin gate and any expected generation. Only a 204 probe admits
+    authenticated work; a fingerprint on a refusal is solely a logout binding.
+    Other API responses continue to require canonical admission.
+    """
+    if scope.get("method") == "GET" and scope.get("path") == "/api/v1/auth/session/":
+        return scope.get("state", {}).get(_SELECTED_GENERATION)
+    return admitted_session_generation(scope)
 
 
 def refuse_superseded_session(request: Request, token: str) -> None:

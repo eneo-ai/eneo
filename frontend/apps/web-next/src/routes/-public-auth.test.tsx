@@ -11,6 +11,7 @@ const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
 const GENERATION = "Eneo-Session-Generation";
 let generation: string | null;
+let bootstrapRefusal: Response | undefined;
 let replies: Map<string, unknown>;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -19,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sessionStorage.clear();
   generation = null;
+  bootstrapRefusal = undefined;
   replies = new Map<string, unknown>([
     [
       "/api/v1/auth/federation-status",
@@ -36,6 +38,7 @@ beforeEach(() => {
     const path = new URL(input instanceof Request ? input.url : String(input), window.location.href)
       .pathname;
     if (path === "/api/v1/auth/session/") {
+      if (bootstrapRefusal) return bootstrapRefusal.clone();
       return generation
         ? new Response(null, { status: 204, headers: { [GENERATION]: generation } })
         : new Response(null, { status: 401 });
@@ -44,7 +47,7 @@ beforeEach(() => {
     const reply = await replies.get(path);
     if (reply instanceof Response) return reply.clone();
     return Response.json(reply, {
-      headers: path === "/api/v1/users/me/" && generation ? { [GENERATION]: generation } : {}
+      headers: generation && !path.startsWith("/api/v1/auth/") ? { [GENERATION]: generation } : {}
     });
   });
   vi.stubGlobal("fetch", fetcher);
@@ -221,8 +224,252 @@ it("never signs out or starts authentication while preloading", async () => {
   fetcher.mockClear();
   await router.preloadRoute({ to: "/logout" });
   await router.preloadRoute({ to: "/login/switch-organisation" });
+  await router.preloadRoute({ to: "/deactivated" });
+  await router.preloadRoute({ to: "/module-login" });
+  await router.preloadRoute({ to: "/integrations/callback/token" });
   expect(fetcher).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it("renders suspended-tenant recovery from the real root boot refusal", async () => {
+  bootstrapRefusal = Response.json(
+    { message: "Suspended", eneo_error_code: 9025 },
+    { status: 403, headers: { [GENERATION]: "suspended" } }
+  );
+  await route("/deactivated");
+  expect(
+    await screen.findByRole("heading", { name: messages.organisation_deactivated })
+  ).toBeTruthy();
+  expect(screen.getByRole("link", { name: messages.logout }).getAttribute("href")).toBe("/logout");
+  expect(screen.getByRole("link", { name: messages.retry }).getAttribute("href")).toBe(
+    "/deactivated"
+  );
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+  expect(navigate).not.toHaveBeenCalled();
+  await expectNoAxeViolations();
+});
+
+it("lets a fresh suspended logout document clear its unusable cookie once", async () => {
+  bootstrapRefusal = Response.json(
+    { message: "Suspended", eneo_error_code: 9025 },
+    { status: 403, headers: { [GENERATION]: "suspended" } }
+  );
+  await route("/logout");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?message=logout", { replace: true })
+  );
+  expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(1);
+  expect(callsTo("/api/v1/auth/session/logout/")[0]![1]?.headers).toEqual({
+    [GENERATION]: "suspended"
+  });
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+});
+
+it("clears the expired cookie identified by bootstrap after a password change", async () => {
+  bootstrapRefusal = Response.json(
+    { message: "Expired", eneo_error_code: 9005 },
+    { status: 401, headers: { [GENERATION]: "expired" } }
+  );
+  await route("/logout?reason=password_changed&next=%2Fadmin");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/login?message=password_changed&next=%2Fadmin",
+      { replace: true }
+    )
+  );
+  expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(1);
+  expect(callsTo("/api/v1/auth/session/logout/")[0]![1]?.headers).toEqual({
+    [GENERATION]: "expired"
+  });
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+});
+
+it("self-heals an active organisation through a generation-bound read", async () => {
+  generation = "reactivated";
+  await route("/deactivated");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/spaces/personal/chat", { replace: true })
+  );
+  const request = callsTo("/api/v1/users/me/")[0]![0] as Request;
+  expect(request.headers.get(GENERATION)).toBe(generation);
+});
+
+it("returns a deactivated-page visitor with an expired session to login", async () => {
+  generation = "expired-session";
+  replies.set("/api/v1/users/me/", new Response(null, { status: 401 }));
+  await route("/deactivated");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true })
+  );
+});
+
+it("shows a retryable read error when checking whether an organisation was reactivated", async () => {
+  generation = "reactivated";
+  const user = replies.get("/api/v1/users/me/");
+  replies.set("/api/v1/users/me/", new Response(null, { status: 503 }));
+  await route("/deactivated");
+  const retry = await screen.findByRole("button", { name: /Försök igen/ });
+  expect(navigate).not.toHaveBeenCalled();
+  expect(screen.queryByText(messages.access_disabled)).toBeNull();
+  replies.set("/api/v1/users/me/", user);
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/spaces/personal/chat", { replace: true })
+  );
+});
+
+it("blocks a previously admitted page when the organisation is suspended during its read", async () => {
+  generation = "session-a";
+  replies.set(
+    "/api/v1/users/me/",
+    Response.json({ message: "Suspended", eneo_error_code: 9025 }, { status: 403 })
+  );
+  await route("/deactivated");
+  await waitFor(async () =>
+    expect((await import("@/lib/api/refusal")).getSessionSnapshot()).toEqual({
+      status: "stale",
+      destination: "/deactivated"
+    })
+  );
+  expect(screen.getByRole("link", { name: messages.logout }).getAttribute("href")).toBe("/logout");
+  expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(0);
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it.each(["/invite", "/invite/abc"])("renders the invitation notice at %s", async (path) => {
+  await route(path);
+  expect(await screen.findByRole("heading", { name: messages.invite_title })).toBeTruthy();
+  expect(screen.getByRole("link", { name: messages.invite_go_to_login }).getAttribute("href")).toBe(
+    "/login"
+  );
+});
+
+it("keeps an anonymous password-change continuation on this installation", async () => {
+  const router = await route("/password-change?next=https://evil.example");
+  await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+  expect(router.state.location.search.next).toBe("/spaces/personal/chat");
+  const target = new URL(navigate.mock.calls[0]![0], window.location.origin);
+  expect(target.pathname).toBe("/login");
+  expect(target.searchParams.get("next")).toBe("/password-change?next=%2Fspaces%2Fpersonal%2Fchat");
+});
+
+it("shows the local password fields and save action outside the authenticated shell", async () => {
+  generation = "session-a";
+  replies.set("/api/v1/users/me/", {
+    id: "user-a",
+    email: "test@example.test",
+    password_status: { change_required: true, reason: "admin_set" },
+    password_change: {
+      source: "eneo",
+      policy: {
+        min_length: 12,
+        max_bytes: 72,
+        requires_uppercase: true,
+        requires_lowercase: true,
+        requires_number: true,
+        requires_symbol: false
+      }
+    }
+  });
+  await route("/password-change?next=%2Fadmin");
+  expect(
+    await screen.findByLabelText(messages.current_password, { exact: true, selector: "input" })
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: messages.save })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+  await expectNoAxeViolations();
+});
+
+it("renders a module failure with the handoff's document metadata", async () => {
+  await route("/module-login/failed?reason=x");
+  expect(await screen.findByRole("heading", { name: messages.module_login_failed })).toBeTruthy();
+  expect(screen.getByText(messages.module_login_invalid_request)).toBeTruthy();
+  expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toBe(
+    "noindex, nofollow, noarchive"
+  );
+  expect(document.querySelector('meta[name="referrer"]')?.getAttribute("content")).toBe(
+    "no-referrer"
+  );
+});
+
+it("recovers a failed password-capability read through an explicit retry", async () => {
+  generation = "session-a";
+  replies.set("/api/v1/users/me/", new Response(null, { status: 503 }));
+  await route("/password-change");
+  const retry = await screen.findByRole("button", { name: /Försök igen/ });
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(1);
+  replies.set("/api/v1/users/me/", {
+    id: "user-a",
+    email: "test@example.test",
+    password_status: { change_required: true, reason: "admin_set" },
+    password_change: {
+      source: "eneo",
+      policy: {
+        min_length: 12,
+        max_bytes: 72,
+        requires_uppercase: true,
+        requires_lowercase: true,
+        requires_number: true,
+        requires_symbol: false
+      }
+    }
+  });
+  fireEvent.click(retry);
+  expect(await screen.findByRole("button", { name: messages.save })).toBeTruthy();
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(2);
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("uses the real session transport for a module ticket and preserves its generation", async () => {
+  generation = "session-a";
+  const target = "https://module.example/callback?ticket=dummy";
+  replies.set(
+    "/api/v1/module-auth/tickets/",
+    Response.json(
+      { redirect_target: target },
+      { status: 201, headers: { [GENERATION]: generation } }
+    )
+  );
+  await route(
+    "/module-login?module_key=module&redirect_uri=https%3A%2F%2Fmodule.example%2Fcallback&state=test-state"
+  );
+  await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith(target, { replace: true }));
+  const calls = callsTo("/api/v1/module-auth/tickets/");
+  expect(calls).toHaveLength(1);
+  expect((calls[0]![0] as Request).headers.get(GENERATION)).toBe("session-a");
+});
+
+it("keeps the refusal owner's destination when a module ticket discovers a changed session", async () => {
+  generation = "session-a";
+  replies.set(
+    "/api/v1/module-auth/tickets/",
+    Response.json({ message: "Changed", eneo_error_code: 9080 }, { status: 401 })
+  );
+  await route(
+    "/module-login?module_key=module&redirect_uri=https%3A%2F%2Fmodule.example%2Fcallback&state=test-state"
+  );
+  expect(await screen.findByRole("heading", { name: messages.session_changed_title })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("routes the shared registered integration URI to the popup handoff", async () => {
+  const postMessage = vi.fn();
+  vi.stubGlobal("opener", { postMessage });
+  vi.spyOn(window, "close").mockImplementation(() => {});
+  const { INTEGRATION_CALLBACK_PATH, INTEGRATION_CALLBACK_MESSAGE_TYPE } =
+    await import("@/features/integrations/callback-message");
+  await route(INTEGRATION_CALLBACK_PATH + "?code=test-code&state=test-state");
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  expect(postMessage).toHaveBeenCalledWith(
+    {
+      type: INTEGRATION_CALLBACK_MESSAGE_TYPE,
+      code: "test-code",
+      state: "test-state",
+      params: "?code=test-code&state=test-state"
+    },
+    window.location.origin
+  );
+  expect(window.close).toHaveBeenCalledTimes(1);
 });
 
 it.each(["getItem", "setItem"] as const)(

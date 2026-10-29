@@ -19,6 +19,8 @@ which is http behind Traefik.
 An ``/api/`` request admitted with the browser session cookie also names that
 session's generation (``Eneo-Session-Generation``), so a page can tell when
 the cookie now belongs to another session than the one it was loaded with.
+The bootstrap probe also identifies a rejected cookie so that its fresh document
+can sign out with the same generation check; this does not admit API access.
 
 Pure ASGI, not BaseHTTPMiddleware: streaming, SSE and Range responses stay
 unbuffered, and status, body and length headers are never touched.
@@ -31,7 +33,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from eneo.authentication.browser_session import (
     SESSION_GENERATION_HEADER,
-    admitted_session_generation,
+    response_session_generation,
 )
 
 _API_DEFAULTS = (
@@ -73,7 +75,7 @@ class ResponseHeadersMiddleware:
                 for name, value in defaults:
                     if name not in headers:
                         headers.append(name, value)
-                generation = admitted_session_generation(scope) if api else None
+                generation = response_session_generation(scope) if api else None
                 if generation is not None:
                     headers[SESSION_GENERATION_HEADER] = generation
             await send(message)

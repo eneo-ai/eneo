@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import messages from "@/lib/i18n/messages/sv.json";
 import type { SessionSnapshot } from "@/lib/api/refusal";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -24,6 +25,9 @@ vi.mock("@/lib/api/refusal", () => ({
   reloadSession: session.reload
 }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/runtime-config", () => ({
+  runtimeConfig: () => ({ accessibility_statement_url: null })
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -82,4 +86,23 @@ it("keeps the editor mounted on a failed check and offers retry", async () => {
   update({ status: "bound", generation: "a" });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input);
+});
+
+it("never exposes logout children from a previously bound suspended document", async () => {
+  window.history.replaceState({}, "", "/logout");
+  renderInApp(
+    <BrowserSessionBoundary>
+      <main>
+        <button>Private action</button>
+      </main>
+    </BrowserSessionBoundary>
+  );
+  update({ status: "stale", destination: "/deactivated" });
+  expect(screen.queryByRole("button", { name: "Private action" })).toBeNull();
+  expect(screen.getByRole("heading", { name: messages.organisation_deactivated })).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: messages.organisation_deactivated })
+  );
+  expect(screen.getByRole("link", { name: "Logga ut" }).getAttribute("href")).toBe("/logout");
+  await expectNoAxeViolations();
 });

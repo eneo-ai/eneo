@@ -1,4 +1,4 @@
-import { CallbackHandoff } from "./callback-handoff.client";
+import { CallbackHandoff } from "@/features/integrations/callback-handoff";
 
 /**
  * OAuth callback landing for integration connects. Popup flow only: the

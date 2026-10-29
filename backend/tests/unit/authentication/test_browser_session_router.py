@@ -51,6 +51,7 @@ from eneo.main.exceptions import (
 from eneo.main.logging import OTELJSONFormatter
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
+from eneo.tenants.tenant import TenantState
 from eneo.users import user_router
 from eneo.users.user import UserInDB, UserState
 from eneo.users.user_service import UserService
@@ -485,6 +486,56 @@ def test_probe_names_the_admitted_cookie_session(endpoints: Endpoints):
     assert response.headers["cache-control"] == "no-store"
 
 
+@pytest.mark.parametrize("restricted", ["dead cookie", "suspended tenant"])
+def test_probe_identifies_a_rejected_cookie_only_for_guarded_logout(
+    endpoints: Endpoints, restricted: str
+):
+    token = mint()
+    if restricted == "suspended tenant":
+        endpoints.valid_tokens.add(token)
+        endpoints.user.tenant.state = TenantState.SUSPENDED
+    headers = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    probe = endpoints.client.get(PROBE, headers=headers)
+    assert probe.status_code == (403 if restricted == "suspended tenant" else 401)
+    assert probe.headers[GENERATION] == session_generation(token)
+    assert probe.headers["cache-control"] == "no-store"
+
+    signed_out = endpoints.client.post(
+        LOGOUT, headers=headers | {GENERATION: probe.headers[GENERATION]}
+    )
+    assert signed_out.status_code == 204
+    assert set_cookies(signed_out)
+
+    replacement = mint(30)
+    refused = endpoints.client.post(
+        LOGOUT,
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{SESSION}={replacement}", GENERATION: probe.headers[GENERATION]},
+    )
+    assert refused.status_code == 401
+    assert refused.json()["eneo_error_code"] == 9080
+    assert set_cookies(refused) == []
+
+
+def test_stale_probe_never_exposes_the_replacement_cookie_generation(
+    endpoints: Endpoints,
+):
+    replacement = mint(30)
+    endpoints.valid_tokens.add(replacement)
+    response = endpoints.client.get(
+        PROBE,
+        headers=SAME_ORIGIN
+        | {
+            "Cookie": f"{SESSION}={replacement}",
+            GENERATION: session_generation(mint()),
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["eneo_error_code"] == 9080
+    assert GENERATION not in response.headers
+    assert set_cookies(response) == []
+
+
 @pytest.mark.parametrize(
     "case", ["bearer token", "dead cookie", "cross-site cookie", "no credential"]
 )
@@ -506,21 +557,23 @@ def test_probe_refuses_without_an_admitted_cookie_session(
     response = endpoints.client.get(PROBE, headers=headers)
 
     assert response.status_code == 401
-    assert GENERATION not in response.headers
+    if case == "dead cookie":
+        assert response.headers[GENERATION] == session_generation("not-a-token")
+    else:
+        assert GENERATION not in response.headers
 
 
 @pytest.mark.parametrize("refusal", ["missing permission", "inactive user"])
 def test_a_refused_cookie_session_names_no_generation(
     endpoints: Endpoints, refusal: str
 ):
-    # A valid cookie refused by admission (an admin route) or by the user's
-    # state: the generation is named only once the request was admitted.
+    # Ordinary API refusals never name an admitted generation, including when
+    # the user is inactive. Only the bootstrap probe has the logout exception.
     token = mint()
     endpoints.valid_tokens.add(token)
     path = ADMIN_ONLY
     if refusal == "inactive user":
         endpoints.user.state = UserState.INACTIVE
-        path = PROBE
 
     response = endpoints.client.get(
         path, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}

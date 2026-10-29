@@ -61,3 +61,11 @@ it.each([403, 503, "network"])("keeps a failed logout visible (%s)", async (fail
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");
 });
+
+it("never clears a newer cookie from a stale bound document", async () => {
+  vi.mocked(getSessionSnapshot).mockReturnValue({ status: "stale", destination: "/deactivated" });
+  renderInApp(<LogoutHandoff target="/login" />);
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(navigateTo).not.toHaveBeenCalled();
+});

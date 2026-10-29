@@ -11,15 +11,21 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AppRouteImport } from "./routes/_app"
+import { Route as DeactivatedRouteImport } from "./routes/deactivated"
 import { Route as LogoutRouteImport } from "./routes/logout"
+import { Route as PasswordChangeRouteImport } from "./routes/password-change"
 import { Route as AppSplatRouteImport } from "./routes/_app/$"
 import { Route as AppAccountRouteImport } from "./routes/_app/account"
+import { Route as InviteSplatRouteImport } from "./routes/invite/$"
 import { Route as LoginIndexRouteImport } from "./routes/login/index"
 import { Route as LoginFailedRouteImport } from "./routes/login/failed"
 import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/switch-organisation"
+import { Route as ModuleLoginIndexRouteImport } from "./routes/module-login/index"
+import { Route as ModuleLoginFailedRouteImport } from "./routes/module-login/failed"
 import { Route as AppAccountIndexRouteImport } from "./routes/_app/account/index"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
 import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
+import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
 import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
 
 const IndexRoute = IndexRouteImport.update({
@@ -31,9 +37,19 @@ const AppRoute = AppRouteImport.update({
   id: "/_app",
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeactivatedRoute = DeactivatedRouteImport.update({
+  id: "/deactivated",
+  path: "/deactivated",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LogoutRoute = LogoutRouteImport.update({
   id: "/logout",
   path: "/logout",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PasswordChangeRoute = PasswordChangeRouteImport.update({
+  id: "/password-change",
+  path: "/password-change",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppSplatRoute = AppSplatRouteImport.update({
@@ -45,6 +61,11 @@ const AppAccountRoute = AppAccountRouteImport.update({
   id: "/account",
   path: "/account",
   getParentRoute: () => AppRoute,
+} as any)
+const InviteSplatRoute = InviteSplatRouteImport.update({
+  id: "/invite/$",
+  path: "/invite/$",
+  getParentRoute: () => rootRouteImport,
 } as any)
 const LoginIndexRoute = LoginIndexRouteImport.update({
   id: "/login/",
@@ -59,6 +80,16 @@ const LoginFailedRoute = LoginFailedRouteImport.update({
 const LoginSwitchOrganisationRoute = LoginSwitchOrganisationRouteImport.update({
   id: "/login/switch-organisation",
   path: "/login/switch-organisation",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModuleLoginIndexRoute = ModuleLoginIndexRouteImport.update({
+  id: "/module-login/",
+  path: "/module-login/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModuleLoginFailedRoute = ModuleLoginFailedRouteImport.update({
+  id: "/module-login/failed",
+  path: "/module-login/failed",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAccountIndexRoute = AppAccountIndexRouteImport.update({
@@ -76,6 +107,12 @@ const AppSpacesListRoute = AppSpacesListRouteImport.update({
   path: "/spaces/list",
   getParentRoute: () => AppRoute,
 } as any)
+const IntegrationsCallbackTokenRoute =
+  IntegrationsCallbackTokenRouteImport.update({
+    id: "/integrations/callback/token",
+    path: "/integrations/callback/token",
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AppSpacesSpaceIdSplatRoute = AppSpacesSpaceIdSplatRouteImport.update({
   id: "/$",
   path: "/$",
@@ -84,26 +121,38 @@ const AppSpacesSpaceIdSplatRoute = AppSpacesSpaceIdSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/deactivated": typeof DeactivatedRoute
   "/logout": typeof LogoutRoute
+  "/password-change": typeof PasswordChangeRoute
   "/$": typeof AppSplatRoute
   "/account": typeof AppAccountRouteWithChildren
+  "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
+  "/module-login/": typeof ModuleLoginIndexRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
+  "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account/": typeof AppAccountIndexRoute
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/deactivated": typeof DeactivatedRoute
   "/logout": typeof LogoutRoute
+  "/password-change": typeof PasswordChangeRoute
   "/$": typeof AppSplatRoute
+  "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login": typeof LoginIndexRoute
+  "/module-login": typeof ModuleLoginIndexRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
+  "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account": typeof AppAccountIndexRoute
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
@@ -111,14 +160,20 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/_app": typeof AppRouteWithChildren
+  "/deactivated": typeof DeactivatedRoute
   "/logout": typeof LogoutRoute
+  "/password-change": typeof PasswordChangeRoute
   "/_app/$": typeof AppSplatRoute
   "/_app/account": typeof AppAccountRouteWithChildren
+  "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
+  "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
+  "/module-login/": typeof ModuleLoginIndexRoute
   "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/_app/spaces/list": typeof AppSpacesListRoute
+  "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/_app/account/": typeof AppAccountIndexRoute
   "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
 }
@@ -126,40 +181,58 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
+    | "/deactivated"
     | "/logout"
+    | "/password-change"
     | "/$"
     | "/account"
+    | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
+    | "/module-login/failed"
     | "/login/"
+    | "/module-login/"
     | "/spaces/$spaceId"
     | "/spaces/list"
+    | "/integrations/callback/token"
     | "/account/"
     | "/spaces/$spaceId/$"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/deactivated"
     | "/logout"
+    | "/password-change"
     | "/$"
+    | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
+    | "/module-login/failed"
     | "/login"
+    | "/module-login"
     | "/spaces/$spaceId"
     | "/spaces/list"
+    | "/integrations/callback/token"
     | "/account"
     | "/spaces/$spaceId/$"
   id:
     | "__root__"
     | "/"
     | "/_app"
+    | "/deactivated"
     | "/logout"
+    | "/password-change"
     | "/_app/$"
     | "/_app/account"
+    | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
+    | "/module-login/failed"
     | "/login/"
+    | "/module-login/"
     | "/_app/spaces/$spaceId"
     | "/_app/spaces/list"
+    | "/integrations/callback/token"
     | "/_app/account/"
     | "/_app/spaces/$spaceId/$"
   fileRoutesById: FileRoutesById
@@ -167,10 +240,16 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  DeactivatedRoute: typeof DeactivatedRoute
   LogoutRoute: typeof LogoutRoute
+  PasswordChangeRoute: typeof PasswordChangeRoute
+  InviteSplatRoute: typeof InviteSplatRoute
   LoginFailedRoute: typeof LoginFailedRoute
   LoginSwitchOrganisationRoute: typeof LoginSwitchOrganisationRoute
+  ModuleLoginFailedRoute: typeof ModuleLoginFailedRoute
   LoginIndexRoute: typeof LoginIndexRoute
+  ModuleLoginIndexRoute: typeof ModuleLoginIndexRoute
+  IntegrationsCallbackTokenRoute: typeof IntegrationsCallbackTokenRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -189,11 +268,25 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/deactivated": {
+      id: "/deactivated"
+      path: "/deactivated"
+      fullPath: "/deactivated"
+      preLoaderRoute: typeof DeactivatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/logout": {
       id: "/logout"
       path: "/logout"
       fullPath: "/logout"
       preLoaderRoute: typeof LogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/password-change": {
+      id: "/password-change"
+      path: "/password-change"
+      fullPath: "/password-change"
+      preLoaderRoute: typeof PasswordChangeRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/_app/$": {
@@ -209,6 +302,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/account"
       preLoaderRoute: typeof AppAccountRouteImport
       parentRoute: typeof AppRoute
+    }
+    "/invite/$": {
+      id: "/invite/$"
+      path: "/invite/$"
+      fullPath: "/invite/$"
+      preLoaderRoute: typeof InviteSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     "/login/": {
       id: "/login/"
@@ -231,6 +331,20 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof LoginSwitchOrganisationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/module-login/": {
+      id: "/module-login/"
+      path: "/module-login"
+      fullPath: "/module-login/"
+      preLoaderRoute: typeof ModuleLoginIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/module-login/failed": {
+      id: "/module-login/failed"
+      path: "/module-login/failed"
+      fullPath: "/module-login/failed"
+      preLoaderRoute: typeof ModuleLoginFailedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/_app/account/": {
       id: "/_app/account/"
       path: "/"
@@ -251,6 +365,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/spaces/list"
       preLoaderRoute: typeof AppSpacesListRouteImport
       parentRoute: typeof AppRoute
+    }
+    "/integrations/callback/token": {
+      id: "/integrations/callback/token"
+      path: "/integrations/callback/token"
+      fullPath: "/integrations/callback/token"
+      preLoaderRoute: typeof IntegrationsCallbackTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     "/_app/spaces/$spaceId/$": {
       id: "/_app/spaces/$spaceId/$"
@@ -304,10 +425,16 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  DeactivatedRoute: DeactivatedRoute,
   LogoutRoute: LogoutRoute,
+  PasswordChangeRoute: PasswordChangeRoute,
+  InviteSplatRoute: InviteSplatRoute,
   LoginFailedRoute: LoginFailedRoute,
   LoginSwitchOrganisationRoute: LoginSwitchOrganisationRoute,
+  ModuleLoginFailedRoute: ModuleLoginFailedRoute,
   LoginIndexRoute: LoginIndexRoute,
+  ModuleLoginIndexRoute: ModuleLoginIndexRoute,
+  IntegrationsCallbackTokenRoute: IntegrationsCallbackTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

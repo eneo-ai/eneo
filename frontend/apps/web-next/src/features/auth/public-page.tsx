@@ -2,7 +2,7 @@
 
 import { Card } from "@astryxdesign/core/Card";
 import { useTranslations } from "use-intl";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { EneoWordMark } from "@/components/shell/eneo-logo";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ export function PublicPage({
   description,
   width = "sm",
   accessibilityStatementUrl,
+  headingRef,
   footer,
   children
 }: {
@@ -19,6 +20,7 @@ export function PublicPage({
   description?: string;
   width?: "sm" | "md";
   accessibilityStatementUrl: string | null;
+  headingRef?: Ref<HTMLHeadingElement>;
   footer?: ReactNode;
   children: ReactNode;
 }) {
@@ -31,7 +33,13 @@ export function PublicPage({
         className={cn("flex w-full flex-col gap-6", width === "md" ? "max-w-md" : "max-w-sm")}
       >
         <header className="flex flex-col gap-2 text-center">
-          <h1 className="text-ax-text text-xl leading-tight font-semibold">{title}</h1>
+          <h1
+            ref={headingRef}
+            tabIndex={headingRef ? -1 : undefined}
+            className="text-ax-text text-xl leading-tight font-semibold"
+          >
+            {title}
+          </h1>
           {description ? <p className="text-ax-text-secondary text-sm">{description}</p> : null}
         </header>
         <div className="flex flex-col gap-4">{children}</div>

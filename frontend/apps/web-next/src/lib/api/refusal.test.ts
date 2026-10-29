@@ -35,6 +35,56 @@ async function bound() {
 }
 
 describe("immutable document session", () => {
+  it("keeps a suspended bootstrap identity-free so its public recovery can render", async () => {
+    window.history.replaceState({}, "", "/deactivated");
+    fetcher.mockResolvedValueOnce(refusal(9025, 403, { [GENERATION]: "suspended" }));
+    await owner.initializeBrowserSession();
+    expect(owner.getSessionSnapshot()).toEqual({ status: "deactivated", generation: "suspended" });
+    await expect(owner.requireBrowserSession()).rejects.toMatchObject({ code: 9025 });
+    fetcher.mockResolvedValueOnce(probe("reactivated-session"));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9025 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("binds an unusable bootstrap cookie only for logout and refuses a replacement on resume", async () => {
+    window.history.replaceState({}, "", "/logout");
+    fetcher.mockResolvedValueOnce(refusal(9005, 401, { [GENERATION]: "expired" }));
+    await owner.initializeBrowserSession();
+    expect(owner.getSessionSnapshot()).toEqual({
+      status: "bound",
+      generation: null,
+      logoutGeneration: "expired"
+    });
+    await expect(owner.requireBrowserSession()).rejects.toMatchObject({ status: 401 });
+    fetcher.mockResolvedValueOnce(probe("new-session"));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+    expect(fetcher.mock.calls[1]![1]!.headers).toEqual(new Headers({ [GENERATION]: "expired" }));
+    expect(owner.getSessionSnapshot().status).toBe("stale");
+  });
+
+  it("does not silently adopt a rejected cookie in a document that booted without one", async () => {
+    window.history.replaceState({}, "", "/login");
+    fetcher.mockResolvedValueOnce(refusal());
+    await owner.initializeBrowserSession();
+    fetcher.mockResolvedValueOnce(refusal(9005, 401, { [GENERATION]: "later-cookie" }));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9080 });
+  });
+
+  it("keeps the same unusable cookie bound only to logout after a resume check", async () => {
+    window.history.replaceState({}, "", "/logout");
+    fetcher.mockResolvedValue(refusal(9005, 401, { [GENERATION]: "expired" }));
+    await owner.initializeBrowserSession();
+    await owner.checkBrowserSession();
+    expect(owner.getSessionSnapshot()).toEqual({
+      status: "bound",
+      generation: null,
+      logoutGeneration: "expired"
+    });
+    await expect(owner.requireBrowserSession()).rejects.toMatchObject({ status: 401 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("bootstraps once, then sends its generation on reads and writes", async () => {
     await Promise.all([owner.initializeBrowserSession(), owner.initializeBrowserSession()]);
     expect(fetcher).toHaveBeenCalledTimes(1);
