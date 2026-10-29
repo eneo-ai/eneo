@@ -460,7 +460,7 @@ async def complete_browser_federation(
     try:
         token = await auth_callback(CallbackRequest(code=code, state=state), container)
     except HTTPException as exc:
-        diagnostics.public_detail = exc.detail if isinstance(exc.detail, str) else None
+        diagnostics.public_detail = exc.detail
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
         raise
