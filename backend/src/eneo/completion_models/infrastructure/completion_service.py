@@ -32,7 +32,7 @@ from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
-    aclose_if_possible,
+    close_provider_stream,
     closing,
     finalization_owner,
     finalizing,
@@ -725,17 +725,19 @@ class CompletionService:
                 # streaming_wrapper never runs, so release its resources here.
                 with finalization_owner():
                     try:
-                        with finalizing("prepared provider stream"):
-                            await aclose_if_possible(stream_obj.stream)
+                        await close_provider_stream(
+                            stream_obj.stream, "prepared provider stream"
+                        )
                     except Exception:
                         # The proxy is closed regardless.
                         logger.warning(
                             "Closing the prepared provider stream failed",
                             exc_info=True,
                         )
-                    if mcp_proxy:
-                        with finalizing("mcp proxy"):
-                            await mcp_proxy.close()
+                    finally:
+                        if mcp_proxy:
+                            with finalizing("mcp proxy"):
+                                await mcp_proxy.close()
 
             completion = OwnedAsyncGenerator(
                 self._typed_chunks(streaming_wrapper()), release=release_unstarted

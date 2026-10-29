@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+import anyio
 import httpx
 import pytest
 
@@ -23,6 +25,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _ToolResultBudget,
 )
 from eneo.files.model_file_references import file_handle
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
@@ -2385,6 +2388,29 @@ async def test_closing_the_adapter_stream_closes_the_provider_stream():
     await stream.aclose()
 
     assert provider.closed
+
+
+@pytest.mark.asyncio
+async def test_closing_the_adapter_bounds_a_shielded_provider_close(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    cancelled = False
+
+    class ShieldedStream(_AsyncChunkStream):
+        async def aclose(self) -> None:
+            nonlocal cancelled
+            with anyio.CancelScope(shield=True):
+                try:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    cancelled = True
+
+    stream = _make_adapter().iterate_stream(ShieldedStream([_text_chunk("hello")]))
+    assert (await anext(stream)).text == "hello"
+    await stream.aclose()
+
+    assert cancelled
 
 
 @pytest.mark.asyncio

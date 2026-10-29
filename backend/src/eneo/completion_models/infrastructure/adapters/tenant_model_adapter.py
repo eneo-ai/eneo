@@ -60,7 +60,7 @@ from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
-from eneo.main.stream_lifecycle import aclose_if_possible, finalizing
+from eneo.main.stream_lifecycle import close_provider_stream
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -2878,8 +2878,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         finally:
             # A finished stream is already exhausted; an aborted one still holds
             # the provider's HTTP response until it is closed.
-            with finalizing("provider stream"):
-                await aclose_if_possible(active_provider_stream)
+            await close_provider_stream(active_provider_stream)
 
     @override
     def get_model_route(self) -> str:

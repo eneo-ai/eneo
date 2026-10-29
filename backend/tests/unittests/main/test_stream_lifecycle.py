@@ -1,17 +1,163 @@
 import asyncio
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from unittest.mock import Mock
 
 import anyio
 import pytest
+from litellm.litellm_core_utils.litellm_logging import Logging
+from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 
 from eneo.main import stream_lifecycle
 from eneo.main.stream_lifecycle import (
     OwnedAsyncGenerator,
+    close_provider_stream,
     finalization_deadline,
     finalization_owner,
     finalizing,
 )
+
+
+def _litellm_stream(source: object) -> CustomStreamWrapper:
+    return CustomStreamWrapper(
+        completion_stream=source,
+        model="gpt-4o-mini",
+        custom_llm_provider="openai",
+        logging_obj=Logging(
+            model="gpt-4o-mini",
+            messages=[],
+            stream=True,
+            call_type="acompletion",
+            start_time=datetime.now(timezone.utc),
+            litellm_call_id="close-test",
+            function_id="close-test",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slow", [False, True])
+@pytest.mark.parametrize("through_litellm", [False, True])
+async def test_provider_close_shares_the_budget_and_allows_the_next_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    slow: bool,
+    through_litellm: bool,
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    monkeypatch.setattr(stream_lifecycle.logger, "handlers", [caplog.handler])
+    events: list[str] = []
+    task = asyncio.current_task()
+    assert task is not None
+    cancelling = task.cancelling()
+
+    class Provider:
+        async def aclose(self) -> None:
+            assert asyncio.current_task() is task
+            events.append("closing")
+            try:
+                await asyncio.sleep(0.2 if slow else 0)
+                events.append("finished")
+            except asyncio.CancelledError:
+                events.append("cancelled")
+                raise
+
+    # Exercise LiteLLM's real shield AND its BaseException handler, nested
+    # inside the same owner/scopes as an answer being closed from SSE.
+    provider = Provider()
+    source = _litellm_stream(provider) if through_litellm else provider
+    with finalization_owner(), finalizing("answer stream"):
+        await close_provider_stream(source)
+        with finalizing("next step"):
+            events.append("next")
+
+    assert events == ["closing", "cancelled" if slow else "finished", "next"]
+    assert ("provider stream' exceeded" in caplog.text) is slow
+    assert task.cancelling() == cancelling
+    assert finalization_deadline() is None
+    # A successful close must disarm its timeout, not cancel later work.
+    await asyncio.sleep(0.03)
+
+
+@pytest.mark.asyncio
+async def test_litellm_close_does_not_refresh_an_already_spent_budget(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    monkeypatch.setattr(stream_lifecycle.logger, "handlers", [caplog.handler])
+    started = False
+    finished = False
+    deadline: float | None = None
+
+    class Provider:
+        async def aclose(self) -> None:
+            nonlocal started, finished
+            started = True
+            assert finalization_deadline() == deadline
+            await asyncio.sleep(0.01)
+            finished = True
+
+    with finalization_owner():
+        with finalizing("earlier cleanup"):
+            await asyncio.sleep(0.1)
+        deadline = finalization_deadline()
+        assert deadline is not None and deadline <= anyio.current_time()
+        await close_provider_stream(_litellm_stream(Provider()))
+
+    assert started and not finished
+    assert "provider stream' was cut off at its first await" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_provider_close_finishes_under_anyio_cancellation():
+    ready = asyncio.Event()
+    finished = False
+
+    class Provider:
+        async def aclose(self) -> None:
+            nonlocal finished
+            await asyncio.sleep(0.01)
+            finished = True
+
+    async def worker() -> None:
+        try:
+            ready.set()
+            await anyio.sleep_forever()
+        finally:
+            await close_provider_stream(_litellm_stream(Provider()))
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(worker)
+        await ready.wait()
+        group.cancel_scope.cancel()
+
+    assert finished
+
+
+@pytest.mark.asyncio
+async def test_litellm_cannot_swallow_external_cancellation_during_close():
+    started = asyncio.Event()
+
+    class Provider:
+        async def aclose(self) -> None:
+            started.set()
+            await asyncio.sleep(0.2)
+
+    closing = asyncio.create_task(close_provider_stream(_litellm_stream(Provider())))
+    await started.wait()
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_error_is_not_mistaken_for_the_cleanup_deadline():
+    class Provider:
+        async def aclose(self) -> None:
+            raise TimeoutError("provider failure")
+
+    with pytest.raises(TimeoutError, match="provider failure"):
+        await close_provider_stream(Provider())
 
 
 async def _cleanup_under_cancellation(*, shielded: bool) -> bool:

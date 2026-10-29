@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import anyio
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -21,6 +22,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     _name_app_views,
 )
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.main import stream_lifecycle
 
 
 class _DummyContextBuilder:
@@ -500,4 +502,50 @@ async def test_a_failing_prepared_stream_close_still_releases_the_proxy():
     )
     await response.completion.aclose()
 
+    assert proxy.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_externally", [False, True])
+async def test_a_shielded_prepared_stream_cannot_delay_the_proxy_cleanup(
+    monkeypatch: pytest.MonkeyPatch, cancel_externally: bool
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    proxy = _FakeProxy()
+    cancelled = False
+    started = asyncio.Event()
+
+    class ShieldedStream:
+        async def aclose(self) -> None:
+            nonlocal cancelled
+            started.set()
+            with anyio.CancelScope(shield=True):
+                try:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    cancelled = True
+
+    class PreparingAdapter(_DummyAdapter):
+        async def prepare_streaming(self, **kwargs):
+            return SimpleNamespace(stream=ShieldedStream())
+
+    completion_model = _make_completion_model()
+    service = _service(PreparingAdapter(model=completion_model))
+    service._mcp_proxy_factory = SimpleNamespace(create=lambda *a, **k: proxy)
+    response = await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        stream=True,
+        mcp_servers=[SimpleNamespace(id=uuid4(), name="server", is_enabled=True)],
+    )
+    if cancel_externally:
+        closing = asyncio.create_task(response.completion.aclose())
+        await started.wait()
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+    else:
+        await response.completion.aclose()
+
+    assert cancelled
     assert proxy.closed

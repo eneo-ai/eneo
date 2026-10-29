@@ -23,7 +23,11 @@ from mcp.server.fastmcp import FastMCP
 
 from eneo.main import stream_lifecycle
 from eneo.main.exceptions import MCPClientError
-from eneo.main.stream_lifecycle import finalizing
+from eneo.main.stream_lifecycle import (
+    finalization_deadline,
+    finalization_owner,
+    finalizing,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -233,10 +237,14 @@ async def test_a_close_whose_budget_is_spent_still_ends_the_connections(
         await proxy.call_tool("probe__echo", {"text": "a"})
         assert len(_live_hosts()) == 1
 
-        with finalizing("spends the budget"):
-            await asyncio.sleep(10)
-        with finalizing("mcp proxy"):
-            await proxy.close()
+        with finalization_owner():
+            with finalizing("spends the budget"):
+                await asyncio.sleep(10)
+            deadline = finalization_deadline()
+            assert deadline is not None and deadline <= anyio.current_time()
+            with finalizing("mcp proxy"):
+                assert finalization_deadline() == deadline
+                await proxy.close()
 
         async with asyncio.timeout(5):
             while _live_hosts():

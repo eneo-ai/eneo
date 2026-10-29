@@ -9,7 +9,13 @@ from uuid import UUID, uuid4
 import pytest
 
 import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
+from eneo.main.stream_lifecycle import (
+    finalization_deadline,
+    finalization_owner,
+    finalizing,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -1842,16 +1848,15 @@ async def test_close_asks_every_connection_to_end_before_it_waits(
         proxy.call_tool("first__tool", {}), proxy.call_tool("second__tool", {})
     )
 
-    async def close_without_awaiting() -> None:
-        closing = proxy.close()
-        try:
-            closing.send(None)  # runs up to the first suspension only
-        except StopIteration:
-            pass
-        finally:
-            closing.close()
-
-    await close_without_awaiting()
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.01)
+    with finalization_owner():
+        with finalizing("earlier cleanup"):
+            await asyncio.sleep(0.1)
+        deadline = finalization_deadline()
+        assert deadline is not None and deadline <= asyncio.get_running_loop().time()
+        with finalizing("mcp proxy"):
+            assert finalization_deadline() == deadline
+            await proxy.close()
 
     assert [client.disconnect_requested for client in _FakeMCPClient.instances] == [
         True,

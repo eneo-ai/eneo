@@ -12,8 +12,9 @@ Two rules make the ``finally`` blocks along that chain reliable:
   deadline shared by every link of the turn, so a disconnect that lands
   mid-await cannot cut the cleanup short, and the request waits at most one
   budget for it. A step cut off by the deadline is logged. An MCP connection
-  it was waiting for is cancelled and unwinds on its own; a provider stream
-  closes under its own shield.
+  it was waiting for is cancelled and unwinds on its own. Provider streams
+  use ``close_provider_stream`` to enforce that same deadline through the
+  provider's own cancellation shield.
 - A generator that never started cannot run its ``finally``. Where resources
   are acquired before the first iteration, ``OwnedAsyncGenerator`` runs the
   owner's release instead.
@@ -129,14 +130,19 @@ def finalizing(step: str) -> Generator[None, None, None]:
         spent_on_entry = anyio.current_time() >= deadline
         with anyio.CancelScope(shield=True, deadline=deadline) as scope:
             yield
-    if scope.cancelled_caught and spent_on_entry:
+    if scope.cancelled_caught:
+        _log_finalization_timeout(step, spent_on_entry=spent_on_entry)
+
+
+def _log_finalization_timeout(step: str, *, spent_on_entry: bool) -> None:
+    if spent_on_entry:
         logger.warning(
             "Stream finalization step '%s' was cut off at its first await: "
             "the %.0fs budget was already spent",
             step,
             FINALIZATION_BUDGET_SECONDS,
         )
-    elif scope.cancelled_caught:
+    else:
         logger.warning(
             "Stream finalization step '%s' exceeded the %.0fs budget and was cut off",
             step,
@@ -148,6 +154,42 @@ async def aclose_if_possible(source: object) -> None:
     aclose = getattr(source, "aclose", None)
     if aclose is not None:
         await aclose()
+
+
+async def close_provider_stream(source: object, step: str = "provider stream") -> None:
+    """Close on the consuming task, bounded even through LiteLLM's shield.
+
+    LiteLLM's ``aclose`` shields its awaits and catches ``BaseException``.
+    An outer anyio deadline cannot interrupt that shield. An asyncio timeout
+    cancels the task directly, so it reaches the provider close; ``expired``
+    still reports it when LiteLLM swallows the cancellation. No close task is
+    detached, and the consumer's context remains available to the provider.
+
+    The shield here blocks the enclosing anyio deadlines and disconnect,
+    leaving only this timeout to deliver the shared finalization deadline.
+    Direct cancellation from elsewhere must still propagate, including when
+    LiteLLM swallowed it.
+    """
+    with finalization_owner(), anyio.CancelScope(shield=True):
+        deadline = _current_deadline()
+        spent_on_entry = anyio.current_time() >= deadline
+        task = asyncio.current_task()
+        assert task is not None
+        cancelling = task.cancelling()
+        timeout = asyncio.timeout_at(deadline)
+        try:
+            async with timeout:
+                await aclose_if_possible(source)
+        except TimeoutError:
+            if not timeout.expired():
+                raise
+        finally:
+            if timeout.expired():
+                _log_finalization_timeout(step, spent_on_entry=spent_on_entry)
+        # The timeout removes its own cancellation request on exit. Any extra
+        # request belongs to the caller, even if the provider caught it.
+        if task.cancelling() > cancelling:
+            raise asyncio.CancelledError
 
 
 @asynccontextmanager
