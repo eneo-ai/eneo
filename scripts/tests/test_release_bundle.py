@@ -5,8 +5,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
+import urllib.request
+from email.message import Message
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +26,106 @@ def module(name, path):
 
 release = module("release_bundle", "scripts/release_bundle.py")
 setup = module("deployment_setup", "docs/deployment/setup.py")
+smoke = module("smoke_release_bundle", "scripts/smoke_release_bundle.py")
+
+
+class WebAppSmokeTests(unittest.TestCase):
+    def test_secure_cookie_exception_is_limited_to_localhost(self):
+        policy = smoke.LocalhostCookiePolicy()
+        cookie = SimpleNamespace(secure=True)
+        for url, allowed in [
+            ("http://localhost:8124/", True),
+            ("http://localhost.example.invalid/", False),
+            ("https://example.invalid/", True),
+        ]:
+            with self.subTest(url=url):
+                self.assertEqual(
+                    policy.return_ok_secure(cookie, urllib.request.Request(url)),
+                    allowed,
+                )
+
+    def test_index_nonce_must_match_the_policy(self):
+        headers = Message()
+        headers["Content-Security-Policy"] = "script-src 'self' 'nonce-test-nonce'"
+        html = b'<meta property="csp-nonce" nonce="test-nonce"><script type="module" src="/assets/index-test.js"></script>'
+        self.assertEqual(smoke.web_app_asset(headers, html), "/assets/index-test.js")
+        with self.assertRaises(AssertionError):
+            smoke.web_app_asset(headers, html.replace(b"test-nonce", b"wrong-nonce"))
+
+    def test_index_without_an_asset_is_rejected(self):
+        headers = Message()
+        headers["Content-Security-Policy"] = "script-src 'nonce-test-nonce'"
+        with self.assertRaises(AssertionError):
+            smoke.web_app_asset(
+                headers, b'<meta property="csp-nonce" nonce="test-nonce">'
+            )
+
+    def test_browser_session_sends_the_cookie_and_bootstrapped_generation(self):
+        observed = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def respond(self, status, headers=None, body=b""):
+                self.send_response(status)
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                observed.append((self.path, self.headers.get("Sec-Fetch-Site")))
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.respond(
+                    204,
+                    {
+                        "Set-Cookie": "__Host-eneo_web=test-cookie; Path=/; Secure; HttpOnly"
+                    },
+                )
+
+            def do_GET(self):
+                if self.path == "/redirect":
+                    self.respond(303, {"Location": "/api/v1/auth/session/password/"})
+                    return
+                if self.path == "/missing":
+                    self.respond(404, body=b"missing")
+                    return
+                if self.headers.get("Cookie") != "__Host-eneo_web=test-cookie":
+                    self.respond(401)
+                    return
+                if self.path == "/api/v1/auth/session/":
+                    self.respond(204, {"Eneo-Session-Generation": "test-generation"})
+                    return
+                observed.append(
+                    (self.path, self.headers.get("Eneo-Session-Generation"))
+                )
+                if self.headers.get("Eneo-Session-Generation") != "test-generation":
+                    self.respond(401)
+                    return
+                self.respond(200, body=b'{"email":"smoke@example.invalid"}')
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            origin = f"http://localhost:{server.server_port}"
+            try:
+                smoke.verify_browser_session(
+                    origin, "smoke@example.invalid", "test-password"
+                )
+                self.assertEqual(smoke.fetch(origin + "/redirect")[0], 303)
+                status, _, body = smoke.fetch(origin + "/missing")
+                self.assertEqual((status, body), (404, b"missing"))
+            finally:
+                server.shutdown()
+                thread.join()
+        self.assertEqual(
+            observed,
+            [
+                ("/api/v1/auth/session/password/", "same-origin"),
+                ("/api/v1/users/me/", "test-generation"),
+            ],
+        )
 
 
 class ReleaseTests(unittest.TestCase):
@@ -31,7 +136,9 @@ class ReleaseTests(unittest.TestCase):
             workflow,
             re.DOTALL,
         )
-        self.assertIsNotNone(gate, "Published frontend images must check their Node runtime")
+        self.assertIsNotNone(
+            gate, "Published frontend images must check their Node runtime"
+        )
         program = """
 const vm = require('node:vm');
 vm.runInNewContext(process.argv[1], {

@@ -3,7 +3,6 @@
 
 import base64
 import json
-import os
 import secrets
 import subprocess
 import sys
@@ -12,12 +11,129 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import Message
+from html.parser import HTMLParser
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = "http://127.0.0.1:8124"
 RUNTIME = "http://127.0.0.1:8310"
 WEB_NEXT = "http://127.0.0.1:8135"
+# The numeric loopback address is the stack's MCP content host, not its web app.
+WEB_APP = "http://localhost:8124"
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class LocalhostCookiePolicy(DefaultCookiePolicy):
+    def return_ok_secure(self, cookie, request):
+        # Match Chromium's trusted-localhost exception for Secure cookies.
+        # Other HTTP hosts retain the standard policy.
+        return super().return_ok_secure(cookie, request) or (
+            request.type == "http"
+            and urllib.parse.urlsplit(request.full_url).hostname == "localhost"
+        )
+
+
+def fetch(url, headers=None, data=None, opener=None) -> tuple[int, Message, bytes]:
+    opener = opener or urllib.request.build_opener(NoRedirect())
+    try:
+        with opener.open(
+            urllib.request.Request(url, data=data, headers=headers or {}), timeout=60
+        ) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as error:
+        with error:
+            return error.code, error.headers, error.read()
+
+
+class WebAppIndex(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.nonce = None
+        self.asset = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta" and attrs.get("property") == "csp-nonce":
+            self.nonce = attrs.get("nonce")
+        if tag == "script" and self.asset is None:
+            src = attrs.get("src") or ""
+            if src.startswith("/assets/") and src.endswith(".js"):
+                self.asset = src
+
+
+def web_app_asset(headers: Message, html: bytes) -> str:
+    index = WebAppIndex()
+    index.feed(html.decode("utf-8"))
+    assert index.nonce, "Web app HTML has no CSP nonce"
+    assert f"'nonce-{index.nonce}'" in headers.get("Content-Security-Policy", ""), (
+        "Web app HTML nonce does not match its CSP"
+    )
+    assert index.asset, "Web app HTML has no built JavaScript asset"
+    return index.asset
+
+
+def verify_web_app(origin, bundle):
+    status, headers, html = fetch(origin + "/")
+    assert status == 200, f"Web app index returned {status}"
+    assert "text/html" in headers.get("Content-Type", ""), "Web app index is not HTML"
+    asset = web_app_asset(headers, html)
+    status, headers, _ = fetch(origin + asset)
+    assert status == 200, f"Built web asset returned {status}"
+    cache = {part.strip() for part in headers.get("Cache-Control", "").split(",")}
+    assert {"immutable", "max-age=31536000"} <= cache, (
+        "Built asset cache policy changed"
+    )
+    assert fetch(origin + "/assets/__release_smoke_missing__.js")[0] == 404
+    assert fetch(origin + "/healthz")[0] == 200, "Backend web app is not healthy"
+    status, _, body = fetch(origin + "/api/v1/runtime-config")
+    assert status == 200, f"Runtime configuration returned {status}"
+    config = json.loads(body)
+    assert config["version"] == bundle["version"], (
+        "Web app version does not match bundle"
+    )
+    assert config["revision"] == bundle["revision"], (
+        "Web app revision does not match bundle"
+    )
+
+
+def verify_browser_session(origin, username, password):
+    cookies = CookieJar(policy=LocalhostCookiePolicy())
+    opener = urllib.request.build_opener(
+        NoRedirect(), urllib.request.HTTPCookieProcessor(cookies)
+    )
+    same_origin = {"Sec-Fetch-Site": "same-origin"}
+    status, _, _ = fetch(
+        origin + "/api/v1/auth/session/password/",
+        {**same_origin, "Content-Type": "application/x-www-form-urlencoded"},
+        urllib.parse.urlencode({"username": username, "password": password}).encode(),
+        opener,
+    )
+    assert status == 204, f"Browser password login returned {status}"
+    assert any(
+        cookie.name in {"eneo_web", "__Host-eneo_web"} and cookie.value
+        for cookie in cookies
+    ), "Browser login did not set a usable session cookie"
+    status, headers, _ = fetch(
+        origin + "/api/v1/auth/session/", same_origin, opener=opener
+    )
+    assert status == 204, f"Browser session bootstrap returned {status}"
+    generation = headers.get("Eneo-Session-Generation")
+    assert generation, "Browser session bootstrap did not identify its generation"
+    status, _, body = fetch(
+        origin + "/api/v1/users/me/",
+        {**same_origin, "Eneo-Session-Generation": generation},
+        opener=opener,
+    )
+    assert status == 200, f"Cookie-authenticated user read returned {status}"
+    assert json.loads(body)["email"] == username, (
+        "Browser session belongs to another user"
+    )
 
 
 def request(url, payload=None, headers=None, raw=False):
@@ -72,8 +188,22 @@ def main():
             "TOOL_RUNTIME_URL": "http://tool-runtime:3010",
             "TOOL_RUNTIME_TOKEN": token,
             "FILE_REFERENCE_BASE_URL": "http://e2e-backend:8000",
+            "WEB_APP_ENABLED": "true",
+            "BROWSER_SESSION_ENABLED": "true",
         }
     )
+    # /healthz includes the real worker heartbeat. Use the bundle's normal
+    # worker entry point after the backend has migrated and seeded the database.
+    config["services"]["worker"] = {
+        "image": bundle["images"]["backend"],
+        "environment": {
+            **backend["environment"],
+            "RUN_AS_WORKER": "true",
+            "WORKER_ROLE": "general",
+        },
+        "networks": ["e2e", "tools"],
+        "depends_on": {"e2e-backend": {"condition": "service_healthy"}},
+    }
     config["services"]["tool-runtime"] = {
         "image": bundle["images"]["tool-runtime"],
         "environment": {
@@ -138,11 +268,18 @@ def main():
                         "revision": bundle["revision"],
                     }
                     request(WEB_NEXT + "/healthz", raw=True)
+                    assert fetch(WEB_APP + "/healthz")[0] == 200
                     break
                 except (OSError, AssertionError):
                     if attempt == 59:
                         raise
                     time.sleep(1)
+            verify_web_app(WEB_APP, bundle)
+            verify_browser_session(
+                WEB_APP,
+                backend["environment"]["DEFAULT_USER_EMAIL"],
+                backend["environment"]["DEFAULT_USER_PASSWORD"],
+            )
             login = request(
                 BACKEND + "/api/v1/users/login/token/",
                 urllib.parse.urlencode(
@@ -253,7 +390,7 @@ def main():
             assert status["runtime"]["state"] == "ready"
             assert "version_mismatch" not in status["runtime"]["warnings"]
             print(
-                "Verified frontend, Next beta, backend, runtime, compute, signed-file analysis, chart, and document."
+                "Verified frontend, Next beta, backend web app and browser session, runtime, compute, signed-file analysis, chart, and document."
             )
         finally:
             subprocess.run(
