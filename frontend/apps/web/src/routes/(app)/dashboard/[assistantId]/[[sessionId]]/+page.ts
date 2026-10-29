@@ -1,4 +1,8 @@
 import type { PageLoad } from "./$types";
+import {
+  loadInitialConversation,
+  NO_INITIAL_CONVERSATION
+} from "$lib/features/chat/initialConversation";
 
 export const load: PageLoad = async (event) => {
   const { eneo } = await event.parent();
@@ -6,12 +10,13 @@ export const load: PageLoad = async (event) => {
   const selectedSessionId = event.params.sessionId;
 
   const loadSession = async () => {
-    return selectedSessionId
-      ? eneo.assistants.getSession({
-          assistant: { id: selectedAssistantId },
-          session: { id: selectedSessionId }
-        })
-      : null;
+    if (!selectedSessionId) return NO_INITIAL_CONVERSATION;
+    return loadInitialConversation(() =>
+      eneo.assistants.getSession({
+        assistant: { id: selectedAssistantId },
+        session: { id: selectedSessionId }
+      })
+    );
   };
 
   const listSessions = async () => {
@@ -23,7 +28,7 @@ export const load: PageLoad = async (event) => {
 
   // Observe all failures immediately and let SvelteKit render its error page.
   // ChatService must never receive a promise that can reject outside this load.
-  const [assistant, initialConversation, initialHistory] = await Promise.all([
+  const [assistant, session, initialHistory] = await Promise.all([
     eneo.assistants.get({ id: selectedAssistantId }),
     loadSession(),
     listSessions()
@@ -31,7 +36,7 @@ export const load: PageLoad = async (event) => {
 
   return {
     chatPartner: assistant,
-    initialConversation,
-    initialHistory
+    initialHistory,
+    ...session
   };
 };

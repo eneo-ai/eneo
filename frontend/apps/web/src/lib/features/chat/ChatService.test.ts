@@ -40,6 +40,7 @@ function chatService(
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
     initialConversation?: Conversation | null;
     initialHistory?: Paginated<ConversationSparse>;
+    missingConversation?: boolean;
   } = {}
 ) {
   return new ChatService({
@@ -59,7 +60,8 @@ function chatService(
     } as never,
     chatPartner: assistantPartner(),
     initialConversation: overrides.initialConversation ?? null,
-    initialHistory: overrides.initialHistory ?? { items: [], count: 0, total_count: 0 }
+    initialHistory: overrides.initialHistory ?? { items: [], count: 0, total_count: 0 },
+    missingConversation: overrides.missingConversation
   });
 }
 
@@ -106,6 +108,28 @@ describe("ChatService loaded page data", () => {
     expect(chat.hasMoreConversations).toBe(false);
     expect(chat.debugPanelOpen).toBe(false);
     expect(chat.lockedInputTokens).toBe(0);
+  });
+
+  it("keeps the missing-conversation notice until the user moves on", async () => {
+    const conversation = { id: "session-2", name: "Other", messages: [] };
+    const chat = chatService(vi.fn(), {
+      get: vi.fn().mockResolvedValue(conversation),
+      missingConversation: true
+    });
+    expect(chat.missingConversation).toBe(true);
+    expect(chat.currentConversation.id).toBe("");
+
+    chat.newConversation();
+    expect(chat.missingConversation).toBe(false);
+
+    chat.init({ eneo: {} as never, chatPartner: assistantPartner(), missingConversation: true });
+    await chat.loadConversation({ id: conversation.id });
+    expect(chat.missingConversation).toBe(false);
+    expect(chat.currentConversation).toEqual(conversation);
+
+    chat.init({ eneo: {} as never, chatPartner: assistantPartner(), missingConversation: true });
+    chat.init({ eneo: {} as never, chatPartner: assistantPartner() });
+    expect(chat.missingConversation).toBe(false);
   });
 });
 

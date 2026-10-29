@@ -1,4 +1,4 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { isHttpError } from "@sveltejs/kit";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { toAppError } from "$lib/core/errors/toAppError";
@@ -101,7 +101,8 @@ describe.each([
     expect(await result).toMatchObject({
       chatPartner: data.partner,
       initialConversation: data.conversation,
-      initialHistory: data.history
+      initialHistory: data.history,
+      missingConversation: false
     });
   });
 
@@ -109,40 +110,76 @@ describe.each([
     const data = fixture(false);
     expect(await load(data.input as never)).toMatchObject({
       initialConversation: null,
-      initialHistory: data.history
+      initialHistory: data.history,
+      missingConversation: false
     });
     expect(data.getSession).not.toHaveBeenCalled();
   });
 
-  test.each([403, 404, 500])(
-    "preserves a session %i for SvelteKit error handling",
+  function conversationFailure(status: number, code: EneoErrorCode = 0) {
+    return new EneoError(
+      "Conversation unavailable",
+      "RESPONSE",
+      status,
+      code,
+      undefined,
+      { endpoint: "GET@/api/v1/conversations/session-1/" },
+      new Headers({ "x-trace-id": "0af7651916cd43dd8448eb211c80319c" })
+    );
+  }
+
+  test("opens a missing conversation as an empty chat with a notice", async () => {
+    const data = fixture();
+    data.getSession.mockRejectedValue(conversationFailure(404, 9000));
+
+    expect(await load(data.input as never)).toMatchObject({
+      chatPartner: data.partner,
+      initialConversation: null,
+      initialHistory: data.history,
+      missingConversation: true
+    });
+
+    // A stale URL does not prevent the next valid page load from succeeding.
+    data.getSession.mockResolvedValue(data.conversation);
+    expect(await load(data.input as never)).toMatchObject({
+      initialConversation: data.conversation,
+      missingConversation: false
+    });
+  });
+
+  test.each([403, 410])(
+    "answers a refused conversation (%i) with the backend's status",
     async (status) => {
       const data = fixture();
-      const failure = new EneoError(
-        "Conversation unavailable",
-        "RESPONSE",
-        status,
-        status === 404 ? 9000 : 0,
-        undefined,
-        { endpoint: "GET@/api/v1/conversations/session-1/" },
-        new Headers({ "x-trace-id": "0af7651916cd43dd8448eb211c80319c" })
-      );
+      const failure = conversationFailure(status);
       data.getSession.mockRejectedValue(failure);
 
-      await expect(load(data.input as never)).rejects.toBe(failure);
-      expect(toAppError(failure, { status: 500, message: "Internal Error" })).toMatchObject({
+      const thrown = await Promise.resolve(load(data.input as never)).then(
+        () => null,
+        (error: unknown) => error
+      );
+      expect(isHttpError(thrown, status)).toBe(true);
+      expect(isHttpError(thrown) && thrown.body).toEqual(
+        toAppError(failure, { status: 500, message: "Internal Error" })
+      );
+      expect(isHttpError(thrown) && thrown.body).toMatchObject({
         status,
-        code: status === 404 ? 9000 : 0,
         traceId: "0af7651916cd43dd8448eb211c80319c"
-      });
-
-      // A failed URL does not prevent the next valid page load from succeeding.
-      data.getSession.mockResolvedValue(data.conversation);
-      expect(await load(data.input as never)).toMatchObject({
-        initialConversation: data.conversation
       });
     }
   );
+
+  test("preserves a backend failure (500) for SvelteKit's unexpected-error handling", async () => {
+    const data = fixture();
+    const failure = conversationFailure(500);
+    data.getSession.mockRejectedValue(failure);
+
+    await expect(load(data.input as never)).rejects.toBe(failure);
+    expect(toAppError(failure, { status: 500, message: "Internal Error" })).toMatchObject({
+      status: 500,
+      traceId: "0af7651916cd43dd8448eb211c80319c"
+    });
+  });
 
   test("routes a network failure through the page load", async () => {
     const data = fixture();
@@ -194,6 +231,7 @@ describe("Space chat access", () => {
     expect(await loadSpace(data.input as never)).toMatchObject({
       accessDenied: true,
       initialConversation: null,
+      missingConversation: false,
       initialHistory: { items: [], count: 0, total_count: 0, next_cursor: null }
     });
     expect(data.getSession).not.toHaveBeenCalled();

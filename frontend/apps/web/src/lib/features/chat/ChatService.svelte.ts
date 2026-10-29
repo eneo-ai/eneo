@@ -108,6 +108,8 @@ export class ChatService {
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
+  /** The page URL named a conversation that no longer exists; the chat stays usable for a new one. */
+  missingConversation = $state(false);
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
 
@@ -369,6 +371,7 @@ export class ChatService {
     chatPartner: ChatPartner;
     initialConversation?: Conversation | null;
     initialHistory?: Paginated<ConversationSparse>;
+    missingConversation?: boolean;
   }) {
     // Page effects track their data argument, not the chat state read while
     // applying it. Sending a message must not reapply the initial conversation.
@@ -381,6 +384,7 @@ export class ChatService {
       this.#nextCursor = data.initialHistory?.next_cursor ?? null;
 
       this.currentConversation = data.initialConversation ?? emptyConversation();
+      this.missingConversation = data.missingConversation ?? false;
       if (data.initialConversation) {
         this.#seedLockedFromHistory();
       } else {
@@ -393,6 +397,7 @@ export class ChatService {
   newConversation() {
     this.#resetConversationDiagnostics();
     this.currentConversation = emptyConversation();
+    this.missingConversation = false;
     this.#resetLocked();
     this.#clearPreflight();
   }
@@ -715,6 +720,7 @@ export class ChatService {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.#resetConversationDiagnostics();
       this.currentConversation = loaded;
+      this.missingConversation = false;
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
