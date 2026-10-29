@@ -19,6 +19,16 @@ export function isSideNavCollapsed(cookieValue: string | undefined): boolean {
   return cookieValue === "1";
 }
 
+/** Read before the SPA's first shell render, using the server's value parser. */
+export function readSideNavCollapsedCookie(cookie = document.cookie): boolean {
+  const value = cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${SIDE_NAV_COLLAPSED_COOKIE}=`))
+    ?.slice(SIDE_NAV_COLLAPSED_COOKIE.length + 1);
+  return isSideNavCollapsed(value);
+}
+
 /** Remembers the choice in this browser. */
 export function storeSideNavCollapsed(collapsed: boolean): void {
   const secure = window.location.protocol === "https:" ? "; secure" : "";

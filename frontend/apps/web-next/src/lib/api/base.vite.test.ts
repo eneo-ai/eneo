@@ -33,6 +33,31 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Vite API transports", () => {
+  it("loads public federation discovery without cookies or a session-generation response", async () => {
+    const request = await transport.onBrowserApiRequest({
+      request: new Request(new URL("/api/v1/auth/federation-status", window.location.href))
+    });
+    expect(request.credentials).toBe("omit");
+    expect(request.headers.has(GENERATION)).toBe(false);
+    await expect(
+      transport.onBrowserApiResponse({ request, response: new Response("{}") })
+    ).resolves.toBeUndefined();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["POST", "/api/v1/auth/federation-status"],
+    ["GET", "/api/v1/auth/federation-status/private"]
+  ])("keeps %s %s under the authenticated response contract", async (method, path) => {
+    const request = await transport.onBrowserApiRequest({
+      request: new Request(new URL(path, window.location.href), { method })
+    });
+    expect(request.headers.get(GENERATION)).toBe("session-a");
+    await expect(
+      transport.onBrowserApiResponse({ request, response: new Response("{}") })
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
   it("prepares raw requests and refuses replacement data before returning it", async () => {
     fetcher.mockResolvedValueOnce(admitted('{"name":"B"}', "session-b"));
     await expect(

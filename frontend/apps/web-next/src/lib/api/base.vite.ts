@@ -6,16 +6,27 @@ export const API_BASE = "";
 export const CHAT_API = "/api/v1/conversations/?version=3";
 export const JOB_EVENTS_PATH = "/api/v1/jobs/events/";
 
-export const onBrowserApiRequest = ({ request }: { request: Request }): Promise<Request> =>
-  prepareBrowserRequest(request);
+// Global login discovery is public, so it has no authenticated session generation.
+function isPublicDiscovery(request: Request): boolean {
+  return (
+    request.method === "GET" && new URL(request.url).pathname === "/api/v1/auth/federation-status"
+  );
+}
 
-export const onBrowserApiResponse = ({
+export const onBrowserApiRequest = async ({ request }: { request: Request }): Promise<Request> =>
+  isPublicDiscovery(request)
+    ? new Request(request, { credentials: "omit" })
+    : prepareBrowserRequest(request);
+
+export const onBrowserApiResponse = async ({
   request,
   response
 }: {
   request: Request;
   response: Response;
-}): Promise<void> => handleRefusal(response, request.url);
+}): Promise<void> => {
+  if (!isPublicDiscovery(request)) await handleRefusal(response, request.url);
+};
 
 export const onRawRefusal = handleRefusal;
 

@@ -2,8 +2,7 @@ import { dehydrate } from "@tanstack/react-query";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { HydrationBoundary } from "@/components/providers";
-import { QueryAppContextProvider } from "@/components/providers/app-context-from-queries";
-import { AppShellFrame } from "@/components/shell/app-shell";
+import { AppFrame } from "@/components/shell/app-frame";
 import {
   isSideNavCollapsed,
   SIDE_NAV_COLLAPSED_COOKIE
@@ -14,8 +13,6 @@ import { eneoApi } from "@/lib/api/server";
 import { loadSession } from "@/lib/api/session";
 import { backendVersionFrom } from "@/lib/api/version";
 import { env } from "@/lib/env";
-import { JobsProvider } from "@/features/jobs/use-jobs";
-import { TourProvider } from "@/features/whats-new/tour-provider";
 import packageJson from "../../../package.json";
 
 /** Every app page can be added to the home screen (public/manifest.json). */
@@ -52,7 +49,8 @@ export default async function AppLayout({
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <QueryAppContextProvider
+      <AppFrame
+        sideNavCollapsed={sideNavCollapsed}
         env={{
           links: {
             legacyApp: env.LEGACY_APP_URL ?? null,
@@ -63,15 +61,8 @@ export default async function AppLayout({
           backendVersion
         }}
       >
-        <TourProvider>
-          <JobsProvider>
-            {/* Viewport-locked shell: pages scroll inside the page panel
-                (main#main-content), so full-height surfaces (chat) can pin
-                their input to the bottom. */}
-            <AppShellFrame sideNavCollapsed={sideNavCollapsed}>{children}</AppShellFrame>
-          </JobsProvider>
-        </TourProvider>
-      </QueryAppContextProvider>
+        {children}
+      </AppFrame>
     </HydrationBoundary>
   );
 }

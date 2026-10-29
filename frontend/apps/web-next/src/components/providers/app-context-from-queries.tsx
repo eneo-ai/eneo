@@ -20,10 +20,10 @@ export type AppContextEnv = {
 const session = sessionQueries(browserApi);
 
 /**
- * The signed-in app context from the session queries, which the (app) layout
- * has loaded and hydrated (loadSession): they hold data from the first
- * render, so nothing here suspends. A failed refetch keeps the previous data
- * (a suspense query throws only while it has none).
+ * The signed-in app context from the session queries. Next hydrates these;
+ * Vite starts them together in its route gate and suspends until they arrive.
+ * A failed refetch keeps the previous data (a suspense query throws only
+ * while it has none).
  */
 export function QueryAppContextProvider({
   env,

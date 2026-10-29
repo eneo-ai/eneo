@@ -110,8 +110,8 @@ export const handleRefusal: (response: Response, requestUrl: string) => Promise<
   }
 };
 
-/** Every cookie transport uses this before sending, including XHR uploads. */
-export async function prepareBrowserRequest(request: Request): Promise<Request> {
+/** Cookie requests and cache-only route gates share this document's session check. */
+export async function requireBrowserSession(): Promise<string> {
   if (pendingProbe) await pendingProbe;
   if (snapshot.status === "unbound") {
     throw new EneoApiError("The browser session has not been checked.", { status: 503 });
@@ -123,8 +123,14 @@ export async function prepareBrowserRequest(request: Request): Promise<Request> 
     if (!publicAuthPage()) makeStale();
     throw new EneoApiError("No browser session", { status: 401 });
   }
+  return snapshot.generation;
+}
+
+/** Every cookie transport uses this before sending, including XHR uploads. */
+export async function prepareBrowserRequest(request: Request): Promise<Request> {
+  const generation = await requireBrowserSession();
   const headers = new Headers(request.headers);
-  headers.set(SESSION_GENERATION_HEADER, snapshot.generation);
+  headers.set(SESSION_GENERATION_HEADER, generation);
   return new Request(request, {
     headers,
     signal: AbortSignal.any([request.signal, requests.signal])
