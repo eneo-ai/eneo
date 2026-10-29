@@ -16,10 +16,11 @@ import {
   retryPartnerQuery
 } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
+import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
-import { trackPartnerUpdate } from "@/features/chat/partner-updates";
+import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { reasoningEffortOptions } from "@/features/chat/reasoning-effort";
 import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
 import { useSpace } from "@/features/spaces/use-space";
@@ -45,7 +46,7 @@ function ModelSwitcher() {
 
   const update = useMutation({
     mutationFn: (modelId: string) =>
-      trackPartnerUpdate(
+      queuePartnerUpdate(() =>
         unwrap(
           // RB-5(b): assistants use POST-as-update.
           browserApi.POST("/api/v1/assistants/{id}/", {
@@ -111,7 +112,7 @@ function ReasoningSwitcher() {
 
   const update = useMutation({
     mutationFn: (effort: string | null) =>
-      trackPartnerUpdate(
+      queuePartnerUpdate(() =>
         unwrap(
           browserApi.POST("/api/v1/assistants/{id}/", {
             params: { path: { id: assistant!.id } },
@@ -294,6 +295,7 @@ export function SpaceChat() {
         activeId: partner.id
       })}
       modelSelector={partner.type === "default-assistant" ? <ComposerPickers /> : undefined}
+      skills={partner.type === "default-assistant" && space.personal ? <ChatSkills /> : undefined}
       editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);
