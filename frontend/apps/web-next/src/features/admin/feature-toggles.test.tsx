@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useQuery } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { sessionKeys } from "@/lib/api/session";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderHookInApp, renderInApp, testAppContext, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({ PATCH: vi.fn() }));
 const toastApiError = vi.hoisted(() => vi.fn());
@@ -18,8 +19,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderToggles() {
-  const { queryClient } = renderInApp(<FeatureToggles />, {
+function renderToggles(queryClient = testQueryClient()) {
+  renderInApp(<FeatureToggles />, {
+    queryClient,
     appContext: testAppContext({
       settings: {
         using_templates: true,
@@ -44,6 +46,41 @@ it("renders labelled, described switches in a titled card", async () => {
   expect(described?.textContent).toBe(messages.enable_templates_description);
   expect(screen.getAllByRole("switch")).toHaveLength(4);
   await expectNoAxeViolations(document.body);
+});
+
+it("refreshes both provisioning resources without refetching unrelated session data", async () => {
+  const queryClient = testQueryClient();
+  let settings = { provisioning: false };
+  let tenant = { provisioning: false };
+  const getSettings = vi.fn(async () => settings);
+  const getTenant = vi.fn(async () => tenant);
+  const getUser = vi.fn(async () => ({ id: "user-1" }));
+  const { result } = renderHookInApp(
+    () => ({
+      settings: useQuery({
+        queryKey: sessionKeys.settings,
+        queryFn: getSettings,
+        staleTime: Infinity
+      }).data,
+      tenant: useQuery({ queryKey: sessionKeys.tenant, queryFn: getTenant, staleTime: Infinity })
+        .data,
+      user: useQuery({ queryKey: sessionKeys.me, queryFn: getUser, staleTime: Infinity }).data
+    }),
+    { queryClient }
+  );
+  await waitFor(() => expect(result.current).toEqual({ settings, tenant, user: { id: "user-1" } }));
+  api.PATCH.mockImplementation(async (_path, { body }) => {
+    settings = { provisioning: body.enabled };
+    tenant = { provisioning: body.enabled };
+    return { data: settings, response: new Response("{}") };
+  });
+  renderToggles(queryClient);
+  fireEvent.click(screen.getByRole("switch", { name: "Automatisk kontoskapning (SSO)" }));
+  await waitFor(() => expect(result.current.settings?.provisioning).toBe(true));
+  await waitFor(() => expect(result.current.tenant?.provisioning).toBe(true));
+  expect(getSettings).toHaveBeenCalledTimes(2);
+  expect(getTenant).toHaveBeenCalledTimes(2);
+  expect(getUser).toHaveBeenCalledTimes(1);
 });
 
 it("saves a toggle and refreshes the shared settings", async () => {
