@@ -46,11 +46,36 @@ class WebAppSmokeTests(unittest.TestCase):
 
     def test_index_nonce_must_match_the_policy(self):
         headers = Message()
-        headers["Content-Security-Policy"] = "script-src 'self' 'nonce-test-nonce'"
-        html = b'<meta property="csp-nonce" nonce="test-nonce"><script type="module" src="/assets/index-test.js"></script>'
+        headers["Content-Security-Policy"] = (
+            "script-src 'self' 'nonce-test-nonce' 'strict-dynamic'"
+        )
+        html = b'<meta property="csp-nonce" nonce="test-nonce"><script type="module" nonce="test-nonce" src="/assets/index-test.js"></script>'
         self.assertEqual(smoke.web_app_asset(headers, html), "/assets/index-test.js")
         with self.assertRaises(AssertionError):
             smoke.web_app_asset(headers, html.replace(b"test-nonce", b"wrong-nonce"))
+
+    def test_entry_script_must_have_a_nonce_allowed_by_script_src(self):
+        headers = Message()
+        headers["Content-Security-Policy"] = (
+            "script-src 'self' 'nonce-test-nonce' 'strict-dynamic'"
+        )
+        for nonce in [b"", b'nonce="wrong-nonce"']:
+            with self.subTest(nonce=nonce):
+                html = (
+                    b'<meta property="csp-nonce" nonce="test-nonce"><script src="/assets/index.js" '
+                    + nonce
+                    + b"></script>"
+                )
+                with self.assertRaises(AssertionError):
+                    smoke.web_app_asset(headers, html)
+        headers.replace_header(
+            "Content-Security-Policy", "script-src 'none'; style-src 'nonce-test-nonce'"
+        )
+        with self.assertRaises(AssertionError):
+            smoke.web_app_asset(
+                headers,
+                b'<meta property="csp-nonce" nonce="test-nonce"><script src="/assets/index.js" nonce="test-nonce"></script>',
+            )
 
     def test_index_without_an_asset_is_rejected(self):
         headers = Message()

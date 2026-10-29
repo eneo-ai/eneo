@@ -56,6 +56,7 @@ class WebAppIndex(HTMLParser):
         super().__init__()
         self.nonce = None
         self.asset = None
+        self.script_nonce = None
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -65,16 +66,26 @@ class WebAppIndex(HTMLParser):
             src = attrs.get("src") or ""
             if src.startswith("/assets/") and src.endswith(".js"):
                 self.asset = src
+                self.script_nonce = attrs.get("nonce")
 
 
 def web_app_asset(headers: Message, html: bytes) -> str:
     index = WebAppIndex()
     index.feed(html.decode("utf-8"))
     assert index.nonce, "Web app HTML has no CSP nonce"
-    assert f"'nonce-{index.nonce}'" in headers.get("Content-Security-Policy", ""), (
-        "Web app HTML nonce does not match its CSP"
+    directives = [
+        part.split() for part in headers.get("Content-Security-Policy", "").split(";")
+    ]
+    script_sources = next(
+        (part[1:] for part in directives if part and part[0] == "script-src"), []
+    )
+    assert f"'nonce-{index.nonce}'" in script_sources, (
+        "Web app HTML nonce does not match script-src"
     )
     assert index.asset, "Web app HTML has no built JavaScript asset"
+    assert index.script_nonce == index.nonce, (
+        "Web app entry script nonce does not match its CSP"
+    )
     return index.asset
 
 
