@@ -4,6 +4,7 @@ import type { Eneo, Role } from "@eneo/eneo-js";
 import {
   compareVersions,
   hasUnseenRelease,
+  latestRelease,
   releasesForVersion,
   visibleEntries
 } from "@eneo/whats-new";
@@ -39,7 +40,8 @@ function createWhatsNewStore(data: WhatsNewInit) {
   const bundled = releasesForVersion(data.whatsNewVersion);
   const can = hasPermission(data.user);
   const releases = bundled.filter((release) => visibleEntries(release, can).length > 0);
-  const latest = bundled[0];
+  // Unreleased notes on development builds are listed, never announced or recorded.
+  const latest = latestRelease(bundled);
   const latestVisible = latest && visibleEntries(latest, can).length > 0;
   // Local reminders are isolated by account and installed release (including RCs).
   const reminderKey = `eneo:whats-new:remind-after:${data.user.id}:${latest?.version}`;

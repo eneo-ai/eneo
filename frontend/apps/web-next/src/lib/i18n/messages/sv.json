@@ -4779,6 +4779,8 @@
   "whats_new_empty": "Inga nyheter ännu.",
   "whats_new_release": "Version {version}",
   "whats_new_upcoming": "Kommande",
+  "whats_new_unreleased": "Kommande version",
+  "whats_new_unreleased_hint": "Klara ändringar som ännu inte ingår i någon version.",
   "whats_new_admin_only": "Administratörer",
   "whats_new_show_me": "Visa mig",
   "whats_new_spotlight_done": "Uppfattat",

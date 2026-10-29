@@ -8,8 +8,12 @@ import {
   ENTRY_AREAS,
   ENTRY_TYPES,
   LOCALES,
+  UNRELEASED,
   compareVersions,
+  hasUnseenRelease,
+  latestRelease,
   releases,
+  releasesForVersion,
   visibleEntries
 } from "./index.js";
 
@@ -57,18 +61,39 @@ test("releases.json is newest first", () => {
   }
 });
 
-test("RC builds reuse their final release's content with their own identity", async () => {
-  const { releasesForVersion } = await import("./index.js");
-  const source = releases.find((release) => release.version === "2.3.0");
+test("the unreleased block sorts last and is never the latest or unseen release", () => {
+  expect(UNRELEASED).toBe("next");
+  for (const version of ["0.0.0", "2.3.0-rc.1", "2.3.0", "99.0.0"]) {
+    expect(compareVersions(UNRELEASED, version)).toBeGreaterThan(0);
+    expect(compareVersions(version, UNRELEASED)).toBeLessThan(0);
+  }
+  expect(compareVersions(UNRELEASED, UNRELEASED)).toBe(0);
+
+  const entries = releases.at(-1).entries;
+  const upcoming = { version: UNRELEASED, entries };
+  const released = { version: "2.3.0", date: "2026-11-01", entries };
+  expect(latestRelease([upcoming, released])).toBe(released);
+  expect(latestRelease([upcoming])).toBeUndefined();
+  expect(latestRelease([])).toBeUndefined();
+  expect(latestRelease().version).not.toBe(UNRELEASED);
+  for (const seen of [null, undefined, "2.2.0", "2.3.0"]) {
+    expect(hasUnseenRelease(seen, upcoming)).toBe(false);
+  }
+  expect(hasUnseenRelease("2.2.0", released)).toBe(true);
+});
+
+test("RC builds reuse their final release's content with their own identity", () => {
+  const source = latestRelease();
   const before = JSON.stringify(releases);
-  for (const version of ["2.3.0-rc.0", "2.3.0-rc.1", "2.3.0-rc.10"]) {
+  for (const suffix of ["-rc.0", "-rc.1", "-rc.10"]) {
+    const version = `${source.version}${suffix}`;
     for (const installed of [version, `v${version}`]) {
       const resolved = releasesForVersion(installed);
       const candidate = resolved.find((release) => release.version === version);
       expect(candidate.entries).toBe(source.entries);
       expect(candidate.date).toBeUndefined();
       expect(resolved).toHaveLength(releases.length);
-      expect(resolved.some((release) => release.version === "2.3.0")).toBe(false);
+      expect(resolved.some((release) => release.version === source.version)).toBe(false);
     }
   }
   expect(JSON.stringify(releases)).toBe(before);
@@ -82,8 +107,7 @@ test("RC builds reuse their final release's content with their own identity", as
   expect(JSON.stringify(releases)).toBe(before);
 });
 
-test("final, local and unrelated builds keep the authored release identities", async () => {
-  const { releasesForVersion } = await import("./index.js");
+test("final, local and unrelated builds keep the authored release identities", () => {
   for (const version of ["2.3.0", "v2.3.0", "0.0.0-dev", "1.23.1", "unknown"]) {
     expect(releasesForVersion(version)).toBe(releases);
   }

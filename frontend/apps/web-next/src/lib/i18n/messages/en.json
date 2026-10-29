@@ -4779,6 +4779,8 @@
   "whats_new_empty": "No release notes yet.",
   "whats_new_release": "Version {version}",
   "whats_new_upcoming": "Upcoming",
+  "whats_new_unreleased": "Upcoming release",
+  "whats_new_unreleased_hint": "Merged changes that are not in a release yet.",
   "whats_new_admin_only": "Administrators",
   "whats_new_show_me": "Show me",
   "whats_new_spotlight_done": "Got it",

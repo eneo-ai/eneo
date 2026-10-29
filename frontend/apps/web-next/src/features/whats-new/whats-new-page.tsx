@@ -1,6 +1,6 @@
 "use client";
 
-import { releases, visibleEntries } from "@eneo/whats-new";
+import { isUnreleased, releases, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Sparkles } from "lucide-react";
@@ -127,14 +127,20 @@ export function WhatsNewPage({ title }: { title: string }) {
                   onClick={() => selectRelease(release)}
                   className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
                 >
-                  {release.version}
-                  {!release.date && (
-                    <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
-                  )}
-                  {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
+                  {isUnreleased(release) ? (
+                    t("whats_new_upcoming")
+                  ) : (
                     <>
-                      <span aria-hidden="true" className="bg-success size-2 rounded-full" />
-                      <span className="sr-only">{t("whats_new_new_for_you")}</span>
+                      {release.version}
+                      {!release.date && (
+                        <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
+                      )}
+                      {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
+                        <>
+                          <span aria-hidden="true" className="bg-success size-2 rounded-full" />
+                          <span className="sr-only">{t("whats_new_new_for_you")}</span>
+                        </>
+                      )}
                     </>
                   )}
                 </button>
@@ -145,12 +151,19 @@ export function WhatsNewPage({ title }: { title: string }) {
           <section aria-labelledby={`release-${current.version}`} className="space-y-5">
             <div className="flex flex-wrap items-center gap-3">
               <h2 id={`release-${current.version}`} className="text-xl font-semibold">
-                {t("whats_new_release", { version: current.version })}
+                {isUnreleased(current)
+                  ? t("whats_new_unreleased")
+                  : t("whats_new_release", { version: current.version })}
               </h2>
               <span className="text-muted-foreground text-sm">
-                {current.date ? formatDate(current.date) : t("whats_new_upcoming")}
+                {isUnreleased(current)
+                  ? t("whats_new_unreleased_hint")
+                  : current.date
+                    ? formatDate(current.date)
+                    : t("whats_new_upcoming")}
               </span>
               {seenAtOpen !== null &&
+                !isUnreleased(current) &&
                 (isReadRelease(current, seenAtOpen) ? (
                   <span className="text-muted-foreground text-xs">{t("whats_new_read")}</span>
                 ) : (
