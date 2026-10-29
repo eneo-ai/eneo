@@ -141,14 +141,21 @@ test("cookie mutations need an origin while bearer authentication ignores cookie
     data: {}
   });
   expect(mutation.status()).toBe(401);
-  const login = await request.post("/api/v1/users/login/token/", { form: E2E_CREDENTIALS });
+  const invalidCookies = {
+    ...SAME_ORIGIN,
+    Cookie: "__Host-eneo_web=invalid; eneo_web=invalid"
+  };
+  const login = await request.post("/api/v1/users/login/token/", {
+    form: E2E_CREDENTIALS,
+    headers: invalidCookies
+  });
   expect(login.status()).toBe(200);
+  expect(login.headers()["set-cookie"]).toBeUndefined();
   const { access_token: token } = await login.json();
   const me = await request.get("/api/v1/users/me/", {
     headers: {
-      Authorization: `Bearer ${token}`,
-      Cookie: "__Host-eneo_web=invalid; eneo_web=invalid",
-      "Sec-Fetch-Site": "cross-site"
+      ...invalidCookies,
+      Authorization: `Bearer ${token}`
     }
   });
   expect(me.status()).toBe(200);
