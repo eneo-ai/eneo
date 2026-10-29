@@ -46,11 +46,11 @@ for (const event of ["pull_request", "merge_group"]) {
   });
 }
 
-test("shared frontend inputs validate both apps and both images", () => {
+test("shared frontend inputs validate both apps and all application images", () => {
   for (const file of ["frontend/bun.lock", "frontend/package.json", "frontend/patches/x.patch", "frontend/packages/ui/src/styles/main.css"]) {
     const plan = planCi([file], "merge_group");
     for (const name of ["frontend", "frontend_e2e", "web_next", "web_next_e2e"]) assert.equal(plan[name], true, `${file}: ${name}`);
-    assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["frontend", "web-next"]);
+    assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "frontend", "web-next"]);
   }
 });
 
@@ -215,7 +215,17 @@ test("web-next-only changes do not build the Svelte app", () => {
   assert.equal(plan.web_next_e2e, true);
   assert.equal(plan.frontend, false);
   assert.equal(plan.frontend_e2e, false);
-  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["web-next"]);
+  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "web-next"]);
+});
+
+test("web-next inputs rebuild the backend image that bundles the web app", () => {
+  for (const file of ["frontend/bunfig.toml", "frontend/apps/web-next/src/main.tsx"]) {
+    const plan = planCi([file], "merge_group");
+    const backend = plan.docker_matrix.include.find(({ image }) => image === "backend");
+    assert.equal(backend?.build_contexts, "web=./frontend", file);
+  }
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(workflow, /build-contexts: \$\{\{ matrix\.build_contexts \}\}/);
 });
 
 test("missing, failed, cancelled and unexpectedly skipped required jobs fail the gate", () => {

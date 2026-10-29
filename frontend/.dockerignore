@@ -3,6 +3,7 @@
 **/.svelte-kit-e2e
 **/.next
 **/build
+**/dist
 **/coverage
 **/playwright-report
 **/test-results

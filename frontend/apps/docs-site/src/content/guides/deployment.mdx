@@ -1401,6 +1401,21 @@ The backend now reads these optional variables. Nothing needs to be set: they
 prepare the move of the beta to a web app served by the backend, and later
 releases say when to turn them on.
 
+The backend image includes the Vite build at `/app/web-dist`. Node and Bun are
+used only during the build; the running image remains Python-only. The web build
+stage is included in the image's software bill of materials (SBOM).
+
+If you build the backend image yourself, run this from the repository root:
+
+```bash
+docker buildx build --build-context web=./frontend -t eneo-backend:local backend
+```
+
+The named `web` context is required. The initial Vite shell adds about 4.1 MB to
+the uncompressed image; this grows as more routes are ported. Deployments using
+the published images need no Compose changes, and `WEB_APP_ENABLED` remains off
+by default.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
