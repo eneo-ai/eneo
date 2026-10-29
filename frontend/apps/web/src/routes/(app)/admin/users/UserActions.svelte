@@ -7,7 +7,11 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
-  import { EllipsisVertical, SquarePen, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import SquarePen from "@lucide/svelte/icons/square-pen";
+  import UserMinus from "@lucide/svelte/icons/user-minus";
+  import UserPlus from "@lucide/svelte/icons/user-plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";

@@ -33,7 +33,9 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { TextQuote, TriangleAlert, X } from "@lucide/svelte";
+  import TextQuote from "@lucide/svelte/icons/text-quote";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import X from "@lucide/svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";

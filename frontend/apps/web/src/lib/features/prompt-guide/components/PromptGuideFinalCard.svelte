@@ -3,7 +3,7 @@
 -->
 
 <script lang="ts">
-  import { Sparkles } from "@lucide/svelte";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import { fade } from "svelte/transition";
   import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";

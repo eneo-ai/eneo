@@ -45,6 +45,13 @@ const imageModel = {
   default_quality: "high",
   used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
 } as AdminModel;
+const rerankModel = {
+  id: "rerank-1",
+  name: "Qwen/Qwen3-Reranker-4B",
+  nickname: "Qwen Reranker",
+  candidate_factor: 3,
+  max_candidates: 250
+} as AdminModel;
 
 describe("ModelDetailDialog", () => {
   it("names the usage table by the text above it", async () => {
@@ -73,6 +80,24 @@ describe("ModelDetailDialog", () => {
     );
     const sources = within(dialog).getByText("Används av Bildgenerering").nextElementSibling;
     expect(within(sources as HTMLElement).getByRole("listitem").textContent).toBe("Bildgenerering");
+    await expectNoAxeViolations(dialog);
+  });
+
+  it("shows a rerank model's candidate settings without a usage tab", async () => {
+    renderInApp(
+      <ModelDetailDialog model={rerankModel} kind="rerank" open onOpenChange={() => {}} />
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Qwen Reranker" });
+    // No usage endpoint for rerank models either.
+    expect(within(dialog).queryByRole("tab")).toBeNull();
+    expect(
+      within(dialog).getByText("Kandidater per efterfrågad chunk").nextElementSibling?.textContent
+    ).toBe("3");
+    expect(
+      within(dialog).getByText("Max antal kandidater per sökning").nextElementSibling?.textContent
+    ).toBe("250");
+    expect(within(dialog).queryByText("Funktioner")).toBeNull();
     await expectNoAxeViolations(dialog);
   });
 

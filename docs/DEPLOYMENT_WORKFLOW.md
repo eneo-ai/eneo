@@ -57,7 +57,7 @@ Backflow (patches):
 #### `develop`
 - Integration branch for new features
 - Always deployable to dev environment
-- Protected: requires PR with approval
+- Protected: requires a PR approved by a member of `@eneo-ai/core-maintainers`, merged through the merge queue
 
 #### `release/v1.X`
 - Created from `develop` when ready to release or stabilize a minor version
@@ -65,6 +65,7 @@ Backflow (patches):
 - All version tags (`v1.X.Y`) live here
 - Test via RC tags (`:v1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
+- Protected: only members of `@eneo-ai/core-maintainers` can create, push to or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
 
 ### Supporting Branches
 
