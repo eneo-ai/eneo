@@ -440,6 +440,65 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
+    test("Skills: create, saved detail and a long reference preview", async ({ page }) => {
+      test.setTimeout(90_000);
+      const name = uniqueName(`E2E A11y Skill ${colorScheme}`);
+      const description = "A writing guide with detailed editorial requirements. ".repeat(18);
+      const instructions =
+        "# Writing guide\n\nWrite clearly. Check facts and explain unfamiliar words.\n\n".repeat(
+          300
+        );
+
+      await page.goto("/spaces/personal/skills/new");
+      await expect(
+        page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+      ).toBeVisible();
+      await expectNoAxeViolations(page);
+      await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+      await page.getByRole("textbox", { name: /^(Beskrivning|Description)$/ }).fill(description);
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page.evaluate((text) => navigator.clipboard.writeText(text), instructions);
+      const editor = page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ });
+      await editor.focus();
+      await page.keyboard.press("ControlOrMeta+V");
+      await expect(editor).toHaveText(instructions);
+      await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
+      await page.waitForURL(/\/spaces\/personal\/skills\/[\da-f-]+$/);
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+      await expectNoAxeViolations(page);
+
+      await page.goto("/spaces/personal/skills");
+      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+      await expectNoAxeViolations(page);
+
+      await page.goto("/spaces/personal/skills/new");
+      await page.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ }).click();
+      const dialog = page.getByRole("dialog", { name: /^(Infoga referens|Insert reference)$/ });
+      await dialog.getByRole("textbox").fill(name);
+      await dialog.getByRole("button", { name: new RegExp(name) }).click();
+      await expect(dialog.getByRole("heading", { name })).toBeVisible();
+      await dialog.locator("summary", { hasText: /^(Beskrivning|Description)$/ }).click();
+      await expect(dialog.getByText(description, { exact: true })).toBeVisible();
+      const insert = dialog.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ });
+      await expect(dialog.getByText(instructions, { exact: true })).toBeVisible();
+      await expect(insert).toBeEnabled();
+      await expectNoAxeViolations(page);
+
+      const header = dialog.getByRole("heading", { name });
+      const before = { header: await header.boundingBox(), insert: await insert.boundingBox() };
+      await dialog
+        .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
+        .focus();
+      await expect(insert).toBeInViewport();
+      expect(await header.boundingBox()).toEqual(before.header);
+      expect(await insert.boundingBox()).toEqual(before.insert);
+      await page.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+      await expect(
+        page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+      ).toBeFocused();
+    });
+
     test("collection detail", async ({ page }) => {
       // A new space gets the organisation's embedding model (e2e/seed.py),
       // which a collection needs.
