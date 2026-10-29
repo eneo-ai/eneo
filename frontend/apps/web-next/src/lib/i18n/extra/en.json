@@ -1775,5 +1775,6 @@
   "session_check_failed": "Your session could not be checked",
   "session_check_retry_description": "Try again before saving or loading new information.",
   "logout_pending": "Signing out…",
-  "logout_failed": "Sign-out failed. Try again."
+  "logout_failed": "Sign-out failed. Try again.",
+  "login_options_unavailable": "Sign-in options could not be loaded."
 }

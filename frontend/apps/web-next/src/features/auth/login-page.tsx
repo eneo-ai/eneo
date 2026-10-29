@@ -5,6 +5,7 @@ import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { QuietBanner } from "@/components/astryx/banner";
 import { LoadingState } from "@/components/composites/loading-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { getSessionSnapshot } from "@/lib/api/refusal";
 import { sessionQueries } from "@/lib/api/session";
@@ -67,14 +68,24 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
         <>
           {diagnostics ? <LoginDiagnosticsAlert diagnostics={diagnostics} /> : null}
           {notice ? <QuietBanner status="info" title={t(notice)} /> : null}
-          {federation.data?.has_multi_tenant_federation ? (
-            <TenantFederationLogin next={search.next} />
-          ) : ssoHref ? (
-            <Button label={t("login_with_sso")} href={ssoHref} as={DocumentLink} />
-          ) : null}
-          {ssoHref || federation.data?.has_multi_tenant_federation ? (
-            <p className="text-ax-text-secondary text-center text-xs uppercase">{t("or")}</p>
-          ) : null}
+          <QueryStateBoundary
+            query={federation}
+            rows={1}
+            errorTitle={t("login_options_unavailable")}
+          >
+            {() => (
+              <>
+                {federation.data?.has_multi_tenant_federation ? (
+                  <TenantFederationLogin next={search.next} />
+                ) : ssoHref ? (
+                  <Button label={t("login_with_sso")} href={ssoHref} as={DocumentLink} />
+                ) : null}
+                {ssoHref || federation.data?.has_multi_tenant_federation ? (
+                  <p className="text-ax-text-secondary text-center text-xs uppercase">{t("or")}</p>
+                ) : null}
+              </>
+            )}
+          </QueryStateBoundary>
           <LoginForm next={search.next} />
         </>
       )}

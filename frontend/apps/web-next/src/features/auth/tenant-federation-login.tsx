@@ -18,20 +18,20 @@ const tenantsQuery = queryOptions({
   refetchOnWindowFocus: false
 });
 
-function rememberedSlug(): string | null {
+function rememberedTenant() {
   try {
-    return sessionStorage.getItem(LAST_TENANT_KEY);
+    return { available: true, slug: sessionStorage.getItem(LAST_TENANT_KEY) };
   } catch {
-    return null;
+    return { available: false, slug: null };
   }
 }
 
-function remember(slug: string): void {
-  // A storage restriction must not prevent authentication.
+function remember(slug: string): boolean {
   try {
     sessionStorage.setItem(LAST_TENANT_KEY, slug);
+    return true;
   } catch {
-    /* The choice simply won't be remembered. */
+    return false;
   }
 }
 
@@ -52,19 +52,20 @@ export function TenantFederationLogin({ next }: { next?: string }) {
 
 function TenantChoices({ tenants, next }: { tenants: Schema<"TenantInfo">[]; next?: string }) {
   const t = useTranslations();
-  const [remembered] = useState(rememberedSlug);
+  const [remembered] = useState(rememberedTenant);
   const [showSelector, setShowSelector] = useState(false);
   const started = useRef(false);
-  const previous = tenants.find((tenant) => tenant.slug === remembered);
+  const previous = tenants.find((tenant) => tenant.slug === remembered.slug);
   const onlyTenant = tenants.length === 1 ? tenants[0] : undefined;
 
   useEffect(() => {
-    if (onlyTenant && !previous && !started.current) {
+    if (onlyTenant && !previous && remembered.available && !started.current) {
       started.current = true;
-      remember(onlyTenant.slug);
-      navigateTo(federationHref(next, onlyTenant.slug));
+      // Without a remembered choice, a failed login would automatically start
+      // again in the next document. Keep the explicit link usable instead.
+      if (remember(onlyTenant.slug)) navigateTo(federationHref(next, onlyTenant.slug));
     }
-  }, [onlyTenant, previous, next]);
+  }, [onlyTenant, previous, remembered.available, next]);
 
   return (
     <div className="flex flex-col gap-2">

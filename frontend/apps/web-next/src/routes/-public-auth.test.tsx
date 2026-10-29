@@ -58,6 +58,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -222,6 +223,37 @@ it("never signs out or starts authentication while preloading", async () => {
   await router.preloadRoute({ to: "/login/switch-organisation" });
   expect(fetcher).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it.each(["getItem", "setItem"] as const)(
+  "keeps a single tenant as an explicit link when storage %s fails, including after failed authentication",
+  async (operation) => {
+    replies.set("/api/v1/auth/federation-status", { has_multi_tenant_federation: true });
+    replies.set("/api/v1/auth/tenants", { tenants: [{ slug: "first", name: "First" }] });
+    vi.spyOn(Storage.prototype, operation).mockImplementation(() => {
+      throw new DOMException("Storage is blocked", "SecurityError");
+    });
+    for (const path of ["/login", "/login?message=oidc_callback_failed"]) {
+      await route(path);
+      expect((await screen.findByRole("link", { name: "First" })).getAttribute("href")).toBe(
+        "/api/v1/auth/browser/initiate?tenant=first"
+      );
+      expect(navigate).not.toHaveBeenCalled();
+      cleanup();
+    }
+  }
+);
+
+it("keeps password login available and recovers SSO discovery through an explicit retry", async () => {
+  replies.set("/api/v1/auth/federation-status", new Response(null, { status: 503 }));
+  await route("/login");
+  expect(await screen.findByRole("button", { name: messages.login })).toBeTruthy();
+  const retry = await screen.findByRole("button", { name: /Försök igen/ });
+  replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
+  fireEvent.click(retry);
+  expect(await screen.findByRole("link", { name: messages.login_with_sso })).toBeTruthy();
+  expect(callsTo("/api/v1/auth/federation-status")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: messages.login })).toBeTruthy();
 });
 
 it.each([

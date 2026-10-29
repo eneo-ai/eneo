@@ -1775,5 +1775,6 @@
   "session_check_failed": "Sessionen kunde inte kontrolleras",
   "session_check_retry_description": "Försök igen innan du sparar eller hämtar ny information.",
   "logout_pending": "Loggar ut…",
-  "logout_failed": "Utloggningen misslyckades. Försök igen."
+  "logout_failed": "Utloggningen misslyckades. Försök igen.",
+  "login_options_unavailable": "Inloggningsalternativen kunde inte hämtas."
 }
