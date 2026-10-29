@@ -2,6 +2,10 @@ import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
+import {
+  loadInitialConversation,
+  NO_INITIAL_CONVERSATION
+} from "$lib/features/chat/initialConversation";
 
 export const load: PageLoad = async (event) => {
   const { eneo, currentSpace } = await event.parent();
@@ -49,8 +53,8 @@ export const load: PageLoad = async (event) => {
   };
 
   const loadSession = async () => {
-    if (accessDenied || !selectedSessionId) return null;
-    return eneo.conversations.get({ id: selectedSessionId });
+    if (accessDenied || !selectedSessionId) return NO_INITIAL_CONVERSATION;
+    return loadInitialConversation(() => eneo.conversations.get({ id: selectedSessionId }));
   };
 
   const listSessions = async () => {
@@ -65,7 +69,7 @@ export const load: PageLoad = async (event) => {
 
   // Keep every request inside SvelteKit's load lifecycle. A rejected nested
   // promise can otherwise terminate the SSR process, even before rendering.
-  const [partner, initialHistory, initialConversation] = await Promise.all([
+  const [partner, initialHistory, session] = await Promise.all([
     getPartner(),
     listSessions(),
     loadSession()
@@ -85,6 +89,6 @@ export const load: PageLoad = async (event) => {
     chatPartner: partner,
     accessDenied,
     initialHistory,
-    initialConversation
+    ...session
   };
 };

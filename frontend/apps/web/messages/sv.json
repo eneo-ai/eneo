@@ -937,6 +937,7 @@
   "no_results": "Inga resultat hittades",
   "no_results_found": "Inga resultat hittades",
   "not_found": "Hittades inte",
+  "conversation_missing": "Konversationen kunde inte hittas. Den kan ha raderats, eller så är länken inaktuell. Du kan starta en ny konversation här.",
   "nothing_selected": "Inget valt",
   "notifications": "Aviseringar",
   "notifications_and_jobs": "Aviseringar och jobb",
