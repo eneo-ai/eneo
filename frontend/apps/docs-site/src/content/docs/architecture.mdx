@@ -371,8 +371,8 @@ covers deployment and operations.
 - **Queue**: Redis-based ARQ (Async Redis Queue)
 - **Language**: Python with async/await
 - **Concurrency**: `WORKER_MAX_JOBS` concurrent jobs per worker process
-  (default 15) and `TENANT_WORKER_CONCURRENCY_LIMIT` concurrent crawl jobs per
-  tenant (default 4), enforced through durable PostgreSQL admission
+  (default 15) and `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` concurrent crawl jobs
+  per tenant (default 4), enforced through durable PostgreSQL admission
 
 **Responsibilities:**
 
@@ -627,7 +627,7 @@ There is no separate CSRF token or refresh-token mechanism.
   (`NUM_WORKERS`).
 - Worker capacity scales with additional worker containers; per-process
   concurrency is `WORKER_MAX_JOBS`, and crawl fan-out per tenant is capped by
-  `TENANT_WORKER_CONCURRENCY_LIMIT`.
+  `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`.
 
 ### Database
 

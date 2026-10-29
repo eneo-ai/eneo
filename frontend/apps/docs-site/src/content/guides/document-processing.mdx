@@ -172,18 +172,19 @@ update interval to re-enable it.
 ### Crawler Limits
 
 Crawl limits are not set per website. They are deployment defaults from
-`env_backend.env` that a system administrator can override per tenant.
+`env_backend.env` that a system administrator can override per tenant, except
+`CRAWL_EMBEDDING_CONCURRENCY` and `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`, which
+apply to the whole deployment.
 
-| Setting                            | Default             | Purpose                                              |
-| ---------------------------------- | ------------------- | ---------------------------------------------------- |
-| `CRAWL_MAX_LENGTH`                 | 36000 s (10 hours)  | Maximum duration of one crawl                        |
-| `CLOSESPIDER_ITEMCOUNT`            | 20000               | Maximum pages per crawl                              |
-| `DOWNLOAD_MAX_SIZE`                | 10485760 (10 MB)    | Maximum size of a downloaded file                    |
-| `OBEY_ROBOTS`                      | `true`              | Respect `robots.txt`                                 |
-| `CRAWL_PAGE_BATCH_SIZE`            | 100                 | Pages committed per database write                   |
-| `CRAWL_EMBEDDING_CONCURRENCY`      | 3                   | Parallel embedding calls per crawl                   |
-| `TENANT_WORKER_CONCURRENCY_LIMIT`  | 4                   | Concurrent crawl jobs per tenant                     |
-| `USING_CRAWL`                      | `true`              | Enable crawling for the deployment                   |
+| Setting                              | Default            | Purpose                                            |
+| ------------------------------------ | ------------------ | -------------------------------------------------- |
+| `CRAWL_MAX_LENGTH`                   | 36000 s (10 hours) | Maximum duration of one crawl                      |
+| `CLOSESPIDER_ITEMCOUNT`              | 20000              | Maximum pages and linked files per crawl           |
+| `DOWNLOAD_MAX_SIZE`                  | 10485760 (10 MB)   | Maximum size of a downloaded file                  |
+| `OBEY_ROBOTS`                        | `true`             | Respect `robots.txt`                               |
+| `CRAWL_PAGE_BATCH_SIZE`              | 100                | Pages committed per database write                 |
+| `CRAWL_EMBEDDING_CONCURRENCY`        | 3                  | Parallel embedding calls per crawl                 |
+| `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` | 4                  | Concurrent crawl jobs per tenant (deployment-wide) |
 
 Per-tenant overrides are stored on the tenant and read by the worker at the
 start of every crawl:
@@ -376,8 +377,9 @@ settings in `env_backend.env` control throughput:
 # Concurrent jobs per worker process (default 15)
 WORKER_MAX_JOBS=15
 
-# Concurrent crawl jobs per tenant (default 4, 0 = unlimited)
-TENANT_WORKER_CONCURRENCY_LIMIT=4
+# Concurrent crawl jobs per tenant (default 4). Use the same value on the
+# backend and every worker.
+CRAWL_JOB_TENANT_CONCURRENCY_LIMIT=4
 ```
 
 Keep `WORKER_MAX_JOBS` at or below roughly 60 % of `DB_POOL_SIZE +
@@ -423,8 +425,9 @@ docker compose restart worker
 **Check error messages:**
 
 ```bash
-docker compose logs worker crawler | grep -i crawl
-curl -s https://your-eneo-instance.com/api/healthz/crawler
+docker compose logs worker crawler-worker | grep -i crawl
+curl -s https://your-eneo-instance.com/api/healthz/crawler \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY"
 ```
 
 **Common issues:**

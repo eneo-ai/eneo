@@ -321,7 +321,7 @@ value and a comment.
     | `JWT_SECRET` | empty | Token signing key (32+ chars). Generate: `openssl rand -hex 32` |
     | `URL_SIGNING_KEY` | empty | URL signing key. Generate: `openssl rand -hex 32` |
     | `PUBLIC_ORIGIN` | empty | External URL, e.g. `https://eneo.example.com`. Used to build the OIDC redirect URI `{PUBLIC_ORIGIN}/login/callback` |
-    | `FILE_REFERENCE_BASE_URL` | unset (falls back to `PUBLIC_ORIGIN`) | Base URL written into the signed file links handed to MCP tools. Set it when MCP servers reach the backend on another host than browsers do. See [Signed file references](#signed-file-references). |
+    | `FILE_REFERENCE_BASE_URL` | `http://backend:8000` in the reference `docker-compose.yml`; unset elsewhere (falls back to `PUBLIC_ORIGIN`) | Base URL written into the signed file links handed to MCP tools and the bundled tool runtime. With the reference Compose file, set it in the deployment `.env`, not in `env_backend.env`. See [Signed file references](#signed-file-references). |
     | `API_PREFIX` | `/api/v1` | Prefix for all API routes |
     | `API_KEY_HEADER_NAME` | `X-API-Key` | Header that carries API keys (including `ENEO_SUPER_API_KEY`) |
 
@@ -526,10 +526,11 @@ signed link instead of its content:
 {FILE_REFERENCE_BASE_URL}/api/v1/files/{file_id}/original/download/?token=...
 ```
 
-Both Eneo's built-in file tool and external MCP servers receive the same
-link. The built-in tool verifies the token locally and never makes an HTTP
-request. An external MCP server redeems the link over HTTP, so **the Eneo
-backend must be reachable from the network where that MCP server runs**.
+Eneo's built-in file tool, the bundled tool runtime and external MCP servers
+receive the same link. The built-in file tool verifies the token locally and
+never makes an HTTP request. The tool runtime and external MCP servers redeem
+the link over HTTP, so **the Eneo backend must be reachable at
+`FILE_REFERENCE_BASE_URL` from the network where they run**.
 This is independent of where the file bytes live: originals stored in
 PostgreSQL and originals stored in object storage are served through the
 same endpoint.
@@ -562,9 +563,9 @@ Choose `FILE_REFERENCE_BASE_URL` by where the MCP servers run:
 
 | MCP servers run                              | `FILE_REFERENCE_BASE_URL`                                                                                       | Notes                                                                                                                                                                                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nowhere, or only Eneo's built-in tools       | leave unset                                                                                                     | Built-in tools never fetch the link. `PUBLIC_ORIGIN` is used and is not contacted.                                                                                                                                                 |
-| On the same private network as the backend   | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address only needs to resolve from the MCP servers' network; browsers never see it.                                                                                           |
-| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com`                                                              | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. |
+| Nowhere, or only Eneo's built-in tools       | keep the reference default `http://backend:8000`                                                                | The bundled tool runtime downloads attachments for file analysis from the backend over the internal `tool_runtime_net`. Without the reference Compose file, an unset value uses `PUBLIC_ORIGIN`, which the built-in file tool never contacts. |
+| On the same private network as the backend   | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address must resolve from the MCP servers' network and from the bundled tool runtime; browsers never see it. `TOOL_RUNTIME_FILE_ORIGINS` follows the value. |
+| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com`                                                              | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. Eneo uses one base URL for every recipient, and the bundled tool runtime has no internet access, so its file analysis cannot download from a public origin. |
 
 On a private network with no route from the MCP server to the backend, the
 tool call fails. The model is told the link is valid, so it reports that the
@@ -820,7 +821,10 @@ Manage AI provider credentials per tenant using the sysadmin API.
 
 ### Crawler Settings API
 
-Configure crawling behavior per tenant.
+Configure crawling behavior per tenant. From 2.3 the endpoint rejects unknown
+keys with `422`, including the settings of the retired crawl feeder and tenant
+semaphore (`tenant_worker_concurrency_limit`, `crawl_feeder_*` and similar).
+Values stored earlier for those keys are ignored.
 
 <Tabs items={['Set Settings', 'Get Settings', 'Reset to Defaults']}>
   <Tabs.Tab>
@@ -1140,6 +1144,11 @@ Follow the [File and Icon storage upgrade
 checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
 closed until the new migration and same-release worker are ready.
 
+For the upgrade to 2.3, also stop every backend and worker replica before
+`db-init` and start the new versions together. The new crawler's lifecycle,
+its migrations and the old Scrapy worker cannot run side by side. Returning to
+2.2 requires restoring the backup taken in the next step.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database
@@ -1158,7 +1167,7 @@ content needs no second backup artifact.
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
-docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env stop backend worker crawler-worker
 docker compose --env-file .env --env-file release.env pull
 docker compose --env-file .env --env-file release.env run --rm db-init
 docker compose --env-file .env --env-file release.env up -d
@@ -1177,7 +1186,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker
+  stop backend worker crawler-worker
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -1277,7 +1286,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker object-content
+  stop backend worker crawler-worker object-content
 # Restore the matching PostgreSQL dump and object-store snapshot as described
 # in the linked procedure, then start the pinned versions:
 docker compose \
@@ -1301,8 +1310,12 @@ The reference `docker-compose.yml` sets a fixed `container_name` on every
 service, so `docker compose up --scale ...` is refused. To run more than one
 backend or worker replica, define additional services without `container_name`
 (or run the images under an orchestrator) and place the backend replicas behind
-your load balancer. Additional workers are safe: only one crawl feeder runs
-across all workers through leader election.
+your load balancer. Additional workers are safe. Crawls run only on
+`crawler-worker` services, each with its own `/tmp`. `WORKER_MAX_JOBS` applies
+per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
+`CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` cap running crawls across all crawler
+workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
+backend and every worker.
 
 ---
 
