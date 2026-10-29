@@ -35,7 +35,11 @@ it("reports rendered modules through boot's dynamic import and each static closu
       build: {
         minify: false,
         rolldownOptions: {
-          output: { entryFileNames: "assets/start.js", chunkFileNames: "assets/[hash].js" }
+          output: {
+            entryFileNames: "assets/start.js",
+            chunkFileNames: "assets/[hash].js",
+            codeSplitting: { groups: [{ name: "shared", test: /node_modules\/mermaid\// }] }
+          }
         }
       }
     });
@@ -46,7 +50,16 @@ it("reports rendered modules through boot's dynamic import and each static closu
     expect(report.scopes.startup.modules).not.toContain("node_modules/driver.js/index.js");
     expect(report.scopes.chat?.modules).toContain("node_modules/driver.js/index.js");
     expect(report.scopes.chat?.modules).not.toContain("node_modules/mermaid/index.js");
-    expect(report.scopes.startup.bytes).toBeGreaterThan(0);
+    const shared = report.chunks.find((chunk) => "node_modules/mermaid/index.js" in chunk.modules)!;
+    const roots = report.chunks.filter((chunk) =>
+      report.scopes.startup.roots.includes(chunk.fileName)
+    );
+    expect(report.scopes.startup.roots).not.toContain(shared.fileName);
+    expect(roots.some((chunk) => chunk.imports.includes(shared.fileName))).toBe(true);
+    expect(report.scopes.startup.chunks).toContain(shared.fileName);
+    expect(report.scopes.startup.bytes).toBeGreaterThanOrEqual(
+      roots.reduce((bytes, chunk) => bytes + chunk.bytes, 0) + shared.bytes
+    );
     expect(report.chunks.every((chunk) => !/mermaid|driver|chat/.test(chunk.fileName))).toBe(true);
     expect(JSON.stringify(report)).not.toContain(root);
   } finally {
