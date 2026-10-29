@@ -34,7 +34,9 @@ def _config_field(output_config: object, key: str) -> str | None:
     if not isinstance(block, Mapping):
         return None
     value = cast(Mapping[str, object], block).get(key)
-    return value if isinstance(value, str) and value.strip() else None
+    # One reading for publication and runtime: a name kept with spaces around
+    # it names the field without them.
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def speaker_mapping_speaker_count_field(output_config: object) -> str | None:

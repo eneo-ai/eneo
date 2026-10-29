@@ -18,6 +18,7 @@ from eneo.flows.enums import (
     FlowOutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.runtime.speaker_mapping_runtime import resolve_participants
 
 
 def _step(output_config: dict[str, object] | None) -> FlowStepValidationView:
@@ -187,3 +188,18 @@ def test_infer_names_must_be_a_bool_when_present(value: object) -> None:
             form_field_types=FIELDS,
             require_complete_config=False,
         )
+
+
+def test_a_field_name_with_spaces_around_it_that_publish_accepts_is_the_field_the_run_reads() -> (
+    None
+):
+    config = {"speaker_mapping": {"participants_field": " namn "}}
+    validate_speaker_mapping_output_config(
+        step=_step(config), form_field_types=FIELDS, require_complete_config=True
+    )
+    field = speaker_mapping_participants_field(config)
+    assert field == "namn"
+    assert resolve_participants({"namn": ["Anna Berg", "Bo Ek"]}, field) == (
+        ["Anna Berg", "Bo Ek"],
+        True,
+    )
