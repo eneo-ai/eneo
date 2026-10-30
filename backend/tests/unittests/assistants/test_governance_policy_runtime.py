@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,8 +30,12 @@ from eneo.sessions.conversation_settings import (
     ConversationSettingsState,
 )
 from eneo.sessions.session import SessionInDB
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerReason,
+    PersonalSkillLayerStatus,
     ResolvedSkillBinding,
+    SkillActivationEvidenceV2,
     SkillActivationMode,
     SkillBindingSource,
     SkillRuntimePolicy,
@@ -53,7 +58,15 @@ def _not_helper_history_repo():
     return repo
 
 
-def _empty_skill_service():
+_RUNTIME_POLICY = SkillRuntimePolicy(
+    selective_activation_enabled=False,
+    max_attached_skills=100,
+    context_share_percent=10,
+    max_activations_per_turn=10,
+)
+
+
+def _empty_skill_service(*, holds_personal_skills: bool = True):
     service = AsyncMock()
     service.resolve_assistant_bindings_for_runtime.return_value = (
         SkillRuntimeResolution(eligible=(), blocked=())
@@ -62,12 +75,14 @@ def _empty_skill_service():
         lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
-            policy=SkillRuntimePolicy(
-                selective_activation_enabled=False,
-                max_attached_skills=100,
-                context_share_percent=10,
-                max_activations_per_turn=10,
-            ),
+            policy=_RUNTIME_POLICY,
+        )
+    )
+    service.create_personal_chat_turn_plan.side_effect = (
+        lambda **kwargs: plan_personal_chat_turn(
+            **kwargs,
+            policy=_RUNTIME_POLICY,
+            holds_permission=holds_personal_skills,
         )
     )
     return service
@@ -881,6 +896,10 @@ async def test_get_assistant_with_effective_config_allows_personal_default_for_b
     assert effective_config is effective_config_service.resolve_for.return_value
 
 
+# The test Assistant's space; own Skills live there.
+_SPACE_ID = uuid4()
+
+
 def _resolved_skill(
     *,
     position: int = 0,
@@ -891,7 +910,7 @@ def _resolved_skill(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
-        skill_space_id=uuid4(),
+        skill_space_id=_SPACE_ID,
         slug=name.lower(),
         revision_number=3,
         current_revision_number=3,
@@ -924,6 +943,7 @@ def _runtime_service(
 ):
     assistant = MagicMock()
     assistant.id = uuid4()
+    assistant.space_id = _SPACE_ID
     assistant.name = "Assistant"
     assistant.description = None
     assistant.is_default = personal_default
@@ -1218,11 +1238,8 @@ async def test_frozen_evidence_is_persisted_before_runtime_failure_or_disconnect
     assert activation.initially_active == ("skill-1",)
 
 
-async def test_personal_default_rejects_invalid_direct_bindings_before_history():
-    skill_service = _skill_service_with_resolution(
-        eligible=(_resolved_skill(),),
-    )
-    effective_config = SimpleNamespace(
+def _personal_chat_config(*organisation: ResolvedSkillBinding) -> SimpleNamespace:
+    return SimpleNamespace(
         models_enforced=False,
         available_models=[],
         mcp_enforced=False,
@@ -1231,43 +1248,137 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
         inline_file_text=None,
-        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=organisation, blocked=()
+        ),
+    )
+
+
+async def test_personal_chat_runs_own_skills_after_organisation_skills():
+    organisation = replace(
+        _resolved_skill(name="Klarsprak"), source=SkillBindingSource.ORGANIZATION
+    )
+    own = _resolved_skill(name="Svar")
+    skill_service = _skill_service_with_resolution(eligible=(own,))
+    service, assistant, session_service = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=_personal_chat_config(organisation),
+    )
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    prompt = assistant.ask.await_args.kwargs["prompt_override"]
+    assert prompt.index("Instructions for Klarsprak") < prompt.index(
+        "Instructions for Svar"
+    )
+    activation = (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "skill_activation"
+        ]
+    )
+    assert isinstance(activation, SkillActivationEvidenceV2)
+    assert activation.personal_layer.status is PersonalSkillLayerStatus.APPLIED
+    assert [r.skill_id for r in activation.personal_layer.references] == [own.skill_id]
+
+
+async def test_personal_chat_without_personal_skills_runs_organisation_skills_only():
+    own = _resolved_skill(name="Svar")
+    skill_service = _empty_skill_service(holds_personal_skills=False)
+    skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(own,), blocked=())
     )
     service, assistant, session_service = _runtime_service(
         personal_default=True,
         skill_service=skill_service,
-        effective_config=effective_config,
+        effective_config=_personal_chat_config(),
     )
 
-    with pytest.raises(BadRequestException, match="invalid direct Skill bindings"):
-        await service.ask(question="hello", assistant_id=assistant.id)
+    await service.ask(question="hello", assistant_id=assistant.id)
 
-    session_service.create_session.assert_not_awaited()
-    session_service.create_session_with_question_placeholder.assert_not_awaited()
-    session_service.create_question_placeholder.assert_not_awaited()
-    assistant.ask.assert_not_awaited()
+    # With no organisation Skills and the own layer suspended, nothing is
+    # composed and the stored base prompt is used unchanged.
+    prompt = assistant.ask.await_args.kwargs["prompt_override"] or ""
+    assert "Instructions for Svar" not in prompt
+    activation = (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "skill_activation"
+        ]
+    )
+    assert isinstance(activation, SkillActivationEvidenceV2)
+    assert activation.personal_layer.reason is (
+        PersonalSkillLayerReason.PERMISSION_MISSING
+    )
+    assert activation.available == ()
 
 
-async def test_personal_default_preflight_rejects_blocked_direct_bindings():
-    binding = _resolved_skill()
-    skill_service = _skill_service_with_resolution(blocked=(binding,))
-    effective_config = SimpleNamespace(
-        models_enforced=False,
-        available_models=[],
-        mcp_enforced=False,
-        available_mcp_servers=[],
-        prompt_enforced=False,
-        enforced_prompt_text=None,
-        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+@pytest.mark.parametrize("origin", ["organisation", "another_space"])
+async def test_personal_chat_refuses_stored_skills_from_outside_its_space(origin: str):
+    """Only the person's own personal-space Skills may run in the own layer,
+    whatever wrote the binding (docs/adr/personal-chat-skill-layers.md, 4)."""
+    own = _resolved_skill(name="Svar")
+    stray = (
+        replace(own, source=SkillBindingSource.ORGANIZATION)
+        if origin == "organisation"
+        else replace(own, skill_space_id=uuid4())
     )
     service, assistant, _ = _runtime_service(
         personal_default=True,
-        skill_service=skill_service,
-        effective_config=effective_config,
+        skill_service=_skill_service_with_resolution(eligible=(stray,)),
+        effective_config=_personal_chat_config(),
     )
 
-    with pytest.raises(BadRequestException, match="invalid direct Skill bindings"):
-        await service.get_preflight_baseline(assistant.id)
+    with pytest.raises(BadRequestException):
+        await service.ask(question="hello", assistant_id=assistant.id)
+
+
+async def test_personal_chat_preflight_counts_blocked_own_skills_without_failing():
+    skill_service = _skill_service_with_resolution(blocked=(_resolved_skill(),))
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=_personal_chat_config(),
+    )
+
+    baseline = await service.get_preflight_baseline(assistant.id)
+
+    assert baseline.skill_context_tokens >= 0
+
+
+async def test_personal_chat_preflight_measures_what_the_turn_runs():
+    """Preflight and the turn agree on Skill context, applied or suspended."""
+    organisation = replace(
+        _resolved_skill(name="Klarsprak"), source=SkillBindingSource.ORGANIZATION
+    )
+    own = _resolved_skill(name="Svar")
+    measured = {}
+    for holds_personal_skills in (True, False):
+        skill_service = _empty_skill_service(
+            holds_personal_skills=holds_personal_skills
+        )
+        skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+            SkillRuntimeResolution(eligible=(own,), blocked=())
+        )
+        service, assistant, session_service = _runtime_service(
+            personal_default=True,
+            skill_service=skill_service,
+            effective_config=_personal_chat_config(organisation),
+        )
+
+        baseline = await service.get_preflight_baseline(assistant.id)
+        await service.ask(question="hello", assistant_id=assistant.id)
+
+        activation = (
+            session_service.create_session_with_question_placeholder.await_args.kwargs[
+                "skill_activation"
+            ]
+        )
+        assert baseline.skill_context_tokens == activation.skill_context_tokens
+        measured[activation.personal_layer.status] = activation.skill_context_tokens
+
+    applied = measured[PersonalSkillLayerStatus.APPLIED]
+    suspended = measured[PersonalSkillLayerStatus.SUSPENDED]
+    assert applied > suspended > 0
 
 
 async def test_governance_skill_composes_after_enforced_prompt():

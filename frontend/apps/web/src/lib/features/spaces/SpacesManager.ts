@@ -5,7 +5,13 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { createContext } from "$lib/core/context";
-import type { Eneo, ResourcePermission, Space, SpaceSparse } from "@eneo/eneo-js";
+import type {
+  AssistantSkillBindingInput,
+  Eneo,
+  ResourcePermission,
+  Space,
+  SpaceSparse
+} from "@eneo/eneo-js";
 import { derived, get, writable, type Readable } from "svelte/store";
 import { toastError } from "$lib/core/errors";
 
@@ -158,6 +164,48 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
+  // Skills changes are saved on the default assistant while the user chats, so
+  // a message sent right after a change must not race the save: sends wait for
+  // this chain (see awaitDefaultAssistantUpdates) and saves run one at a time so
+  // a quick A → B → C never lets an older write land last. The model and
+  // reasoning choices are conversation settings owned by ChatService.
+  let pendingDefaultAssistantUpdate: Promise<void> = Promise.resolve();
+
+  /** Resolves once every queued default-assistant update has settled. */
+  function awaitDefaultAssistantUpdates(): Promise<void> {
+    return pendingDefaultAssistantUpdate;
+  }
+
+  /**
+   * Saves the person's own Skills for the personal chat in the same queue, so
+   * a message sent right after uses them. `skillBindings` builds the full
+   * ordered list when the save's turn comes, from what is saved by then, so
+   * a change refused earlier in the queue never travels with a later one. It
+   * rejects to its caller, which shows the choice at once and rolls it back
+   * itself; the queue still settles. The assistant is passed in, not read
+   * when the save runs, so leaving the personal space cannot redirect it.
+   */
+  function updateDefaultAssistantSkills(
+    assistant: { id: string },
+    skillBindings: () => Promise<AssistantSkillBindingInput[]>
+  ): Promise<void> {
+    const run = async () => {
+      const updatedAssistant = await eneo.assistants.update({
+        assistant,
+        update: { skill_bindings: await skillBindings() }
+      });
+      currentSpace.update(($currentSpace) => {
+        if ($currentSpace.default_assistant?.id === assistant.id) {
+          $currentSpace.default_assistant = updatedAssistant;
+        }
+        return $currentSpace;
+      });
+    };
+    const saved = pendingDefaultAssistantUpdate.then(run, run);
+    pendingDefaultAssistantUpdate = saved.catch(() => {});
+    return saved;
+  }
+
   return Object.freeze({
     state: {
       accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
@@ -169,7 +217,9 @@ function SpacesManager(data: SpacesManagerParams) {
     refreshCurrentSpace,
     updateSpace,
     deleteSpace,
-    watchPageData
+    watchPageData,
+    updateDefaultAssistantSkills,
+    awaitDefaultAssistantUpdates
   });
 }
 

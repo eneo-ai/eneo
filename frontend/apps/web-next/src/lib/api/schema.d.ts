@@ -11510,6 +11510,9 @@ export interface components {
       /** Bindings */
       bindings: components["schemas"]["AssistantSkillBindingSummary"][];
       runtime: components["schemas"]["AssistantSkillRuntimeSummary"] | null;
+      /** Organisation Bindings */
+      organisation_bindings?: components["schemas"]["AssistantSkillBindingSummary"][];
+      personal_layer?: components["schemas"]["PersonalChatSkillLayerPublic"] | null;
     };
     /** AssistantSkillRuntimeSummary */
     AssistantSkillRuntimeSummary: {
@@ -12262,7 +12265,11 @@ export interface components {
        * Format: uuid
        */
       message_id: string;
-      skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
+      /** Skill Activation */
+      skill_activation:
+        | components["schemas"]["SkillActivationEvidenceV1"]
+        | components["schemas"]["SkillActivationEvidenceV2"]
+        | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -14705,7 +14712,8 @@ export interface components {
       | 9069
       | 9070
       | 9075
-      | 9076;
+      | 9076
+      | 9080;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -19521,6 +19529,7 @@ export interface components {
       | "assistants"
       | "skills"
       | "skills_management"
+      | "personal_skills"
       | "personal_chat"
       | "group_chats"
       | "apps"
@@ -19576,6 +19585,56 @@ export interface components {
        */
       expected_published_revision_id: string;
     };
+    /**
+     * PersonalChatSkillLayerPublic
+     * @description Whether the person's own Skills run in their personal chat, and why not.
+     */
+    PersonalChatSkillLayerPublic: {
+      status: components["schemas"]["PersonalSkillLayerStatus"];
+      reason: components["schemas"]["PersonalSkillLayerReason"] | null;
+      /** Detail */
+      detail:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+    };
+    /**
+     * PersonalSkillLayerEvidence
+     * @description What happened to the personal chat's own Skills on one turn.
+     */
+    PersonalSkillLayerEvidence: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "applied" | "suspended";
+      reason?: components["schemas"]["PersonalSkillLayerReason"] | null;
+      /** Detail */
+      detail?:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+      /** References */
+      references: components["schemas"]["SkillActivationReference"][];
+    };
+    /**
+     * PersonalSkillLayerReason
+     * @description Why a personal layer is suspended; the first failing check wins.
+     * @enum {string}
+     */
+    PersonalSkillLayerReason:
+      | "permission_missing"
+      | "attachment_limit_exceeded"
+      | "model_context_exceeded"
+      | "on_demand_unavailable"
+      | "personal_skill_does_not_fit"
+      | "organisation_skill_crowded_out";
+    /**
+     * PersonalSkillLayerStatus
+     * @description Whether the personal chat's own Skills run (see personal_chat_skill_layers).
+     * @enum {string}
+     */
+    PersonalSkillLayerStatus: "empty" | "applied" | "suspended";
     /**
      * PolicyActor
      * @enum {string}
@@ -21415,17 +21474,8 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
-    /**
-     * SkillActivationEvidenceV1
-     * @description Strict, versioned, body-free facts retained with one Question.
-     */
+    /** SkillActivationEvidenceV1 */
     SkillActivationEvidenceV1: {
-      /**
-       * Version
-       * @default 1
-       * @constant
-       */
-      version?: 1;
       effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
       fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
       /** Available */
@@ -21475,6 +21525,74 @@ export interface components {
        * @default 0
        */
       selection_latency_ms?: number;
+      /**
+       * Version
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+    };
+    /**
+     * SkillActivationEvidenceV2
+     * @description V1 plus the personal layer; written only for turns that have one.
+     */
+    SkillActivationEvidenceV2: {
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      /** Initially Active */
+      initially_active: string[];
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+      /**
+       * Version
+       * @default 2
+       * @constant
+       */
+      version?: 2;
+      personal_layer: components["schemas"]["PersonalSkillLayerEvidence"];
     };
     /**
      * SkillActivationFallbackReason

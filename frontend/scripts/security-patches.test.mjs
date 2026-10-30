@@ -59,6 +59,18 @@ for (const [entry, merge] of [
     assert.equal({}.injected, undefined);
   });
 }
+// Exercise the resolution used by the beta's installed query devtools.
+const webNext = createRequire(
+  new URL("../apps/web-next/package.json", import.meta.url),
+);
+const reactQueryDevtools = createRequire(
+  webNext.resolve("@tanstack/react-query-devtools"),
+);
+const queryDevtools = createRequire(
+  reactQueryDevtools.resolve("@tanstack/query-devtools"),
+);
+const solid = createRequire(queryDevtools.resolve("solid-js"));
+const { serialize, serializeAsync } = solid("seroval");
 
 function nestedAst() {
   let ast = { type: "text", value: "a" };
@@ -128,4 +140,54 @@ test("cyclic parent references fail instead of hanging", () => {
       ),
     /parent chain contains a cycle/,
   );
+});
+
+test("CVE-2026-116583: typed array data cannot supply executable constructor names", async () => {
+  const input = new Uint16Array([0, 42, 65535]).subarray(1);
+  Object.defineProperty(input, "constructor", {
+    value: { name: "(globalThis.injected = true, Uint16Array)" },
+  });
+
+  for (const serializeValue of [serialize, serializeAsync]) {
+    for (const compactArrayBufferViews of [false, true]) {
+      const output = await serializeValue(input, { compactArrayBufferViews });
+      const context = { injected: false, atob };
+      const restored = vm.runInNewContext(output, context, { timeout: 250 });
+
+      assert.equal(context.injected, false);
+      assert.equal(
+        Object.prototype.toString.call(restored),
+        "[object Uint16Array]",
+      );
+      assert.deepEqual(Array.from(restored), [42, 65535]);
+    }
+  }
+});
+
+test("CVE-2026-116582: RegExp output cannot close its HTML script element", async () => {
+  const input = new RegExp(
+    "[</script><script>globalThis.injected=true</script>]",
+    "i",
+  );
+
+  for (const serializeValue of [serialize, serializeAsync]) {
+    const output = await serializeValue(input);
+    assert.doesNotMatch(output, /<\/script/i);
+    const restored = vm.runInNewContext(output, {}, { timeout: 250 });
+    assert.equal(restored.source, input.source);
+    assert.equal(restored.flags, input.flags);
+  }
+});
+
+test("RegExp named groups and lookbehinds retain their behavior after serialization", async () => {
+  const input = /(?<=prefix-)(?<word>[a-z]+)/gi;
+
+  for (const serializeValue of [serialize, serializeAsync]) {
+    const output = await serializeValue(input);
+    const restored = vm.runInNewContext(output, {}, { timeout: 250 });
+    assert.equal(restored.source, input.source);
+    assert.equal(restored.flags, input.flags);
+    assert.equal(restored.exec("prefix-HELLO").groups.word, "HELLO");
+    assert.equal(restored.test("other-value"), false);
+  }
 });

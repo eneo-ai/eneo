@@ -1368,3 +1368,117 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             )
         ).all()
         assert tuple(ordered_columns[:2]) == ("skill_id", "assistant_id")
+
+
+async def _until_done_or_waiting(db_container, *, pid: int, task) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        if task.done():
+            return
+        async with db_container() as observer:
+            waiting = await observer.session().scalar(
+                sa.text(
+                    "SELECT wait_event_type = 'Lock' "
+                    "FROM pg_stat_activity WHERE pid = :pid"
+                ),
+                {"pid": pid},
+            )
+        if waiting:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Database session {pid} neither finished nor waited")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_fleet_apply_cannot_close_a_cycle_with_policy_and_assistant_saves(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    """A personal chat policy save holds a Skill FOR SHARE while it waits for
+    the exclusive fit token; an Assistant save holds the shared token while it
+    waits for its Assistant row; a fleet apply holds that row. The apply only
+    reads the Skill, so it must not wait for it behind the policy save, or the
+    three wait for each other in a cycle."""
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+    async with db_container() as container:
+        targets = await _discover(container, tenant_id=admin_user.tenant_id, seed=seed)
+        runtime_policy_version = await _runtime_policy_version(
+            container, tenant_id=admin_user.tenant_id
+        )
+    assistant_id = seed.assistant_ids[0]
+
+    async def pid_of(container) -> int:
+        return await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+
+    async with (
+        db_container() as policy_save,
+        db_container() as fleet,
+        db_container() as editor,
+    ):
+        # Read each session's pid before its task starts; a busy session
+        # cannot answer a second query.
+        fleet_pid = await pid_of(fleet)
+        editor_pid = await pid_of(editor)
+        policies = policy_save.governance_policy_service()
+        await policies.get_policy_for_update()
+        await policies.update_policy(
+            skill_intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=seed.skill_id,
+                        skill_revision_id=seed.published_revision_id,
+                    )
+                )
+            ]
+        )
+        apply = asyncio.create_task(
+            fleet.skill_repo().advance_assistant_skill_pins(
+                tenant_id=admin_user.tenant_id,
+                skill_id=seed.skill_id,
+                expected_published_revision_id=seed.published_revision_id,
+                expected_runtime_policy_version=runtime_policy_version,
+                targets=targets,
+            )
+        )
+        save: asyncio.Task | None = None
+        confirm: asyncio.Task | None = None
+        try:
+            # The editor starts only once the apply holds the Assistant row.
+            await _until_done_or_waiting(db_container, pid=fleet_pid, task=apply)
+            save = asyncio.create_task(
+                editor.assistant_service().update_assistant(
+                    assistant_id, name="Renamed"
+                )
+            )
+            await _wait_until_database_lock(db_container, pid=editor_pid)
+            confirm = asyncio.create_task(
+                policy_save.assistant_service().confirm_personal_default_governance_fit()
+            )
+            results = await asyncio.wait_for(apply, timeout=10)
+            await fleet.session().commit()
+            assert save is not None
+            await asyncio.wait_for(save, timeout=10)
+            await editor.session().commit()
+            await asyncio.wait_for(confirm, timeout=10)
+        finally:
+            pending = [task for task in (apply, save, confirm) if task is not None]
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    assert [result.outcome for result in results] == [
+        AssistantPinAdvanceOutcome.ADVANCED
+    ]

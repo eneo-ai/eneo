@@ -9,7 +9,6 @@ Covers, for every capability purpose (web search, image generation):
 - purpose changes on update re-home the server (inactive provider on the way
   in, enabled general server with its attachments detached on the way out)
 - catalog write conflicts map to the matching domain error per constraint
-- usable-tool filtering that gates provider activation
 - audiences: the default provider replaces only the default, group-targeted
   providers coexist, audience input is validated against the purpose, and
   the active default cannot be narrowed to groups in place
@@ -126,6 +125,36 @@ class TestPurposeModels:
 
 
 class TestCreateCapabilityServer:
+    @pytest.mark.parametrize("approved", [True, False])
+    async def test_create_readiness_uses_the_saved_tool(self, monkeypatch, approved):
+        service, repo, tool_repo, user = _make_service()
+        saved = _make_server(user.tenant_id)
+        saved_tool = _make_tool(approved=approved)
+        saved_tool.mcp_server_id = saved.id
+        repo.add.return_value = saved
+        tool_repo.upsert_by_server_and_name.return_value = saved_tool
+        monkeypatch.setattr(
+            service,
+            "_test_connection_and_discover_tools",
+            AsyncMock(
+                return_value=(
+                    [{"name": "search", "description": "Discovered description"}],
+                    ConnectionResult(success=True),
+                )
+            ),
+        )
+
+        result = await service.create_mcp_server(
+            name="Provider",
+            http_url="https://provider.example/mcp",
+            purpose=saved.purpose,
+        )
+
+        expected = None if approved else "no_approved_tools"
+        assert result.server.readiness_reason == expected
+        assert result.server.is_enabled is False
+        assert result.connection.tools_discovered == 1
+
     @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
     async def test_capability_server_is_created_inactive(self, monkeypatch, purpose):
         service, mock_repo, _, _ = _make_service()
@@ -172,15 +201,11 @@ class TestActivation:
         with pytest.raises(BadRequestException):
             await service.activate_capability_server(server.id)
 
-    async def test_rejects_server_without_usable_tools(self, monkeypatch):
+    async def test_rejects_server_without_usable_tools(self):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id)
         mock_repo.one.return_value = server
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool(approved=False)]),
-        )
+        server.tools = [_make_tool(approved=False)]
 
         with pytest.raises(BadRequestException):
             await service.activate_capability_server(server.id)
@@ -189,11 +214,7 @@ class TestActivation:
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id)
         mock_repo.one.return_value = server
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool()]),
-        )
+        server.tools = [_make_tool()]
         monkeypatch.setattr(
             service,
             "_test_connection_and_discover_tools",
@@ -215,11 +236,7 @@ class TestActivation:
         execute_result = MagicMock()
         execute_result.fetchall.return_value = [(previous_id,)]
         mock_repo.session.execute.return_value = execute_result
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool()]),
-        )
+        server.tools = [_make_tool()]
         monkeypatch.setattr(
             service,
             "_test_connection_and_discover_tools",
@@ -395,11 +412,7 @@ class TestIntegrityErrorMapping:
         execute_result = MagicMock()
         execute_result.fetchall.return_value = []
         mock_repo.session.execute.return_value = execute_result
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool()]),
-        )
+        server.tools = [_make_tool()]
         monkeypatch.setattr(
             service,
             "_test_connection_and_discover_tools",
@@ -408,20 +421,6 @@ class TestIntegrityErrorMapping:
 
         with pytest.raises(BadRequestException, match="already active"):
             await service.activate_capability_server(server.id)
-
-
-class TestUsableTools:
-    def test_filters_disabled_removed_and_unapproved(self):
-        service, _, _, _ = _make_service()
-        usable = _make_tool()
-        tools = [
-            usable,
-            _make_tool(enabled=False),
-            _make_tool(removed=True),
-            _make_tool(approved=False),
-        ]
-
-        assert service._usable_tools(tools) == [usable]
 
 
 class TestAudience:
@@ -490,11 +489,7 @@ class TestAudience:
         server.user_groups = [MCPServerAudienceGroup(id=uuid4(), name="Legal")]
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool()]),
-        )
+        server.tools = [_make_tool()]
         monkeypatch.setattr(
             service,
             "_test_connection_and_discover_tools",
@@ -517,11 +512,7 @@ class TestAudience:
         execute_result = MagicMock()
         execute_result.fetchall.return_value = []
         mock_repo.session.execute.return_value = execute_result
-        monkeypatch.setattr(
-            service,
-            "get_tools_with_tenant_settings",
-            AsyncMock(return_value=[_make_tool()]),
-        )
+        server.tools = [_make_tool()]
         monkeypatch.setattr(
             service,
             "_test_connection_and_discover_tools",

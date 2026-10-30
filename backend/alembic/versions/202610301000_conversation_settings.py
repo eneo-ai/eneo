@@ -4,14 +4,14 @@ Nullable, without a default or backfill: old sessions initialize on first use.
 The catalog change fails immediately if chat holds the table lock; rerun the
 migration when the short lock is available. No table scan or rewrite is needed.
 
-Revision ID: 202610281100
-Revises: 202610261300
+Revision ID: 202610301000
+Revises: 202610291800
 """
 
 from alembic import op
 
-revision = "202610281100"
-down_revision = "202610261300"
+revision = "202610301000"
+down_revision = "202610291800"
 branch_labels = None
 depends_on = None
 

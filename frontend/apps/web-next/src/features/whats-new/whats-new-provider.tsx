@@ -1,6 +1,7 @@
 "use client";
 
 import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
+import type { Release } from "@eneo/whats-new";
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -8,6 +9,8 @@ import { unwrap } from "@/lib/api/errors";
 import { pendingAnnouncement, type Marker } from "./release-model";
 
 interface WhatsNewContextValue {
+  /** Releases with at least one entry visible under the user's permissions. */
+  releases: Release[];
   enabled: boolean;
   seenVersion: Marker;
   hasUnseen: boolean;
@@ -31,6 +34,7 @@ export function WhatsNewProvider({
   children: React.ReactNode;
 }) {
   const { can } = useAppContext();
+  const visibleReleases = releases.filter((release) => visibleEntries(release, can).length > 0);
   const latest = latestRelease();
   const latestVisible = latest && visibleEntries(latest, can).length > 0;
   const [seenVersion, setSeenVersion] = useState<Marker>(initialSeen);
@@ -40,9 +44,7 @@ export function WhatsNewProvider({
   const hasUnseen =
     enabled &&
     seenVersion !== undefined &&
-    releases.some(
-      (release) => visibleEntries(release, can).length > 0 && hasUnseenRelease(seenVersion, release)
-    );
+    visibleReleases.some((release) => hasUnseenRelease(seenVersion, release));
 
   const markLatestSeen = useCallback((): Promise<void> => {
     if (!hasUnseen) return Promise.resolve();
@@ -64,7 +66,7 @@ export function WhatsNewProvider({
       });
     seenInFlight.current = request;
     return request;
-  }, [hasUnseen, seenVersion]);
+  }, [hasUnseen, seenVersion, setSeenVersion]);
 
   const markLatestAnnounced = useCallback((): Promise<void> => {
     const latest = pendingAnnouncement(
@@ -81,17 +83,18 @@ export function WhatsNewProvider({
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
       });
-  }, [announcedVersion, enabled, latestVisible]);
+  }, [announcedVersion, enabled, latestVisible, setAnnouncedVersion]);
 
   const resetState = useCallback(async () => {
     await unwrap(browserApi.DELETE("/api/v1/whats-new/state/"));
     setSeenVersion(null);
     setAnnouncedVersion(null);
-  }, []);
+  }, [setSeenVersion, setAnnouncedVersion]);
 
   return (
     <WhatsNewContext.Provider
       value={{
+        releases: visibleReleases,
         enabled,
         seenVersion,
         hasUnseen,

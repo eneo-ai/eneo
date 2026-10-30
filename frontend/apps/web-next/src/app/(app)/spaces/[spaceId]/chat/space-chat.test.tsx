@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { SpaceChat } from "./space-chat.client";
 
 const route = vi.hoisted(() => ({
@@ -101,8 +101,11 @@ afterEach(() => {
   route.space.default_assistant = null;
 });
 
-function renderRoute(url = "/spaces/space-1/chat") {
-  return renderInApp(<SpaceChat />, { route: url });
+function renderRoute(url = "/spaces/space-1/chat", permissions: string[] = []) {
+  return renderInApp(<SpaceChat />, {
+    route: url,
+    appContext: testAppContext({ permissions: permissions as never })
+  });
 }
 
 describe("SpaceChat", () => {
@@ -160,6 +163,17 @@ describe("SpaceChat", () => {
         }
       })
     );
+  });
+
+  it("puts the personal chat's Skills beside the tools in the composer", async () => {
+    Object.assign(route.space, personalSpace);
+    renderRoute("/spaces/personal/chat", ["personal_chat", "personal_skills"]);
+
+    const skills = await screen.findByRole("button", { name: /^Skills/ });
+    const composer = screen
+      .getByRole("textbox", { name: /^Meddelande till/ })
+      .closest("[data-clear-of-toasts]") as HTMLElement;
+    expect(within(composer).getByRole("button", { name: /^Skills/ })).toBe(skills);
   });
 
   it("shows no reasoning picker when the policy keeps the level fixed", async () => {

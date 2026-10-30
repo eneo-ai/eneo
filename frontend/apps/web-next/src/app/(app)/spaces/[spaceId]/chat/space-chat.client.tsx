@@ -17,6 +17,7 @@ import {
   retryPartnerQuery
 } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
+import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
@@ -242,6 +243,7 @@ export function SpaceChat() {
         activeId: partner.id
       })}
       modelSelector={partner.type === "default-assistant" ? <ComposerPickers /> : undefined}
+      skills={partner.type === "default-assistant" && space.personal ? <ChatSkills /> : undefined}
       editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);

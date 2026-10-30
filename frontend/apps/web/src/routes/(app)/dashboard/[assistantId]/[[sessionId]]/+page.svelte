@@ -3,6 +3,7 @@
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
   import { Button } from "$lib/components/ui/button/index.js";
   import { pushState, replaceState } from "$app/navigation";
+  import { page } from "$app/state";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import { fade, fly, slide } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
@@ -10,7 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { untrack } from "svelte";
-  import { page } from "$app/state";
+  import { SvelteURL } from "svelte/reactivity";
 
   let { data } = $props();
 
@@ -27,14 +28,18 @@
     untrack(() => chat.init(initial));
   });
 
+  // Keep a confirmed replacement session reloadable without restarting its stream.
   $effect(() => {
-    const id = chat.currentConversation.id;
-    if (!id) return;
-    const path = `/dashboard/${chat.partner.id}/${id}`;
-    if (page.url.pathname === path) return;
+    const sessionId = chat.currentConversation.id;
+    if (chat.missingConversation) return;
     untrack(() => {
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic assistant and conversation IDs
-      replaceState(path, page.state);
+      const path = `/dashboard/${chat.partner.id}${sessionId ? `/${sessionId}` : ""}`;
+      const url = new SvelteURL(page.url);
+      const pathname = new URL(localizeHref(path), url).pathname;
+      if (url.pathname === pathname) return;
+      url.pathname = pathname;
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- localizeHref handles the dynamic dashboard route
+      replaceState(url, { ...page.state, conversation: undefined });
     });
   });
 

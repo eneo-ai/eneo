@@ -16,6 +16,7 @@
   import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
+  import ChatSkills from "./ChatSkills.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
@@ -197,6 +198,9 @@
     scrollToBottom();
 
     try {
+      // A Skills change is saved on the default assistant; the backend answers
+      // with what is stored, so let that write land before the question is sent.
+      await spacesManager?.awaitDefaultAssistantUpdates();
       await chat.askQuestion(questionText, files, tools, undefined, controller);
       removeUploads(sentIds);
     } catch (error: unknown) {
@@ -567,6 +571,11 @@
           onAutoAcceptChange={(enabled) =>
             void chat.updateSettings({ require_tool_approval: !enabled })}
         />
+      {/if}
+
+      {#if showModelSelect}
+        <!-- Saves to the default assistant through the same SpacesManager as the model picker. -->
+        <ChatSkills />
       {/if}
     </PromptInput.Tools>
 

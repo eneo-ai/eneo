@@ -49,7 +49,7 @@
     "postcss": "8.5.28",
     "mermaid": "11.16.1",
     "sharp": "0.35.5",
-    "seroval": "1.6.9",
+    "seroval": "1.6.11",
     "vite": "^6.4.4",
     "@modelcontextprotocol/client": "^2.3.1"
   },

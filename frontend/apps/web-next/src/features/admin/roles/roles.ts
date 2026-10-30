@@ -64,7 +64,14 @@ export function templatesQueryOptions(api: EneoClient, catalogue: readonly Permi
 }
 
 const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = {
-  chat: ["personal_chat", "group_chats", "shared_spaces", "web_search", "image_generation"],
+  chat: [
+    "personal_chat",
+    "personal_skills",
+    "group_chats",
+    "shared_spaces",
+    "web_search",
+    "image_generation"
+  ],
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
   insight: ["insights", "assistant_debug"],

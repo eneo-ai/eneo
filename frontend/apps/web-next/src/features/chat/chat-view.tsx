@@ -60,6 +60,7 @@ import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
 import { ConversationSettingsProvider, useConversationSettings } from "./conversation-settings";
+import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
@@ -165,6 +166,8 @@ type ChatViewProps = {
   onStartedChange?: (started: boolean) => void;
   /** Interactive model picker shown in the composer (default-assistant only). */
   modelSelector?: ReactNode;
+  /** The personal chat's Skills control, beside Verktyg in the composer. */
+  skills?: ReactNode;
   /** Start state for the personal assistant: the assistant selector inside the composer. */
   partnerToken?: ReactNode;
   activity: ActivityState | null;
@@ -202,6 +205,7 @@ function ConversationView({
   onTitle,
   onStartedChange,
   modelSelector,
+  skills,
   partnerToken,
   activity,
   onActivityChange
@@ -702,7 +706,11 @@ function ConversationView({
     };
 
     timings.markSent();
-    void sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    // A Skills change made in the composer is saved on the assistant; the
+    // backend answers with what is stored, so that save lands first.
+    if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
+    else void send();
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
@@ -844,6 +852,7 @@ function ConversationView({
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
     tools,
+    skills,
     mention,
     modelSelector,
     quote: composerQuote,

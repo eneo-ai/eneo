@@ -5,7 +5,7 @@ soon as a fixed upstream version is installed; retain the behavior regressions.
 
 ## deepmerge 4.3.1 — CVE-2026-93753 / GHSA-gcqx-w48m-w2h4
 
-Reviewed 2026-10-28. Review/exception expires 2026-11-28 (CI fails after that date).
+Reviewed 2026-10-28. Review/exception expires 2026-11-27 (CI fails after that date).
 The [advisory](https://github.com/advisories/GHSA-gcqx-w48m-w2h4) lists no fixed
 release. The transitive build dependency is used by the Svelte Vite plugin and
 Rollup's node-resolve plugin. The downstream patch rejects `__proto__` keys in
@@ -18,7 +18,9 @@ Svelte plugin and tests both shipped distributions. It covers poisoned target
 and source objects, null-prototype targets, nested null/undefined/primitive
 placeholders and `merge.all`, as well as ordinary nested configuration, arrays
 and symbol keys. The poisoning tests fail against unpatched 4.3.1. CI runs these
-regressions before accepting only this advisory and exact affected range.
+regressions before accepting only this advisory and exact affected range; the
+accepted entry in `scripts/audit-dependencies.mjs` also records that the
+dependency is build-time only and never sees request input.
 
 Frontend maintainers must replace this mitigation with a fixed upstream release
 when available, removing the patch and audit exception together. Reverting the
@@ -42,8 +44,9 @@ unbounded recursion this mitigates.
 `node --test scripts/security-patches.test.mjs` exercises the installed copy
 through Nextra → fast-glob → micromatch, including ordinary patterns, excessive
 brace/parenthesis nesting, direct AST inputs and cyclic parents. CI runs it
-before allowing exactly this advisory in the version-based audit. All other
-advisories still fail. Container scans retain the unmodified findings for review;
+before allowing exactly this advisory in the version-based audit. Other high or
+critical advisories still fail; lower severities produce warnings. Container
+scans retain the unmodified findings for review;
 the same tested patch is installed by the frozen Bun install in both Dockerfiles.
 
 The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes
@@ -63,3 +66,19 @@ cover rendering, size limits and untrusted formulas, including inherited
 `trust` and `processor` properties. Both apps retain the shared
 `@eneo/markdown-math` options. KaTeX 0.18 prefixes internal CSS classes;
 application styles use the stable outer `.katex` and `.katex-display` classes.
+
+## Seroval resolution — CVE-2026-116582 / CVE-2026-116583
+
+Reviewed 2026-10-29. The root resolution selects Seroval 1.6.11, including the
+upstream fixes for [RegExp script injection](https://github.com/advisories/GHSA-9wx9-5pv9-3349)
+and [typed array constructor injection](https://github.com/advisories/GHSA-f86p-h4j2-7qgj).
+There is no audit exception. The installed chain is the beta's
+`@tanstack/react-query-devtools` → `@tanstack/query-devtools` → `solid-js` →
+`seroval`. Remove the override once the parents require a fixed version.
+
+The existing `scripts/security-patches.test.mjs` suite resolves Seroval through
+that chain. It checks synchronous and asynchronous serialization of typed
+arrays with an untrusted own `constructor`, with and without compact buffer
+views, and prevents RegExp sources from ending an HTML script element. It also
+checks typed array contents, RegExp flags, named groups and lookbehinds survive
+the round trip. CI runs these regressions before the dependency audit.

@@ -23,6 +23,82 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+const modelA = { id: "model-a", nickname: "A" };
+
+function space(defaultAssistant: Record<string, unknown>) {
+  return {
+    id: "space-1",
+    personal: true,
+    organization: false,
+    members: { items: [] },
+    permissions: [],
+    skill_permissions: [],
+    applications: null,
+    knowledge: {
+      groups: { items: [], permissions: [] },
+      websites: { items: [], permissions: [] },
+      integration_knowledge_list: { items: [], permissions: [] }
+    },
+    completion_models: [modelA],
+    default_assistant: defaultAssistant
+  } as never;
+}
+
+function manager(update: (...args: unknown[]) => Promise<unknown>) {
+  const eneo = { assistants: { update }, spaces: {} } as never;
+  return SpacesManager({
+    spaces: [],
+    currentSpace: space({ id: "assistant-1", completion_model: modelA }),
+    eneo
+  });
+}
+
+describe("SpacesManager.updateDefaultAssistantSkills", () => {
+  const skillBindings = [
+    { skill_id: "skill-1", skill_revision_id: "revision-1", activation_mode: "always" as const }
+  ];
+
+  it("saves the person's Skills one at a time, and a send waits for all of them", async () => {
+    const calls: { args: unknown; done: Deferred<Record<string, unknown>> }[] = [];
+    const m = manager((args) => {
+      const done = deferred<Record<string, unknown>>();
+      calls.push({ args, done });
+      return done.promise;
+    });
+    const buildBindings = vi.fn(async () => skillBindings);
+
+    void m.updateDefaultAssistantSkills({ id: "assistant-1" }, async () => []);
+    const saved = m.updateDefaultAssistantSkills({ id: "assistant-1" }, buildBindings);
+    let settled = false;
+    void m.awaitDefaultAssistantUpdates().then(() => (settled = true));
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    // The second save waits for the first; its list is built when its turn comes.
+    expect(buildBindings).not.toHaveBeenCalled();
+
+    calls[0].done.resolve({ id: "assistant-1", completion_model: modelA });
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].args).toEqual({
+      assistant: { id: "assistant-1" },
+      update: { skill_bindings: skillBindings }
+    });
+    expect(settled).toBe(false);
+
+    calls[1].done.resolve({ id: "assistant-1", completion_model: modelA, name: "Saved" });
+    await saved;
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect(get(m.state.currentSpace).default_assistant).toMatchObject({ name: "Saved" });
+  });
+
+  it("rejects to the caller, which owns the rollback, and still settles the queue", async () => {
+    const m = manager(() => Promise.reject(new Error("refused")));
+
+    await expect(
+      m.updateDefaultAssistantSkills({ id: "assistant-1" }, async () => skillBindings)
+    ).rejects.toThrow("refused");
+    await m.awaitDefaultAssistantUpdates();
+  });
+});
+
 describe("SpacesManager.organizationSpaceId", () => {
   it("uses the current-space contract without needing organization membership and follows navigation", () => {
     const currentSpace = {

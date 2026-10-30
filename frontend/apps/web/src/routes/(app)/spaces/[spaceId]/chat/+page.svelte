@@ -15,6 +15,7 @@
   import { page } from "$app/state";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
+  import { SvelteURL } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import ChatDebugPanel from "$lib/features/chat/components/debug/ChatDebugPanel.svelte";
@@ -58,23 +59,6 @@
     });
   }
 
-  // The first answer creates the conversation id in place. Put it in the URL
-  // so a refresh opens that same conversation and restores its tool choices.
-  $effect(() => {
-    const conversationId = chat.currentConversation.id;
-    if (!conversationId || page.url.searchParams.has("session_id")) return;
-
-    untrack(() => {
-      const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({
-        chatPartner: chat.partner,
-        conversation: chat.currentConversation,
-        tab: "chat"
-      })}`;
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
-      replaceState(nextUrl, page.state);
-    });
-  });
-
   function partnerEditHref() {
     return localizeHref(
       `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
@@ -96,6 +80,21 @@
       if (data.chatPartner.type === "default-assistant") {
         $currentTab = "chat";
       }
+    });
+  });
+
+  // A newly persisted conversation replaces the stale link without reloading
+  // page data or interrupting its stream. An explicit new chat clears the id.
+  $effect(() => {
+    const sessionId = chat.currentConversation.id;
+    if (chat.missingConversation) return;
+    untrack(() => {
+      if ((page.url.searchParams.get("session_id") ?? "") === sessionId) return;
+      const url = new SvelteURL(page.url);
+      if (sessionId) url.searchParams.set("session_id", sessionId);
+      else url.searchParams.delete("session_id");
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- shallow update of the current route's session query
+      replaceState(url, { ...page.state, conversation: undefined });
     });
   });
 

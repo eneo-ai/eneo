@@ -269,7 +269,7 @@ Changes are recorded as `model_provider_headers_updated`, with secret values mas
 
 - A request a user makes, such as a chat message or a search, uses that user's attributes.
 - A file upload is processed with the attributes of the user who uploaded it.
-- A website crawl, whether started by hand or on schedule, uses the attributes of the website's owner. If the crawl feeder is turned off (`CRAWL_FEEDER_ENABLED=false`), a crawl started by hand uses the attributes of the user who started it.
+- A scheduled website crawl uses the attributes of the website's owner. A crawl started by hand uses the attributes of the user who started it.
 - A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so a synchronisation triggered by a SharePoint webhook uses the attributes of the tenant's oldest administrator: the earliest-created active or invited user with the admin permission.
 
 ### When changes take effect
