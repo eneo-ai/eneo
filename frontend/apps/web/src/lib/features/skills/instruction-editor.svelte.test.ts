@@ -22,6 +22,12 @@ function setup(value: string) {
     label: "Instructions",
     editorClass: "",
     referenceClass: "",
+    referenceTypeLabels: {
+      skill: "Skill",
+      function: "Funktion",
+      mcp_server: "MCP",
+      mcp_tool: "MCP-verktyg"
+    },
     onChange,
     onReference
   });
@@ -36,6 +42,22 @@ function key(key: string, options: KeyboardEventInit = {}) {
 }
 
 describe("literal instruction editor", () => {
+  it("shows the reference type and preserves the complete name and source behind a compact label", () => {
+    const name = "A very long name ".repeat(15);
+    const source = serializeReference(name, target);
+    const { onReference } = setup(source);
+    const button = mount.querySelector("button")!;
+    expect(button.getAttribute("aria-label")).toBe(`Funktion: ${name}`);
+    expect(button.title).toBe(`Funktion: ${name}`);
+    expect(button.querySelector("[data-skill-reference-kind]")?.textContent).toBe("Funktion:");
+    expect(button.querySelector("[data-skill-reference-label]")?.textContent).toBe(name);
+    button.click();
+    expect(onReference).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reference: expect.objectContaining({ label: name, target }) })
+    );
+    editor.setSource(true);
+    expect(editor.getValue()).toBe(source);
+  });
   it("preserves whitespace, Unicode, examples and exact source through mode switches", () => {
     const text = "  ✨ Åäö é\n\n" + token + "\n\n`" + token + "`\n\t";
     const { onChange } = setup(text);

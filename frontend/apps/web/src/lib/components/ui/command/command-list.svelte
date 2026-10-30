@@ -5,6 +5,7 @@
   let {
     ref = $bindable(null),
     class: className,
+    children,
     ...restProps
   }: CommandPrimitive.ListProps = $props();
 </script>
@@ -17,4 +18,8 @@
     className
   )}
   {...restProps}
-/>
+>
+  <CommandPrimitive.Viewport>
+    {@render children?.()}
+  </CommandPrimitive.Viewport>
+</CommandPrimitive.List>

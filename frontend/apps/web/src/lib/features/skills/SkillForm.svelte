@@ -14,6 +14,7 @@
   import type { SkillFormValue, SkillRevisionFormValue } from "./skillBindings";
   import type { ReferenceCatalog } from "@eneo/skill-instructions";
   import SkillInstructionEditor from "./SkillInstructionEditor.svelte";
+  import "./skillAuthoring.css";
 
   type SharedProps = {
     referenceCatalog?: ReferenceCatalog;
@@ -200,7 +201,7 @@
 </script>
 
 <form
-  class={["flex w-full max-w-[80ch] flex-col gap-5", props.class]}
+  class={["skill-authoring flex w-full max-w-[80ch] flex-col gap-5", props.class]}
   onsubmit={handleSubmit}
   aria-busy={isSubmitting}
   novalidate
@@ -214,7 +215,7 @@
         bind:value={displayName}
         oninput={handleDisplayNameInput}
         aria-invalid={displayNameInvalid || undefined}
-        aria-describedby={`${displayNameId}-description`}
+        aria-describedby={`${displayNameId}-description ${displayNameId}-error`}
         disabled={isSubmitting}
         maxlength={200}
         required
@@ -223,7 +224,7 @@
         {m.skills_display_name_description()}
       </Field.Description>
       {#if displayNameInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${displayNameId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
 
@@ -234,7 +235,7 @@
         id={descriptionId}
         bind:value={description}
         aria-invalid={descriptionInvalid || undefined}
-        aria-describedby={`${descriptionId}-description`}
+        aria-describedby={`${descriptionId}-description ${descriptionId}-error`}
         disabled={isSubmitting}
         class="max-h-64 min-h-24 overflow-y-auto"
         rows={3}
@@ -245,7 +246,7 @@
         {m.skills_description_description()}
       </Field.Description>
       {#if descriptionInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${descriptionId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
 
@@ -255,6 +256,7 @@
         <SkillInstructionEditor
           bind:this={instructionEditor}
           id={instructionsId}
+          describedBy={`${instructionsId}-error`}
           bind:value={instructions}
           disabled={isSubmitting}
           invalid={instructionsInvalid}
@@ -267,7 +269,7 @@
           id={instructionsId}
           bind:value={instructions}
           aria-invalid={instructionsInvalid || undefined}
-          aria-describedby={`${instructionsId}-description`}
+          aria-describedby={`${instructionsId}-description ${instructionsId}-error`}
           disabled={isSubmitting}
           class={[
             "max-h-[min(50dvh,32rem)] overflow-y-auto",
@@ -283,7 +285,7 @@
         </Field.Description>
       {/if}
       {#if instructionsInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${instructionsId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
   </Field.Group>
@@ -317,7 +319,7 @@
             bind:value={slug}
             oninput={handleSlugInput}
             aria-invalid={slugInvalid || undefined}
-            aria-describedby={`${slugId}-description`}
+            aria-describedby={`${slugId}-description ${slugId}-error`}
             disabled={isSubmitting}
             autocomplete="off"
             maxlength={64}
@@ -327,7 +329,7 @@
             {m.skills_slug_description()}
           </Field.Description>
           {#if slugInvalid}
-            <Field.Error>{m.skills_required_field()}</Field.Error>
+            <Field.Error id={`${slugId}-error`}>{m.skills_required_field()}</Field.Error>
           {/if}
         </Field.Field>
       </div>

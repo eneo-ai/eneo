@@ -42,6 +42,24 @@ function deferred<T>() {
 }
 
 describe("SkillCatalogQuery", () => {
+  test("removes stale choices and pagination as soon as the search changes", async () => {
+    const list = vi.fn().mockResolvedValue(makePage([makeSkill("new")]));
+    const catalog = new SkillCatalogQuery(makePage([makeSkill("old")], "old-cursor"), list);
+    try {
+      catalog.setQuery("new");
+      expect(catalog.items).toEqual([]);
+      expect(catalog.loading).toBe(true);
+      expect(catalog.hasMore).toBe(false);
+      await catalog.loadMore();
+      expect(list).not.toHaveBeenCalled();
+      await catalog.reload();
+      expect(catalog.items.map((skill) => skill.id)).toEqual(["new"]);
+      expect(catalog.loading).toBe(false);
+    } finally {
+      catalog.dispose();
+    }
+  });
+
   test("uses bounded server search and ignores an older response", async () => {
     vi.useFakeTimers();
     let catalog: SkillCatalogQuery<SkillSparse> | undefined;

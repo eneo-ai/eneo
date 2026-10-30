@@ -14,3 +14,26 @@
   pointer-events: none;
   color: var(--skill-placeholder, currentColor);
 }
+
+/* Keep references in the sentence; the picker exposes the complete name. */
+[data-skill-instruction-editor] [data-skill-reference] {
+  display: inline-flex;
+  max-width: min(100%, 22rem);
+  align-items: baseline;
+  gap: 0.375em;
+  vertical-align: baseline;
+  white-space: nowrap;
+  text-align: left;
+}
+
+[data-skill-reference-kind] {
+  flex: none;
+  font-size: 0.85em;
+}
+
+[data-skill-reference-label] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
