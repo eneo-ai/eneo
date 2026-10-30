@@ -3,8 +3,9 @@ import { ItemDetail } from "@/features/knowledge/integrations/item-detail.client
 import { sourceHref, sourceTabParam } from "@/features/knowledge/integrations/sources";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { browserApi } from "@/lib/api/browser";
-import { readCached } from "@/lib/api/query";
+import { readFresh } from "@/lib/api/query";
 import { resourceTitle } from "@/lib/route-head";
+import { notFoundOn404 } from "@/lib/route-helpers";
 import { parseSearch } from "@/lib/router/search";
 
 export const Route = createFileRoute(
@@ -12,13 +13,9 @@ export const Route = createFileRoute(
 )({
   loader: {
     staleReloadMode: "blocking",
-    handler: async ({ context, params, location, parentMatchPromise }) => {
-      // Ownership must use the space layout's completed freshness check, not its older cache.
-      const parent = await parentMatchPromise;
-      if (parent.status === "error" || parent.status === "notFound") throw parent.error;
-      const space = await readCached(
-        context.queryClient,
-        spaceQueryOptions(browserApi, params.spaceId)
+    handler: async ({ context, params, location }) => {
+      const space = await notFoundOn404(
+        readFresh(context.queryClient, spaceQueryOptions(browserApi, params.spaceId))
       );
       const item = space.knowledge.integration_knowledge_list.items.find(
         (entry) => entry.id === params.integrationKnowledgeId && entry.space_id === space.id

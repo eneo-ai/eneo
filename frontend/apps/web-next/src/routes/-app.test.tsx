@@ -333,6 +333,52 @@ it("checks integration ownership against the parent's refreshed space on a retur
   expect(screen.queryByRole("region", { name: "Item item-1" })).toBeNull();
 });
 
+it.each(["item-1", "wrapper/wrapper-1"])(
+  "refreshes ownership when entering %s while the space parent stays mounted",
+  async (source) => {
+    const item = makeIntegration({
+      id: "item-1",
+      wrapper_id: source.startsWith("wrapper/") ? "wrapper-1" : null
+    });
+    replies.set("/api/v1/spaces/space-1/", makeSpace({ integrations: [item] }));
+    const { router, queryClient } = await renderRoute(
+      "/spaces/space-1/knowledge",
+      undefined,
+      ({ queryClient }) => {
+        queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+      }
+    );
+    await screen.findByRole("heading", { name: "Knowledge hub" });
+    let release!: (space: ReturnType<typeof makeSpace>) => void;
+    replies.set(
+      "/api/v1/spaces/space-1/",
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+    await queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"], refetchType: "none" });
+    let complete = false;
+    let navigation!: Promise<void>;
+    try {
+      await act(async () => {
+        navigation = router.navigate({ href: `/spaces/space-1/knowledge/integrations/${source}` });
+        void navigation.then(() => {
+          complete = true;
+        });
+      });
+      expect(complete).toBe(false);
+      expect(screen.queryByRole("region", { name: /^(Item|Wrapper) / })).toBeNull();
+    } finally {
+      await act(async () => {
+        release(makeSpace({ integrations: [makeIntegration({ ...item, space_id: "space-2" })] }));
+        await navigation;
+      });
+    }
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(requestedPaths().filter((path) => path === "/api/v1/spaces/space-1/")).toHaveLength(2);
+  }
+);
+
 it("opens a collection with its prefetched files and resource title", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   replies.set("/api/v1/groups/collection-1/", makeCollection({ permissions: ["read"] }));
