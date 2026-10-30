@@ -6,7 +6,7 @@
  * Core: @astryxdesign/core@0.7.3
  */
 
-import { neutralTheme } from '@astryxdesign/theme-neutral';
+import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { neutralIconRegistry } from '@astryxdesign/theme-neutral/built';
 const themeIcons = {...neutralTheme["icons"], ...neutralIconRegistry};
 /**

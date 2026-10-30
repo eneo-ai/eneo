@@ -21,8 +21,7 @@
  * utilities. See AGENTS.md for the mapping.
  */
 import { defineTheme } from "@astryxdesign/core/theme";
-import { neutralTheme } from "@astryxdesign/theme-neutral";
-import { neutralIconRegistry } from "@astryxdesign/theme-neutral/built";
+import { neutralIconRegistry, neutralTheme } from "@astryxdesign/theme-neutral/built";
 
 const FONT_BODY =
   'var(--font-figtree, Figtree), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
