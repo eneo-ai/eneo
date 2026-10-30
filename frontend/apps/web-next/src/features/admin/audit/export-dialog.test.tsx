@@ -56,7 +56,7 @@ describe("ExportDialog", () => {
       "/api/eneo/api/v1/audit/logs/export/job-1/signed-download?token=fresh",
       ""
     );
-    api.GET.mockRejectedValueOnce(new EneoApiError("Session changed", { status: 401, code: 9080 }));
+    api.GET.mockRejectedValueOnce(new EneoApiError("Session changed", { status: 401, code: 9090 }));
     fireEvent.click(screen.getByRole("button", { name: "Ladda ner" }));
     await flush();
     expect(save).toHaveBeenCalledTimes(1);

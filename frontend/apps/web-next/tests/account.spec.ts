@@ -2,7 +2,7 @@ import { expect, test } from "./csp";
 
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 
-test.describe("Konto on a phone (decision 22)", () => {
+test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
   test.use(PHONE);
 
   test("opens from the drawer's profile row, one page of 44 px rows with Logga ut last", async ({
@@ -62,7 +62,7 @@ test.describe("Konto on a phone (decision 22)", () => {
   });
 });
 
-test.describe("the account pages on an iPad held sideways", () => {
+test.describe("the account pages on an iPad held sideways", { tag: "@vite" }, () => {
   test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true });
 
   test("keep Mitt konto, its tabs and the profile menu", async ({ page }) => {

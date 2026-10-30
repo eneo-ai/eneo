@@ -500,6 +500,111 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
+    test(
+      "Skills: create, saved detail and a long reference preview",
+      { tag: "@vite" },
+      async ({ page }) => {
+        test.setTimeout(90_000);
+        const name =
+          `${uniqueName(`E2E A11y Skill ${colorScheme}`)} ${"Detailed communication guide ".repeat(8)}`.slice(
+            0,
+            200
+          );
+        const description = "A writing guide with detailed editorial requirements. ".repeat(18);
+        const instructions =
+          "# Writing guide\n\nWrite clearly. Check facts and explain unfamiliar words.\n\n".repeat(
+            300
+          );
+
+        await page.goto("/spaces/personal/skills/new");
+        await expect(
+          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+        ).toBeVisible();
+        await expectNoAxeViolations(page);
+        await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+        await page.getByRole("textbox", { name: /^(Beskrivning|Description)$/ }).fill(description);
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.evaluate((text) => navigator.clipboard.writeText(text), instructions);
+        const editor = page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ });
+        await editor.focus();
+        await page.keyboard.press("ControlOrMeta+V");
+        await expect(editor).toHaveText(instructions);
+        await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
+        await page.waitForURL(/\/spaces\/personal\/skills\/[\da-f-]+$/);
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expectNoAxeViolations(page);
+
+        await page.goto("/spaces/personal/skills");
+        await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+        await expectNoAxeViolations(page);
+
+        await page.goto("/spaces/personal/skills/new");
+        await page.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ }).click();
+        const dialog = page.getByRole("dialog", { name: /^(Infoga referens|Insert reference)$/ });
+        await dialog.getByRole("textbox").fill(name);
+        await dialog.getByRole("button", { name: new RegExp(name) }).click();
+        await expect(dialog.getByRole("heading", { name })).toBeVisible();
+        await dialog.locator("summary", { hasText: /^(Beskrivning|Description)$/ }).click();
+        await expect(dialog.getByText(description, { exact: true })).toBeVisible();
+        const insert = dialog.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ });
+        await expect(dialog.getByText(instructions, { exact: true })).toBeVisible();
+        await expect(insert).toBeEnabled();
+        await expectNoAxeViolations(page);
+
+        const header = dialog.getByRole("heading", { name });
+        const before = { header: await header.boundingBox(), insert: await insert.boundingBox() };
+        await dialog
+          .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
+          .focus();
+        await expect(insert).toBeInViewport();
+        expect(await header.boundingBox()).toEqual(before.header);
+        expect(await insert.boundingBox()).toEqual(before.insert);
+
+        // CSS viewport equivalents of desktop zoom, followed by narrow reflow.
+        for (const viewport of [
+          { width: 640, height: 400 },
+          { width: 320, height: 200 },
+          { width: 320, height: 800 }
+        ]) {
+          await page.setViewportSize(viewport);
+          const instructionsHeading = dialog.getByRole("heading", {
+            name: /^(Instruktioner|Instructions)$/
+          });
+          const readingArea = await instructionsHeading.evaluate((element) => {
+            let scrollArea = element.parentElement;
+            while (scrollArea && getComputedStyle(scrollArea).overflowY !== "auto") {
+              scrollArea = scrollArea.parentElement;
+            }
+            if (!scrollArea) throw new Error("Missing scroll area for reference instructions");
+            const style = getComputedStyle(scrollArea);
+            return {
+              height:
+                scrollArea.clientHeight -
+                parseFloat(style.paddingTop) -
+                parseFloat(style.paddingBottom),
+              lineHeight: parseFloat(getComputedStyle(element).lineHeight)
+            };
+          });
+          expect(readingArea.height).toBeGreaterThanOrEqual(readingArea.lineHeight);
+          await instructionsHeading.scrollIntoViewIfNeeded();
+          await expect(instructionsHeading).toBeInViewport();
+          await dialog
+            .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
+            .focus();
+          await insert.focus();
+          await expect(insert).toBeInViewport();
+          expect(
+            await dialog.evaluate((element) => element.scrollWidth > element.clientWidth)
+          ).toBe(false);
+        }
+        await page.keyboard.press("Escape");
+        await expect(dialog).not.toBeVisible();
+        await expect(
+          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+        ).toBeFocused();
+      }
+    );
+
     test("collection detail", async ({ page }) => {
       // A new space gets the organisation's embedding model (e2e/seed.py),
       // which a collection needs.
@@ -679,7 +784,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("account", async ({ page }) => {
+        test("account", { tag: "@vite" }, async ({ page }) => {
           // Where the drawer is, Konto is a page (decision 22); sideways,
           // "Mitt konto" and its tabs.
           await scan(page, "/account", async () => {
@@ -771,7 +876,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        test("Konto's pages, and Nyheter", async ({ page }) => {
+        test("Konto's pages", { tag: "@vite" }, async ({ page }) => {
           for (const [path, title] of [
             ["/account/password", /^(Byt lösenord|Change password)$/],
             ["/account/copy-format", /^(Kopieringsformat|Copy format)$/],
@@ -788,6 +893,9 @@ for (const colorScheme of ["light", "dark"] as const) {
               ).toBeAttached();
             });
           }
+        });
+
+        test("Nyheter", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/whats-new", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
@@ -846,7 +954,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("account", async ({ page }) => {
+  test("account", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
@@ -855,8 +963,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
       "/account/copy-format",
       "/account/password",
       "/account/api-keys",
-      "/account/integrations",
-      "/whats-new"
+      "/account/integrations"
     ]) {
       await page.goto(path);
       await expect(
@@ -864,6 +971,12 @@ test.describe("reflow at 320 px (1.4.10)", () => {
       ).toBeVisible();
       await expectNoSidewaysPageScroll(page);
     }
+  });
+
+  test("Nyheter", { tag: "@vite" }, async ({ page }) => {
+    await page.goto("/whats-new");
+    await expect(page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
   });
 
   test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {

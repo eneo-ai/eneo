@@ -7,6 +7,10 @@ from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
+from eneo.main.stream_lifecycle import FINALIZATION_BUDGET_SECONDS
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    drain_connection_hosts,
+)
 from eneo.object_content.content import (
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
@@ -18,6 +22,7 @@ from eneo.object_content.object_store_connection import (
 from eneo.object_content.runtime import object_content_runtime
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
+from eneo.sessions.session_service import drain_background_saves
 from eneo.settings.encryption_service import EncryptionService
 
 
@@ -32,6 +37,11 @@ async def lifespan(app: FastAPI):
     else:
         async with internal_mcp_lifespan():
             yield
+            # Streamed turns cut off by the shutdown finish their cleanup
+            # while everything they use is still up: a connection host
+            # attached to a loopback server ends gracefully only while that
+            # server still answers, and the pools close in shutdown().
+            await drain_streamed_turns()
     await shutdown()
 
 
@@ -71,6 +81,17 @@ async def startup():
 
     # init predefined roles
     await init_predefined_roles()
+
+
+async def drain_streamed_turns():
+    """Finish the cleanup of turns cut off by the shutdown.
+
+    The saves scheduled on abort need the database, the MCP connections
+    their HTTP clients and the loopback internal-MCP servers: this runs
+    before any of them close.
+    """
+    await drain_background_saves(FINALIZATION_BUDGET_SECONDS)
+    await drain_connection_hosts(FINALIZATION_BUDGET_SECONDS)
 
 
 async def shutdown():

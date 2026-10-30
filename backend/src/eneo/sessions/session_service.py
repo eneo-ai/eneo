@@ -32,7 +32,7 @@ from eneo.sessions.session import (
 )
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 from eneo.skills.domain.skill import (
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillExecutionReference,
 )
 from eneo.users.user import UserInDB
@@ -66,6 +66,29 @@ def safe_count_tokens(text: str, model_name: str | None) -> int:
 _background_save_tasks: set[asyncio.Task[None]] = set()
 
 
+async def drain_background_saves(timeout: float) -> int:
+    """Wait for scheduled saves at shutdown; return how many were pending.
+
+    Partial answers are saved on a task of their own after the request ends.
+    The database pool they write through closes after this, so a save that
+    is still running then would be lost.
+    """
+    pending = {task for task in _background_save_tasks if not task.done()}
+    if not pending:
+        return 0
+    logger.info("Waiting for %d background save(s) before shutdown", len(pending))
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.wait(pending)
+    except TimeoutError:
+        logger.error(
+            "%d background save(s) did not finish within %.0fs at shutdown",
+            sum(1 for task in pending if not task.done()),
+            timeout,
+        )
+    return len(pending)
+
+
 def schedule_background_save(coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
     """Schedule a fire-and-forget background save with GC protection.
 
@@ -89,7 +112,7 @@ async def persist_partial_question_answer(
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
-    skill_activation: SkillActivationEvidenceV1 | None = None,
+    skill_activation: SkillActivationEvidence | None = None,
     generated_files: Sequence[File] | None = None,
     tool_calls: list[ToolCallInfo] | None = None,
 ) -> None:
@@ -138,7 +161,7 @@ async def persist_final_skill_runtime_state(
     tenant_id: UUID,
     question_id: UUID,
     skill_provenance: Sequence[SkillExecutionReference],
-    skill_activation: SkillActivationEvidenceV1,
+    skill_activation: SkillActivationEvidence,
 ) -> None:
     """Commit final Skill evidence independently of a failing request transaction."""
 
@@ -371,7 +394,7 @@ class SessionService:
         assistant_id: UUID | None,
         completion_model: CompletionModel | None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> QuestionAdd:
         completion_model_id = completion_model.id if completion_model else None
         completion_model_name = completion_model.name if completion_model else None
@@ -418,7 +441,7 @@ class SessionService:
         group_chat_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[SessionInDB, UUID, datetime | None]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
@@ -450,7 +473,7 @@ class SessionService:
         assistant_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[UUID, datetime | None]:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
@@ -500,7 +523,7 @@ class SessionService:
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None

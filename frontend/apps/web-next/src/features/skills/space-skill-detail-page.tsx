@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,7 +15,9 @@ import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { PersonalChatVersionNotice } from "./personal-chat-skills";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { SkillRevisionHistory } from "./skill-revision-history";
 import { skillQueryKey } from "./skill-revisions";
 
@@ -27,6 +29,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
   const queryClient = useQueryClient();
   const [dirty, setDirty] = useState(false);
   const [statusError, setStatusError] = useState<unknown>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const key = skillQueryKey({ type: "space", spaceId: space.id });
   const base = `/spaces/${routeId}/skills`;
   const skill = useQuery({
@@ -77,11 +80,12 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
-      <PageHeader title={value.display_name} />
+      <PageHeader title={value.display_name} headingRef={headingRef} />
       <RefreshError queries={[skill]} />
       <Button asChild variant="link" className="w-fit px-0">
         <Link href={base}>{t("skills")}</Link>
       </Button>
+      {space.personal && <PersonalChatVersionNotice skillId={skillId} rescueTarget={headingRef} />}
       <section className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="space-y-5">
           <div>
@@ -103,6 +107,10 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
                 </AlertDescription>
               </Alert>
               <SkillForm
+                referenceCatalog={skillReferenceCatalog(
+                  { type: "space", spaceId: space.id },
+                  skillId
+                )}
                 key={value.current_revision_id}
                 mode="revision"
                 initialValue={{

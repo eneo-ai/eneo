@@ -327,6 +327,41 @@ it("renders an authenticated unknown path inside the shared shell", async () => 
   expect(navigate).not.toHaveBeenCalled();
 });
 
+it("opens the Skill reference editor in the personal space", async () => {
+  await renderRoute("/spaces/personal/skills/new");
+  await screen.findByRole("textbox", { name: messages.skills_instructions_label });
+  expect(screen.getByRole("button", { name: messages.skills_reference_insert })).toBeTruthy();
+  await waitFor(() =>
+    expect(document.title).toBe(
+      `${messages.skills_library_new_heading} · ${messages.personal} · Eneo`
+    )
+  );
+});
+
+it.each([
+  { permissions: ["read"] as const, destination: "/spaces/personal/skills" },
+  { permissions: [] as const, destination: "/spaces/personal/overview" }
+])(
+  "keeps Skill creation behind the space permission: $destination",
+  async ({ permissions, destination }) => {
+    replies.set(
+      "/api/v1/spaces/type/personal/",
+      makeSpace({ skillPermissions: [...permissions], overrides: { personal: true } })
+    );
+    replies.set("/api/v1/spaces/space-1/skills/", { items: [], next_cursor: null });
+    const { router } = await renderRoute("/spaces/personal/skills/new");
+    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+  }
+);
+
+it("does not open the organization Skill editor for a non-admin", async () => {
+  const { router } = await renderRoute("/spaces/organization/skills/new");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
+  expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+});
+
 it("renders the spaces list with its document title and keeps list distinct from a space ID", async () => {
   await renderRoute("/spaces/list");
   await screen.findByRole("heading", { name: messages.spaces, level: 1 });
@@ -735,5 +770,76 @@ it("holds a cache-only navigation for the resume check and blocks a changed sess
   });
   expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist");
   expect(queryClient.getQueryData(sessionKeys.me)).toBeUndefined();
+  expect(document.getElementById("main-content")).toBeNull();
+});
+
+it.each([
+  ["appearance", "account_appearance_language", "/account"],
+  ["copy-format", "account_copy_format", "/account"],
+  ["password", "change_password", "/account"],
+  ["api-keys", "my_api_keys", "/account/api-keys"],
+  ["integrations", "my_integrations", "/account/integrations"]
+] as const)(
+  "renders account/%s with its title and one current account link",
+  async (page, titleKey, currentHref) => {
+    setViewport("desktop");
+    replies.set("/api/v1/users/me/", {
+      ...context.user,
+      password_change: {
+        source: "eneo",
+        policy: {
+          min_length: 12,
+          max_bytes: 72,
+          requires_uppercase: false,
+          requires_lowercase: false,
+          requires_number: false,
+          requires_symbol: false
+        }
+      }
+    });
+    replies.set("/api/v1/integrations/me/", { items: [] });
+    replies.set("/api/v1/api-keys", { items: [], total_count: 0, next_cursor: null });
+    replies.set("/api/v1/api-keys/notification-preferences", {
+      enabled: false,
+      days_before_expiry: [7],
+      auto_follow_published_assistants: false
+    });
+    await renderRoute(`/account/${page}`);
+    await waitFor(() => expect(document.title).toBe(`${messages[titleKey]} · Eneo`));
+    const navigation = screen.getByRole("navigation", { name: messages.shell_account_nav_label });
+    const current = navigation.querySelectorAll('a[aria-current="true"]');
+    expect(current).toHaveLength(1);
+    expect(current[0]?.getAttribute("href")).toBe(currentHref);
+    switch (page) {
+      case "appearance":
+        await screen.findByRole("radiogroup", { name: messages.theme });
+        break;
+      case "copy-format":
+        await screen.findByRole("radio", { name: messages.copy_format_markdown });
+        break;
+      case "password":
+        await screen.findByLabelText(messages.current_password, { selector: "input" });
+        expect(screen.getByRole("button", { name: messages.save })).toBeTruthy();
+        break;
+      case "api-keys":
+        await screen.findByRole("heading", { name: messages.api_keys_no_keys });
+        break;
+      case "integrations":
+        await screen.findByText(messages.no_integrations_enabled);
+        break;
+    }
+  }
+);
+
+it("returns a signed-out account visit to login with its destination preserved", async () => {
+  replies.set(
+    "/api/v1/users/me/",
+    new Response(JSON.stringify({ message: "Unauthorized" }), {
+      status: 401,
+      headers: { [GENERATION]: "document-session", "content-type": "application/json" }
+    })
+  );
+  await renderRoute("/account");
+  await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount"));
   expect(document.getElementById("main-content")).toBeNull();
 });

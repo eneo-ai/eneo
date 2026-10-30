@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
+import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { browserApi } from "@/lib/api/browser";
@@ -18,6 +19,22 @@ import {
 } from "@/features/chat/copy-assistant-answer";
 
 const COPY_FORMAT_OPTIONS: AssistantCopyFormat[] = ["markdown", "richtext"];
+
+export function AccountCopyFormat() {
+  const t = useTranslations();
+  return (
+    <div data-pushed-section="">
+      <SettingsGroup title={t("account_copy_format")}>
+        <SettingsRow
+          title={t("preferred_copy_format")}
+          description={t("preferred_copy_format_description")}
+        >
+          <CopyFormatChoice />
+        </SettingsRow>
+      </SettingsGroup>
+    </div>
+  );
+}
 
 function isAssistantCopyFormat(value: string): value is AssistantCopyFormat {
   return value === "markdown" || value === "richtext";

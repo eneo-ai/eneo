@@ -145,7 +145,7 @@ async def test_session_cookie_signs_the_browser_in_and_out(
         headers=cookie | SAME_ORIGIN | {GENERATION: session_generation("other")},
     )
     assert stale.status_code == 401
-    assert stale.json()["eneo_error_code"] == 9080
+    assert stale.json()["eneo_error_code"] == 9090
     assert stale.headers.get_list("set-cookie") == []
     still_in = await client.get("/api/v1/users/me/", headers=cookie | SAME_ORIGIN)
     assert still_in.status_code == 200
@@ -212,20 +212,20 @@ async def test_a_document_cannot_use_a_replacement_session_from_another_tenant(
 
     refused_read = await client.get("/api/v1/users/me/", headers=stale)
     assert refused_read.status_code == 401, refused_read.text
-    assert refused_read.json()["eneo_error_code"] == 9080
+    assert refused_read.json()["eneo_error_code"] == 9090
     assert second_email not in refused_read.text
 
     for headers in (current, stale):
         refused_write = await client.post(invalidate, headers=headers)
         assert refused_write.status_code == 401, refused_write.text
-        assert refused_write.json()["eneo_error_code"] == 9080
+        assert refused_write.json()["eneo_error_code"] == 9090
         refused_upload = await client.post(
             "/api/v1/groups/00000000-0000-0000-0000-000000000001/info-blobs/upload/",
             files={"file": ("document.txt", b"document", "text/plain")},
             headers=headers,
         )
         assert refused_upload.status_code == 401, refused_upload.text
-        assert refused_upload.json()["eneo_error_code"] == 9080
+        assert refused_upload.json()["eneo_error_code"] == 9090
 
     # Neither rejected write invalidated the replacement account's sessions.
     matching = current | {GENERATION: session_generation(second)}

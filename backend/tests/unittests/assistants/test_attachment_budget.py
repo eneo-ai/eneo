@@ -21,9 +21,11 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     PersonalChatPinOverride,
+    PersonalSkillLayerStatus,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingProjection,
@@ -1382,26 +1384,66 @@ async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
 
 
 @pytest.mark.asyncio
-async def test_personal_default_skill_configuration_has_no_direct_runtime():
+async def test_personal_chat_configuration_shows_both_layers_and_the_decision():
+    organisation = replace(
+        _resolved_skill(
+            name="Klarsprak", position=0, activation_mode=SkillActivationMode.ALWAYS
+        ),
+        source=SkillBindingSource.ORGANIZATION,
+    )
     assistant = _assistant_with_runtime_model()
     assistant.is_default = True
+    own = replace(
+        _resolved_skill(
+            name="Svar", position=0, activation_mode=SkillActivationMode.ALWAYS
+        ),
+        skill_space_id=assistant.space_id,
+    )
     space = MagicMock()
     space.is_personal.return_value = True
     space.get_assistant.return_value = assistant
     service = _service()
     service.space_repo.get_space_by_assistant.return_value = space
-    service.skill_service.list_assistant_binding_projections.return_value = []
-    service._resolve_effective_config = AsyncMock()
+    service.skill_service.list_assistant_binding_projections.return_value = [
+        SkillBindingProjection(binding=own, execution_blocked=False)
+    ]
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(own,), blocked=())
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
+    service.skill_service.create_personal_chat_turn_plan.side_effect = (
+        lambda **kwargs: plan_personal_chat_turn(
+            **kwargs, policy=policy, holds_permission=True
+        )
+    )
+    service._resolve_effective_config = AsyncMock(
+        return_value=SimpleNamespace(
+            models_enforced=False,
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(organisation,), blocked=()
+            ),
+        )
+    )
 
     configuration = await service.get_skill_configuration(
         space_id=assistant.space_id,
         assistant_id=assistant.id,
     )
 
-    assert configuration.bindings == ()
-    assert configuration.runtime is None
-    service._resolve_effective_config.assert_not_awaited()
-    service.skill_service.create_turn_plan.assert_not_awaited()
+    assert [p.binding.skill_id for p in configuration.bindings] == [own.skill_id]
+    assert [p.binding.skill_id for p in configuration.organisation_bindings] == [
+        organisation.skill_id
+    ]
+    assert configuration.personal_layer is not None
+    assert configuration.personal_layer.status is PersonalSkillLayerStatus.APPLIED
+    assert configuration.runtime is not None
 
 
 @pytest.mark.asyncio
@@ -2071,16 +2113,22 @@ async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbac
     space.is_personal.return_value = True
     service = _service()
     service._resolve_effective_config = AsyncMock(return_value=effective_config)
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=selective_activation_enabled,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
     service.skill_service.create_turn_plan.side_effect = (
         lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
-            policy=SkillRuntimePolicy(
-                selective_activation_enabled=selective_activation_enabled,
-                max_attached_skills=100,
-                context_share_percent=10,
-                max_activations_per_turn=3,
-            ),
+            policy=policy,
+        )
+    )
+    service.skill_service.create_personal_chat_turn_plan.side_effect = (
+        lambda **kwargs: plan_personal_chat_turn(
+            **kwargs, policy=policy, holds_permission=True
         )
     )
 
@@ -2387,3 +2435,77 @@ def test_assembler_advertises_attachment_guardrails(monkeypatch):
     restrictions = assembler._get_allowed_attachments()
     assert restrictions.limit.max_files == 100
     assert restrictions.limit.max_size == 123
+
+
+@pytest.mark.parametrize("conflicting", [False, True])
+async def test_candidate_pin_checks_whole_skill_group_before_context(conflicting):
+    root = _resolved_skill(
+        name="Root", position=0, activation_mode=SkillActivationMode.ALWAYS
+    )
+    helper = _resolved_skill(
+        name="Helper", position=1, activation_mode=SkillActivationMode.ALWAYS
+    )
+    candidate = replace(root, skill_revision_id=uuid4(), dependencies=(helper,))
+    retained = (
+        replace(helper, skill_revision_id=uuid4())
+        if conflicting
+        else _resolved_skill(
+            name="Retained", position=2, activation_mode=SkillActivationMode.ALWAYS
+        )
+    )
+    service = _service()
+    service._validate_skill_activation_fit = AsyncMock()
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=_assistant_with_runtime_model(),
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            root.skill_id, root.skill_revision_id, candidate.skill_revision_id
+        ),
+        candidate_binding=candidate,
+        resolution=SkillRuntimeResolution(eligible=(root,), blocked=(retained,)),
+        runtime_policy=replace(_runtime_policy(), max_attached_skills=2),
+        preflight_adapters={},
+        completion_prompt_files=[],
+    )
+    assert verdict is not None
+    assert verdict.value == (
+        "conflicting_revisions" if conflicting else "attachment_limit"
+    )
+    service._validate_skill_activation_fit.assert_not_awaited()
+
+
+async def test_personal_pin_checks_group_limit_even_without_existing_chats():
+    root = _resolved_skill(
+        name="Root", position=0, activation_mode=SkillActivationMode.ALWAYS
+    )
+    helper = _resolved_skill(
+        name="Helper", position=1, activation_mode=SkillActivationMode.ALWAYS
+    )
+    service = _service()
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda **kwargs: SkillTurnPlan.create(
+            **kwargs, policy=replace(_runtime_policy(), max_attached_skills=1)
+        )
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        SimpleNamespace(
+            enforced_prompt_text="",
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(replace(root, dependencies=(helper,)),), blocked=()
+            ),
+            available_models=[],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+        )
+    )
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[], next_after=None
+    )
+    with pytest.raises(BadRequestException, match="limit of 1"):
+        await service.assert_personal_default_governance_context_fit(
+            personal_chat_pin_override=PersonalChatPinOverride(
+                root.skill_id, uuid4(), root.skill_revision_id
+            )
+        )
+    service.repo.get_personal_defaults_page.assert_not_awaited()

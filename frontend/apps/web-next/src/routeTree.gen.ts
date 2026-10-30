@@ -24,6 +24,11 @@ import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/swit
 import { Route as ModuleLoginIndexRouteImport } from "./routes/module-login/index"
 import { Route as ModuleLoginFailedRouteImport } from "./routes/module-login/failed"
 import { Route as AppAccountIndexRouteImport } from "./routes/_app/account/index"
+import { Route as AppAccountApiKeysRouteImport } from "./routes/_app/account/api-keys"
+import { Route as AppAccountAppearanceRouteImport } from "./routes/_app/account/appearance"
+import { Route as AppAccountCopyFormatRouteImport } from "./routes/_app/account/copy-format"
+import { Route as AppAccountIntegrationsRouteImport } from "./routes/_app/account/integrations"
+import { Route as AppAccountPasswordRouteImport } from "./routes/_app/account/password"
 import { Route as AppDashboardIndexRouteImport } from "./routes/_app/dashboard/index"
 import { Route as AppSpacesIndexRouteImport } from "./routes/_app/spaces/index"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
@@ -37,6 +42,9 @@ import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/space
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
 import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
+import { Route as AppSpacesSpaceIdSkillsIndexRouteImport } from "./routes/_app/spaces/$spaceId/skills/index"
+import { Route as AppSpacesSpaceIdSkillsSkillIdRouteImport } from "./routes/_app/spaces/$spaceId/skills/$skillId"
+import { Route as AppSpacesSpaceIdSkillsNewRouteImport } from "./routes/_app/spaces/$spaceId/skills/new"
 import { Route as AppDashboardAppAppIdResultsResultIdRouteImport } from "./routes/_app/dashboard/app/$appId/results/$resultId"
 
 const IndexRoute = IndexRouteImport.update({
@@ -113,6 +121,31 @@ const AppAccountIndexRoute = AppAccountIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AppAccountRoute,
 } as any)
+const AppAccountApiKeysRoute = AppAccountApiKeysRouteImport.update({
+  id: "/api-keys",
+  path: "/api-keys",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountAppearanceRoute = AppAccountAppearanceRouteImport.update({
+  id: "/appearance",
+  path: "/appearance",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountCopyFormatRoute = AppAccountCopyFormatRouteImport.update({
+  id: "/copy-format",
+  path: "/copy-format",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountIntegrationsRoute = AppAccountIntegrationsRouteImport.update({
+  id: "/integrations",
+  path: "/integrations",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountPasswordRoute = AppAccountPasswordRouteImport.update({
+  id: "/password",
+  path: "/password",
+  getParentRoute: () => AppAccountRoute,
+} as any)
 const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
   id: "/dashboard/",
   path: "/dashboard/",
@@ -183,6 +216,24 @@ const AppDashboardAppAppIdIndexRoute =
     path: "/dashboard/app/$appId/",
     getParentRoute: () => AppRoute,
   } as any)
+const AppSpacesSpaceIdSkillsIndexRoute =
+  AppSpacesSpaceIdSkillsIndexRouteImport.update({
+    id: "/skills/",
+    path: "/skills/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdSkillsSkillIdRoute =
+  AppSpacesSpaceIdSkillsSkillIdRouteImport.update({
+    id: "/skills/$skillId",
+    path: "/skills/$skillId",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdSkillsNewRoute =
+  AppSpacesSpaceIdSkillsNewRouteImport.update({
+    id: "/skills/new",
+    path: "/skills/new",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
 const AppDashboardAppAppIdResultsResultIdRoute =
   AppDashboardAppAppIdResultsResultIdRouteImport.update({
     id: "/dashboard/app/$appId/results/$resultId",
@@ -204,6 +255,11 @@ export interface FileRoutesByFullPath {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
   "/module-login/": typeof ModuleLoginIndexRoute
+  "/account/api-keys": typeof AppAccountApiKeysRoute
+  "/account/appearance": typeof AppAccountAppearanceRoute
+  "/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/account/integrations": typeof AppAccountIntegrationsRoute
+  "/account/password": typeof AppAccountPasswordRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -217,7 +273,10 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
+  "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRoutesByTo {
@@ -233,6 +292,11 @@ export interface FileRoutesByTo {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login": typeof LoginIndexRoute
   "/module-login": typeof ModuleLoginIndexRoute
+  "/account/api-keys": typeof AppAccountApiKeysRoute
+  "/account/appearance": typeof AppAccountAppearanceRoute
+  "/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/account/integrations": typeof AppAccountIntegrationsRoute
+  "/account/password": typeof AppAccountPasswordRoute
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account": typeof AppAccountIndexRoute
@@ -245,7 +309,10 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId": typeof AppDashboardAppAppIdIndexRoute
+  "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRoutesById {
@@ -264,6 +331,11 @@ export interface FileRoutesById {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
   "/module-login/": typeof ModuleLoginIndexRoute
+  "/_app/account/api-keys": typeof AppAccountApiKeysRoute
+  "/_app/account/appearance": typeof AppAccountAppearanceRoute
+  "/_app/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/_app/account/integrations": typeof AppAccountIntegrationsRoute
+  "/_app/account/password": typeof AppAccountPasswordRoute
   "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/_app/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -277,7 +349,10 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/_app/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
+  "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/_app/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRouteTypes {
@@ -296,6 +371,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login/"
     | "/module-login/"
+    | "/account/api-keys"
+    | "/account/appearance"
+    | "/account/copy-format"
+    | "/account/integrations"
+    | "/account/password"
     | "/spaces/$spaceId"
     | "/spaces/list"
     | "/integrations/callback/token"
@@ -309,7 +389,10 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId/"
+    | "/spaces/$spaceId/skills/$skillId"
+    | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId/"
+    | "/spaces/$spaceId/skills/"
     | "/dashboard/app/$appId/results/$resultId"
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -325,6 +408,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login"
     | "/module-login"
+    | "/account/api-keys"
+    | "/account/appearance"
+    | "/account/copy-format"
+    | "/account/integrations"
+    | "/account/password"
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account"
@@ -337,7 +425,10 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId"
+    | "/spaces/$spaceId/skills/$skillId"
+    | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId"
+    | "/spaces/$spaceId/skills"
     | "/dashboard/app/$appId/results/$resultId"
   id:
     | "__root__"
@@ -355,6 +446,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login/"
     | "/module-login/"
+    | "/_app/account/api-keys"
+    | "/_app/account/appearance"
+    | "/_app/account/copy-format"
+    | "/_app/account/integrations"
+    | "/_app/account/password"
     | "/_app/spaces/$spaceId"
     | "/_app/spaces/list"
     | "/integrations/callback/token"
@@ -368,7 +464,10 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/overview"
     | "/_app/spaces/$spaceId/settings"
     | "/_app/spaces/$spaceId/"
+    | "/_app/spaces/$spaceId/skills/$skillId"
+    | "/_app/spaces/$spaceId/skills/new"
     | "/_app/dashboard/app/$appId/"
+    | "/_app/spaces/$spaceId/skills/"
     | "/_app/dashboard/app/$appId/results/$resultId"
   fileRoutesById: FileRoutesById
 }
@@ -494,6 +593,41 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAccountIndexRouteImport
       parentRoute: typeof AppAccountRoute
     }
+    "/_app/account/api-keys": {
+      id: "/_app/account/api-keys"
+      path: "/api-keys"
+      fullPath: "/account/api-keys"
+      preLoaderRoute: typeof AppAccountApiKeysRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/appearance": {
+      id: "/_app/account/appearance"
+      path: "/appearance"
+      fullPath: "/account/appearance"
+      preLoaderRoute: typeof AppAccountAppearanceRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/copy-format": {
+      id: "/_app/account/copy-format"
+      path: "/copy-format"
+      fullPath: "/account/copy-format"
+      preLoaderRoute: typeof AppAccountCopyFormatRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/integrations": {
+      id: "/_app/account/integrations"
+      path: "/integrations"
+      fullPath: "/account/integrations"
+      preLoaderRoute: typeof AppAccountIntegrationsRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/password": {
+      id: "/_app/account/password"
+      path: "/password"
+      fullPath: "/account/password"
+      preLoaderRoute: typeof AppAccountPasswordRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
     "/_app/dashboard/": {
       id: "/_app/dashboard/"
       path: "/dashboard"
@@ -585,6 +719,27 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppDashboardAppAppIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    "/_app/spaces/$spaceId/skills/": {
+      id: "/_app/spaces/$spaceId/skills/"
+      path: "/skills"
+      fullPath: "/spaces/$spaceId/skills/"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/skills/$skillId": {
+      id: "/_app/spaces/$spaceId/skills/$skillId"
+      path: "/skills/$skillId"
+      fullPath: "/spaces/$spaceId/skills/$skillId"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsSkillIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/skills/new": {
+      id: "/_app/spaces/$spaceId/skills/new"
+      path: "/skills/new"
+      fullPath: "/spaces/$spaceId/skills/new"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsNewRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
     "/_app/dashboard/app/$appId/results/$resultId": {
       id: "/_app/dashboard/app/$appId/results/$resultId"
       path: "/dashboard/app/$appId/results/$resultId"
@@ -596,10 +751,20 @@ declare module "@tanstack/react-router" {
 }
 
 interface AppAccountRouteChildren {
+  AppAccountApiKeysRoute: typeof AppAccountApiKeysRoute
+  AppAccountAppearanceRoute: typeof AppAccountAppearanceRoute
+  AppAccountCopyFormatRoute: typeof AppAccountCopyFormatRoute
+  AppAccountIntegrationsRoute: typeof AppAccountIntegrationsRoute
+  AppAccountPasswordRoute: typeof AppAccountPasswordRoute
   AppAccountIndexRoute: typeof AppAccountIndexRoute
 }
 
 const AppAccountRouteChildren: AppAccountRouteChildren = {
+  AppAccountApiKeysRoute: AppAccountApiKeysRoute,
+  AppAccountAppearanceRoute: AppAccountAppearanceRoute,
+  AppAccountCopyFormatRoute: AppAccountCopyFormatRoute,
+  AppAccountIntegrationsRoute: AppAccountIntegrationsRoute,
+  AppAccountPasswordRoute: AppAccountPasswordRoute,
   AppAccountIndexRoute: AppAccountIndexRoute,
 }
 
@@ -614,6 +779,9 @@ interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
   AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
   AppSpacesSpaceIdIndexRoute: typeof AppSpacesSpaceIdIndexRoute
+  AppSpacesSpaceIdSkillsSkillIdRoute: typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  AppSpacesSpaceIdSkillsNewRoute: typeof AppSpacesSpaceIdSkillsNewRoute
+  AppSpacesSpaceIdSkillsIndexRoute: typeof AppSpacesSpaceIdSkillsIndexRoute
 }
 
 const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
@@ -623,6 +791,9 @@ const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
   AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,
   AppSpacesSpaceIdIndexRoute: AppSpacesSpaceIdIndexRoute,
+  AppSpacesSpaceIdSkillsSkillIdRoute: AppSpacesSpaceIdSkillsSkillIdRoute,
+  AppSpacesSpaceIdSkillsNewRoute: AppSpacesSpaceIdSkillsNewRoute,
+  AppSpacesSpaceIdSkillsIndexRoute: AppSpacesSpaceIdSkillsIndexRoute,
 }
 
 const AppSpacesSpaceIdRouteWithChildren =

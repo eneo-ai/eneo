@@ -14,8 +14,9 @@ let generation: string | null;
 let bootstrapRefusal: Response | undefined;
 let replies: Map<string, unknown>;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
+let createAppRouter: typeof import("@/router").createAppRouter;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   sessionStorage.clear();
@@ -57,6 +58,8 @@ beforeEach(() => {
     ...(await import("@/lib/api/base.vite")),
     API_BASE: window.location.origin
   }));
+  // Loading the app's route modules is fixture setup, before the timed auth behavior.
+  ({ createAppRouter } = await import("@/router"));
 });
 
 afterEach(() => {
@@ -83,7 +86,6 @@ async function route(path: string, mount = true) {
   });
   const owner = await import("@/lib/api/refusal");
   await owner.initializeBrowserSession();
-  const { createAppRouter } = await import("@/router");
   const { BootContext } = await import("@/boot-context");
   const router = createAppRouter(
     { queryClient, t: createTranslator({ locale: "sv", messages }) },
@@ -586,7 +588,7 @@ it("keeps the refusal owner's destination when a module ticket discovers a chang
   generation = "session-a";
   replies.set(
     "/api/v1/module-auth/tickets/",
-    Response.json({ message: "Changed", eneo_error_code: 9080 }, { status: 401 })
+    Response.json({ message: "Changed", eneo_error_code: 9090 }, { status: 401 })
   );
   await route(
     "/module-login?module_key=module&redirect_uri=https%3A%2F%2Fmodule.example%2Fcallback&state=test-state"

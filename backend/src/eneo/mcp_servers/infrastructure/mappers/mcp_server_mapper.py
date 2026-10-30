@@ -83,12 +83,16 @@ class MCPServerMapper:
     def to_entity(db_model: MCPServersTable) -> MCPServer:
         """Convert database table to domain entity."""
         tools: List[MCPServerTool] = []
-        # Check if tools relationship is loaded without triggering lazy load
+        tools_loaded = False
+        # Check if tools relationship is loaded without triggering lazy load.
+        # An unloaded one stays distinct from an empty one: reading it raises
+        # instead of returning no tools.
         inspector = inspect(db_model)
         if inspector is not None:
-            tools_loaded = inspector.attrs.tools.loaded_value
-            if tools_loaded is not NEVER_SET and tools_loaded:
-                tools = MCPServerToolMapper.to_entities(tools_loaded)
+            tools_value = inspector.attrs.tools.loaded_value
+            tools_loaded = tools_value is not NEVER_SET
+            if tools_loaded and tools_value:
+                tools = MCPServerToolMapper.to_entities(tools_value)
 
         # Check if security_classification relationship is loaded
         security_classification = None
@@ -165,7 +169,9 @@ class MCPServerMapper:
             icon_url=db_model.icon_url,
             documentation_url=db_model.documentation_url,
             tools=tools,
+            tools_loaded=tools_loaded,
             security_classification=security_classification,
+            security_classification_id=db_model.security_classification_id,
         )
 
     @staticmethod
@@ -197,9 +203,7 @@ class MCPServerMapper:
             "tags": entity.tags,
             "icon_url": entity.icon_url,
             "documentation_url": entity.documentation_url,
-            "security_classification_id": (
-                entity.security_classification.id
-                if entity.security_classification
-                else None
-            ),
+            # The column, not the relationship: a read that did not load the
+            # classification must not clear it.
+            "security_classification_id": entity.security_classification_id,
         }

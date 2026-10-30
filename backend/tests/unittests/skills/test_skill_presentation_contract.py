@@ -744,6 +744,8 @@ async def test_assistant_skill_configuration_returns_modes_and_exact_runtime():
                         ),
                     ),
                 ),
+                organisation_bindings=(),
+                personal_layer=None,
             )
         )
     )
