@@ -604,7 +604,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-container);
   box-shadow: var(--shadow-high);
-  max-width: 22rem;
+  /* Never wider than a 320 px screen leaves room for. */
+  max-width: min(22rem, calc(100vw - 2rem));
   padding: 1rem;
 }
 .driver-popover.eneo-spotlight .eneo-spotlight-version {
@@ -638,6 +639,39 @@
 .driver-popover.eneo-spotlight .driver-popover-footer button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+/* driver.js draws the close x in #d2d2d2 (1.5:1 on this popover) and its
+   footer buttons 12 px and about 22 px high: the muted text colour (4.5:1), and a
+   target a thumb can hit. */
+.driver-popover.eneo-spotlight .driver-popover-close-btn {
+  color: var(--muted-foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-close-btn:hover,
+.driver-popover.eneo-spotlight .driver-popover-close-btn:focus-visible {
+  color: var(--foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  padding: 0.25rem 0.75rem;
+}
+@media (pointer: coarse) {
+  .driver-popover.eneo-spotlight .driver-popover-footer button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 1rem;
+    font-size: 0.9375rem;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-navigation-btns {
+    gap: 0.5rem;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-close-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-title {
+    padding-inline-end: 2.75rem;
+  }
 }
 
 /*
@@ -1115,7 +1149,8 @@
         [contenteditable="true"]:focus
       )
       :is(header:not(main *), [data-page-bar], [data-phone-page-bar], [data-own-mobile-header]) {
-      display: none;
+      /* !important: these bars set display through utilities (flex, grid), a later layer. */
+      display: none !important;
     }
   }
   /* A dialog with a text field hangs from the top on a touch screen instead of

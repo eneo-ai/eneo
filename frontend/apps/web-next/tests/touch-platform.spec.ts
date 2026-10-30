@@ -120,3 +120,29 @@ test(
     }
   }
 );
+
+test(
+  "the page's bars give way while a field has the focus on a very short screen",
+  { tag: "@vite" },
+  async ({ page }) => {
+    // A phone turned sideways with its keyboard up leaves 50 to 150 px; 280 px is
+    // a browser's own bars on a turned phone, short enough for the same rule.
+    await page.setViewportSize({ width: 667, height: 280 });
+    await page.goto("/spaces/list");
+    const topBar = page.locator("header:not(main *)");
+    await expect(topBar).toBeVisible();
+
+    const filter = page.getByRole("textbox", { name: /^Filtrera / });
+    await filter.focus();
+    await expect(topBar).toBeHidden();
+    await expect(filter).toBeInViewport();
+
+    await filter.blur();
+    await expect(topBar).toBeVisible();
+
+    // A taller screen keeps its bar while typing.
+    await page.setViewportSize({ width: 667, height: 420 });
+    await filter.focus();
+    await expect(topBar).toBeVisible();
+  }
+);

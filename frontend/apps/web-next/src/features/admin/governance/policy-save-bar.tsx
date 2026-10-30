@@ -43,12 +43,16 @@ export function PolicySaveBar({
 
   return (
     <div
-      className="bg-background fixed inset-x-0 bottom-0 z-50 border-t shadow-lg md:left-60"
+      // Sticks to the bottom of the page panel, in the page's own column: it
+      // lines up with the content, sits above the home indicator, and the
+      // panel scrolls clear of it (a fixed bar was offset for a sidebar that
+      // phones and iPads held upright do not have).
+      className="bg-background sticky bottom-0 z-10 border-t pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-lg"
       role="region"
       aria-label={t("governance_unsaved_changes_aria")}
     >
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-4 px-6 py-3">
-        <div className="flex items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
           {saveError != null ? (
             <ListError error={saveError} title={t("governance_save_error")} compact />
           ) : !canSave ? (
