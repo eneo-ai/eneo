@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.skill_table import (
     AssistantSkillBindings,
@@ -1460,7 +1461,8 @@ async def test_a_fleet_apply_cannot_close_a_cycle_with_policy_and_assistant_save
             await _until_done_or_waiting(db_container, pid=fleet_pid, task=apply)
             save = asyncio.create_task(
                 editor.assistant_service().update_assistant(
-                    assistant_id, name="Renamed"
+                    assistant_id=assistant_id,
+                    update=AssistantUpdateCommand(name="Renamed"),
                 )
             )
             await _wait_until_database_lock(db_container, pid=editor_pid)

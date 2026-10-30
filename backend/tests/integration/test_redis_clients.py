@@ -180,7 +180,10 @@ async def test_a_full_subscription_pool_leaves_api_keys_and_audit_writes_alone(
     # budget unspent, so it reads and writes through Redis.
     cached_action = f"audit_action:{admin_user.tenant_id}:audit_session_created"
     await redis_client.delete(
-        cached_action, build_rate_limit_key(admin_user.id, admin_user.tenant_id)
+        cached_action,
+        build_rate_limit_key(
+            admin_user.id, admin_user.tenant_id, prefix="rate_limit:audit_session"
+        ),
     )
 
     bounded = get_settings().model_copy(update={"redis_max_connections": streams})

@@ -334,17 +334,9 @@ async def test_removing_a_step_deletes_only_an_own_unused_icon(
             await container.session().execute(
                 sa.update(Spaces).where(Spaces.id == space_id).values(icon_id=icon_id)
             )
-    # Icon ids are public, and a flow assistant may name any of them.
-    icon_response = await client.patch(
-        f"/api/v1/flows/{flow.id}/assistants/{removed_id}/",
-        json={"icon_id": str(icon_id)},
-        headers=headers,
-    )
-    assert icon_response.status_code == 200, icon_response.text
-    # The assistant update moved the draft on; the step save sends its revision.
-    flow = flow.model_copy(
-        update={"draft_revision": icon_response.json()["draft_revision"]}
-    )
+    # Seed existing references: deletion must preserve foreign/shared icons
+    # even when current attachment checks would refuse a new reference.
+    await _set_icon(db_container, assistant_id=removed_id, icon_id=icon_id)
 
     response = await _save_steps(client, flow, flow.steps[:1], headers)
 

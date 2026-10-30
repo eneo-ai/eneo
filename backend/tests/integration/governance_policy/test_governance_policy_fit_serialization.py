@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.assistants.assistant_service import AssistantService
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.skill_table import SkillRuntimePolicies
 from eneo.main.exceptions import BadRequestException
@@ -102,7 +103,8 @@ async def _save_policy_with(container, skill) -> None:
 
 async def _switch_model(container, assistant_id, model_id) -> None:
     await container.assistant_service().update_assistant(
-        assistant_id, completion_model_id=model_id
+        assistant_id=assistant_id,
+        update=AssistantUpdateCommand(completion_model_id=model_id),
     )
 
 

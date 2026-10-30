@@ -15,7 +15,7 @@ from eneo.database.tables.security_classifications_table import (
     SecurityClassification,
 )
 from eneo.mcp_servers.application.capability_resolver import (
-    get_active_capability_servers,
+    active_capability_providers,
 )
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
@@ -152,8 +152,8 @@ async def test_reads_and_edits_agree_with_settings_and_keep_stored_data(
     # Check immediately after activation, before any other edit can mask it.
     async with db_container() as container:
         session = container.session()
-        providers = await get_active_capability_servers(
-            session, admin_user.tenant_id, "web_search"
+        providers = await active_capability_providers(
+            session, admin_user.tenant_id, purposes=("web_search",)
         )
         activated = next(
             (provider for provider in providers if provider.id == server_id), None

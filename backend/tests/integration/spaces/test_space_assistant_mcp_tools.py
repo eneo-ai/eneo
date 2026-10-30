@@ -52,9 +52,7 @@ def _switches(space: Space) -> dict[UUID, dict[UUID, list[tuple[str, bool]]]]:
     """Each assistant's servers, with each offered tool and its switch."""
     return {
         assistant.id: {
-            server.id: [
-                (tool.name, tool.is_enabled_by_default) for tool in server.tools
-            ]
+            server.id: [(tool.name, tool.is_enabled) for tool in server.tools]
             for server in assistant.mcp_servers
         }
         for assistant in space.assistants
@@ -163,7 +161,7 @@ async def test_a_space_load_reads_the_tool_policy_once_for_all_assistants(
             space = await _load(db_container, space_id)
         counts.append(len(statements))
         assert all(
-            [tool.name for tool in server.tools if tool.is_enabled_by_default]
+            [tool.name for tool in server.tools if tool.is_enabled]
             == [server.tools[0].name]
             for assistant in space.assistants
             for server in assistant.mcp_servers

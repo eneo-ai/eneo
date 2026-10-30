@@ -24,6 +24,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
@@ -367,7 +368,9 @@ async def _change_icon(container, kind: str, resource_id: str, icon_id: str) -> 
     resource, icon = UUID(resource_id), UUID(icon_id)
     match kind:
         case "assistant":
-            await container.assistant_service().update_assistant(resource, icon_id=icon)
+            await container.assistant_service().update_assistant(
+                assistant_id=resource, update=AssistantUpdateCommand(icon_id=icon)
+            )
         case "app":
             await container.app_service().update_app(resource, icon_id=icon)
         case "space":
