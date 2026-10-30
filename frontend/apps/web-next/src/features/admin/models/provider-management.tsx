@@ -212,120 +212,122 @@ function ProviderEditForm({
   }
 
   return (
-    <form id={id} onSubmit={submit} noValidate>
-      {formRefusal && (
-        <div ref={errorRef} tabIndex={-1} {...fieldProblemProps(id, formRefusal.message)}>
-          <FieldProblem id={id} problem={formRefusal.message} />
-        </div>
-      )}
-      <FormLayout defaultOptionality="optional">
-        <TextInput
-          ref={focus.ref("name")}
-          label={t("provider_name")}
-          value={name}
-          onChange={setName}
-          isRequired
-          autoComplete="off"
-          placeholder={t("provider_name_placeholder")}
-          status={nameError ? { type: "error", message: nameError } : undefined}
-        />
-        <Switch
-          label={t("provider_is_active")}
-          value={isActive}
-          onChange={setIsActive}
-          labelPosition="start"
-          labelSpacing="spread"
-        />
-        {showKeyInput ? (
-          <div className="flex flex-col gap-2">
-            <ProviderField
-              field={NEW_KEY_FIELD}
-              providerType={provider.provider_type}
-              value={apiKey}
-              confirmation={apiKeyConfirmation}
-              onValueChange={setApiKey}
-              onConfirmationChange={setApiKeyConfirmation}
-              description={
-                keyRequiredForEndpointChange
-                  ? t("provider_endpoint_change_requires_key")
-                  : undefined
-              }
-              valueError={keyValueError}
-              showErrors={submitted}
-              focus={focus}
-            />
-            {/* The stored key cannot be kept for a new destination. */}
-            {!keyRequiredForEndpointChange && (
-              <Button
-                variant="ghost"
-                size="sm"
-                label={t("cancel_keep_current_key")}
-                onClick={keepCurrentKey}
-                className="self-start"
-              />
-            )}
-          </div>
-        ) : (
-          <div role="group" aria-labelledby={keyLabelId} className="flex flex-col gap-1">
-            {/* Styled like the Astryx field labels around it. */}
-            <Text type="label" color="secondary" id={keyLabelId}>
-              {t("api_key")}
-            </Text>
-            <div className="flex flex-wrap items-center gap-3">
-              <Text type="code">{provider.masked_api_key ?? t("provider_form_no_key")}</Text>
-              <Button
-                ref={changeKeyRef}
-                size="sm"
-                label={t("provider_form_change_key")}
-                onClick={startChangingKey}
-              >
-                {t("change")}
-              </Button>
-            </div>
+    <div className="flex flex-col gap-4">
+      <form id={id} onSubmit={submit} noValidate>
+        {formRefusal && (
+          <div ref={errorRef} tabIndex={-1} {...fieldProblemProps(id, formRefusal.message)}>
+            <FieldProblem id={id} problem={formRefusal.message} />
           </div>
         )}
-        <KeyExpiryField value={keyExpiresOn} onChange={setKeyExpiresOn} />
-        {configFields.length > 0 && (
-          <fieldset className="flex min-w-0 flex-col gap-4">
-            <legend className="text-ax-text mb-3 text-sm font-semibold">
-              {t("configuration")}
-            </legend>
-            {configFields.map((field) => (
+        <FormLayout defaultOptionality="optional">
+          <TextInput
+            ref={focus.ref("name")}
+            label={t("provider_name")}
+            value={name}
+            onChange={setName}
+            isRequired
+            autoComplete="off"
+            placeholder={t("provider_name_placeholder")}
+            status={nameError ? { type: "error", message: nameError } : undefined}
+          />
+          <Switch
+            label={t("provider_is_active")}
+            value={isActive}
+            onChange={setIsActive}
+            labelPosition="start"
+            labelSpacing="spread"
+          />
+          {showKeyInput ? (
+            <div className="flex flex-col gap-2">
               <ProviderField
-                key={field.name}
-                field={field}
+                field={NEW_KEY_FIELD}
                 providerType={provider.provider_type}
-                value={configValues[field.name] ?? ""}
-                onValueChange={(value) =>
-                  setConfigValues((current) => ({ ...current, [field.name]: value }))
+                value={apiKey}
+                confirmation={apiKeyConfirmation}
+                onValueChange={setApiKey}
+                onConfirmationChange={setApiKeyConfirmation}
+                description={
+                  keyRequiredForEndpointChange
+                    ? t("provider_endpoint_change_requires_key")
+                    : undefined
                 }
+                valueError={keyValueError}
                 showErrors={submitted}
                 focus={focus}
               />
-            ))}
-          </fieldset>
-        )}
-        <OutboundHeadersEditor
-          providerType={provider.provider_type}
-          options={headerOptions.data ?? null}
-          optionsError={blockingError(headerOptions)}
-          loading={headerOptions.isFetching}
-          onRetry={() => {
-            void headerOptions.refetch();
-          }}
-          rows={headerRows}
-          onChange={setHeaderRows}
-          focus={focus}
-          endpoint={configValues.endpoint}
-          editing
-          showErrors={submitted}
-          endpointProblem={endpointHeaderProblem}
-        />
-        {canEditHeaders && (
-          <OutboundHeadersPreview providerId={provider.id} hasUnsavedChanges={headersDirty} />
-        )}
-      </FormLayout>
-    </form>
+              {/* The stored key cannot be kept for a new destination. */}
+              {!keyRequiredForEndpointChange && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  label={t("cancel_keep_current_key")}
+                  onClick={keepCurrentKey}
+                  className="self-start"
+                />
+              )}
+            </div>
+          ) : (
+            <div role="group" aria-labelledby={keyLabelId} className="flex flex-col gap-1">
+              {/* Styled like the Astryx field labels around it. */}
+              <Text type="label" color="secondary" id={keyLabelId}>
+                {t("api_key")}
+              </Text>
+              <div className="flex flex-wrap items-center gap-3">
+                <Text type="code">{provider.masked_api_key ?? t("provider_form_no_key")}</Text>
+                <Button
+                  ref={changeKeyRef}
+                  size="sm"
+                  label={t("provider_form_change_key")}
+                  onClick={startChangingKey}
+                >
+                  {t("change")}
+                </Button>
+              </div>
+            </div>
+          )}
+          <KeyExpiryField value={keyExpiresOn} onChange={setKeyExpiresOn} />
+          {configFields.length > 0 && (
+            <fieldset className="flex min-w-0 flex-col gap-4">
+              <legend className="text-ax-text mb-3 text-sm font-semibold">
+                {t("configuration")}
+              </legend>
+              {configFields.map((field) => (
+                <ProviderField
+                  key={field.name}
+                  field={field}
+                  providerType={provider.provider_type}
+                  value={configValues[field.name] ?? ""}
+                  onValueChange={(value) =>
+                    setConfigValues((current) => ({ ...current, [field.name]: value }))
+                  }
+                  showErrors={submitted}
+                  focus={focus}
+                />
+              ))}
+            </fieldset>
+          )}
+          <OutboundHeadersEditor
+            providerType={provider.provider_type}
+            options={headerOptions.data ?? null}
+            optionsError={blockingError(headerOptions)}
+            loading={headerOptions.isFetching}
+            onRetry={() => {
+              void headerOptions.refetch();
+            }}
+            rows={headerRows}
+            onChange={setHeaderRows}
+            focus={focus}
+            endpoint={configValues.endpoint}
+            editing
+            showErrors={submitted}
+            endpointProblem={endpointHeaderProblem}
+          />
+        </FormLayout>
+      </form>
+      {canEditHeaders && (
+        <OutboundHeadersPreview providerId={provider.id} hasUnsavedChanges={headersDirty} />
+      )}
+    </div>
   );
 }
 

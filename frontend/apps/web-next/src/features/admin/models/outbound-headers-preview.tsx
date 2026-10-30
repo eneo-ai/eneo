@@ -71,9 +71,12 @@ function PreviewForUser({ providerId, user }: { providerId: string; user: Previe
             status={result.blocked ? "warning" : "success"}
             title={resultLabel}
             description={
-              result.destination_problem
-                ? t("outbound_headers_destination_problem")
-                : reason(result.blocked_reason)
+              [
+                result.destination_problem ? t("outbound_headers_destination_problem") : null,
+                reason(result.blocked_reason)
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
             }
           />
           <ul className="border-ax-border divide-ax-border rounded-ax-container divide-y border">

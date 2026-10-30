@@ -138,4 +138,21 @@ describe("outbound header preview", () => {
     expect(screen.queryByRole("button", { name: "Förhandsgranska" })).toBeNull();
     await expectNoAxeViolations(document.body);
   });
+
+  it("shows both destination and stored-secret recovery problems", async () => {
+    api.POST.mockResolvedValueOnce(
+      ok({
+        user_id: "u1",
+        blocked: true,
+        destination_problem: "not_allowed",
+        blocked_reason: "decryption_failed",
+        headers: []
+      })
+    );
+    renderInApp(<OutboundHeadersPreview providerId="p1" hasUnsavedChanges={false} />);
+    await choose();
+    fireEvent.click(screen.getByRole("button", { name: "Förhandsgranska" }));
+    expect(await screen.findByText(/endpointen är inte ett tillåtet mål/)).toBeTruthy();
+    expect(screen.getByText(/Ett lagrat hemligt headervärde kan inte läsas/)).toBeTruthy();
+  });
 });

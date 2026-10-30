@@ -438,6 +438,11 @@ describe("ProviderEditDialog", () => {
 });
 
 describe("provider outbound headers", () => {
+  it("keeps preview search outside the provider save form", () => {
+    renderDialog(provider({ provider_type: "hosted_vllm" }));
+    expect(field(/^Sök på e-post/).form).toBeNull();
+  });
+
   it("keeps a saved secret without sending its mask and allows a fixed value to change", async () => {
     const item = provider({
       provider_type: "hosted_vllm",
