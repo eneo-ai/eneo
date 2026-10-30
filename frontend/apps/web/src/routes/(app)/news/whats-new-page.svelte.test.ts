@@ -6,11 +6,13 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  UNRELEASED,
   compareVersions,
+  latestRelease,
   releases,
-  releasesForVersion,
   visibleEntries,
-  type Locale
+  type Locale,
+  type Release
 } from "@eneo/whats-new";
 import { getLocale, localizeHref, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
@@ -31,6 +33,7 @@ const state = vi.hoisted(() => ({
   ] as Permission[],
   enabled: true,
   installedVersion: "2.3.0",
+  seen: null as string | null,
   markSeen: vi.fn().mockResolvedValue(undefined),
   markAnnounced: vi.fn().mockResolvedValue(undefined),
   snooze: vi.fn().mockResolvedValue(undefined),
@@ -73,15 +76,11 @@ vi.mock("$app/navigation", () => ({
 }));
 vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
   const { writable } = await import("svelte/store");
-  // A release image bundles notes up to its own version; develop may already
-  // carry the next release above the one these tests pin.
-  const bundled = (version: string) =>
-    releasesForVersion(version).filter((release) => compareVersions(release.version, version) <= 0);
   return {
     getWhatsNewStore: () => ({
       releases: bundled(state.installedVersion),
       markLatestSeen: state.markSeen,
-      seenVersion: writable(null),
+      seenVersion: writable(state.seen),
       resetState: vi.fn(),
       enabled: writable(state.enabled),
       hasUnseen: writable(state.enabled),
@@ -100,7 +99,21 @@ vi.mock("$lib/features/whats-new/tour", async (importOriginal) => {
 import WhatsNewPage from "./+page.svelte";
 import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
 
-const release = releases.find((release) => release.version === "2.3.0")!;
+// These tests pin the 2.3 notes. On develop they sit in the unreleased block
+// until the final 2.3 release is ported, so find them by content and bundle
+// them the way a 2.3 image does: under the installed identity, above history.
+const pinned = releases.find((release) =>
+  release.entries.some((entry) => entry.id === "assistant-attachment-modes")
+)!;
+const release: Release = { ...pinned, version: "2.3.0" };
+function bundled(installed: string): Release[] {
+  const history = releases.filter(
+    (other) => other.date && compareVersions(other.version, release.version) < 0
+  );
+  const { date: _date, ...notes } = release;
+  if (installed.startsWith("develop-")) return [{ ...notes, version: UNRELEASED }, ...history];
+  return [installed === release.version ? release : { ...notes, version: installed }, ...history];
+}
 
 const resolveLocale = getLocale;
 afterEach(() => {
@@ -121,6 +134,7 @@ beforeEach(async () => {
     "modules"
   ];
   state.installedVersion = "2.3.0";
+  state.seen = null;
   state.enabled = true;
   document.documentElement.dataset.theme = "light";
   await page.viewport(1280, 900);
@@ -362,4 +376,23 @@ it("shows the installed RC in both the announcement and release picker", async (
     .element(page.getByRole("heading", { name: "Version 2.3.0-rc.1", exact: true }))
     .toBeVisible();
   await expect.element(page.getByRole("button", { name: /^2\.3\.0-rc\.1/ })).toBeVisible();
+});
+
+it("shows unreleased notes on development builds as the upcoming release", async () => {
+  state.installedVersion = "develop-0123456789ab";
+  state.seen = latestRelease()!.version;
+  overwriteGetLocale(() => "en");
+  render(WhatsNewPage);
+  await expect
+    .element(page.getByRole("heading", { name: m.whats_new_unreleased(), exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(m.whats_new_unreleased_hint(), { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: m.whats_new_upcoming(), exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect.element(page.getByText(m.whats_new_new_for_you())).not.toBeInTheDocument();
+  await expect.element(page.getByText(m.whats_new_read(), { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByText(UNRELEASED, { exact: true })).not.toBeInTheDocument();
 });

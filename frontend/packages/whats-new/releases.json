@@ -2,99 +2,7 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
-      "version": "2.4.0",
-      "entries": [
-        {
-          "id": "sharepoint-sync-status",
-          "type": "improved",
-          "area": "knowledge",
-          "title": {
-            "en": "See how each SharePoint source is doing",
-            "sv": "Se hur varje SharePoint-källa mår"
-          },
-          "body": {
-            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
-            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
-          }
-        },
-        {
-          "id": "sharepoint-imported-documents",
-          "type": "new",
-          "area": "knowledge",
-          "title": {
-            "en": "See what a SharePoint import contains",
-            "sv": "Se vad en SharePoint-import innehåller"
-          },
-          "body": {
-            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
-            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
-          }
-        },
-        {
-          "id": "sharepoint-file-formats",
-          "type": "fixed",
-          "area": "knowledge",
-          "title": {
-            "en": "Read SharePoint files like uploads",
-            "sv": "Läs SharePoint-filer som uppladdningar"
-          },
-          "body": {
-            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
-            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
-          }
-        },
-        {
-          "id": "sharepoint-credential-health",
-          "type": "new",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Check SharePoint credentials and sign in again",
-            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
-          },
-          "body": {
-            "en": "Under Administration › Integrations, a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
-            "sv": "Under Administration › Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
-          },
-          "showMe": {
-            "href": "/admin/integrations",
-            "anchor": "admin-integrations"
-          }
-        },
-        {
-          "id": "sharepoint-webhook-recovery",
-          "type": "fixed",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Keep SharePoint webhooks working after a move",
-            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
-          },
-          "body": {
-            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
-            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
-          }
-        },
-        {
-          "id": "sharepoint-picker-keyboard",
-          "permissions": {
-            "allOf": ["integrations"]
-          },
-          "type": "improved",
-          "area": "knowledge",
-          "title": {
-            "en": "Browse SharePoint folders with the keyboard",
-            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
-          },
-          "body": {
-            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
-            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
-          }
-        }
-      ]
-    },
-    {
-      "version": "2.3.0",
+      "version": "next",
       "entries": [
         {
           "id": "file-creation-progress",
@@ -357,6 +265,93 @@
           "body": {
             "en": "Under What's new in the account menu you can read what has changed in each release, and Show me points out a new feature where you find it. After an update, a short announcement highlights the most important news: choose Later to see it again after 24 hours, or Not interested to dismiss it for this version. You only see news about features your role can use, and administrators can turn What's new off for the organisation.",
             "sv": "Under Nyheter i kontomenyn kan du läsa vad som har ändrats i varje version, och Visa mig pekar ut en ny funktion där du hittar den. Efter en uppdatering lyfter ett kort meddelande fram de viktigaste nyheterna: välj Senare för att se det igen efter 24 timmar, eller Inte intresserad för att stänga det för den här versionen. Du ser bara nyheter om funktioner som din roll kan använda, och administratörer kan stänga av Nyheter för organisationen."
+          }
+        },
+        {
+          "id": "sharepoint-sync-status",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "See how each SharePoint source is doing",
+            "sv": "Se hur varje SharePoint-källa mår"
+          },
+          "body": {
+            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+          }
+        },
+        {
+          "id": "sharepoint-imported-documents",
+          "type": "new",
+          "area": "knowledge",
+          "title": {
+            "en": "See what a SharePoint import contains",
+            "sv": "Se vad en SharePoint-import innehåller"
+          },
+          "body": {
+            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
+            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
+          }
+        },
+        {
+          "id": "sharepoint-file-formats",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Read SharePoint files like uploads",
+            "sv": "Läs SharePoint-filer som uppladdningar"
+          },
+          "body": {
+            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
+            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
+          }
+        },
+        {
+          "id": "sharepoint-credential-health",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check SharePoint credentials and sign in again",
+            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
+          },
+          "body": {
+            "en": "Under Administration › Integrations, a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
+            "sv": "Under Administration › Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          },
+          "showMe": {
+            "href": "/admin/integrations",
+            "anchor": "admin-integrations"
+          }
+        },
+        {
+          "id": "sharepoint-webhook-recovery",
+          "type": "fixed",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep SharePoint webhooks working after a move",
+            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
+          },
+          "body": {
+            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
+            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
+          }
+        },
+        {
+          "id": "sharepoint-picker-keyboard",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Browse SharePoint folders with the keyboard",
+            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
+          },
+          "body": {
+            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
+            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
           }
         }
       ]

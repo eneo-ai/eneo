@@ -312,11 +312,14 @@ jobs:
           python3 apps/web/scripts/check-i18n-parity.py
           python3 apps/web/scripts/check-i18n-unused.py
 
-      # User-facing release notes: schema, sv+en parity, newest-first order and
-      # that every "Show me" anchor still exists in the web app.
+      # User-facing release notes: schema, sv+en parity, newest-first order,
+      # that every "Show me" anchor still exists in the web app, and the rules
+      # of the branch the change lands on (unreleased notes only on develop).
       - name: Check What's new release notes
         working-directory: .
-        run: python3 scripts/check_whats_new.py --repo-root .
+        env:
+          TARGET_BRANCH: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+        run: python3 scripts/check_whats_new.py --repo-root . --branch "$TARGET_BRANCH"
 
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend

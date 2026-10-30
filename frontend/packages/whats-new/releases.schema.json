@@ -14,6 +14,11 @@
     }
   },
   "$defs": {
+    "releaseVersion": {
+      "type": "string",
+      "description": "Semver without a leading v, matching the git tag (v2.2.0 -> 2.2.0).",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
     "localized": {
       "type": "object",
       "required": ["en", "sv"],
@@ -29,9 +34,8 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "type": "string",
-          "description": "Semver without a leading v, matching the git tag (v2.2.0 -> 2.2.0).",
-          "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+          "description": "The release this block ships in, or \"next\" (develop only, undated, first) for merged changes that no final release includes yet. See PLAYBOOK.md.",
+          "anyOf": [{ "$ref": "#/$defs/releaseVersion" }, { "const": "next" }]
         },
         "date": {
           "type": "string",
