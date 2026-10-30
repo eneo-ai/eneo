@@ -17,7 +17,10 @@ import random
 import threading
 import time
 from collections import Counter
+from email import policy
+from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from uuid import uuid4
 
 from workflow_model import response as workflow_response
 
@@ -34,6 +37,45 @@ TRANSCRIPTION_LATENCY_MS = int(os.environ.get("MOCK_TRANSCRIPTION_LATENCY_MS", "
 TRANSCRIPT_WORDS = int(os.environ.get("MOCK_TRANSCRIPT_WORDS", "200"))
 STATS: Counter = Counter()
 STATS_LOCK = threading.Lock()
+TIMING_JOBS: dict[str, dict] = {}
+TIMING_JOBS_LOCK = threading.Lock()
+
+
+def _timed_transcript(content_type: str, body: bytes) -> dict:
+    """Echo the model's words with deterministic timings for the native service API."""
+    form = BytesParser(policy=policy.default).parsebytes(
+        f"Content-Type: {content_type}\r\n\r\n".encode() + body
+    )
+    fields = {
+        part.get_param("name", header="content-disposition"): part.get_payload(
+            decode=True
+        ).decode()
+        for part in form.iter_parts()
+        if not part.get_filename()
+    }
+    if fields["task"] != "timestamp":
+        raise ValueError("The E2E timing service supports timestamp jobs only")
+    segments = json.loads(fields["segments"])
+    for segment in segments:
+        words = segment["text"].split()
+        interval = (segment["end"] - segment["start"]) / len(words)
+        segment["words"] = [
+            {
+                "word": word,
+                "start": segment["start"] + index * interval,
+                "end": segment["start"] + (index + 1) * interval,
+            }
+            for index, word in enumerate(words)
+        ]
+        segment["speaker"] = None
+    return {
+        "text": "\n".join(segment["text"] for segment in segments),
+        "segments": segments,
+        "model": fields["model"],
+        "language": fields["language"],
+        "duration_seconds": segments[-1]["end"],
+        "alignment": "forced",
+    }
 
 
 def _count(path: str) -> None:
@@ -84,6 +126,34 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == "/v1/health/ready":
+            self._json(
+                200, {"queue_accepting_jobs": True, "supported_tasks": ["timestamp"]}
+            )
+            return
+        if self.path.startswith("/v1/jobs/"):
+            job_id = self.path.split("/")[3]
+            with TIMING_JOBS_LOCK:
+                result = (
+                    TIMING_JOBS.pop(job_id, None)
+                    if self.path.endswith("/result")
+                    else TIMING_JOBS.get(job_id)
+                )
+            if result is None:
+                self._json(404, {"detail": "Unknown timing job"})
+            elif self.path.endswith("/result"):
+                self._json(200, result)
+            else:
+                self._json(
+                    200,
+                    {
+                        "job_id": job_id,
+                        "status": "completed",
+                        "stage": "completed",
+                        "queue_position": None,
+                    },
+                )
+            return
         if self.path.startswith("/stats"):
             with STATS_LOCK:
                 counts = dict(STATS)
@@ -102,6 +172,13 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b"{}"
         _count(self.path)
         _delay()
+        if self.path == "/v1/jobs":
+            result = _timed_transcript(self.headers["Content-Type"], body)
+            job_id = uuid4().hex
+            with TIMING_JOBS_LOCK:
+                TIMING_JOBS[job_id] = result
+            self._json(202, {"job_id": job_id, "status": "queued"})
+            return
         if self.path.endswith("/audio/transcriptions"):
             time.sleep(TRANSCRIPTION_LATENCY_MS / 1000)
             words = " ".join(f"word{i}" for i in range(TRANSCRIPT_WORDS))

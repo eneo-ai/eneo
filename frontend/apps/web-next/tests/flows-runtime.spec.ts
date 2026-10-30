@@ -58,9 +58,15 @@ test(
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     await expect.poll(() => statuses.includes("completed"), { timeout: 90_000 }).toBe(true);
     expect(statuses.length).toBeGreaterThan(1);
-    await page.getByRole("button", { name: "Spela upp ljudet", exact: true }).first().click();
+    const play = page.getByRole("button", { name: "Spela upp ljudet", exact: true }).first();
+    await expect(play).toBeVisible();
+    await play.click();
     const audio = page.locator("audio").first();
     await expect(audio).toHaveAttribute("src", /token=/);
+    await page.screenshot({
+      path: test.info().outputPath("flow-audio-result-desktop.png"),
+      fullPage: true
+    });
     const signedUrl = new URL((await audio.getAttribute("src")) ?? "", page.url());
     const ranged = await page.request.get(signedUrl.toString(), {
       headers: { Range: "bytes=0-43" }

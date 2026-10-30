@@ -19,18 +19,21 @@ test(
     await expect(
       dialog.getByRole("checkbox", { name: "Visa text medan du spelar in", exact: true })
     ).toBeChecked();
-    const worklet = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === "/flows/pcm16-worklet.js"
-    );
-    await dialog.getByRole("button", { name: "Spela in", exact: true }).click();
-    const workletResponse = await worklet;
+    // AudioWorklet fetches are not exposed as page response events. Check the
+    // served asset here; the live transcript below proves the browser loaded it.
+    const workletResponse = await page.request.get("/flows/pcm16-worklet.js");
     expect(workletResponse.status()).toBe(200);
     expect(workletResponse.headers()["content-type"]).toMatch(/javascript/);
     expect(workletResponse.headers()["x-content-type-options"]).toBe("nosniff");
     expect(workletResponse.headers()["cache-control"]).toBe("no-cache");
+    await dialog.getByRole("button", { name: "Spela in", exact: true }).click();
     await expect(
       dialog.getByText("E2E live transcription: mikrofonen fungerar.", { exact: true })
     ).toBeVisible({ timeout: 20_000 });
+    await page.screenshot({
+      path: test.info().outputPath("flow-live-recording-desktop.png"),
+      fullPage: true
+    });
     await dialog.getByRole("button", { name: "Stoppa", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Stoppa", exact: true })).toBeHidden();
     const refusal = await page.evaluate(

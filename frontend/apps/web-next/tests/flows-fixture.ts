@@ -8,6 +8,7 @@ export async function audioFlow(page: Page, realtime = false) {
   const spaceId = await apiPost(page, "/spaces/", { name: uniqueName("E2E audio") });
   const space = await apiRequest<Schema<"SpacePublic">>(page, `/spaces/${spaceId}/`);
   let modelId = space.transcription_models[0]?.id;
+  let timingServiceId: string | undefined;
   if (realtime) {
     const providerId = await apiPost(page, "/admin/model-providers/", {
       name: uniqueName("E2E realtime"),
@@ -25,6 +26,21 @@ export async function audioFlow(page: Page, realtime = false) {
       method: "PATCH",
       body: { transcription_models: [{ id: modelId }] }
     });
+  } else {
+    // Precise transcript playback comes from the native timing service, not
+    // the ASR provider's untrusted word timestamps.
+    timingServiceId = await apiPost(page, "/admin/transcription-services/", {
+      name: uniqueName("E2E timing"),
+      endpoint_url: "http://e2e-mock-model:8200",
+      api_key: "e2e-timing-fixture"
+    });
+    await apiRequest(page, `/admin/transcription-services/${timingServiceId}/check/`, {
+      method: "POST"
+    });
+    await apiRequest(page, `/spaces/${spaceId}/`, {
+      method: "PATCH",
+      body: { transcription_services: [{ id: timingServiceId }] }
+    });
   }
   if (!modelId) throw new Error("The E2E space has no seeded transcription model");
   const flow = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
@@ -40,7 +56,9 @@ export async function audioFlow(page: Page, realtime = false) {
           wizard: {
             transcription_enabled: true,
             transcription_model: { id: modelId },
-            transcription_language: "sv"
+            transcription_language: "sv",
+            transcription_diarization: false,
+            ...(timingServiceId ? { transcription_speaker_service: { id: timingServiceId } } : {})
           }
         }
       },

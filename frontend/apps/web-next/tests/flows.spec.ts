@@ -44,6 +44,11 @@ test(
     await txt.focus();
     await page.keyboard.press("Space");
     await expect(txt).toBeChecked();
+    await txt.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: test.info().outputPath("manual-flow-inputs-desktop.png"),
+      fullPage: true
+    });
 
     await page.evaluate(() => history.back());
     const leave = page.getByRole("alertdialog");
@@ -67,11 +72,16 @@ test(
       path: test.info().outputPath("manual-flow-editor-mobile.png"),
       fullPage: true
     });
+    await txt.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: test.info().outputPath("manual-flow-inputs-mobile.png"),
+      fullPage: true
+    });
     await page.getByRole("button", { name: "Spara steget", exact: true }).click();
     const ownText = page.getByRole("textbox", { name: /^Egen text till steget/ });
     await expect(ownText).toHaveAttribute("aria-invalid", "true");
     await expect(ownText).toBeFocused();
-    await expect(page.getByText(/^Steget tar emot filer när flödet körs, men/)).toBeVisible();
+    await expect(ownText).toHaveAccessibleDescription(/Steget tar emot filer när flödet körs, men/);
     await ownText.fill("Det manuella flödet fungerar.\n");
     await page.getByRole("button", { name: "Infoga variabel", exact: true }).click();
     await page.getByText("Text från uppladdade filer", { exact: true }).click();
@@ -96,6 +106,16 @@ test(
     await expect(
       run.getByRole("heading", { name: "Det här följer med i körningen" })
     ).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath("manual-flow-run-review-desktop.png"),
+      fullPage: true
+    });
+    const reviewAxe = await new AxeBuilder({
+      page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"]
+    })
+      .withTags(WCAG_22_AA_TAGS)
+      .analyze();
+    expect(reviewAxe.violations).toEqual([]);
     await run.getByRole("button", { name: "Starta körningen", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     const runUrl = page.url();
@@ -109,6 +129,22 @@ test(
       path: test.info().outputPath("flow-run-history-desktop.png"),
       fullPage: true
     });
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await page.screenshot({
+      path: test.info().outputPath("flow-run-history-mobile-dark.png"),
+      fullPage: true
+    });
+    const historyAxe = await new AxeBuilder({
+      page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"]
+    })
+      .withTags(WCAG_22_AA_TAGS)
+      .analyze();
+    expect(historyAxe.violations).toEqual([]);
     await page.getByRole("link", { name: runName, exact: true }).click();
     await expect(page).toHaveURL(runUrl);
   }
