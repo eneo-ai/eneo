@@ -42,10 +42,19 @@ import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/space
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
 import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
+import { Route as AppSpacesSpaceIdAppsIndexRouteImport } from "./routes/_app/spaces/$spaceId/apps/index"
+import { Route as AppSpacesSpaceIdAssistantsIndexRouteImport } from "./routes/_app/spaces/$spaceId/assistants/index"
+import { Route as AppSpacesSpaceIdServicesIndexRouteImport } from "./routes/_app/spaces/$spaceId/services/index"
+import { Route as AppSpacesSpaceIdServicesServiceIdRouteImport } from "./routes/_app/spaces/$spaceId/services/$serviceId"
 import { Route as AppSpacesSpaceIdSkillsIndexRouteImport } from "./routes/_app/spaces/$spaceId/skills/index"
 import { Route as AppSpacesSpaceIdSkillsSkillIdRouteImport } from "./routes/_app/spaces/$spaceId/skills/$skillId"
 import { Route as AppSpacesSpaceIdSkillsNewRouteImport } from "./routes/_app/spaces/$spaceId/skills/new"
 import { Route as AppDashboardAppAppIdResultsResultIdRouteImport } from "./routes/_app/dashboard/app/$appId/results/$resultId"
+import { Route as AppSpacesSpaceIdAppsAppIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/index"
+import { Route as AppSpacesSpaceIdAppsAppIdEditRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/edit"
+import { Route as AppSpacesSpaceIdAssistantsAssistantIdEditRouteImport } from "./routes/_app/spaces/$spaceId/assistants/$assistantId/edit"
+import { Route as AppSpacesSpaceIdGroupChatsGroupChatIdEditRouteImport } from "./routes/_app/spaces/$spaceId/group-chats/$groupChatId/edit"
+import { Route as AppSpacesSpaceIdAppsAppIdResultsResultIdRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/results/$resultId"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -216,6 +225,30 @@ const AppDashboardAppAppIdIndexRoute =
     path: "/dashboard/app/$appId/",
     getParentRoute: () => AppRoute,
   } as any)
+const AppSpacesSpaceIdAppsIndexRoute =
+  AppSpacesSpaceIdAppsIndexRouteImport.update({
+    id: "/apps/",
+    path: "/apps/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdAssistantsIndexRoute =
+  AppSpacesSpaceIdAssistantsIndexRouteImport.update({
+    id: "/assistants/",
+    path: "/assistants/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdServicesIndexRoute =
+  AppSpacesSpaceIdServicesIndexRouteImport.update({
+    id: "/services/",
+    path: "/services/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdServicesServiceIdRoute =
+  AppSpacesSpaceIdServicesServiceIdRouteImport.update({
+    id: "/services/$serviceId",
+    path: "/services/$serviceId",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
 const AppSpacesSpaceIdSkillsIndexRoute =
   AppSpacesSpaceIdSkillsIndexRouteImport.update({
     id: "/skills/",
@@ -239,6 +272,36 @@ const AppDashboardAppAppIdResultsResultIdRoute =
     id: "/dashboard/app/$appId/results/$resultId",
     path: "/dashboard/app/$appId/results/$resultId",
     getParentRoute: () => AppRoute,
+  } as any)
+const AppSpacesSpaceIdAppsAppIdIndexRoute =
+  AppSpacesSpaceIdAppsAppIdIndexRouteImport.update({
+    id: "/apps/$appId/",
+    path: "/apps/$appId/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdAppsAppIdEditRoute =
+  AppSpacesSpaceIdAppsAppIdEditRouteImport.update({
+    id: "/apps/$appId/edit",
+    path: "/apps/$appId/edit",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdAssistantsAssistantIdEditRoute =
+  AppSpacesSpaceIdAssistantsAssistantIdEditRouteImport.update({
+    id: "/assistants/$assistantId/edit",
+    path: "/assistants/$assistantId/edit",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute =
+  AppSpacesSpaceIdGroupChatsGroupChatIdEditRouteImport.update({
+    id: "/group-chats/$groupChatId/edit",
+    path: "/group-chats/$groupChatId/edit",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdAppsAppIdResultsResultIdRoute =
+  AppSpacesSpaceIdAppsAppIdResultsResultIdRouteImport.update({
+    id: "/apps/$appId/results/$resultId",
+    path: "/apps/$appId/results/$resultId",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -273,11 +336,20 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
+  "/spaces/$spaceId/apps/": typeof AppSpacesSpaceIdAppsIndexRoute
+  "/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
+  "/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
+  "/spaces/$spaceId/assistants/$assistantId/edit": typeof AppSpacesSpaceIdAssistantsAssistantIdEditRoute
+  "/spaces/$spaceId/group-chats/$groupChatId/edit": typeof AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute
+  "/spaces/$spaceId/apps/$appId/": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -309,11 +381,20 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId": typeof AppDashboardAppAppIdIndexRoute
+  "/spaces/$spaceId/apps": typeof AppSpacesSpaceIdAppsIndexRoute
+  "/spaces/$spaceId/assistants": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/spaces/$spaceId/services": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
+  "/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
+  "/spaces/$spaceId/assistants/$assistantId/edit": typeof AppSpacesSpaceIdAssistantsAssistantIdEditRoute
+  "/spaces/$spaceId/group-chats/$groupChatId/edit": typeof AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute
+  "/spaces/$spaceId/apps/$appId": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -349,11 +430,20 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/_app/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/_app/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
+  "/_app/spaces/$spaceId/apps/": typeof AppSpacesSpaceIdAppsIndexRoute
+  "/_app/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/_app/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/_app/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
+  "/_app/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
+  "/_app/spaces/$spaceId/assistants/$assistantId/edit": typeof AppSpacesSpaceIdAssistantsAssistantIdEditRoute
+  "/_app/spaces/$spaceId/group-chats/$groupChatId/edit": typeof AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute
+  "/_app/spaces/$spaceId/apps/$appId/": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/_app/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -389,11 +479,20 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId/"
+    | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId/"
+    | "/spaces/$spaceId/apps/"
+    | "/spaces/$spaceId/assistants/"
+    | "/spaces/$spaceId/services/"
     | "/spaces/$spaceId/skills/"
     | "/dashboard/app/$appId/results/$resultId"
+    | "/spaces/$spaceId/apps/$appId/edit"
+    | "/spaces/$spaceId/assistants/$assistantId/edit"
+    | "/spaces/$spaceId/group-chats/$groupChatId/edit"
+    | "/spaces/$spaceId/apps/$appId/"
+    | "/spaces/$spaceId/apps/$appId/results/$resultId"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -425,11 +524,20 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId"
+    | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId"
+    | "/spaces/$spaceId/apps"
+    | "/spaces/$spaceId/assistants"
+    | "/spaces/$spaceId/services"
     | "/spaces/$spaceId/skills"
     | "/dashboard/app/$appId/results/$resultId"
+    | "/spaces/$spaceId/apps/$appId/edit"
+    | "/spaces/$spaceId/assistants/$assistantId/edit"
+    | "/spaces/$spaceId/group-chats/$groupChatId/edit"
+    | "/spaces/$spaceId/apps/$appId"
+    | "/spaces/$spaceId/apps/$appId/results/$resultId"
   id:
     | "__root__"
     | "/"
@@ -464,11 +572,20 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/overview"
     | "/_app/spaces/$spaceId/settings"
     | "/_app/spaces/$spaceId/"
+    | "/_app/spaces/$spaceId/services/$serviceId"
     | "/_app/spaces/$spaceId/skills/$skillId"
     | "/_app/spaces/$spaceId/skills/new"
     | "/_app/dashboard/app/$appId/"
+    | "/_app/spaces/$spaceId/apps/"
+    | "/_app/spaces/$spaceId/assistants/"
+    | "/_app/spaces/$spaceId/services/"
     | "/_app/spaces/$spaceId/skills/"
     | "/_app/dashboard/app/$appId/results/$resultId"
+    | "/_app/spaces/$spaceId/apps/$appId/edit"
+    | "/_app/spaces/$spaceId/assistants/$assistantId/edit"
+    | "/_app/spaces/$spaceId/group-chats/$groupChatId/edit"
+    | "/_app/spaces/$spaceId/apps/$appId/"
+    | "/_app/spaces/$spaceId/apps/$appId/results/$resultId"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -719,6 +836,34 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppDashboardAppAppIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    "/_app/spaces/$spaceId/apps/": {
+      id: "/_app/spaces/$spaceId/apps/"
+      path: "/apps"
+      fullPath: "/spaces/$spaceId/apps/"
+      preLoaderRoute: typeof AppSpacesSpaceIdAppsIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/assistants/": {
+      id: "/_app/spaces/$spaceId/assistants/"
+      path: "/assistants"
+      fullPath: "/spaces/$spaceId/assistants/"
+      preLoaderRoute: typeof AppSpacesSpaceIdAssistantsIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/services/": {
+      id: "/_app/spaces/$spaceId/services/"
+      path: "/services"
+      fullPath: "/spaces/$spaceId/services/"
+      preLoaderRoute: typeof AppSpacesSpaceIdServicesIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/services/$serviceId": {
+      id: "/_app/spaces/$spaceId/services/$serviceId"
+      path: "/services/$serviceId"
+      fullPath: "/spaces/$spaceId/services/$serviceId"
+      preLoaderRoute: typeof AppSpacesSpaceIdServicesServiceIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
     "/_app/spaces/$spaceId/skills/": {
       id: "/_app/spaces/$spaceId/skills/"
       path: "/skills"
@@ -746,6 +891,41 @@ declare module "@tanstack/react-router" {
       fullPath: "/dashboard/app/$appId/results/$resultId"
       preLoaderRoute: typeof AppDashboardAppAppIdResultsResultIdRouteImport
       parentRoute: typeof AppRoute
+    }
+    "/_app/spaces/$spaceId/apps/$appId/": {
+      id: "/_app/spaces/$spaceId/apps/$appId/"
+      path: "/apps/$appId"
+      fullPath: "/spaces/$spaceId/apps/$appId/"
+      preLoaderRoute: typeof AppSpacesSpaceIdAppsAppIdIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/apps/$appId/edit": {
+      id: "/_app/spaces/$spaceId/apps/$appId/edit"
+      path: "/apps/$appId/edit"
+      fullPath: "/spaces/$spaceId/apps/$appId/edit"
+      preLoaderRoute: typeof AppSpacesSpaceIdAppsAppIdEditRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/assistants/$assistantId/edit": {
+      id: "/_app/spaces/$spaceId/assistants/$assistantId/edit"
+      path: "/assistants/$assistantId/edit"
+      fullPath: "/spaces/$spaceId/assistants/$assistantId/edit"
+      preLoaderRoute: typeof AppSpacesSpaceIdAssistantsAssistantIdEditRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/group-chats/$groupChatId/edit": {
+      id: "/_app/spaces/$spaceId/group-chats/$groupChatId/edit"
+      path: "/group-chats/$groupChatId/edit"
+      fullPath: "/spaces/$spaceId/group-chats/$groupChatId/edit"
+      preLoaderRoute: typeof AppSpacesSpaceIdGroupChatsGroupChatIdEditRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/apps/$appId/results/$resultId": {
+      id: "/_app/spaces/$spaceId/apps/$appId/results/$resultId"
+      path: "/apps/$appId/results/$resultId"
+      fullPath: "/spaces/$spaceId/apps/$appId/results/$resultId"
+      preLoaderRoute: typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
     }
   }
 }
@@ -779,9 +959,18 @@ interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
   AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
   AppSpacesSpaceIdIndexRoute: typeof AppSpacesSpaceIdIndexRoute
+  AppSpacesSpaceIdServicesServiceIdRoute: typeof AppSpacesSpaceIdServicesServiceIdRoute
   AppSpacesSpaceIdSkillsSkillIdRoute: typeof AppSpacesSpaceIdSkillsSkillIdRoute
   AppSpacesSpaceIdSkillsNewRoute: typeof AppSpacesSpaceIdSkillsNewRoute
+  AppSpacesSpaceIdAppsIndexRoute: typeof AppSpacesSpaceIdAppsIndexRoute
+  AppSpacesSpaceIdAssistantsIndexRoute: typeof AppSpacesSpaceIdAssistantsIndexRoute
+  AppSpacesSpaceIdServicesIndexRoute: typeof AppSpacesSpaceIdServicesIndexRoute
   AppSpacesSpaceIdSkillsIndexRoute: typeof AppSpacesSpaceIdSkillsIndexRoute
+  AppSpacesSpaceIdAppsAppIdEditRoute: typeof AppSpacesSpaceIdAppsAppIdEditRoute
+  AppSpacesSpaceIdAssistantsAssistantIdEditRoute: typeof AppSpacesSpaceIdAssistantsAssistantIdEditRoute
+  AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute: typeof AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute
+  AppSpacesSpaceIdAppsAppIdIndexRoute: typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  AppSpacesSpaceIdAppsAppIdResultsResultIdRoute: typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
 }
 
 const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
@@ -791,9 +980,22 @@ const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
   AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,
   AppSpacesSpaceIdIndexRoute: AppSpacesSpaceIdIndexRoute,
+  AppSpacesSpaceIdServicesServiceIdRoute:
+    AppSpacesSpaceIdServicesServiceIdRoute,
   AppSpacesSpaceIdSkillsSkillIdRoute: AppSpacesSpaceIdSkillsSkillIdRoute,
   AppSpacesSpaceIdSkillsNewRoute: AppSpacesSpaceIdSkillsNewRoute,
+  AppSpacesSpaceIdAppsIndexRoute: AppSpacesSpaceIdAppsIndexRoute,
+  AppSpacesSpaceIdAssistantsIndexRoute: AppSpacesSpaceIdAssistantsIndexRoute,
+  AppSpacesSpaceIdServicesIndexRoute: AppSpacesSpaceIdServicesIndexRoute,
   AppSpacesSpaceIdSkillsIndexRoute: AppSpacesSpaceIdSkillsIndexRoute,
+  AppSpacesSpaceIdAppsAppIdEditRoute: AppSpacesSpaceIdAppsAppIdEditRoute,
+  AppSpacesSpaceIdAssistantsAssistantIdEditRoute:
+    AppSpacesSpaceIdAssistantsAssistantIdEditRoute,
+  AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute:
+    AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute,
+  AppSpacesSpaceIdAppsAppIdIndexRoute: AppSpacesSpaceIdAppsAppIdIndexRoute,
+  AppSpacesSpaceIdAppsAppIdResultsResultIdRoute:
+    AppSpacesSpaceIdAppsAppIdResultsResultIdRoute,
 }
 
 const AppSpacesSpaceIdRouteWithChildren =

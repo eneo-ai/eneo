@@ -7,14 +7,17 @@ import { title } from "@/lib/route-head";
 import { notFoundOn404 } from "@/lib/route-helpers";
 
 export const Route = createFileRoute("/_app/dashboard/app/$appId/results/$resultId")({
-  loader: async ({ context, params }) => {
-    const [app] = await notFoundOn404(
-      Promise.all([
-        readFresh(context.queryClient, appQueryOptions(browserApi, params.appId)),
-        readFresh(context.queryClient, appRunQueryOptions(browserApi, params.resultId))
-      ])
-    );
-    return app;
+  loader: {
+    staleReloadMode: "blocking",
+    handler: async ({ context, params }) => {
+      const [app] = await notFoundOn404(
+        Promise.all([
+          readFresh(context.queryClient, appQueryOptions(browserApi, params.appId)),
+          readFresh(context.queryClient, appRunQueryOptions(browserApi, params.resultId))
+        ])
+      );
+      return app;
+    }
   },
   head: ({ match, loaderData }) =>
     title(

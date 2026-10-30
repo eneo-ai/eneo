@@ -6,6 +6,7 @@ import { expect, test } from "./csp";
 import {
   activityPill,
   addActivityToAnswers,
+  apiPost,
   askChatQuestion,
   auditLogs,
   chatComposer,
@@ -839,42 +840,105 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("a space's assistants, apps and members, an editor and an app result", async ({
-          page
-        }) => {
-          const work = await spaceWithWork(page, uniqueName(`E2E A11y Touch Work ${colorScheme}`));
-          for (const [tab, name] of [
-            ["assistants", /^(Assistenter|Assistants)$/],
-            ["apps", /^(Appar|Apps)$/],
-            ["members", /^(Medlemmar|Members)$/]
-          ] as const) {
-            await scan(page, `${work.space}/${tab}`, async () => {
-              await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+        test(
+          "a space's assistants, apps and members, an editor and an app result",
+          { tag: "@vite" },
+          async ({ page }) => {
+            const work = await spaceWithWork(
+              page,
+              uniqueName(`E2E A11y Touch Work ${colorScheme}`)
+            );
+            for (const [tab, name] of [
+              ["assistants", /^(Assistenter|Assistants)$/],
+              ["apps", /^(Appar|Apps)$/],
+              ["members", /^(Medlemmar|Members)$/]
+            ] as const) {
+              await scan(page, `${work.space}/${tab}`, async () => {
+                await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+              });
+            }
+            // A phone opens the editor on its index of sections (decision 21).
+            for (const editor of layout.phone
+              ? [work.editor, `${work.editor}?section=instructions`]
+              : [work.editor]) {
+              await scan(page, editor, async () => {
+                await expect(
+                  page.getByRole("heading", { level: 1, name: /^Bygglov / })
+                ).toBeVisible();
+              });
+            }
+            await scan(page, work.result, async () => {
+              await expect(
+                page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
+              ).toBeVisible();
+              await expect(
+                page.getByText(/^(Ditt resultat genereras\.|Your result is being generated\.)$/)
+              ).toBeVisible();
+              await expect(page.locator("[data-result-skeleton]")).toHaveAttribute(
+                "aria-hidden",
+                "true"
+              );
             });
           }
-          // A phone opens the editor on its index of sections (decision 21).
-          for (const editor of layout.phone
-            ? [work.editor, `${work.editor}?section=instructions`]
-            : [work.editor]) {
-            await scan(page, editor, async () => {
+        );
+
+        test(
+          "space app pages, group-chat editor and service pages",
+          { tag: "@vite" },
+          async ({ page }) => {
+            const work = await spaceWithWork(
+              page,
+              uniqueName(`E2E Resource Routes ${colorScheme}`)
+            );
+            const groupName = uniqueName("E2E Grupp");
+            const group = await apiPost(page, `${work.space}/applications/group-chats/`, {
+              name: groupName
+            });
+            const serviceName = uniqueName("E2E Service");
+            const service = await apiPost(page, `${work.space}/applications/services/`, {
+              name: serviceName
+            });
+            await scan(page, work.app, async () => {
+              await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
+              await expect(page.getByRole("link", { name: /^(Redigera|Edit)$/ })).toHaveAttribute(
+                "href",
+                work.appEditor
+              );
+            });
+            for (const editor of layout.phone
+              ? [work.appEditor, `${work.appEditor}?section=instructions`]
+              : [work.appEditor]) {
+              await scan(page, editor, async () => {
+                await expect(
+                  page.getByRole("heading", { level: 1, name: /^Protokoll / })
+                ).toBeVisible();
+              });
+            }
+            await scan(page, `${work.space}/group-chats/${group}/edit`, async () => {
+              await expect(page.getByRole("heading", { level: 1, name: groupName })).toBeVisible();
+            });
+            await scan(page, `${work.space}/services`, async () => {
               await expect(
-                page.getByRole("heading", { level: 1, name: /^Bygglov / })
+                page.getByRole("heading", { level: 2, name: /^(Tjänster|Services)$/ })
               ).toBeVisible();
             });
+            for (const tab of ["playground", "settings"]) {
+              await scan(page, `${work.space}/services/${service}?tab=${tab}`, async () => {
+                await expect(
+                  page.getByRole("heading", { level: 1, name: serviceName })
+                ).toBeVisible();
+                await expect(
+                  page.getByRole("tab", {
+                    name:
+                      tab === "settings"
+                        ? /^(Inställningar|Settings)$/
+                        : /^(Testområde|Playground)$/
+                  })
+                ).toHaveAttribute("aria-selected", "true");
+              });
+            }
           }
-          await scan(page, work.result, async () => {
-            await expect(
-              page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
-            ).toBeVisible();
-            await expect(
-              page.getByText(/^(Ditt resultat genereras\.|Your result is being generated\.)$/)
-            ).toBeVisible();
-            await expect(page.locator("[data-result-skeleton]")).toHaveAttribute(
-              "aria-hidden",
-              "true"
-            );
-          });
-        });
+        );
 
         test("Konto's pages", { tag: "@vite" }, async ({ page }) => {
           for (const [path, title] of [
@@ -979,22 +1043,28 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {
-    const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
-    for (const tab of ["assistants", "apps", "members"]) {
-      await page.goto(`${work.space}/${tab}`);
-      await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
+  test(
+    "a space's assistants, apps and members, an editor and an app result",
+    { tag: "@vite" },
+    async ({ page }) => {
+      const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
+      for (const tab of ["assistants", "apps", "members"]) {
+        await page.goto(`${work.space}/${tab}`);
+        await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
+        await expectNoSidewaysPageScroll(page);
+      }
+      for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
+        await page.goto(editor);
+        await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
+        await expectNoSidewaysPageScroll(page);
+      }
+      await page.goto(work.result);
+      await expect(
+        page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
+      ).toBeVisible();
       await expectNoSidewaysPageScroll(page);
     }
-    for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
-      await page.goto(editor);
-      await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
-      await expectNoSidewaysPageScroll(page);
-    }
-    await page.goto(work.result);
-    await expect(page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })).toBeVisible();
-    await expectNoSidewaysPageScroll(page);
-  });
+  );
 });
 
 // Focus not obscured (2.4.11): errors and warnings stay until closed, at the

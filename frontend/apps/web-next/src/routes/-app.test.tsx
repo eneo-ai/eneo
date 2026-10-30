@@ -35,6 +35,17 @@ const context = testAppContext({ settings: { whats_new_enabled: false } });
 let replies: Map<string, unknown>;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 
+function EditorDraft({ id }: { id: string }) {
+  const [draft, setDraft] = useState("");
+  return (
+    <input
+      aria-label={`Editor ${id}`}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+    />
+  );
+}
+
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -69,6 +80,16 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetcher);
   vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
   vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
+  // Editor fields have feature tests; here their local state exposes the route's identity boundary.
+  vi.doMock("@/features/apps/editor/app-editor", () => ({
+    AppEditor: ({ appId }: { appId: string }) => <EditorDraft id={appId} />
+  }));
+  vi.doMock("@/features/assistants/editor/assistant-editor", () => ({
+    AssistantEditor: ({ assistantId }: { assistantId: string }) => <EditorDraft id={assistantId} />
+  }));
+  vi.doMock("@/features/group-chats/group-chat-editor", () => ({
+    GroupChatEditor: ({ groupChatId }: { groupChatId: string }) => <EditorDraft id={groupChatId} />
+  }));
   // Chat streaming has its own feature and browser tests; keep its state observable here.
   vi.doMock("@/features/chat/chat-page", async () => {
     const { replaceUrl } = await import("@/lib/navigation");
@@ -104,6 +125,198 @@ beforeEach(() => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
+});
+
+it.each(["assistants", "apps", "services"] as const)(
+  "opens the space %s list with its space title",
+  async (kind) => {
+    replies.set("/api/v1/spaces/space-1/", makeSpace({ resourcePermissions: [] }));
+    await renderRoute(`/spaces/space-1/${kind}`);
+    await screen.findByRole("heading", { name: messages[kind], level: 2 });
+    expect(document.title).toBe(`${messages[kind]} · Upphandling · Eneo`);
+  }
+);
+
+it.each(["apps", "assistants", "group-chats"] as const)(
+  "keeps the %s editor draft across section navigation and resets it for another resource",
+  async (kind) => {
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    for (const id of ["resource-1", "resource-2"])
+      replies.set(`/api/v1/${kind}/${id}/`, { id, name: `Name ${id}` });
+    replies.set("/api/v1/help-assistants/availability", new Response(null, { status: 500 }));
+    const base = `/spaces/space-1/${kind}`;
+    const { router } = await renderRoute(
+      `${base}/resource-1/edit`,
+      undefined,
+      ({ queryClient }) => {
+        queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+      }
+    );
+    const input = await screen.findByRole("textbox", { name: "Editor resource-1" });
+    const t = createTranslator({ locale: "sv", messages });
+    expect(document.title).toBe(
+      `${t("space_edit_title", { name: "Name resource-1" })} · Upphandling · Eneo`
+    );
+    fireEvent.change(input, { target: { value: "Unfinished instructions" } });
+    await act(() => router.navigate({ href: `${base}/resource-1/edit?section=instructions` }));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Editor resource-1" }).value).toBe(
+      "Unfinished instructions"
+    );
+    expect(requestedPaths().filter((path) => path === `/api/v1/${kind}/resource-1/`)).toHaveLength(
+      1
+    );
+    await act(() => router.navigate({ href: `${base}/resource-2/edit` }));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Editor resource-2" }).value).toBe(
+      ""
+    );
+  }
+);
+
+it("redirects a help assistant before mounting its space editor or warming the optional guide", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
+  const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/help-assistants"));
+  expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
+  expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
+});
+
+it.each([
+  ["apps/missing", "/api/v1/apps/missing/"],
+  ["group-chats/missing/edit", "/api/v1/group-chats/missing/"],
+  ["services/missing", "/api/v1/services/missing/"]
+])("maps a missing space resource %s to not-found after reading it", async (path, apiPath) => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set(apiPath, new Response(null, { status: 404 }));
+  replies.set("/api/v1/apps/missing/runs/", { items: [] });
+  await renderRoute(`/spaces/space-1/${path}`);
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths()).toContain(apiPath);
+});
+
+it("shows a resource load failure through the route error boundary", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/services/failed/", new Response(null, { status: 500 }));
+  await renderRoute("/spaces/space-1/services/failed");
+  await screen.findByRole("heading", { name: messages.something_went_wrong });
+  expect(screen.queryByRole("heading", { name: messages.page_not_found })).toBeNull();
+});
+
+it("awaits a fresh existence check when returning to an invalidated service", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/services/service-1/", {
+    id: "service-1",
+    name: "Old service",
+    permissions: []
+  });
+  const href = "/spaces/space-1/services/service-1";
+  const { router, queryClient } = await renderRoute(href, undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  await screen.findByRole("heading", { name: "Old service", level: 1 });
+  await act(() => router.navigate({ href: "/account" }));
+  let release!: (response: Response) => void;
+  replies.set(
+    "/api/v1/services/service-1/",
+    new Promise<Response>((resolve) => {
+      release = resolve;
+    })
+  );
+  await queryClient.invalidateQueries({ queryKey: ["services", "service-1"], refetchType: "none" });
+  let complete = false;
+  let navigation!: Promise<void>;
+  try {
+    await act(async () => {
+      navigation = router.navigate({ href });
+      void navigation.then(() => {
+        complete = true;
+      });
+    });
+    expect(complete).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Old service", level: 1 })).toBeNull();
+  } finally {
+    await act(async () => {
+      release(new Response(null, { status: 404 }));
+      await navigation;
+    });
+  }
+  await screen.findByRole("heading", { name: messages.page_not_found });
+});
+
+it("keeps a space app's URL tab and resets its run input for a different app", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  for (const id of ["app-1", "app-2"]) {
+    replies.set(`/api/v1/apps/${id}/`, {
+      ...dashboardApp,
+      id,
+      name: id,
+      input_fields: [{ type: "text-field" }],
+      permissions: []
+    });
+    replies.set(`/api/v1/apps/${id}/runs/`, { items: [] });
+  }
+  const { router } = await renderRoute(
+    "/spaces/space-1/apps/app-1?tab=results",
+    undefined,
+    ({ queryClient }) => {
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    }
+  );
+  await screen.findByRole("heading", { name: "app-1", level: 1 });
+  expect(screen.getByRole("tab", { name: messages.results }).getAttribute("aria-selected")).toBe(
+    "true"
+  );
+  expect(document.title).toBe("app-1 · Upphandling · Eneo");
+  await act(() => router.navigate({ href: "/spaces/space-1/apps/app-1?tab=run" }));
+  const input = await screen.findByRole("textbox", { name: messages.enter_your_question_here });
+  fireEvent.change(input, { target: { value: "First app's input" } });
+  expect(requestedPaths().filter((path) => path === "/api/v1/apps/app-1/")).toHaveLength(1);
+  await act(() => router.navigate({ href: "/spaces/space-1/apps/app-2" }));
+  expect(
+    screen.getByRole<HTMLTextAreaElement>("textbox", { name: messages.enter_your_question_here })
+      .value
+  ).toBe("");
+});
+
+it.each([false, true])(
+  "shows a space result's edit link only with edit permission (%s)",
+  async (canEdit) => {
+    setViewport("desktop");
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    replies.set("/api/v1/apps/app-1/", { ...dashboardApp, permissions: canEdit ? ["edit"] : [] });
+    replies.set("/api/v1/app-runs/run-1/", {
+      id: "run-1",
+      status: "complete",
+      input: { text: "Question", files: [] },
+      output: "Result",
+      finished_at: "2026-10-30T08:00:00Z",
+      user: { id: "user-1", email: "test@example.se" },
+      skill_provenance: []
+    });
+    await renderRoute("/spaces/space-1/apps/app-1/results/run-1");
+    await screen.findByText("Result");
+    const edit = screen.queryByRole("link", { name: messages.edit });
+    expect(edit?.getAttribute("href") ?? null).toBe(
+      canEdit ? "/spaces/space-1/apps/app-1/edit" : null
+    );
+    const t = createTranslator({ locale: "sv", messages });
+    expect(document.title).toBe(
+      `${t("space_app_result_title", { name: dashboardApp.name })} · Upphandling · Eneo`
+    );
+  }
+);
+
+it("keeps a service without edit permission in its playground and isolates its input", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  for (const id of ["service-1", "service-2"])
+    replies.set(`/api/v1/services/${id}/`, { id, name: id, permissions: [] });
+  const { router } = await renderRoute("/spaces/space-1/services/service-1?tab=settings");
+  const input = await screen.findByRole("textbox", { name: messages.input });
+  expect(screen.queryByRole("tab", { name: messages.settings })).toBeNull();
+  expect(document.title).toBe("service-1 · Upphandling · Eneo");
+  fireEvent.change(input, { target: { value: "First service's input" } });
+  await act(() => router.navigate({ href: "/spaces/space-1/services/service-2" }));
+  expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: messages.input }).value).toBe("");
 });
 
 it("opens the dashboard catalog with its title and existing app links", async () => {

@@ -163,6 +163,8 @@ export async function spaceWithWork(page: Page, name: string) {
     space,
     editor: `${space}/assistants/${assistant}/edit`,
     result: `${space}/apps/${app}/results/${run}`,
+    app: `${space}/apps/${app}`,
+    appEditor: `${space}/apps/${app}/edit`,
     dashboardApp: `/dashboard/app/${app}`,
     dashboardResult: `/dashboard/app/${app}/results/${run}`
   };

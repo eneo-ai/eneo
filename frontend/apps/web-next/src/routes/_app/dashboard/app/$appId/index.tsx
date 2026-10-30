@@ -8,14 +8,17 @@ import { notFoundOn404 } from "@/lib/route-helpers";
 
 export const Route = createFileRoute("/_app/dashboard/app/$appId/")({
   remountDeps: ({ params }) => params.appId,
-  loader: async ({ context, params }) => {
-    const [app] = await notFoundOn404(
-      Promise.all([
-        readFresh(context.queryClient, appQueryOptions(browserApi, params.appId)),
-        readFresh(context.queryClient, appRunsQueryOptions(browserApi, params.appId))
-      ])
-    );
-    return app;
+  loader: {
+    staleReloadMode: "blocking",
+    handler: async ({ context, params }) => {
+      const [app] = await notFoundOn404(
+        Promise.all([
+          readFresh(context.queryClient, appQueryOptions(browserApi, params.appId)),
+          readFresh(context.queryClient, appRunsQueryOptions(browserApi, params.appId))
+        ])
+      );
+      return app;
+    }
   },
   head: resourceTitle("apps"),
   component: DashboardAppPage
