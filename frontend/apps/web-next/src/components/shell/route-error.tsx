@@ -5,6 +5,7 @@ import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useEffect } from "react";
 import { errorReferenceLines } from "@/lib/api/errors";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 /**
  * A page that failed to load or render: what happened, the references
@@ -15,6 +16,8 @@ import { errorReferenceLines } from "@/lib/api/errors";
 export function RouteError({ error, reset }: { error: unknown; reset: () => void }) {
   const t = useTranslations();
   const queryErrors = useQueryErrorResetBoundary();
+  const references = errorReferenceLines(error, t);
+  const { copy, isCopied } = useCopy();
 
   useEffect(() => {
     console.error(error);
@@ -24,11 +27,20 @@ export function RouteError({ error, reset }: { error: unknown; reset: () => void
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <h1 className="text-ax-text text-2xl font-semibold">{t("something_went_wrong")}</h1>
       <p className="text-ax-text-secondary max-w-prose text-sm">{t("error_occurred")}</p>
-      {errorReferenceLines(error, t).map((line) => (
-        <p key={line} className="text-ax-text-secondary font-mono text-xs">
+      {references.map((line) => (
+        <p key={line} className="text-ax-text-secondary max-w-full font-mono text-xs break-all">
           {line}
         </p>
       ))}
+      {references.length > 0 && (
+        <Button
+          type="button"
+          label={t(isCopied ? "copied" : "copy")}
+          onClick={() => {
+            void copy(references.join("\n"));
+          }}
+        />
+      )}
       <Button
         label={t("try_again")}
         variant="primary"
@@ -37,6 +49,15 @@ export function RouteError({ error, reset }: { error: unknown; reset: () => void
           reset();
         }}
       />
+      <p className="text-ax-text-secondary text-sm">
+        {t("error_persists")}{" "}
+        <a
+          href="/logout"
+          className="text-ax-text-accent inline-flex min-h-11 items-center underline underline-offset-4"
+        >
+          {t("delete_cookies")}
+        </a>
+      </p>
     </div>
   );
 }

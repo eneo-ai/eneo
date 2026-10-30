@@ -58,6 +58,32 @@ const refused = (code: number) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("ChangePasswordCard", () => {
+  it("reveals each password independently without submitting or changing its value", () => {
+    renderCard();
+    const inputs = [
+      field(/^Nuvarande lösenord/),
+      field(/^Nytt lösenord/),
+      field(/^Bekräfta lösenord/)
+    ];
+    const toggles = screen.getAllByRole("button", { name: "Visa lösenord" });
+    expect(toggles).toHaveLength(3);
+    inputs.forEach((input, index) => {
+      fireEvent.change(input, { target: { value: "unchanged-value" } });
+      const toggle = toggles[index]!;
+      fireEvent.click(toggle);
+      expect(input.type).toBe("text");
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      expect(input.value).toBe("unchanged-value");
+      inputs
+        .filter((other) => other !== input)
+        .forEach((other) => expect(other.type).toBe("password"));
+      fireEvent.click(toggle);
+      expect(input.type).toBe("password");
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    });
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("states the backend's policy before the field and gives password managers what they need", async () => {
     const { container } = renderCard();
 

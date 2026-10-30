@@ -33,3 +33,19 @@ it("shows the frontend's and the backend's version", () => {
 
   expect(screen.getByText("Frontend 0.1.0 · Backend 2.3.0")).toBeTruthy();
 });
+
+it("shows a username that differs from the email", () => {
+  renderInApp(<AccountProfile />, {
+    appContext: testAppContext({ user: { username: "anna.legacy" } })
+  });
+  expect(screen.getByText("Användarnamn")).toBeTruthy();
+  expect(screen.getByText("anna.legacy")).toBeTruthy();
+});
+
+it.each([null, "anna.lind@example.se"])(
+  "does not repeat an absent or email username (%s)",
+  (username) => {
+    renderInApp(<AccountProfile />, { appContext: testAppContext({ user: { username } }) });
+    expect(screen.queryByText("Användarnamn")).toBeNull();
+  }
+);

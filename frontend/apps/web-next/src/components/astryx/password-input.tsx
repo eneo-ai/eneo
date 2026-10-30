@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { TextInput, type TextInputProps } from "./text-input";
 
@@ -14,6 +15,7 @@ export function PasswordInput(props: Omit<TextInputProps, "type">) {
       <TextInput {...props} type={visible ? "text" : "password"} />
       <Button
         label={t(visible ? "hide_password" : "show_password")}
+        icon={visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
         type="button"
         variant="ghost"
         size="sm"

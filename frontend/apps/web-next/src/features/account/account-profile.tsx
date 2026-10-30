@@ -21,6 +21,11 @@ export function AccountProfile() {
       <SettingsRow title={t("email")}>
         <p className="text-sm">{user.email}</p>
       </SettingsRow>
+      {user.username && user.username !== user.email && (
+        <SettingsRow title={t("username")}>
+          <p className="text-sm break-words">{user.username}</p>
+        </SettingsRow>
+      )}
       <SettingsRow title={t("organization")}>
         <p className="text-sm">{tenant.display_name ?? tenant.name}</p>
       </SettingsRow>
