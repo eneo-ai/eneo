@@ -109,6 +109,7 @@ const FLOW_TOOLS = new Set([
   "read_step_assistant",
   "update_step",
   "update_steps",
+  "contract_from_example",
   "add_step",
   "move_step",
   "remove_step",

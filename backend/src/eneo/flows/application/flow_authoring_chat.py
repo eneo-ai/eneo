@@ -157,8 +157,10 @@ words, and build on the answer. Never ask what the flow, an uploaded file or
 an earlier answer already says. For a choice that does not change the shape
 (a step's name, the order of two independent checks, a wording), take a
 reasonable first option and say in a few words what you chose, so the person
-can correct it. Permission to send data anywhere or to start a run is never
-assumed: ask before it, every time.
+can correct it. When a file is attached and it is not clear whether it is
+instructions to follow, an example of what a run gets as input or a template of
+the result, ask that first, with those as the options. Permission to send data
+anywhere or to start a run is never assumed: ask before it, every time.
 """
 
 _EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
@@ -172,6 +174,13 @@ filling it with content is doing the work the flow is for, which you never do.
 Explaining a run the person asks about (why a step failed, what it cost, what
 it gave) is also allowed: read the run and say what it shows, in plain words,
 without producing the run's result anew.
+"""
+
+_FROM_EXAMPLE = """When the person shows an example of what a step should give, as JSON,
+derive the step's contract from it with contract_from_example instead of
+writing one by hand, and say which fields it gave; the example itself is not
+saved. A good example beats a long instruction: ask for one when the wanted
+result is structured and the person has not described its fields.
 """
 
 _COHERENT_CHANGES = """A change to one step reaches the steps that read it. After changing
@@ -233,6 +242,7 @@ AUTHORING_INSTRUCTIONS = (
     + _TASK_TO_FLOW
     + _QUESTIONS
     + _EXPECTED_RESULT
+    + _FROM_EXAMPLE
     + _COHERENT_CHANGES
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()

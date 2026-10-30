@@ -9329,6 +9329,8 @@
   "tool_flows_update_step_done": "Updated step",
   "tool_flows_update_steps": "Updating steps",
   "tool_flows_update_steps_done": "Updated steps",
+  "tool_flows_contract_from_example": "Creating a contract from the example",
+  "tool_flows_contract_from_example_done": "Created a contract from the example",
   "tool_flows_add_step": "Adding step",
   "tool_flows_add_step_done": "Added step",
   "tool_flows_move_step": "Moving step",

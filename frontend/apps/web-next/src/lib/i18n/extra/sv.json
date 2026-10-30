@@ -3864,6 +3864,8 @@
   "tool_flows_update_step_done": "Ändrade steg",
   "tool_flows_update_steps": "Ändrar flera steg",
   "tool_flows_update_steps_done": "Ändrade flera steg",
+  "tool_flows_contract_from_example": "Skapar kontrakt från exemplet",
+  "tool_flows_contract_from_example_done": "Skapade kontrakt från exemplet",
   "tool_flows_add_step": "Lägger till steg",
   "tool_flows_add_step_done": "Lade till steg",
   "tool_flows_move_step": "Flyttar steg",

@@ -617,11 +617,58 @@ def test_every_draft_changing_tool_reports_introduced_suggestions():
         "update_flow_settings",
         "update_step",
         "update_steps",
+        "contract_from_example",
         "add_step",
         "move_step",
         "remove_step",
         "apply_flow_suggestions",
     }
+
+
+async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.contract_from_example(
+        MagicMock(),
+        expected_revision=4,
+        step_id=_DRAFT_IDS[1],
+        example='{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null}',
+    )
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    body = json.loads(page["content"])
+    assert body["saved"] is True
+    assert body["fields"] == [
+        {"name": "beslut", "type": "string", "variable": True},
+        {"name": "belopp", "type": "number", "variable": True},
+        {"name": "a.b", "type": "array", "variable": False},
+        {"name": "n", "type": ["string", "null"], "variable": True},
+    ]
+    assert body["notes"] == ["empty_list", "null_value"]
+    request = save.await_args.args[2]
+    (edit,) = request.step_edits
+    assert edit.changes.output_type == "json"
+    assert edit.changes.output_contract["required"] == [
+        "beslut",
+        "belopp",
+        "a.b",
+        "n",
+    ]
+    # The contract carries the fields' types, never the example's values.
+    assert "Bifall" not in json.dumps(request.model_dump(mode="json"))
+
+
+async def test_an_example_that_gives_no_contract_is_refused_without_saving(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.contract_from_example(
+        MagicMock(), expected_revision=4, step_id=_DRAFT_IDS[1], example="[1]"
+    )
+
+    assert result.isError is True
+    assert "JSON object" in result.content[0].text
+    save.assert_not_awaited()
 
 
 def test_every_tool_that_needs_edit_mode_is_withheld_while_the_chat_asks():

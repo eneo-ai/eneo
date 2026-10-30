@@ -42,7 +42,9 @@ read_flow's overview (the default) lists every step in short with what it reads 
 which later steps read it; section "steps" with steps=[...] gives those steps in
 full with their prompts, section "settings" the flow without its steps. Read a step
 in full before changing it. A change that reaches several steps goes in one
-update_steps call.
+update_steps call. When the person shows an example of what a step should give as
+JSON, contract_from_example gives the step the contract the example implies; the
+example itself is not kept.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
 A completion step whose input may exceed its model's window can set
@@ -745,6 +747,87 @@ async def update_steps(
     return await _call(ctx, operation, changes_draft=True)
 
 
+_EXAMPLE_PROBLEMS = {
+    "syntax": "The example is not valid JSON.",
+    "not_object": "The example must be a JSON object with the fields the step gives.",
+    "no_fields": "The example has no fields.",
+    "inexact_number": (
+        "A number in the example cannot be held exactly; round it or write it as text."
+    ),
+    "too_large": "The example is too large; keep it to the fields the step gives.",
+}
+
+
+@mcp.tool()
+async def contract_from_example(
+    ctx: Context, expected_revision: int, step_id: UUID, example: str
+) -> CallToolResult:
+    """Give a step the output contract one example of its answer implies, the way
+    the editor's "Skapa från exempel" does: example is a JSON object whose keys
+    become required fields typed by their values (numbers as number, lists by
+    their first element). Saves output_type json and the contract on the step;
+    the example itself is not kept. The result lists the fields, marks a name a
+    later step cannot read as a reference, and notes what one example could
+    not decide (an empty list, a null, a list of mixed elements)."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
+        from eneo.flows.domain.contract_from_example import (
+            ExampleProblemError,
+        )
+        from eneo.flows.domain.contract_from_example import (
+            contract_from_example as read_example,
+        )
+
+        try:
+            reading = read_example(example)
+        except ExampleProblemError as error:
+            raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
+        flow = await get_flow(chat.flow_id, request, container)
+        edit = _step_edit(
+            flow,
+            step_id,
+            {"output_type": "json", "output_contract": reading.contract},
+            None,
+        )
+        updated = await apply_editor_update(
+            chat.flow_id,
+            request,
+            FlowEditorUpdateRequest.model_validate(
+                {
+                    "expected_revision": expected_revision,
+                    "definition": {},
+                    "step_edits": edit.step_edits,
+                    "assistants": [],
+                }
+            ),
+            container,
+        )
+        return page_result(
+            {
+                "saved": True,
+                "step_id": str(step_id),
+                "fields": [
+                    {
+                        "name": item.name,
+                        "type": item.schema.get("type"),
+                        "variable": item.variable,
+                    }
+                    for item in reading.fields
+                ],
+                "notes": list(reading.notes),
+            },
+            flow_id=chat.flow_id,
+            revision=updated.draft_revision,
+        )
+
+    return await _call(ctx, operation, changes_draft=True)
+
+
 @mcp.tool()
 async def add_step(
     ctx: Context,
@@ -1263,6 +1346,7 @@ EDIT_MODE_TOOLS = frozenset(
         "update_flow_settings",
         "update_step",
         "update_steps",
+        "contract_from_example",
         "add_step",
         "move_step",
         "remove_step",

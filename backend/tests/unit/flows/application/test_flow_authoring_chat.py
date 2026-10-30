@@ -59,6 +59,19 @@ def test_the_instructions_ask_one_shaping_question_at_a_time() -> None:
         in instructions
     )
     assert "ask before it, every time" in instructions
+    assert "instructions to follow, an example of what a run gets as input" in (
+        instructions
+    )
+
+
+def test_the_instructions_take_a_contract_from_an_example() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "derive the step's contract from it with contract_from_example" in (
+        instructions
+    )
+    assert "the example itself is not saved" in instructions
+    assert "ask for one when the wanted result is structured" in instructions
 
 
 def test_the_instructions_show_the_expected_result_without_doing_the_work() -> None:

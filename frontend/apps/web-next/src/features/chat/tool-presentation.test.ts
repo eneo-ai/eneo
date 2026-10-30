@@ -367,6 +367,7 @@ describe("Eneo's flows server", () => {
     "read_step_assistant",
     "update_step",
     "update_steps",
+    "contract_from_example",
     "add_step",
     "move_step",
     "remove_step",
