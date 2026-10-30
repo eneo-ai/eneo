@@ -23,10 +23,13 @@ import { cn } from "@/lib/utils";
  * close. alert-dialog.tsx builds on the same parts, so the whole app has one
  * dialog implementation.
  *
- * The call sites' classes (`sm:max-w-2xl`, `max-h-[90vh] overflow-y-auto`,
+ * The call sites' classes (`sm:max-w-2xl`, `overflow-y-auto`,
  * `p-0`, `flex flex-col`, …) style the <dialog> itself, as they styled
  * shadcn's content box. Astryx wraps the children in one layout div; it is
  * flattened (`display: contents`) so those classes lay the children out.
+ * Height is capped here at the dynamic viewport minus 2rem (dvh follows
+ * Safari's toolbar and Android's keyboard): a call site's own `max-h-[90vh]`
+ * would beat that cap, and eslint rejects vh in class names.
  */
 
 type DialogContextValue = {

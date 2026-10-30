@@ -7,7 +7,6 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { revealProblems } from "@/components/composites/field-problem";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
@@ -74,13 +73,7 @@ export function CreateSpaceDialog({
   }
 
   return (
-    <Dialog
-      isOpen={open}
-      onOpenChange={requestOpenChange}
-      purpose="form"
-      width={440}
-      className={DIALOG_TOP_ON_TOUCH}
-    >
+    <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={440}>
       <Layout
         height="auto"
         header={<DialogHeader title={t("create_new_space")} onOpenChange={requestOpenChange} />}

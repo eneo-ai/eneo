@@ -267,6 +267,24 @@
 }
 
 @custom-variant dark (&:is(.dark *));
+/* `hover:` shows on a pointer that hovers and, on touch (which has no hover),
+   while the finger is down: Tailwind's own gates it to hover-capable pointers,
+   so a tap on a legacy button or a row showed nothing at all. */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+  @media (hover: none) {
+    &:active {
+      @slot;
+    }
+  }
+}
+/* A short viewport: a phone turned sideways (a browser's own bars leave about
+   280 px) or its keyboard open. */
+@custom-variant short (@media (height < 30rem));
 
 /*
  * 3. Tailwind theme. `inline` makes every utility reference the token itself,
@@ -1078,6 +1096,51 @@
   .astryx-mobile-nav::backdrop,
   .astryx-dialog::backdrop {
     backdrop-filter: none;
+  }
+  /* While a text field has the focus on a viewport this short (a phone turned
+     sideways with its keyboard up leaves 50 to 150 px), the page's bars would
+     take all of it: the shell's top bar, a pushed screen's PageBar and the
+     chat's header give way until the field loses the focus. */
+  @media (height < 18.75rem) {
+    .group\/shell:has(
+        input:focus:not(
+            [type="checkbox"],
+            [type="radio"],
+            [type="file"],
+            [type="range"],
+            [type="button"],
+            [type="submit"]
+          ),
+        textarea:focus,
+        [contenteditable="true"]:focus
+      )
+      :is(header:not(main *), [data-page-bar], [data-phone-page-bar], [data-own-mobile-header]) {
+      display: none;
+    }
+  }
+  /* A dialog with a text field hangs from the top on a touch screen instead of
+     centring: the software keyboard rises over the lower half, and a centred
+     dialog's field, and the buttons under it, end up behind it. The margin
+     clears the notch; the cap keeps its footer inside the visible height. */
+  @media (pointer: coarse) {
+    .astryx-dialog:has(
+      input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="file"],
+        [type="range"],
+        [type="button"],
+        [type="submit"],
+        [type="hidden"],
+        [type="color"]
+      ),
+      textarea,
+      [contenteditable="true"],
+      [role="combobox"]
+    ) {
+      margin-block: max(1rem, env(safe-area-inset-top, 0px)) auto;
+      max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - 1rem);
+    }
   }
   .astryx-mobile-nav {
     --duration-medium: var(--duration-medium-min);

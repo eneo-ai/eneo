@@ -96,6 +96,13 @@ const eslintConfig = defineConfig([
           selector:
             "CallExpression[callee.object.property.name='history'][callee.property.name='replaceState'][arguments.0.raw='null']",
           message: "Use replaceUrl from @/lib/navigation: the router owns silent URL updates."
+        },
+        {
+          // vh is the tallest the viewport gets (Safari's toolbar included), and a
+          // utility beats the dialog's own dvh cap, so a footer falls under it.
+          selector:
+            "Literal[value=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/], TemplateElement[value.raw=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/]",
+          message: "Use dvh (h-[60dvh]): vh ignores Safari's toolbar."
         }
       ]
     }

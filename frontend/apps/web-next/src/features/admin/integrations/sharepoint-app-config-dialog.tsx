@@ -185,7 +185,7 @@ export function SharePointAppConfigDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("configure_sharepoint_app_title")}</DialogTitle>
           <DialogDescription>{t("sharepoint_app_config_description")}</DialogDescription>

@@ -772,7 +772,7 @@ export function PromptGuideDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[85vh] flex-col gap-3 sm:max-w-2xl">
+        <DialogContent className="flex flex-col gap-3 sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="text-primary size-5" aria-hidden="true" />

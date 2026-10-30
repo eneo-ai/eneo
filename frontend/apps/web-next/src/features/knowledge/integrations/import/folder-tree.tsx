@@ -128,7 +128,7 @@ export function SharePointFolderTree({
         </nav>
       )}
 
-      <div className="max-h-[42vh] min-h-0 overflow-x-hidden overflow-y-auto rounded-md border">
+      <div className="max-h-[42dvh] min-h-0 overflow-x-hidden overflow-y-auto rounded-md border">
         {isPending ? (
           <div role="status" className="text-muted-foreground flex items-center gap-2 px-4 py-8">
             <Spinner size="sm" aria-hidden /> {t("loading_available_sites")}
@@ -177,7 +177,7 @@ export function SharePointFolderTree({
                   {item.type === "folder" ? (
                     <button
                       type="button"
-                      className="text-muted-foreground hover:text-foreground size-3.5 shrink-0"
+                      className="text-muted-foreground hover:text-foreground focus-visible:outline-ring relative z-10 -mx-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:size-11"
                       onClick={() => navigateInto(item)}
                       title={t("open_folder")}
                       aria-label={t("open_folder")}
@@ -185,7 +185,10 @@ export function SharePointFolderTree({
                       <ChevronRight className="size-3.5" />
                     </button>
                   ) : (
-                    <div className="size-3.5" />
+                    <div
+                      className="-mx-1 size-6 shrink-0 pointer-coarse:size-11"
+                      aria-hidden="true"
+                    />
                   )}
                   <Checkbox
                     checked={selectedKeys.has(key)}

@@ -77,7 +77,7 @@ export function McpServerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="overflow-y-auto">
         {/* DialogContent remounts on every opening, so each add starts empty. */}
         <McpServerForm
           pending={save.isPending}

@@ -218,6 +218,55 @@ describe("globals.css", () => {
     }
   });
 
+  it("shows a tap like a hover, and gives a short viewport its own variant and bar rule", () => {
+    // Tailwind's hover: is gated to hover-capable pointers; on touch it is :active.
+    const media = (query: string) => {
+      const found: string[] = [];
+      postcss.parse(css).walkAtRules("media", (rule: AtRule) => {
+        if (rule.params !== query) return;
+        rule.walkRules((r: Rule) => void found.push(r.selector));
+      });
+      return found;
+    };
+    expect(media("(hover: hover)")).toContain(".hover\\:bg-ax-hover-overlay:hover");
+    expect(media("(hover: none)")).toContain(".hover\\:bg-ax-hover-overlay:active");
+
+    // `short:` is a viewport under 30rem tall.
+    expect(css).toMatch(/@media \(height < 30rem\)/);
+    // With a field focused on a viewport under 18.75rem, the page's bars give way.
+    const bars = [...declarationsOf("components", "(height < 18.75rem)").entries()];
+    expect(bars).toHaveLength(1);
+    expect(bars[0]![0]).toContain("textarea:focus");
+    for (const bar of ["[data-page-bar]", "[data-phone-page-bar]", "[data-own-mobile-header]"]) {
+      expect(bars[0]![0]).toContain(bar);
+    }
+    expect(bars[0]![1]).toEqual({ display: "none" });
+  });
+
+  it("hangs a dialog with a text field from the top on touch, under a dvh cap", () => {
+    const rules = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
+      ([selector]) => selector.startsWith(".astryx-dialog:has(")
+    );
+    expect(rules).toHaveLength(1);
+    const [selector, declarations] = rules[0]!;
+    for (const field of [
+      "input:not(",
+      "textarea",
+      '[contenteditable="true"]',
+      '[role="combobox"]'
+    ]) {
+      expect(selector).toContain(field);
+    }
+    // Not for a checkbox, radio, file or range input, which open no keyboard.
+    for (const kind of ["checkbox", "radio", "file", "range", "button"]) {
+      expect(selector).toContain(`[type="${kind}"]`);
+    }
+    expect(declarations).toMatchObject({
+      "margin-block": "max(1rem, env(safe-area-inset-top, 0px)) auto",
+      "max-height": "calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - 1rem)"
+    });
+  });
+
   it("pads a page outside the shell by 1rem (or --page-pad) and the hardware's insets, whichever is larger", () => {
     const padSafe = declarationsOf("utilities").get(".p-safe");
     expect(padSafe).toEqual({

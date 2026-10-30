@@ -70,11 +70,11 @@ export function PromptVersionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-3xl">
+      <DialogContent className="overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("prompt_history")}</DialogTitle>
         </DialogHeader>
-        <div className="grid max-h-[60vh] grid-cols-1 gap-4 sm:grid-cols-[18rem_1fr]">
+        <div className="grid max-h-[60dvh] grid-cols-1 gap-4 sm:grid-cols-[18rem_1fr]">
           <div className="overflow-y-auto rounded-md border">
             {list.isPending ? (
               <LoadingState rows={1} height={160} />

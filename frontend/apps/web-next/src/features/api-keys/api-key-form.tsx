@@ -685,7 +685,7 @@ export function CreateApiKeyDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="overflow-y-auto sm:max-w-2xl">
         {/* Mounted while open: each opening starts empty, with no earlier failure. */}
         <CreateBody
           idPrefix={idPrefix}
@@ -791,7 +791,7 @@ export function EditApiKeyDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="overflow-y-auto sm:max-w-2xl">
         {/* Mounted while open: each opening starts from the key as it is then. */}
         <EditBody apiKey={apiKey} mode={mode} onClose={() => onOpenChange(false)} />
       </DialogContent>

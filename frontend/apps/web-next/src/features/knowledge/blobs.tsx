@@ -95,7 +95,7 @@ export function BlobPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
+      <DialogContent className="flex flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{blob.metadata.title ?? blob.id}</DialogTitle>
         </DialogHeader>

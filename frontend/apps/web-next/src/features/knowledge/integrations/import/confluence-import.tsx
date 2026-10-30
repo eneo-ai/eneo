@@ -180,7 +180,7 @@ function ConfluenceImportForm({
           id="confluence-spaces"
           role="group"
           aria-label={t("confluence_spaces_label")}
-          className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
+          className="max-h-[40dvh] overflow-y-auto rounded-md border p-1"
           {...fieldProblemProps("confluence-spaces", spaceProblem)}
         >
           {userIntegrationId.length === 0 ? (

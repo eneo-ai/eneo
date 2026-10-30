@@ -218,10 +218,10 @@ export function StartState({
     // The personal start leads with its greeting on a phone, start-aligned
     // above its lists; another assistant's has only its introduction, centred
     // at every width.
-    <div className="flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
+    <div className="short:py-3 flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
       <div
         className={cn(
-          "@container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
+          "short:gap-4 @container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
           personal ? "sm:my-auto sm:items-center" : "my-auto items-center"
         )}
       >
@@ -233,7 +233,7 @@ export function StartState({
         >
           {personal ? (
             // The mark only where there is room; on a phone the greeting leads.
-            <BrandMark className="size-[38px] max-sm:hidden" />
+            <BrandMark className="short:hidden size-[38px] max-sm:hidden" />
           ) : (
             <EntityAvatar
               id={partner.id}

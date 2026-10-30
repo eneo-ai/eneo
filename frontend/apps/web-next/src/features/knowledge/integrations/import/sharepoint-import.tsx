@@ -349,7 +349,7 @@ function SharePointImportForm({
             id="sharepoint-sites"
             role="group"
             aria-label={t("sharepoint_available_sources")}
-            className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
+            className="max-h-[40dvh] overflow-y-auto rounded-md border p-1"
             {...fieldProblemProps("sharepoint-sites", shown(siteProblem))}
           >
             {userIntegrationId.length === 0 ? (
@@ -406,7 +406,7 @@ function SharePointImportForm({
           <FieldProblem id="sharepoint-sites" problem={shown(siteProblem)} />
         </div>
       ) : (
-        <div className="flex max-h-[56vh] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+        <div className="flex max-h-[56dvh] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
           <div
             id="sharepoint-tree"
             role="group"
