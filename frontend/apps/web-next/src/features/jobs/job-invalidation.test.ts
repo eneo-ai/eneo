@@ -16,7 +16,7 @@ describe("invalidateAfterJobs", () => {
     });
 
     const spaces = storageSpacesQueryOptions(browserApi);
-    queryClient.setQueryData(spaces.queryKey, { items: [] });
+    queryClient.setQueryData(spaces.queryKey, { count: 0, items: [] });
 
     invalidateAfterJobs(queryClient);
 
