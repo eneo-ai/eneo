@@ -115,7 +115,11 @@ jobs:
         run: |
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
-          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs .github/scripts/evaluate-backend-audit.test.mjs
+          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs
+          node --test --test-concurrency=1 \
+            .github/scripts/evaluate-backend-audit.test.mjs \
+            .github/scripts/fetch-backend-audit-severities.test.mjs \
+            frontend/scripts/audit-dependencies.test.mjs
           node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test
