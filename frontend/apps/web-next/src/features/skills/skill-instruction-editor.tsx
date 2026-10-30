@@ -44,6 +44,10 @@ export function SkillInstructionEditor({
   const [selection, setSelection] = useState<ReferenceSelection | null>(null);
   const label = t("skills_instructions_label");
   const placeholder = t("skills_reference_placeholder");
+  const skillTypeLabel = t("skills_reference_kind_skill");
+  const functionTypeLabel = t("skills_reference_kind_function");
+  const mcpTypeLabel = t("skills_reference_kind_mcp");
+  const toolTypeLabel = t("skills_reference_kind_tool");
   let malformed = false;
   try {
     parseInstructionReferences(value);
@@ -62,10 +66,10 @@ export function SkillInstructionEditor({
       placeholder,
       describedBy: [describedBy, `${id}-reference-hint`].filter(Boolean).join(" "),
       referenceTypeLabels: {
-        skill: t("skills_reference_kind_skill"),
-        function: t("skills_reference_kind_function"),
-        mcp_server: t("skills_reference_kind_mcp"),
-        mcp_tool: t("skills_reference_kind_tool")
+        skill: skillTypeLabel,
+        function: functionTypeLabel,
+        mcp_server: mcpTypeLabel,
+        mcp_tool: toolTypeLabel
       },
       editorClass:
         "text-ax-text relative min-h-48 max-h-[50dvh] overflow-y-auto px-3 py-3 text-base sm:text-sm leading-7 whitespace-pre-wrap wrap-anywhere focus-visible:outline-2 focus-visible:outline-ax-focus focus-visible:-outline-offset-2 [--skill-placeholder:var(--color-text-secondary)] [&>p]:m-0",
@@ -78,7 +82,18 @@ export function SkillInstructionEditor({
       editor.current?.destroy();
       editor.current = null;
     };
-  }, [initialValue, id, label, onChange, placeholder, describedBy, t]);
+  }, [
+    initialValue,
+    id,
+    label,
+    onChange,
+    placeholder,
+    describedBy,
+    skillTypeLabel,
+    functionTypeLabel,
+    mcpTypeLabel,
+    toolTypeLabel
+  ]);
   useEffect(() => editor.current?.setValue(value), [value]);
   useEffect(
     () => editor.current?.setState({ disabled, invalid: invalid || malformed }),
