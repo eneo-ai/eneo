@@ -114,7 +114,6 @@ function UploadMimeTypes({
         value={selected}
         onChange={(items) => onChange([...items, ...custom])}
         density="compact"
-        controlClassName="grid sm:grid-cols-2"
       >
         {presets.map((item) => (
           <CheckboxListItem key={item.value} value={item.value} label={item.label} />
