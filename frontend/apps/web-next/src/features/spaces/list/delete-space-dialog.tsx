@@ -8,6 +8,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { confirmationMatches } from "@/components/composites/confirmation-match";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useRemovalMutation } from "@/features/spaces/removal";
@@ -52,7 +54,7 @@ export function DeleteSpaceDialog({
   }
 
   const name = space?.name ?? "";
-  const matches = space !== null && typed === name;
+  const matches = space !== null && confirmationMatches(typed, name);
   const problem =
     submitted && !matches ? t("form_problem_confirm_mismatch", { value: name }) : null;
 
@@ -88,6 +90,7 @@ export function DeleteSpaceDialog({
                   value={typed}
                   onChange={setTyped}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   status={problem ? { type: "error", message: problem } : undefined}
                 />
               </form>

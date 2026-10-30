@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { KEYBOARD } from "./keyboard-hints";
@@ -44,4 +44,22 @@ it("gives an address field the keyboard with @ and an identifier field neither",
     autocapitalize: "none",
     spellcheck: "false"
   });
+});
+
+it("closes the keyboard on a search field's search key, not on another field's Return", () => {
+  renderInApp(
+    <>
+      <TextInput label="Filtrera" value="" onChange={() => {}} {...KEYBOARD.search} />
+      <TextInput label="Användarnamn" value="" onChange={() => {}} {...KEYBOARD.identifier} />
+    </>
+  );
+  const search = screen.getByLabelText("Filtrera");
+  search.focus();
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(document.activeElement).not.toBe(search);
+
+  const name = screen.getByLabelText("Användarnamn");
+  name.focus();
+  fireEvent.keyDown(name, { key: "Enter" });
+  expect(document.activeElement).toBe(name);
 });

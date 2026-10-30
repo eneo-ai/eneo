@@ -20,6 +20,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { confirmationMatches } from "./confirmation-match";
 
 /**
  * Controlled confirmation dialog without a trigger, for actions launched from
@@ -112,7 +114,7 @@ export function ConfirmDialog({
   const [submitted, setSubmitted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = pending || running;
-  const blocked = confirmValue !== undefined && typed !== confirmValue;
+  const blocked = confirmValue !== undefined && !confirmationMatches(typed, confirmValue);
   const problem =
     submitted && blocked ? t("form_problem_confirm_mismatch", { value: confirmValue }) : null;
 
@@ -164,6 +166,8 @@ export function ConfirmDialog({
               value={typed}
               placeholder={confirmValue}
               onChange={(event) => setTyped(event.target.value)}
+              autoComplete="off"
+              {...KEYBOARD.identifier}
               {...fieldProblemProps(inputId, problem)}
             />
             <FieldProblem id={inputId} problem={problem} />

@@ -181,7 +181,11 @@ export function PromptGuideQuestionCard({
   }
 
   function handleTextareaKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submit();
     }
@@ -504,7 +508,11 @@ function PromptGuideInput({
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submit();
     }
