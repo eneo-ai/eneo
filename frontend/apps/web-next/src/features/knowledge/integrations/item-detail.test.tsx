@@ -8,7 +8,7 @@ import type { Space } from "@/features/spaces/space";
 
 const state = vi.hoisted(() => ({ space: null as unknown, deleted: [] as string[] }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -58,7 +58,7 @@ import { resetPendingSyncs } from "@/features/knowledge/integrations/pending-syn
 import type { LoadedItems } from "@/features/knowledge/integrations/use-source-items";
 import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
-import { ItemDetail } from "./item-detail.client";
+import { ItemDetail } from "@/features/knowledge/integrations/item-detail.client";
 
 afterEach(() => {
   cleanup();

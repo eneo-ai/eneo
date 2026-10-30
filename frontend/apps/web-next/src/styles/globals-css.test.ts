@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 // so regressions in @source paths, the layer order or the theme wiring fail
 // here instead of silently in the browser.
 const appDir = path.resolve(import.meta.dirname, "../..");
-const entry = path.join(appDir, "src/app/globals.css");
+const entry = path.join(appDir, "src/styles/globals.css");
 
 // @tailwindcss/postcss caches its compiler per input path, so every compile
 // below uses its own `from` (same directory, so relative paths resolve alike).

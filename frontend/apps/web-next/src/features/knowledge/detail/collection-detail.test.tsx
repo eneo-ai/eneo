@@ -6,7 +6,7 @@ import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 import { makeCollection } from "@/features/spaces/testing/space-fixture";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
@@ -29,7 +29,7 @@ vi.mock("@/lib/api/browser", () => ({
   }
 }));
 
-import { CollectionDetail } from "./collection-detail.client";
+import { CollectionDetail } from "@/features/knowledge/detail/collection-detail.client";
 
 afterEach(cleanup);
 

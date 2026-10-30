@@ -44,7 +44,7 @@ vi.mock("@/features/jobs/use-jobs", () => ({
   useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
 }));
 
-import { SpaceOverview } from "@/app/(app)/spaces/[spaceId]/overview/space-overview.client";
+import { SpaceOverview } from "@/features/spaces/overview/space-overview.client";
 
 afterEach(() => {
   cleanup();

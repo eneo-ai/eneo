@@ -6,7 +6,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { AppWindow, Bot, Search, User } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
@@ -16,8 +16,8 @@ import {
   useResourceLayout
 } from "@/components/composites/resource-tile";
 import { browserApi } from "@/lib/api/browser";
-import { type CatalogEntry, catalogGroups, filterCatalog } from "./catalog";
-import { dashboardQueryOptions } from "./queries";
+import { type CatalogEntry, catalogGroups, filterCatalog } from "@/features/dashboard/catalog";
+import { dashboardQueryOptions } from "@/features/dashboard/queries";
 
 function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: string }) {
   const t = useTranslations();

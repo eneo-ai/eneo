@@ -4,7 +4,7 @@ import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { appQueryOptions, appRunsQueryOptions } from "@/features/apps/apps";
-import { DashboardApp } from "./dashboard-app.client";
+import { DashboardApp } from "@/features/dashboard/dashboard-app.client";
 
 export default async function DashboardAppPage({ params }: { params: Promise<{ appId: string }> }) {
   const { appId } = await params;

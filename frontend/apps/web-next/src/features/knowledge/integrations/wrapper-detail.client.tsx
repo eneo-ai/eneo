@@ -1,12 +1,11 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useCollator } from "@astryxdesign/core/i18n";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { useIsRemovingSource } from "@/features/knowledge/integrations/actions";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
-import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
+import { findWrapperSource } from "@/features/knowledge/integrations/sources";
 import {
   useSourceItems,
   type LoadedItems
@@ -14,23 +13,24 @@ import {
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * An item imported on its own (a file, a page, a site) as its own source.
- * `loaded` is the item as the server page found it, which stands in while the
- * cached space predates it (useSourceItems).
+ * A SharePoint wrapper as one source. The items live on the space object
+ * (prefetched by the space layout); `loaded` are the items as the server page
+ * found them, which stand in while the cached space predates them
+ * (useSourceItems). Once the last one is gone, say so.
  */
-export function ItemDetail({ itemId, loaded }: { itemId: string; loaded: LoadedItems }) {
+export function WrapperDetail({ wrapperId, loaded }: { wrapperId: string; loaded: LoadedItems }) {
   const t = useTranslations();
-  const collator = useCollator();
   const { space, routeId } = useSpace();
   const items = useSourceItems(
     routeId,
-    space.knowledge.integration_knowledge_list.items.filter(
-      (entry) => entry.id === itemId && entry.space_id === space.id
-    ),
+    findWrapperSource(
+      space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
+      wrapperId
+    )?.items ?? [],
     loaded
   );
-  const [source] = groupIntegrationSources(items, collator.compare);
-  const removing = useIsRemovingSource(space.id, { kind: "item", id: itemId });
+  const source = findWrapperSource(items, wrapperId);
+  const removing = useIsRemovingSource(space.id, { kind: "wrapper", id: wrapperId });
 
   if (!source) {
     // Deleted from its own page, which is on its way back to the list.

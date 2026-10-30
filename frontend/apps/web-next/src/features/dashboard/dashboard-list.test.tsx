@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setViewport } from "@/test/setup-dom";
-import { DashboardList } from "./dashboard-list.client";
-import type { Dashboard } from "./queries";
+import { DashboardList } from "@/features/dashboard/dashboard-list.client";
+import type { Dashboard } from "@/features/dashboard/queries";
 
 const DASHBOARD = {
   spaces: {
@@ -47,12 +47,12 @@ function renderList(dashboard: Dashboard = DASHBOARD) {
   });
   queryClient.setQueryData(["dashboard"], dashboard);
   return render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <QueryClientProvider client={queryClient}>
         <h1>Assistenter</h1>
         <DashboardList />
       </QueryClientProvider>
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 

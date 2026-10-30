@@ -1,7 +1,7 @@
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import type { RecentConversation } from "@/lib/api/conversations";
 import type { Schema } from "@/lib/api/models";
-import { catalogGroups } from "@/app/(app)/dashboard/catalog";
+import { catalogGroups } from "@/features/dashboard/catalog";
 import type { AdminNavGroup } from "./admin-nav-items";
 import { conversationContext } from "./conversation-context";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";

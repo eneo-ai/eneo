@@ -304,7 +304,16 @@ const eslintConfig = defineConfig([
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
-        { paths: [...astryxWrappedImports, ...frameworkSeamImports] }
+        {
+          paths: [...astryxWrappedImports, ...frameworkSeamImports],
+          patterns: [
+            {
+              group: ["@/app/*", "**/app/(app)/*", "**/app/(public)/*"],
+              message:
+                "src/app holds frozen Next files until removal; import from src/features or src/styles."
+            }
+          ]
+        }
       ]
     }
   },

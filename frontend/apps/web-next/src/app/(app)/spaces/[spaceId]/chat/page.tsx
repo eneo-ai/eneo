@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SpaceChat } from "./space-chat.client";
+import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 export default function SpaceChatPage() {
   return (

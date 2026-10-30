@@ -38,8 +38,8 @@ vi.mock("@/lib/toast", () => ({ toast: toasts }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 /** The props each next/link gets: Astryx's links too, through the app's LinkProvider. */
 const links = vi.hoisted(() => [] as Record<string, unknown>[]);
-vi.mock("next/link", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/link")>();
+vi.mock("@/lib/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/link")>();
   const { createElement } = await import("react");
   return {
     default: (props: Record<string, unknown>) => {
@@ -169,7 +169,7 @@ import { resetPendingSyncs, trackSyncs } from "@/features/knowledge/integrations
 import type { LoadedItems } from "@/features/knowledge/integrations/use-source-items";
 import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
-import { WrapperDetail } from "./wrapper-detail.client";
+import { WrapperDetail } from "@/features/knowledge/integrations/wrapper-detail.client";
 
 afterEach(() => {
   cleanup();

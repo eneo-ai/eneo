@@ -359,7 +359,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       );
     });
 
-    test("personal chat", async ({ page }) => {
+    test("personal chat", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
     });
 
@@ -378,7 +378,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("spaces list", async ({ page }) => {
+    test("spaces list", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/spaces/list", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
@@ -431,6 +431,26 @@ for (const colorScheme of ["light", "dark"] as const) {
           page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
         ).toBeVisible();
       });
+    });
+
+    test("space overview, members and settings", { tag: "@vite" }, async ({ page }) => {
+      const name = uniqueName(`E2E Space Shell ${colorScheme}`);
+      const space = await createSpace(page, name);
+      await scan(page, `${space}/overview`, async () => {
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expect(page).toHaveTitle(`${name} · Eneo`);
+      });
+      for (const [tab, title] of [
+        ["members", "Medlemmar"],
+        ["settings", "Inställningar"]
+      ]) {
+        await scan(page, `${space}/${tab}`, async () => {
+          await expect(
+            page.getByRole("heading", { level: 2, name: title, exact: true })
+          ).toBeVisible();
+          await expect(page).toHaveTitle(`${title} · ${name} · Eneo`);
+        });
+      }
     });
 
     test("space overview, knowledge and websites, and the create-collection dialog", async ({
@@ -638,7 +658,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("account", async ({ page }) => {
+    test("account", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
       });
@@ -657,7 +677,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
         });
 
-        test("personal chat", async ({ page }) => {
+        test("personal chat", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
         });
 
@@ -702,7 +722,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("spaces list", async ({ page }) => {
+        test("spaces list", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/spaces/list", async () => {
             await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
           });
@@ -867,13 +887,13 @@ for (const colorScheme of ["light", "dark"] as const) {
 test.describe("reflow at 320 px (1.4.10)", () => {
   test.use({ viewport: { width: 320, height: 640 }, contextOptions: { reducedMotion: "reduce" } });
 
-  test("personal chat", async ({ page }) => {
+  test("personal chat", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     await chatStartReady(page);
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("spaces list", async ({ page }) => {
+  test("spaces list", { tag: "@vite" }, async ({ page }) => {
     await spacesList(page);
     await expectNoSidewaysPageScroll(page);
   });
@@ -984,21 +1004,23 @@ test.describe("toasts never cover the focused element (2.4.11)", () => {
   }
 });
 
-test("the skip link is the first tab stop and moves focus to the main content", async ({
-  page
-}) => {
-  await page.goto("/spaces/list");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+test(
+  "the skip link is the first tab stop and moves focus to the main content",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/spaces/list");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  await page.keyboard.press("Tab");
-  const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
-  await expect(skipLink).toBeFocused();
-  // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
-  // shown at full size (2.4.7) and be a real target (2.5.8).
-  const box = await skipLink.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+    await page.keyboard.press("Tab");
+    const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
+    await expect(skipLink).toBeFocused();
+    // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
+    // shown at full size (2.4.7) and be a real target (2.5.8).
+    const box = await skipLink.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
 
-  await page.keyboard.press("Enter");
-  await expect(page.locator("#main-content")).toBeFocused();
-});
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+  }
+);

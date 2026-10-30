@@ -5,9 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { switchLocale } from "@/lib/i18n/switch-locale";
 import { renderInApp } from "@/test/render";
-import { AccountAppearance } from "./account-appearance.client";
+import { AccountAppearance } from "@/features/account/account-appearance";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/i18n/switch-locale", () => ({ switchLocale: vi.fn() }));
 
 afterEach(() => {

@@ -6,9 +6,9 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { AdminPageBar } from "./admin-page-bar.client";
+import { AdminPageBar } from "@/features/admin/admin-page-bar";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null

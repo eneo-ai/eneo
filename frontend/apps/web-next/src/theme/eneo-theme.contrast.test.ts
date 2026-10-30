@@ -286,7 +286,7 @@ describe("form controls use the 3:1 control border", () => {
   });
 
   it("shadcn --input (border-input, the unchecked switch track)", () => {
-    const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+    const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
     expect(css).toMatch(/--input:\s*var\(--eneo-color-border-control\);/);
   });
 });

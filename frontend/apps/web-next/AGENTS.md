@@ -225,7 +225,7 @@ settings uses the layout without `phone` and keeps one page on every width.
   palette, radii, shadows and fonts; it is the single source of truth.
   `bun run theme:build` compiles it to `src/theme/eneo.{css,js,d.ts}`
   (generated and committed; never edit them; `bun run lint` fails when stale).
-- **CSS** (`src/app/globals.css`): one cascade-layer order,
+- **CSS** (`src/styles/globals.css`): one cascade-layer order,
   `properties, reset, theme, base, astryx-base, astryx-theme, components, utilities`.
   Tailwind utilities are the top layer, so a utility in an Astryx component's
   `className` wins. The shadcn variables (`--background`, `--primary`, …) point
@@ -591,7 +591,7 @@ production build shows these violations. Never loosen the policy.
 - `bun run lint` — i18n drift, theme staleness, Prettier, ESLint. ESLint lints
   `src` with type information and fails on deprecated APIs
   (`@typescript-eslint/no-deprecated`): move to the replacement the warning names.
-- `bun run test` — Vitest. `src/app/globals-css.test.ts` compiles `globals.css`
+- `bun run test` — Vitest. `src/styles/globals-css.test.ts` compiles `globals.css`
   and guards the layer order, the theme import, the Streamdown `@source`
   paths and the touch-target rules; `src/theme/eneo-theme.contrast.test.ts`
   checks the colour pairs; axe tests check component markup. Component tests

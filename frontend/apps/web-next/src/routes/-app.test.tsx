@@ -3,7 +3,15 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createTranslator } from "use-intl";
-import { Profiler, useState, type ProfilerOnRenderCallback, type ReactNode } from "react";
+import {
+  Profiler,
+  useEffect,
+  useState,
+  type ComponentProps,
+  type ProfilerOnRenderCallback,
+  type ReactNode
+} from "react";
+import type { ChatPage } from "@/features/chat/chat-page";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
@@ -28,6 +36,8 @@ let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  // The router scrolls the main panel; jsdom has no element scrolling implementation.
+  HTMLElement.prototype.scrollTo = () => {};
   window.history.replaceState({}, "", "/does-not-exist");
   document.cookie = "eneo_sidenav_collapsed=; Path=/; Max-Age=0";
   replies = new Map<string, unknown>([
@@ -57,6 +67,28 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetcher);
   vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
   vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
+  // Chat streaming has its own feature and browser tests; keep its state observable here.
+  vi.doMock("@/features/chat/chat-page", async () => {
+    const { replaceUrl } = await import("@/lib/navigation");
+    return {
+      ChatPage: ({
+        sessionId,
+        buildSessionUrl
+      }: Required<Pick<ComponentProps<typeof ChatPage>, "sessionId" | "buildSessionUrl">>) => {
+        const [answers, setAnswers] = useState(0);
+        return (
+          <button
+            onClick={() => {
+              setAnswers((count) => count + 1);
+              replaceUrl(buildSessionUrl("saved-session"));
+            }}
+          >
+            Chat {sessionId ?? "new"}: {answers}
+          </button>
+        );
+      }
+    };
+  });
   vi.doMock("@/lib/api/base", async () => ({
     ...(await import("@/lib/api/base.vite")),
     // Node's Request needs an absolute base; response/session middleware stays real.
@@ -225,7 +257,7 @@ it.each([false, true])(
       }
     });
     await screen.findByRole("heading", { name: messages.page_not_found });
-    expect(router.state.location.pathname).toBe("/spaces/missing");
+    expect(router.state.location.pathname).toBe("/spaces/missing/overview");
     expect(
       router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId")?.status
     ).toBe("notFound");
@@ -242,8 +274,7 @@ it("uses a fresh space already in the query cache and sets the layout title", as
   });
   const layout = router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId");
   expect(layout?.meta).toContainEqual({ title: "Upphandling · Eneo" });
-  // The space index is ported separately; its fallback owns the document title for now.
-  await waitFor(() => expect(document.title).toBe(`${messages.page_not_found} · Eneo`));
+  await waitFor(() => expect(document.title).toBe("Upphandling · Eneo"));
   expect(requestedPaths()).not.toContain("/api/v1/spaces/space-1/");
 });
 
@@ -283,9 +314,127 @@ it("uses the stored collapsed preference on the first shell commit", async () =>
 
 it("redirects the root to the signed-in landing path", async () => {
   const { router } = await renderRoute("/");
-  await screen.findByRole("heading", { name: messages.page_not_found });
+  await screen.findByRole("button", { name: "Chat new: 0" });
   expect(router.state.location.pathname).toBe("/spaces/personal/chat");
   expect(document.getElementById("main-content")).not.toBeNull();
+});
+
+it("redirects the spaces index to its list without treating it as a space ID", async () => {
+  const { router } = await renderRoute("/spaces");
+  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
+  expect(router.state.location.pathname).toBe("/spaces/list");
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/list/");
+});
+
+it.each([
+  ["personal", "/spaces/personal/chat", `${messages.personal} · Eneo`],
+  ["space-1", "/spaces/space-1/overview", "Upphandling · Eneo"]
+])(
+  "redirects the %s space index and inherits its space title",
+  async (spaceId, destination, title) => {
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    const { router } = await renderRoute(`/spaces/${spaceId}`);
+    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    await waitFor(() => expect(document.title).toBe(title));
+    expect(screen.queryByRole("heading", { name: messages.page_not_found })).toBeNull();
+  }
+);
+
+it("keeps the space frame mounted when switching from overview to members", async () => {
+  const mounts = vi.fn();
+  const unmounts = vi.fn();
+  vi.doMock("@/features/spaces/frame/space-frame", async (importOriginal) => {
+    const { SpaceFrame } =
+      await importOriginal<typeof import("@/features/spaces/frame/space-frame")>();
+    return {
+      SpaceFrame: ({ children }: { children: ReactNode }) => {
+        useEffect(() => {
+          mounts();
+          return unmounts;
+        }, []);
+        return <SpaceFrame>{children}</SpaceFrame>;
+      }
+    };
+  });
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  try {
+    const { router } = await renderRoute("/spaces/space-1/overview");
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1));
+    await act(() => router.navigate({ href: "/spaces/space-1/members" }));
+    await screen.findByRole("heading", { name: messages.members });
+    await waitFor(() => expect(document.title).toBe(`${messages.members} · Upphandling · Eneo`));
+    expect(mounts).toHaveBeenCalledTimes(1);
+    expect(unmounts).not.toHaveBeenCalled();
+  } finally {
+    vi.doUnmock("@/features/spaces/frame/space-frame");
+  }
+});
+
+it("preserves chat state when its saved session updates the URL without another space read", async () => {
+  const { router } = await renderRoute("/spaces/personal/chat", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  const chat = await screen.findByRole("button", { name: "Chat new: 0" });
+  const initialReads = requestedPaths().filter(
+    (path) => path === "/api/v1/spaces/type/personal/"
+  ).length;
+  fireEvent.click(chat);
+  await waitFor(() =>
+    expect(router.state.location.search).toMatchObject({ session_id: "saved-session" })
+  );
+  expect(await screen.findByRole("button", { name: "Chat saved-session: 1" })).toBe(chat);
+  expect(requestedPaths().filter((path) => path === "/api/v1/spaces/type/personal/")).toHaveLength(
+    initialReads
+  );
+});
+
+it("flushes a settings draft to its original space and opens the next space with its own values", async () => {
+  const first = makeSpace();
+  const second = makeSpace({ overrides: { id: "space-2", name: "Personalfrågor" } });
+  replies.set("/api/v1/spaces/space-1/", first);
+  replies.set("/api/v1/spaces/space-2/", second);
+  replies.set("/api/v1/security-classifications/", {
+    security_enabled: false,
+    security_classifications: []
+  });
+  replies.set("/api/v1/ai-models/", {
+    completion_models: [],
+    embedding_models: [],
+    transcription_models: []
+  });
+  replies.set("/api/v1/mcp-servers/settings/", { items: [] });
+  replies.set("/api/v1/api-keys/notification-subscriptions", { items: [] });
+  replies.set("/api/v1/api-keys", { items: [], total_count: 0, next_cursor: null });
+  const read = fetcher.getMockImplementation()!;
+  const writes: { path: string; body: unknown }[] = [];
+  fetcher.mockImplementation(async (input, init) => {
+    if ((input instanceof Request ? input.method : init?.method) !== "PATCH")
+      return read(input, init);
+    const request = new Request(input, init);
+    const path = new URL(request.url).pathname;
+    const body: unknown = await request.json();
+    writes.push({ path, body });
+    return new Response(JSON.stringify({ ...first, name: "Uppdaterat namn" }), {
+      headers: { "content-type": "application/json", [GENERATION]: "document-session" }
+    });
+  });
+  const { router } = await renderRoute("/spaces/space-1/settings");
+  const name = await screen.findByLabelText<HTMLInputElement>(messages.name, { selector: "input" });
+  fireEvent.change(name, { target: { value: "Uppdaterat namn" } });
+  await act(() => router.navigate({ href: "/spaces/space-1/settings?section=models" }));
+  expect(screen.getByLabelText(messages.name, { selector: "input" })).toBe(name);
+  expect(name.value).toBe("Uppdaterat namn");
+  expect(writes).toHaveLength(0);
+  await act(() => router.navigate({ href: "/spaces/space-2/settings" }));
+  await waitFor(() =>
+    expect(
+      screen.getByLabelText<HTMLInputElement>(messages.name, { selector: "input" }).value
+    ).toBe(second.name)
+  );
+  await waitFor(() =>
+    expect(writes).toEqual([{ path: "/api/v1/spaces/space-1/", body: { name: "Uppdaterat namn" } }])
+  );
+  expect(screen.getByLabelText(messages.name, { selector: "input" })).not.toBe(name);
 });
 
 it("preloads the session using only GET requests", async () => {

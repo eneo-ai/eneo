@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@/components/astryx/text-input";
+import { PasswordInput } from "@/components/astryx/password-input";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
@@ -134,9 +134,8 @@ export function ChangePasswordForm({
           value={email}
           readOnly
         />
-        <TextInput
+        <PasswordInput
           ref={currentRef}
-          type="password"
           label={t("current_password")}
           value={current}
           onChange={(value) => {
@@ -155,6 +154,7 @@ export function ChangePasswordForm({
           policy={policy}
         />
         <ConfirmedSecretInput
+          allowReveal
           label={t("new_password")}
           confirmLabel={t("confirm_password")}
           describedBy={checklistId}

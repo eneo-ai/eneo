@@ -9,7 +9,7 @@ test("activate landing renders", async ({ page }) => {
   await expect(page.getByText(/nästan klar/i)).toBeVisible();
 });
 
-test("account shows the change-password card", async ({ page }) => {
+test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/account");
   await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
   await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
@@ -36,10 +36,10 @@ test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
 
-// Fonts (src/app/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
+// Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
 
-test("preloads only Figtree and renders with it", async ({ page }) => {
-  const response = await page.goto("/spaces/personal/chat");
+test("preloads only Figtree and renders with it", { tag: "@vite" }, async ({ page }) => {
+  const response = await page.goto("/spaces/list");
   // Next's font loader sent its preloads only as a Link header; Next mirrors
   // the app's own HTML preload into that header too. Both count, once each.
   const headerPreloads = (response?.headers()["link"] ?? "")
@@ -99,16 +99,20 @@ test("the side navigation reaches the assistant catalog", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("Ctrl/⌘+K opens the command palette and Escape closes it", async ({ page }) => {
-  await page.goto("/spaces/list");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await page.keyboard.press("ControlOrMeta+k");
-  const palette = page.getByRole("dialog", { name: /sök i eneo|search eneo/i });
-  await expect(palette).toBeVisible();
-  await expect(palette.getByRole("combobox")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(palette).toBeHidden();
-});
+test(
+  "Ctrl/⌘+K opens the command palette and Escape closes it",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/spaces/list");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.keyboard.press("ControlOrMeta+k");
+    const palette = page.getByRole("dialog", { name: /sök i eneo|search eneo/i });
+    await expect(palette).toBeVisible();
+    await expect(palette.getByRole("combobox")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(palette).toBeHidden();
+  }
+);
 
 test.describe("on a phone", () => {
   test.use({
@@ -117,15 +121,19 @@ test.describe("on a phone", () => {
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
   });
 
-  test("stays on the requested page and opens the navigation drawer", async ({ page }) => {
-    await page.goto("/spaces/list");
-    await expect(page).toHaveURL(/\/spaces\/list$/);
-    await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
-    const drawer = page.getByRole("dialog", { name: /^(meny|menu)$/i });
-    await expect(drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
-  });
+  test(
+    "stays on the requested page and opens the navigation drawer",
+    { tag: "@vite" },
+    async ({ page }) => {
+      await page.goto("/spaces/list");
+      await expect(page).toHaveURL(/\/spaces\/list$/);
+      await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+      const drawer = page.getByRole("dialog", { name: /^(meny|menu)$/i });
+      await expect(drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
+    }
+  );
 });
 
 test.describe("signed out", () => {

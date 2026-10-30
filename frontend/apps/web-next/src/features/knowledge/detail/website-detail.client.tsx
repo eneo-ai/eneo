@@ -11,8 +11,8 @@ import {
   useSuspenseQuery
 } from "@tanstack/react-query";
 import { ChevronLeft, RefreshCw, Square } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";

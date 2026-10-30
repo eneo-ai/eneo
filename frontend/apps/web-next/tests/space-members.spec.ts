@@ -9,7 +9,7 @@ import { createSpace, uniqueName } from "./helpers";
 test.describe("members on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  test("lists you as a row and docks adding members", async ({ page }) => {
+  test("lists you as a row and docks adding members", { tag: "@vite" }, async ({ page }) => {
     const space = await createSpace(page, uniqueName("E2E Medlemmar"));
     await page.goto(`${space}/members`);
 

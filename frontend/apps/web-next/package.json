@@ -11,7 +11,7 @@
     "build:vite": "tsr generate && vite build",
     "routes:generate": "tsr generate",
     "start": "next start",
-    "lint": "node scripts/check-i18n.mjs && astryx theme build --check src/theme/eneo-theme.ts && prettier --check . && eslint",
+    "lint": "node scripts/check-i18n.mjs && astryx theme build --check src/theme/eneo-theme.ts && prettier --check . && eslint && node scripts/check-route-parity.mjs",
     "format": "prettier --write .",
     "check": "tsr generate && next typegen && tsc --noEmit",
     "theme:build": "astryx theme build src/theme/eneo-theme.ts",

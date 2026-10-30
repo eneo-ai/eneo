@@ -31,7 +31,7 @@ import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
-import { dashboardQueryOptions } from "@/app/(app)/dashboard/queries";
+import { dashboardQueryOptions } from "@/features/dashboard/queries";
 import { spaceQueryOptions, spacesListQueryOptions } from "@/features/spaces/space";
 import { adminNavGroups } from "./admin-nav-items";
 import {

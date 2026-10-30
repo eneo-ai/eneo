@@ -120,7 +120,7 @@ the manual test protocol for every PR that changes UI.
 The shadcn/ui components in `src/components/ui` are legacy: don't add new ones,
 and replace them as screens migrate. Their semantic variables (`--background`,
 `--primary`, `--muted`, …) are mapped onto the Eneo tokens in
-`src/app/globals.css`, so keep all feature styling on tokens instead of
+`src/styles/globals.css`, so keep all feature styling on tokens instead of
 hard-coded colours.
 
 ## i18n
