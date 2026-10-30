@@ -15,6 +15,7 @@ import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY, type SkillRemovalResult } from "./organization-skills";
 import { SkillRemovalDialog } from "./organization-skills-page";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { SkillRevisionHistory } from "./skill-revision-history";
 import { OrganizationSkillExecution } from "./organization-skill-execution";
 import { OrganizationSkillPublication } from "./organization-skill-publication";
@@ -129,6 +130,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
             <AlertDescription>{t("skills_library_revision_notice_description")}</AlertDescription>
           </Alert>
           <SkillForm
+            referenceCatalog={skillReferenceCatalog({ type: "organization" }, skillId)}
             key={value.current_revision_id}
             mode="revision"
             initialValue={{

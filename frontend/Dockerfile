@@ -16,6 +16,7 @@ COPY apps/docs-site/package.json apps/docs-site/package.json
 COPY packages/eneo-js/package.json packages/eneo-js/package.json
 COPY packages/eslint-plugin/package.json packages/eslint-plugin/package.json
 COPY packages/markdown-math/package.json packages/markdown-math/package.json
+COPY packages/skill-instructions/package.json packages/skill-instructions/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/whats-new/package.json packages/whats-new/package.json
 # The root package.json "patchedDependencies" are applied during install.

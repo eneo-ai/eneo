@@ -154,6 +154,41 @@ it("renders an authenticated unknown path inside the shared shell", async () => 
   expect(navigate).not.toHaveBeenCalled();
 });
 
+it("opens the Skill reference editor in the personal space", async () => {
+  await renderRoute("/spaces/personal/skills/new");
+  await screen.findByRole("textbox", { name: messages.skills_instructions_label });
+  expect(screen.getByRole("button", { name: messages.skills_reference_insert })).toBeTruthy();
+  await waitFor(() =>
+    expect(document.title).toBe(
+      `${messages.skills_library_new_heading} · ${messages.personal} · Eneo`
+    )
+  );
+});
+
+it.each([
+  { permissions: ["read"] as const, destination: "/spaces/personal/skills" },
+  { permissions: [] as const, destination: "/spaces/personal/overview" }
+])(
+  "keeps Skill creation behind the space permission: $destination",
+  async ({ permissions, destination }) => {
+    replies.set(
+      "/api/v1/spaces/type/personal/",
+      makeSpace({ skillPermissions: [...permissions], overrides: { personal: true } })
+    );
+    replies.set("/api/v1/spaces/space-1/skills/", { items: [], next_cursor: null });
+    const { router } = await renderRoute("/spaces/personal/skills/new");
+    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+  }
+);
+
+it("does not open the organization Skill editor for a non-admin", async () => {
+  const { router } = await renderRoute("/spaces/organization/skills/new");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
+  expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+});
+
 it("renders the spaces list with its document title and keeps list distinct from a space ID", async () => {
   await renderRoute("/spaces/list");
   await screen.findByRole("heading", { name: messages.spaces, level: 1 });

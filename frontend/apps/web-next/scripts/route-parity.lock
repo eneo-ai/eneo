@@ -12,6 +12,9 @@ addb9e8f056c3c02753b51541411767dd847040b  (app)/layout.tsx
 f6acd48eb96fb6e7eaa99dd98953d153a24bae75  (app)/spaces/[spaceId]/overview/page.tsx
 a5e21675d2eece261591f7d33d9719a2039cbb8c  (app)/spaces/[spaceId]/page.tsx
 ea195359e2145eb01b783dafd48d9dcb763ce366  (app)/spaces/[spaceId]/settings/page.tsx
+09afab9ad543adaa04806b3a14e56bfdf2abb2bd  (app)/spaces/[spaceId]/skills/[skillId]/page.tsx
+16a7e02d88127e8fe5a985cf170f0a5fae5a0406  (app)/spaces/[spaceId]/skills/new/page.tsx
+548fcac687a24dddcaaae462ed34d89a17c7bdb2  (app)/spaces/[spaceId]/skills/page.tsx
 0725559d609d0ff2033094d85a5ad386e4346fb4  (app)/spaces/list/page.tsx
 31c152c90ffc3334b04cc212f9fcaa88eaeadce0  (app)/spaces/page.tsx
 f0ad8f5a043b9c1dc8ea1d47dbf4d3ab421c51b3  (public)/deactivated/page.tsx

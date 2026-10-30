@@ -422,7 +422,7 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
     assert response.status_code == 401
     body = response.json()
     assert (
-        body["eneo_error_code"] == ErrorCodes.SESSION_GENERATION_MISMATCH.value == 9080
+        body["eneo_error_code"] == ErrorCodes.SESSION_GENERATION_MISMATCH.value == 9090
     )
     assert body["code"] == "session_generation_mismatch"
     assert body["message"] == "The browser session changed after this page was loaded."
@@ -513,7 +513,7 @@ def test_probe_identifies_a_rejected_cookie_only_for_guarded_logout(
         | {"Cookie": f"{SESSION}={replacement}", GENERATION: probe.headers[GENERATION]},
     )
     assert refused.status_code == 401
-    assert refused.json()["eneo_error_code"] == 9080
+    assert refused.json()["eneo_error_code"] == 9090
     assert set_cookies(refused) == []
 
 
@@ -531,7 +531,7 @@ def test_stale_probe_never_exposes_the_replacement_cookie_generation(
         },
     )
     assert response.status_code == 401
-    assert response.json()["eneo_error_code"] == 9080
+    assert response.json()["eneo_error_code"] == 9090
     assert GENERATION not in response.headers
     assert set_cookies(response) == []
 

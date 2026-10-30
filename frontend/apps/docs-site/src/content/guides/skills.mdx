@@ -17,6 +17,8 @@ Assistant, App, or Personal Chat.
 
 - **New to Skills:** read [The mental model](#the-mental-model) and
   [When to use a Skill](#when-to-use-a-skill).
+- **Shaping your own Personal Chat:** read
+  [Your own Skills in Personal Chat](#your-own-skills-in-personal-chat).
 - **Building an Assistant or App:** follow
   [Create and attach a Skill](#create-and-attach-a-skill), then read
   [Versions and adoption](#versions-and-adoption). If the Skill describes an
@@ -67,6 +69,66 @@ decision-document structure, and safe intranet navigation.
 
 Reuse one Skill when the capability has one real owner and release cycle. Do not
 merge Skills only because parts of their text look similar.
+
+## Refer to Skills and tools in instructions
+
+Type **@** in the instructions or choose **Insert reference**. Select a Skill,
+a Function, an MCP connection, or a specific tool within that connection. A
+reference identifies the selected resource even if its display name changes.
+Writing its name as ordinary text does not create a reference.
+
+For example, a Communication guide can say: “Use [Plain language] when writing
+public information. Use [Time] to check today's date, then [Web search] to find
+the current guidance.” Choose each bracketed reference in the picker. These
+are instructions for the model; they do not define a guaranteed execution order.
+
+When choosing a Skill, review its exact version before inserting it. The preview
+keeps the name, version, and insertion controls visible while you read long
+instructions. Expand **Description** to read its full description. **Source**
+in the editor shows the stored Markdown, including reference addresses.
+
+### Included Skills
+
+Choose the main Skill on an Assistant, App, or Personal Chat. Its referenced
+Skills are included automatically when it activates; users do not need to
+select each helper separately. The configuration shows which helpers are
+included and where they come from. An **Always** Skill includes its helpers
+from the start. An **On demand** Skill includes them when the model activates
+that Skill. A shared helper is included once.
+
+Skills can refer to other Skills in the same Space. Organisation Skills can
+refer to published versions in the organisation catalogue. The author approves
+the included versions when saving the reference, and the organisation's
+publication and attachment controls still apply. Readers can use the approved
+group without permission to edit or browse its helper Skills. This does not
+grant access to another Space or to a tool.
+
+References pin exact versions, including nested helpers. Later edits do not
+change existing references. To adopt a newer version, select it explicitly and
+save a new version of the containing Skill. Cycles and conflicting versions of
+the same included Skill are refused. Helpers count toward the existing Skill
+and context limits; a group that does not fit is not partially activated.
+Updating published versions on existing resources checks the entire proposed
+Skill group too. Resources with conflicting versions or too many included
+Skills keep their current pin and report the reason.
+
+An execution block on an included organisation Skill also blocks groups that
+need it. Retained versions protect their referenced local Skills from permanent
+deletion, including when a newer version no longer contains that reference.
+
+### Functions and MCP connections
+
+A Function reference selects a capability such as Web search or Charts. An MCP
+reference can select an entire connection or one exact tool. Neither turns the
+capability on, bypasses approval, or grants the author's permissions to the
+person chatting. Eneo checks the tools actually available to that user in the
+current turn, including organisation policy and the chat's settings.
+
+If a referenced tool is missing or off, the Skill can still run the parts that
+are possible. The model receives the limitation instead of a substitute tool
+chosen by a similar name. The reference does not fetch a URL, execute code, or
+contact an MCP server when you save it. External information is retrieved only
+through an available tool during the chat.
 
 ## Use a Skill with MCP
 
@@ -269,6 +331,7 @@ changed back to **Always**.
 | Surface       | Selection owner                                              | Runtime effect                                      |
 | ------------- | ------------------------------------------------------------ | --------------------------------------------------- |
 | Personal Chat | Tenant admin in Personal Chat settings                       | Ordered versions apply to every user's new requests |
+| Personal Chat | Each user with **Own Skills**, for their own chat            | Their own versions run after the organisation's     |
 | Assistant     | Builder with **Use Skills** and edit access to the Assistant | Exact versions run always or load on demand         |
 | App           | Builder with **Use Skills** and edit access to the App       | Exact versions apply when that App runs             |
 
@@ -321,11 +384,57 @@ set. Saving rechecks the selected models, prompt, MCP configuration, and every
 existing Personal Chat baseline. If any candidate cannot fit, the save is
 rejected and the previous policy remains active.
 
+### Your own Skills in Personal Chat
+
+A user with the **Own Skills** permission can write Skills in their personal
+Space and choose which of them their Personal Chat uses, for example "answer
+briefly, in bullet points". No Assistant is needed.
+
+- **Library.** In their own personal Space the user can create, edit and delete
+  Skills without **Use Skills** or **Manage Skills**. The permission gives no
+  access to Skills in shared Spaces or to the organisation catalogue, and does
+  not let the user attach Skills to their other Assistants or Apps.
+- **Choosing.** In the Personal Chat composer, **Skills** sits next to
+  **Tools** and shows how many Skills run. It lists the organisation's Skills
+  read-only, with a lock and their mode, and each of the user's own Skills
+  with **Off**, **On demand** and **Always**. On a phone the same choices open
+  in a bottom sheet. The choice applies to all of the user's personal chats.
+- **Saving.** A choice is saved at once. A question sent right after it is
+  answered with the saved choice. If Eneo refuses the change, the choice goes
+  back to what it was and the reason is shown next to it.
+- **Order.** The organisation's Skills always run first, then the user's own.
+  The user's Skills never change what the organisation's Skills do.
+
+The user's own Skills run exactly as chosen, or not at all. When they cannot,
+the composer says **Your skills are paused** with the reason, the
+organisation's Skills keep running and the user's choices are kept:
+
+| Reason                         | What the user can do                                                        |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| Permission removed             | Nothing; the choices return if an administrator grants **Own Skills** again |
+| Too many Skills                | Turn some of their own Skills off                                           |
+| Does not fit the model         | Turn a Skill off or choose another model                                    |
+| On demand unavailable          | Choose **Always**, or a model that supports tool calling                    |
+| A Skill is too large on demand | Choose **Always** for it, or turn it off                                    |
+| Crowds out the organisation's  | Turn one of their own Skills off                                            |
+
+Turning a Skill off is always accepted, so a user can recover from a paused
+state themselves. A model switch that would pause Skills that were running is
+refused.
+
+Personal Chat pins the exact version the user chose. After a Skill is edited,
+its page says which version Personal Chat uses and offers **Use the latest
+version**; the composer offers the same on the Skill's row. The personal
+Space's Skills list marks each Skill Personal Chat uses, for example
+**Personal chat · Always**. A Skill that Personal Chat uses cannot be deleted;
+turn it off first.
+
 ### Default roles
 
-The predefined **Owner** role receives **Use Skills** and **Manage Skills** by
-default. The predefined User and AI Configurator roles do not. Owners can
-delegate either permission through custom roles. Administrators should review
+The predefined **Owner** role receives **Use Skills**, **Manage Skills** and
+**Own Skills** by default. The predefined User and AI Configurator roles do
+not. Owners can delegate these permissions through custom roles; give
+**Own Skills** to the roles whose users should shape their own Personal Chat. Administrators should review
 custom roles after an upgrade because earlier releases did not record why each
 grant was assigned.
 
@@ -434,13 +543,13 @@ Eneo refuses a Skill change rather than silently overwriting someone else's work
 or breaking a resource that is in use. The message names the exact blocker and
 the next safe action.
 
-| Blocker                             | What happened                                                                                                                                                                 | What to do                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                        |
-| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action |
-| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                    | Tick the detach option in the confirmation, or remove the attachments |
-| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                    |
-| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again       |
+| Blocker                             | What happened                                                                                                                                                                 | What to do                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                         |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action  |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                   | Tick the detach option in the confirmation, or remove the attachments |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                     |
+| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again        |
 
 The Skill editor keeps unsaved edits when a save is refused, so nothing has to
 be retyped. A separate refusal applies at save time when the selected models or
@@ -455,6 +564,8 @@ configuration limit rather than a conflict, described in
 - Skills do not grant models, tools, knowledge, or permissions.
 - Assistant and Personal Chat bindings can be **always** or **on demand**.
   Apps remain eager.
+- A user's own Personal Chat Skills come from their personal Space only.
+  Organisation Skills reach Personal Chat through the administrator's policy.
 - Organisation approval and exact pins do not update existing resources
   automatically.
 - This release has no external Skill marketplace or package installation flow.
@@ -470,6 +581,12 @@ measurement, activation rounds, and selection time.
 
 Activation evidence records that instructions entered the model context; it
 does not prove the model followed them.
+
+For turns using references, the panel also shows included helper versions,
+the source of each reference, and whether the matching tool was available.
+Recorded tool calls can be matched to the offered tool identities. This shows
+what was available and called; it does not prove that a particular sentence in
+a Skill caused a call. The evidence is retained for partial replies too.
 
 The panel is for development and support diagnostics. It does not expose Skill
 instructions, model reasoning, credentials, or an administrator's incident

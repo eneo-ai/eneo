@@ -32,6 +32,7 @@ import {
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
+import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { appQueryOptions } from "../apps";
 import { AttachmentsSection } from "./attachments-section";
 import { AiSection } from "./ai-section";
@@ -50,7 +51,8 @@ import { useUpdateApp } from "./use-app";
  */
 export function AppEditor({ appId }: { appId: string }) {
   const t = useTranslations();
-  const { routeId, can } = useSpace();
+  const { routeId } = useSpace();
+  const canAttachSkills = useCanAttachSkills();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
   const update = useUpdateApp(appId);
   const created = useJustCreated("app", appId);
@@ -83,7 +85,7 @@ export function AppEditor({ appId }: { appId: string }) {
       summary: summary.instructions(app.prompt?.text),
       node: <InstructionsSection app={app} />
     },
-    ...(can("read", "skill")
+    ...(canAttachSkills
       ? [
           {
             id: "skills",

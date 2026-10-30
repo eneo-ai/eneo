@@ -30,6 +30,13 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
+from eneo.main.stream_lifecycle import (
+    OwnedAsyncGenerator,
+    close_provider_stream,
+    closing,
+    finalization_owner,
+    finalizing,
+)
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
     McpAppViewRepo,
 )
@@ -238,6 +245,8 @@ class CompletionService:
             )
 
         try:
+            if mcp_proxy is not None and skill_runtime.has_tool_references:
+                mcp_proxy.include_reference_identities()
             context = self.context_builder.build_context(
                 input_str="",
                 max_tokens=adapter.get_token_limit_of_model(),
@@ -403,17 +412,19 @@ class CompletionService:
         )
 
     async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
-        async for chunk in completion:
-            # Adapter events name their own type (tool calls and their argument
-            # deltas, approvals and their timeouts, reasoning, images, errors)
-            # and pass through whether or not they carry text. An untyped chunk
-            # is answer text, or the closing stop chunk that carries usage.
-            if chunk.response_type is None:
-                if chunk.text:
-                    chunk.response_type = ResponseType.TEXT
-                elif not chunk.stop:
-                    continue
-            yield chunk
+        async with closing(completion, "completion stream") as chunks:
+            async for chunk in chunks:
+                # Adapter events name their own type (tool calls and their
+                # argument deltas, approvals and their timeouts, reasoning,
+                # images, errors) and pass through whether or not they carry
+                # text. An untyped chunk is answer text, or the closing stop
+                # chunk that carries usage.
+                if chunk.response_type is None:
+                    if chunk.text:
+                        chunk.response_type = ResponseType.TEXT
+                    elif not chunk.stop:
+                        continue
+                yield chunk
 
     async def get_response(
         self,
@@ -541,6 +552,15 @@ class CompletionService:
             )
 
         try:
+            if skill_runtime is not None and skill_runtime.has_tool_references:
+                if mcp_proxy is not None and model.supports_tool_calling:
+                    mcp_proxy.include_reference_identities()
+                prompt = skill_runtime.prepare_reference_tools(
+                    mcp_proxy.get_model_tool_identities()
+                    if mcp_proxy is not None and model.supports_tool_calling
+                    else (),
+                    rendered_prompt=prompt,
+                )
             context = self.context_builder.build_context(
                 input_str=text_input,
                 max_tokens=max_tokens,
@@ -611,12 +631,11 @@ class CompletionService:
                     skill_runtime=skill_runtime,
                 )
             except BaseException:
-                # If stream prep fails, close the proxy here — the streaming_wrapper's
-                # finally block won't run because the generator is never reached.
-                # Without this, leaked MCP connections accumulate anyio task-group
-                # background tasks and creep CPU toward 100% over the worker's lifetime.
+                # Stream preparation failed, so streaming_wrapper never runs
+                # and its cleanup with it: release the proxy here.
                 if mcp_proxy:
-                    await mcp_proxy.close()
+                    with finalizing("mcp proxy after failed stream preparation"):
+                        await mcp_proxy.close()
                 raise
 
             # Phase 2: Create generator that iterates the pre-created stream
@@ -626,7 +645,8 @@ class CompletionService:
                 Generator that iterates pre-created stream.
                 The stream was already created and validated, so we're past
                 the pre-flight checks. Any errors here are mid-stream failures.
-                Proxy cleanup happens after iteration completes.
+                Owns the turn's pending approvals and MCP connections: they
+                are released when it ends, however it ends.
                 """
                 approval_manager: Any | None = None
                 pending_approval_ids: set[str] = set()
@@ -655,50 +675,84 @@ class CompletionService:
                             ),
                         }
 
-                    async for chunk in model_adapter.iterate_stream(
-                        stream=stream_obj,
-                        context=context,
-                        model_kwargs=model_kwargs,
-                        require_tool_approval=require_tool_approval,
-                        approval_manager=approval_manager,
-                        approval_context=approval_context,
-                        pending_approval_ids=pending_approval_ids,
-                    ):
-                        await _name_app_views(chunk, mcp_proxy)
-                        yield chunk
-                        # The ask path has saved the file by the time the
-                        # consumer returns control. Mint its reference URL now,
-                        # before the adapter resumes and hands the tool result
-                        # to the model, so another tool can take the file in
-                        # the same turn.
-                        if (
-                            chunk.response_type == ResponseType.FILES
-                            and chunk.generated_file is not None
-                        ):
-                            chunk.reference_url = await self._mint_generated_file_url(
-                                chunk.generated_file, session
-                            )
-                            if mcp_proxy and chunk.reference_url:
-                                mcp_proxy.allow_file_references(
-                                    {chunk.generated_file.id: chunk.reference_url}
+                    async with closing(
+                        model_adapter.iterate_stream(
+                            stream=stream_obj,
+                            context=context,
+                            model_kwargs=model_kwargs,
+                            require_tool_approval=require_tool_approval,
+                            approval_manager=approval_manager,
+                            approval_context=approval_context,
+                            pending_approval_ids=pending_approval_ids,
+                        ),
+                        "adapter stream",
+                    ) as adapter_stream:
+                        async for chunk in adapter_stream:
+                            await _name_app_views(chunk, mcp_proxy)
+                            yield chunk
+                            # The ask path has saved the file by the time the
+                            # consumer returns control. Mint its reference URL
+                            # now, before the adapter resumes and hands the
+                            # tool result to the model, so another tool can
+                            # take the file in the same turn.
+                            if (
+                                chunk.response_type == ResponseType.FILES
+                                and chunk.generated_file is not None
+                            ):
+                                chunk.reference_url = (
+                                    await self._mint_generated_file_url(
+                                        chunk.generated_file, session
+                                    )
                                 )
+                                if mcp_proxy and chunk.reference_url:
+                                    mcp_proxy.allow_file_references(
+                                        {chunk.generated_file.id: chunk.reference_url}
+                                    )
                 finally:
-                    if approval_manager:
-                        for approval_id in list(pending_approval_ids):
-                            try:
-                                await approval_manager.cancel_approval(approval_id)
-                            except Exception:
-                                logger.warning(
-                                    "Failed to cancel pending tool approval",
-                                    extra={"approval_id": approval_id},
-                                    exc_info=True,
-                                )
+                    # Runs on a disconnect that lands mid-await too: the
+                    # shielded steps keep the cancellation out until the
+                    # cleanup's budget runs out.
+                    with finalization_owner():
+                        with finalizing("pending tool approvals"):
+                            if approval_manager:
+                                for approval_id in list(pending_approval_ids):
+                                    try:
+                                        await approval_manager.cancel_approval(
+                                            approval_id
+                                        )
+                                    except Exception:
+                                        logger.warning(
+                                            "Failed to cancel pending tool approval",
+                                            extra={"approval_id": approval_id},
+                                            exc_info=True,
+                                        )
+                        if mcp_proxy:
+                            with finalizing("mcp proxy"):
+                                await mcp_proxy.close()
 
-                    # Cleanup proxy after streaming completes
-                    if mcp_proxy:
-                        await mcp_proxy.close()
+            async def release_unstarted() -> None:
+                # The stream is prepared (the provider request is in flight)
+                # before the response starts. If the body is never iterated,
+                # streaming_wrapper never runs, so release its resources here.
+                with finalization_owner():
+                    try:
+                        await close_provider_stream(
+                            stream_obj.stream, "prepared provider stream"
+                        )
+                    except Exception:
+                        # The proxy is closed regardless.
+                        logger.warning(
+                            "Closing the prepared provider stream failed",
+                            exc_info=True,
+                        )
+                    finally:
+                        if mcp_proxy:
+                            with finalizing("mcp proxy"):
+                                await mcp_proxy.close()
 
-            completion = self._typed_chunks(streaming_wrapper())
+            completion = OwnedAsyncGenerator(
+                self._typed_chunks(streaming_wrapper()), release=release_unstarted
+            )
             adapter_input_estimate = None
             usage = None
 

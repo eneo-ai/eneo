@@ -60,9 +60,10 @@ const UNLOCALIZED_BY_DESIGN = new Map<number, string>([
   [9032, "PROVIDER_NOT_FOUND — model providers"],
   [9041, "PROVIDER_REJECTED_REQUEST — message quotes the provider"],
 
-  // Browser-session protocol of the Vite web app, which answers it with a
-  // reload; this app signs in with Bearer tokens and never receives it.
-  [9080, "SESSION_GENERATION_MISMATCH — answered by a reload, never shown"]
+  // Browser-session protocol of the Vite web app, answered with a reload.
+  [9090, "SESSION_GENERATION_MISMATCH — answered by a reload, never shown"],
+  // Localized from its details instead of one message per code.
+  [9080, "PERSONAL_SKILLS_REJECTED — personalChatSkills.ts shows the copy for details.reason"]
 ]);
 
 function backendErrorCodes(): number[] {

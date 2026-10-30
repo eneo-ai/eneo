@@ -325,24 +325,24 @@ class TestKnowledgeServerCollisionDefense:
         # not shadow the built-in tools: the loopback server is registered
         # first and the proxy drops later tools with the same prefixed name.
         from eneo.internal_mcp.knowledge import KNOWLEDGE_SERVER_NAME
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
         from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
             MCPProxySession,
         )
 
         def _server(description):
-            tool = MagicMock()
-            tool.name = "search_knowledge"
-            tool.title = None
-            tool.display_name = None
-            tool.description = description
-            tool.input_schema = {"type": "object", "properties": {}}
-            tool.is_enabled_by_default = True
-            tool.requires_approval = False
             server = MagicMock()
             server.id = uuid4()
             server.name = KNOWLEDGE_SERVER_NAME
             server.http_url = "http://localhost:8080"
-            server.tools = [tool]
+            server.tools = [
+                MCPServerTool(
+                    mcp_server_id=server.id,
+                    name="search_knowledge",
+                    description=description,
+                    input_schema={"type": "object", "properties": {}},
+                )
+            ]
             return server
 
         internal = _server("Built-in knowledge search")

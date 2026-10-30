@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -157,9 +158,7 @@ describe("organisation skill catalogue", () => {
     fireEvent.change(screen.getByLabelText("skills_description_label"), {
       target: { value: " Search reports " }
     });
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: " Use the index " }
-    });
+    replaceInstructionText(screen.getByLabelText("skills_instructions_label"), " Use the index ");
     fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/skills/organization/", {

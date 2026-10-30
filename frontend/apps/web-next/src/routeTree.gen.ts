@@ -38,6 +38,9 @@ import { Route as AppSpacesSpaceIdChatRouteImport } from "./routes/_app/spaces/$
 import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/spaces/$spaceId/members"
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
+import { Route as AppSpacesSpaceIdSkillsIndexRouteImport } from "./routes/_app/spaces/$spaceId/skills/index"
+import { Route as AppSpacesSpaceIdSkillsSkillIdRouteImport } from "./routes/_app/spaces/$spaceId/skills/$skillId"
+import { Route as AppSpacesSpaceIdSkillsNewRouteImport } from "./routes/_app/spaces/$spaceId/skills/new"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -186,6 +189,24 @@ const AppSpacesSpaceIdSettingsRoute =
     path: "/settings",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
+const AppSpacesSpaceIdSkillsIndexRoute =
+  AppSpacesSpaceIdSkillsIndexRouteImport.update({
+    id: "/skills/",
+    path: "/skills/",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdSkillsSkillIdRoute =
+  AppSpacesSpaceIdSkillsSkillIdRouteImport.update({
+    id: "/skills/$skillId",
+    path: "/skills/$skillId",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdSkillsNewRoute =
+  AppSpacesSpaceIdSkillsNewRouteImport.update({
+    id: "/skills/new",
+    path: "/skills/new",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -216,6 +237,9 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -244,6 +268,9 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -276,6 +303,9 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -308,6 +338,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId/"
+    | "/spaces/$spaceId/skills/$skillId"
+    | "/spaces/$spaceId/skills/new"
+    | "/spaces/$spaceId/skills/"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -336,6 +369,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId"
+    | "/spaces/$spaceId/skills/$skillId"
+    | "/spaces/$spaceId/skills/new"
+    | "/spaces/$spaceId/skills"
   id:
     | "__root__"
     | "/"
@@ -367,6 +403,9 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/overview"
     | "/_app/spaces/$spaceId/settings"
     | "/_app/spaces/$spaceId/"
+    | "/_app/spaces/$spaceId/skills/$skillId"
+    | "/_app/spaces/$spaceId/skills/new"
+    | "/_app/spaces/$spaceId/skills/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -589,6 +628,27 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdSettingsRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
+    "/_app/spaces/$spaceId/skills/": {
+      id: "/_app/spaces/$spaceId/skills/"
+      path: "/skills"
+      fullPath: "/spaces/$spaceId/skills/"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/skills/$skillId": {
+      id: "/_app/spaces/$spaceId/skills/$skillId"
+      path: "/skills/$skillId"
+      fullPath: "/spaces/$spaceId/skills/$skillId"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsSkillIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/skills/new": {
+      id: "/_app/spaces/$spaceId/skills/new"
+      path: "/skills/new"
+      fullPath: "/spaces/$spaceId/skills/new"
+      preLoaderRoute: typeof AppSpacesSpaceIdSkillsNewRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
   }
 }
 
@@ -621,6 +681,9 @@ interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
   AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
   AppSpacesSpaceIdIndexRoute: typeof AppSpacesSpaceIdIndexRoute
+  AppSpacesSpaceIdSkillsSkillIdRoute: typeof AppSpacesSpaceIdSkillsSkillIdRoute
+  AppSpacesSpaceIdSkillsNewRoute: typeof AppSpacesSpaceIdSkillsNewRoute
+  AppSpacesSpaceIdSkillsIndexRoute: typeof AppSpacesSpaceIdSkillsIndexRoute
 }
 
 const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
@@ -630,6 +693,9 @@ const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
   AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,
   AppSpacesSpaceIdIndexRoute: AppSpacesSpaceIdIndexRoute,
+  AppSpacesSpaceIdSkillsSkillIdRoute: AppSpacesSpaceIdSkillsSkillIdRoute,
+  AppSpacesSpaceIdSkillsNewRoute: AppSpacesSpaceIdSkillsNewRoute,
+  AppSpacesSpaceIdSkillsIndexRoute: AppSpacesSpaceIdSkillsIndexRoute,
 }
 
 const AppSpacesSpaceIdRouteWithChildren =

@@ -221,6 +221,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle
+  9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
   9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT
   9053: "eneo_error_9053", // SKILL_NOT_PUBLISHED_FOR_BINDING
   9054: "eneo_error_9054", // SKILL_BLOCKED_FOR_BINDING

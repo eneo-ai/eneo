@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +162,28 @@ describe("space Skills", () => {
     expect(within(alert).getAllByText("request_failed").length).toBeGreaterThan(0);
   });
 
+  it("focuses an empty instruction editor and associates its field problem", async () => {
+    show(<SpaceSkillNewPage />);
+    fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
+      target: { value: "Reports" }
+    });
+    fireEvent.change(screen.getByLabelText("skills_description_label"), {
+      target: { value: "Find reports" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
+    const editor = screen.getByLabelText("skills_instructions_label");
+    expect(document.activeElement).toBe(editor);
+    expect(editor.getAttribute("aria-invalid")).toBe("true");
+    const problemId = `${editor.id}-problem`;
+    expect(document.getElementById(problemId)?.textContent).toContain("required_field");
+    expect(editor.getAttribute("aria-describedby")?.split(" ")).toContain(problemId);
+    replaceInstructionText(editor, "Find current reports.");
+    expect(screen.getByLabelText("skills_instructions_label")).toBe(editor);
+    expect(editor.getAttribute("aria-invalid")).toBe("false");
+    expect(screen.queryByText("required_field")).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("creates a Skill in the current space using the shared form", async () => {
     show(<SpaceSkillNewPage />);
     // The sticky footer never covers a focused field: the fields keep a
@@ -174,9 +197,7 @@ describe("space Skills", () => {
     fireEvent.change(screen.getByLabelText("skills_description_label"), {
       target: { value: "Find reports" }
     });
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: "Search" }
-    });
+    replaceInstructionText(screen.getByLabelText("skills_instructions_label"), "Search");
     fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
@@ -203,9 +224,10 @@ describe("space Skills", () => {
         body: { is_active: false }
       })
     );
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: "Search the archive" }
-    });
+    replaceInstructionText(
+      screen.getByLabelText("skills_instructions_label"),
+      "Search the archive"
+    );
     fireEvent.click(screen.getByRole("button", { name: "save_changes" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/", {
@@ -222,7 +244,7 @@ describe("space Skills", () => {
   it("keeps the form and its unsaved draft when a refresh of the skill fails", async () => {
     const client = show(<SpaceSkillDetailPage skillId="skill-1" />);
     const instructions = await screen.findByLabelText("skills_instructions_label");
-    fireEvent.change(instructions, { target: { value: "Search the archive" } });
+    replaceInstructionText(instructions, "Search the archive");
 
     get.mockImplementation(() =>
       Promise.resolve({
@@ -234,7 +256,7 @@ describe("space Skills", () => {
 
     expect(await screen.findByText("query_error_refresh_title")).toBeTruthy();
     expect(screen.getByLabelText("skills_instructions_label")).toBe(instructions);
-    expect((instructions as HTMLTextAreaElement).value).toBe("Search the archive");
+    expect(instructions.textContent).toBe("Search the archive");
   });
 
   it("keeps focus on the availability switch while it saves, and saves the press once", async () => {

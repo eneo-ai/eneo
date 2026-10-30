@@ -1,6 +1,8 @@
 "use client";
 
 import { useTranslations } from "use-intl";
+import type { ReferenceCatalog } from "@eneo/skill-instructions";
+import { SkillInstructionEditor } from "./skill-instruction-editor";
 import { useEffect, useId, useState, type SubmitEvent } from "react";
 import {
   FieldProblem,
@@ -20,7 +22,7 @@ import {
   type SkillCreation
 } from "./skill-model";
 
-type Props =
+type Props = { referenceCatalog?: ReferenceCatalog; referencePickerInline?: boolean } & (
   | {
       mode: "create";
       onSubmit: (value: SkillCreation) => Promise<void>;
@@ -32,7 +34,8 @@ type Props =
       onSubmit: (value: SkillContent) => Promise<void>;
       initialValue: SkillContent;
       onDirtyChange?: (dirty: boolean) => void;
-    };
+    }
+);
 
 export function SkillForm(props: Props) {
   const t = useTranslations();
@@ -172,17 +175,32 @@ export function SkillForm(props: Props) {
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
-          <Textarea
-            id={`${id}-instructions`}
-            value={instructions}
-            rows={props.mode === "create" ? 8 : 12}
-            className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
-            required
-            disabled={busy}
-            {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
-            onChange={(event) => setInstructions(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
+          {props.referenceCatalog ? (
+            <SkillInstructionEditor
+              id={`${id}-instructions`}
+              value={instructions}
+              onChange={setInstructions}
+              disabled={busy}
+              invalid={Boolean(instructionsProblem)}
+              describedBy={`${id}-instructions-problem`}
+              catalog={props.referenceCatalog}
+              inlinePicker={props.referencePickerInline}
+            />
+          ) : (
+            <Textarea
+              id={`${id}-instructions`}
+              value={instructions}
+              rows={props.mode === "create" ? 8 : 12}
+              className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+              required
+              disabled={busy}
+              {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
+              onChange={(event) => setInstructions(event.target.value)}
+            />
+          )}
+          {!props.referenceCatalog && (
+            <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
+          )}
           <FieldProblem id={`${id}-instructions`} problem={instructionsProblem} />
         </div>
         {props.mode === "create" && (

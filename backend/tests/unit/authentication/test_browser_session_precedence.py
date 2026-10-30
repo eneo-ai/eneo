@@ -429,7 +429,7 @@ def test_real_routes_refuse_the_wrong_document_before_authentication_or_work(
             domain.assert_awaited_once()
     else:
         assert response.status_code == 401, response.text
-        assert response.json()["eneo_error_code"] == 9080
+        assert response.json()["eneo_error_code"] == 9090
         assert SESSION_GENERATION_HEADER not in response.headers
         assert auth_calls == []
         domain.assert_not_awaited()

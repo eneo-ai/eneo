@@ -77,11 +77,13 @@ from eneo.object_content.object_store_connection import (
 from eneo.server.middleware.cors import add_cors_headers
 from eneo.server.middleware.trace_id import current_trace_id
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerRejectedError,
     PublishedSkillDeletionError,
     SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillHasReferencesError,
     SkillNotPublishedForBindingError,
     SkillRemovalBusyError,
     SkillRuntimePolicyChangedError,
@@ -379,6 +381,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This Skill is still attached. Remove every binding before deleting it.",
         ErrorCodes.SKILL_STILL_ATTACHED,
     ),
+    SkillHasReferencesError: (
+        409,
+        "Other Skills reference this Skill, including retained revisions. "
+        "Deactivate it to hide it from new selections; existing references will keep working.",
+        ErrorCodes.SKILL_REFERENCED_BY_REVISION,
+    ),
     SkillRemovalBusyError: (
         409,
         "One or more selected Skills are being changed. Nothing was removed. "
@@ -400,6 +408,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This execution block changed after you reviewed it. "
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    PersonalSkillLayerRejectedError: (
+        400,
+        None,
+        ErrorCodes.PERSONAL_SKILLS_REJECTED,
     ),
     SkillRuntimePolicyChangedError: (
         409,
