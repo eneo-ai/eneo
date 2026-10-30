@@ -72,6 +72,7 @@ import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
+import { useChatDraft } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -227,7 +228,10 @@ function ConversationView({
   useSyncExternalStore(timings.subscribe, timings.getVersion);
   const toolChoices = useToolChoices(partner);
 
-  const [input, setInput] = useState("");
+  // Kept for the tab: a question typed and left is there when the conversation is.
+  const [input, setInput] = useChatDraft(
+    `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
+  );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -549,7 +553,7 @@ function ConversationView({
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
         dockTextareaRef.current?.focus();
       }),
-    [panel]
+    [panel, setInput]
   );
 
   const preflight = usePreflight({
@@ -967,7 +971,8 @@ function ConversationView({
           <StartState
             partner={partner}
             onPickStarter={(prompt) => {
-              setInput(prompt);
+              // A starter never replaces what was already typed.
+              setInput((current) => (current.trim() ? current : prompt));
               startTextarea()?.focus();
             }}
             composer={
@@ -1078,6 +1083,7 @@ function ConversationView({
         {({ sheetOver }) => (
           <ConversationLayout
             className="min-w-0 flex-1"
+            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion ? "pending" : ""}`}
             sheetOver={sheetOver}
             sheetOpener={activityTrigger}
             composer={

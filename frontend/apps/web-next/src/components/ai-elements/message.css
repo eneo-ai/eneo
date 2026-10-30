@@ -4,6 +4,14 @@
     overflow-wrap: anywhere;
   }
 
+  /* A table cell keeps its words whole: anywhere (above) lets a cell shrink to
+     one character, so a four-column table on a phone tore "Förvaltningschef"
+     over three lines and never needed its scroll region. */
+  .eneo-answer table :is(th, td) {
+    overflow-wrap: normal;
+    min-width: 7.5rem;
+  }
+
   .eneo-answer [data-streamdown="code-block"],
   .eneo-answer [data-streamdown="mermaid-block"] {
     margin-block: 1.25rem;
