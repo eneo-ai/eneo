@@ -1598,7 +1598,7 @@ it("only reads data while preloading admin users and usage", async () => {
 });
 
 it("opens enabled federation administration with its navigation and title", async () => {
-  setViewport(1280);
+  setViewport("desktop");
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
   replies.set("/api/v1/admin/federation", {});
   const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
@@ -1614,7 +1614,7 @@ it("opens enabled federation administration with its navigation and title", asyn
 });
 
 it("hides disabled federation administration and rejects its URL before the API read", async () => {
-  setViewport(1280);
+  setViewport("desktop");
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
   const { router } = await renderRoute("/admin/federation");
   await screen.findByRole("heading", { name: messages.page_not_found });
