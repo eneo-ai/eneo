@@ -222,6 +222,12 @@ class SimpleLogger(logging.Logger):
         for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
+    def setLevel(self, level: int | str) -> None:
+        super().setLevel(level)
+        # These loggers are constructed outside the logging manager's registry,
+        # so its level-change invalidation does not reach their cached decisions.
+        self._cache.clear()
+
 
 def get_logger(module_name: str):
     # If we don't add a handler manually one will be created for us
