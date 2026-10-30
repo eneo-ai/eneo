@@ -23,7 +23,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { storageQueryOptions } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { sessionQueries } from "@/lib/api/session";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
