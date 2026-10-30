@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createRoute } from "@tanstack/react-router";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import Link from "@/lib/link.tanstack";
 import { renderWithRouter } from "@/test/router";
@@ -50,18 +50,29 @@ it.each([
   }
 );
 
-it.each([
-  { scope: "space-1", component: SpaceSkillNewPage },
-  { scope: "organization", component: OrganizationSkillNewPage }
-])(
-  "does not pull the user back after leaving a pending creation in $scope",
-  async ({ scope, component }) => {
+it.each(
+  [
+    { scope: "space-1", component: SpaceSkillNewPage },
+    { scope: "organization", component: OrganizationSkillNewPage }
+  ].flatMap((scope) => [
+    { ...scope, phase: "destination loaded" },
+    { ...scope, phase: "destination still loading" }
+  ])
+)(
+  "does not pull the user back after leaving a pending creation in $scope: $phase",
+  async ({ scope, component, phase }) => {
     let finish!: (reply: { data: { id: string }; response: Response }) => void;
     post.mockReturnValueOnce(
       new Promise((resolve) => {
         finish = resolve;
       })
     );
+    let releaseDestination!: () => void;
+    const destination = new Promise<void>((resolve) => {
+      releaseDestination = resolve;
+    });
+    const loadDestination = vi.fn(() => destination);
+    if (phase === "destination loaded") releaseDestination();
     const base = `/spaces/${scope}/skills`;
     const { router } = await renderWithRouter(<Link href="/left">Leave editor</Link>, {
       route: `${base}/new`,
@@ -75,6 +86,8 @@ it.each([
         createRoute({
           getParentRoute: () => root,
           path: "/left",
+          loader: loadDestination,
+          pendingMs: 10_000,
           component: () => <h1>Left editor</h1>
         })
       ]
@@ -92,8 +105,12 @@ it.each([
     fireEvent.click(screen.getByRole("link", { name: "Leave editor" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
-    await screen.findByRole("heading", { name: "Left editor" });
+    await waitFor(() => expect(loadDestination).toHaveBeenCalled());
+    if (phase === "destination loaded") await screen.findByRole("heading", { name: "Left editor" });
+    else expect(screen.getByRole("textbox", { name: "Namn" })).toBeTruthy();
     await act(async () => finish({ data: { id: "skill-1" }, response: new Response() }));
+    await act(async () => releaseDestination());
+    await screen.findByRole("heading", { name: "Left editor" });
     expect(router.state.location.pathname).toBe("/left");
   }
 );

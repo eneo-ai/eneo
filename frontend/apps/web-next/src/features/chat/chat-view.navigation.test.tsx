@@ -45,6 +45,10 @@ function Chat() {
 
 it("keeps a document after a failed save and cancelled navigation, then leaves after saving", async () => {
   let refuseSave = true;
+  let finishSave!: () => void;
+  const saved = new Promise<void>((resolve) => {
+    finishSave = resolve;
+  });
   const toastError = vi.spyOn(toast, "error");
   post.mockImplementation(async (path: string) => {
     if (path === "/api/v1/files/{id}/original/signed-url/")
@@ -55,6 +59,7 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
     if (path === "/api/v1/conversations/{session_id}/documents/{file_id}/versions/") {
       if (refuseSave)
         return { error: { message: "Unavailable" }, response: new Response(null, { status: 503 }) };
+      await saved;
       return {
         data: { ...file, id: "file-2", revises_file_id: file.id },
         response: new Response()
@@ -101,7 +106,12 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
   expect(editor.textContent).toBe("Changed document.");
   refuseSave = false;
   fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+  fireEvent.click(screen.getByRole("link", { name: "Leave conversation" }));
+  await screen.findByRole("alertdialog");
+  await act(async () => finishSave());
   await waitFor(() => expect(screen.queryByRole("button", { name: "Spara" })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(router.state.location.pathname).toBe("/chat");
   expect(post).toHaveBeenLastCalledWith(
     "/api/v1/conversations/{session_id}/documents/{file_id}/versions/",
     {

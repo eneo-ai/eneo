@@ -22,7 +22,11 @@ import {
   type SkillCreation
 } from "./skill-model";
 
-type Props = { referenceCatalog?: ReferenceCatalog; referencePickerInline?: boolean } & (
+type Props = {
+  referenceCatalog?: ReferenceCatalog;
+  referencePickerInline?: boolean;
+  onLeave?: () => void;
+} & (
   | {
       mode: "create";
       onSubmit: (value: SkillCreation) => Promise<void>;
@@ -259,7 +263,7 @@ export function SkillForm(props: Props) {
           </div>
         </div>
       </form>
-      <LeaveConfirmation active={dirty} />
+      <LeaveConfirmation active={dirty} onLeave={props.onLeave} />
     </>
   );
 }

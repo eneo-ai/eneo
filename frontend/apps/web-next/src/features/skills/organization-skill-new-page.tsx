@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,10 +19,11 @@ export function OrganizationSkillNewPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [createdHref, setCreatedHref] = useState<string | null>(null);
+  const departureAccepted = useRef(false);
   // Navigate after the saved state has unmounted the form and its leave guard.
-  // A response arriving after this page unmounts must not navigate back here.
+  // An accepted departure owns navigation even while its destination is loading.
   useEffect(() => {
-    if (createdHref) router.push(createdHref);
+    if (createdHref && !departureAccepted.current) router.push(createdHref);
   }, [createdHref, router]);
 
   return (
@@ -51,6 +52,9 @@ export function OrganizationSkillNewPage() {
             <AlertDescription>{t("organization_skills_draft_notice_description")}</AlertDescription>
           </Alert>
           <SkillForm
+            onLeave={() => {
+              departureAccepted.current = true;
+            }}
             referenceCatalog={skillReferenceCatalog({ type: "organization" })}
             mode="create"
             onSubmit={async (value) => {
