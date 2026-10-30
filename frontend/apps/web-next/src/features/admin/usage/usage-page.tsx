@@ -66,6 +66,7 @@ import {
   type UsageSegment,
   useCostRates
 } from "@/features/admin/usage/usage-parts";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** Rows the model and space tables show until "show all" (apps/web's page size). */
 const SHORT_LIST = 10;
@@ -564,6 +565,7 @@ function UsersTab({ view, onChange }: { view: UsageView; onChange: ChangeView })
               isLabelHidden
               placeholder={t("usage_user_search")}
               startIcon={Search}
+              {...KEYBOARD.search}
               value={draft}
               onChange={setDraft}
               autoComplete="off"

@@ -29,6 +29,7 @@ import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { UserGroupField } from "./user-group-field";
 import type { AdminUser } from "./users";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * The roles as checkbox rows in named groups (Standardroller, Anpassade
@@ -261,6 +262,7 @@ function UserEditorForm({
           <TextInput
             ref={usernameRef}
             label={t("username")}
+            {...KEYBOARD.identifier}
             description={
               mode === "update"
                 ? t("username_change_logout_hint")

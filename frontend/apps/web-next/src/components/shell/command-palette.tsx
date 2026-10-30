@@ -45,6 +45,7 @@ import {
   type PalettePermissions
 } from "./palette-items";
 import { spaceRouteIdFromPath } from "./routes";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PaletteItem = SearchableItem<{ group: string; entry: PaletteEntry }>;
 
@@ -327,6 +328,7 @@ export default function ShellCommandPalette({
           label={t("shell_palette_input_label")}
           placeholder={t("shell_palette_placeholder")}
           endContent={<CancelButton />}
+          {...KEYBOARD.search}
         />
       }
       renderItem={(item) =>

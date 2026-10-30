@@ -34,6 +34,7 @@ import {
   useSessionMutations
 } from "./session-actions";
 import { useNow } from "./use-now";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
 
@@ -257,6 +258,7 @@ function HistoryPanel({
             value={query}
             onChange={setQuery}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"

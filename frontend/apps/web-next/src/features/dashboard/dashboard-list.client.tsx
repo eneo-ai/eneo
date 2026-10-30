@@ -18,6 +18,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { type CatalogEntry, catalogGroups, filterCatalog } from "@/features/dashboard/catalog";
 import { dashboardQueryOptions } from "@/features/dashboard/queries";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: string }) {
   const t = useTranslations();
@@ -102,6 +103,7 @@ export function DashboardList() {
           label={t("shell_catalog_search_label")}
           isLabelHidden
           startIcon={Search}
+          {...KEYBOARD.search}
           hasClear
           value={query}
           onChange={search}

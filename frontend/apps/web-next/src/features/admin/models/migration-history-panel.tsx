@@ -25,6 +25,7 @@ import { browserApi } from "@/lib/api/browser";
 import { matchesSearch } from "@/lib/search";
 import { useModelTypeLabel } from "./model-type-label";
 import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./models";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type TypeFilter = "all" | "completion" | "transcription";
 type StatusFilter = "all" | "completed" | "failed" | "in_progress";
@@ -124,6 +125,7 @@ export function MigrationHistoryPanel() {
                     isLabelHidden
                     placeholder={t("search")}
                     startIcon={Search}
+                    {...KEYBOARD.search}
                     value={search}
                     onChange={(value) => {
                       setSearch(value);

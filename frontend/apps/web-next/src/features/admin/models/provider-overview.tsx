@@ -39,6 +39,7 @@ import {
   modelsAttention,
   UNCLASSIFIED
 } from "./provider-sections";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * One banner for everything the data says needs an admin: active providers
@@ -274,6 +275,7 @@ export function ProviderOverview({
             isLabelHidden
             placeholder={t("search_models_and_providers")}
             startIcon={Search}
+            {...KEYBOARD.search}
             value={search}
             onChange={(value) => {
               setSearch(value);

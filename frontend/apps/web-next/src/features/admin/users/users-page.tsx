@@ -31,6 +31,7 @@ import {
   type StateFilter,
   type UsersFilters
 } from "./users";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
@@ -258,6 +259,7 @@ export function AdminUsersPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <TextInput
               label={t("email")}
+              {...KEYBOARD.email}
               value={emailBox.draft}
               onChange={emailBox.setDraft}
               hasClear
@@ -267,6 +269,7 @@ export function AdminUsersPage() {
             />
             <TextInput
               label={t("username")}
+              {...KEYBOARD.identifier}
               value={nameBox.draft}
               onChange={nameBox.setDraft}
               hasClear

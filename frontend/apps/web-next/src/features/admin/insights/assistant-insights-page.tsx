@@ -52,6 +52,7 @@ import {
 import { AnswerFeedbackCell } from "./answer-feedback-cell";
 import { AnswerFeedbackSummary } from "./answer-feedback-summary";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type InsightsTab = "analysis" | "questions";
 
@@ -337,6 +338,7 @@ function QuestionsTab({
             isLabelHidden
             placeholder={t("assistant_questions_search_placeholder")}
             startIcon={Search}
+            {...KEYBOARD.search}
             value={search}
             onChange={setSearch}
             hasClear

@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, type Ref } from "react";
 import { cn } from "@/lib/utils";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * Filter field above a resource grid or table: Astryx TextInput with a search
@@ -61,6 +62,7 @@ export function ResourceFilterInput({
         onChange={(next) => onChange(next)}
         placeholder={placeholder}
         startIcon={Search}
+        {...KEYBOARD.search}
         hasClear
         width="100%"
       />

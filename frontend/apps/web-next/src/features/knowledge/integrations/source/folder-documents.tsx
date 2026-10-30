@@ -46,6 +46,7 @@ import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "@/components/composites/in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
 const NARROW_QUERY = `not all and ${MEDIA.sm}`;
@@ -446,6 +447,7 @@ export function FolderDocuments({
               value={searchInput}
               onChange={setSearchInput}
               startIcon={Search}
+              {...KEYBOARD.search}
               hasClear
               width="100%"
             />

@@ -57,6 +57,7 @@ import {
   SPACE_ROLE_LABEL_KEYS,
   sortMembersByRole
 } from "./member-avatar";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -295,6 +296,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <Typeahead
             ref={searchRef}
             label={t("email")}
+            {...KEYBOARD.email}
             placeholder={t("member_search_placeholder")}
             searchSource={candidates}
             value={selected}
