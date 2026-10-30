@@ -17,7 +17,7 @@ export type StreamFixture = {
   /** The pinned SDK's projection once the request settled. */
   ui: {
     status: "ready" | "error";
-    error?: { message: string; code: number | null };
+    error?: { message: string; code: number | null; reason?: string };
     message: { id: string; role: "assistant"; parts: Record<string, unknown>[] };
   };
 };

@@ -135,6 +135,50 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, t)).toBe("t(eneo_error_9008)");
   });
 
+  it.each([9042, 9043, 9053, 9054, 9055, 9056, 9057, 9062, 9063, 9064])(
+    "localizes backend refusal %i in both supported languages",
+    (code) => {
+      const error = apiErrorFromResponse(errorResponse(409), {
+        message: "Backend English refusal",
+        eneo_error_code: code
+      });
+      for (const [locale, messages] of [
+        ["sv", sv],
+        ["en", en]
+      ] as const) {
+        const t = translator(locale, messages);
+        expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
+      }
+    }
+  );
+
+  it.each([
+    ["provider_unavailable", "provider_failure_unavailable"],
+    ["provider_timeout", "provider_failure_timeout"],
+    ["provider_unreachable", "provider_failure_unreachable"],
+    ["provider_connection_lost", "provider_failure_connection_lost"],
+    ["provider_rate_limited", "provider_failure_rate_limited"],
+    ["provider_model_not_found", "provider_failure_model_not_found"],
+    ["provider_rejected_request", "provider_failure_rejected_request"],
+    ["provider_error", "eneo_error_9010"],
+    ["stream_error", "chat_answer_failed_internal"],
+    ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
+    ["user_quota_exceeded", "job_failure_user_quota_exceeded"]
+  ])("describes %s before its less specific numeric code", (reason, key) => {
+    const error = apiErrorFromResponse(errorResponse(503), {
+      message: "Refused",
+      eneo_error_code: 9008,
+      code: reason
+    });
+    for (const [locale, messages] of [
+      ["sv", sv],
+      ["en", en]
+    ] as const) {
+      const t = translator(locale, messages);
+      expect(getErrorMessage(error, t)).toBe(t(key));
+    }
+  });
+
   it("falls back to the backend message for unmapped codes", () => {
     const error = new EneoApiError("Crawl already running", { status: 400, code: 9021 });
     expect(getErrorMessage(error, t)).toBe("Crawl already running");
