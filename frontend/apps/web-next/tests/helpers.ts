@@ -136,15 +136,23 @@ export function apiPath(path: string): string {
 export async function apiPost(page: Page, path: string, data: object): Promise<string> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, data }) => {
+    async ({ url, data, browserSession }) => {
+      const headers = new Headers({ "content-type": "application/json" });
+      if (browserSession) {
+        const session = await fetch("/api/v1/auth/session/");
+        const generation = session.headers.get("Eneo-Session-Generation");
+        if (session.status !== 204 || !generation)
+          throw new Error(`Fixture session probe failed (${session.status})`);
+        headers.set("Eneo-Session-Generation", generation);
+      }
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(data)
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), data }
+    { url: apiPath(path), data, browserSession: Boolean(process.env.E2E_BASE_URL) }
   );
   expect(response.ok, response.body).toBe(true);
   return (JSON.parse(response.body) as { id: string }).id;
