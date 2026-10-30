@@ -4,6 +4,10 @@ c735e65af694523b796f0bea338dac864ed89c20  (app)/account/appearance/page.tsx
 dad18e7a5d42d0d5d20019cd0ced14c4bbb23074  (app)/account/integrations/page.tsx
 0273606893ac5ebac328abb8cf032fdaf9a9e99f  (app)/account/layout.tsx
 c213f2dc385fbd1d07c22549f4d90df0d09ebf47  (app)/account/page.tsx
+a646dc8f1657d4583abc392b213725399399422e  (app)/dashboard/[assistantId]/[[...sessionId]]/page.tsx
+5bb8ce90aac94e8b4aa0877a6c9a94fca4355bae  (app)/dashboard/app/[appId]/page.tsx
+feef18a8fba4fb0d373ecee29ec154c4f47bd5f0  (app)/dashboard/app/[appId]/results/[resultId]/page.tsx
+318760b7d0f148a8c8574971db77509ded64a0a9  (app)/dashboard/page.tsx
 c67bd2212612b3e43cccb4164f65344c94d1219d  (app)/account/password/page.tsx
 addb9e8f056c3c02753b51541411767dd847040b  (app)/layout.tsx
 36410d4987933616f071e65308dd27357a0b8da6  (app)/spaces/[spaceId]/chat/page.tsx
@@ -17,6 +21,7 @@ ea195359e2145eb01b783dafd48d9dcb763ce366  (app)/spaces/[spaceId]/settings/page.t
 548fcac687a24dddcaaae462ed34d89a17c7bdb2  (app)/spaces/[spaceId]/skills/page.tsx
 0725559d609d0ff2033094d85a5ad386e4346fb4  (app)/spaces/list/page.tsx
 31c152c90ffc3334b04cc212f9fcaa88eaeadce0  (app)/spaces/page.tsx
+21c1a6f487185c59ea77e0878fb8a4dd2bb42899  (app)/whats-new/page.tsx
 f0ad8f5a043b9c1dc8ea1d47dbf4d3ab421c51b3  (public)/deactivated/page.tsx
 e72b8147f4715492e913ddbd19576edf73d65bf8  (public)/integrations/callback/token/page.tsx
 36886c872f4b40f6b6abe90b1a10f17c59e3bb78  (public)/invite/[[...rest]]/page.tsx

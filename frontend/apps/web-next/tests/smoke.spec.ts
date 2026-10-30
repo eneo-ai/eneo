@@ -89,7 +89,7 @@ test("profile language selection reloads the document in either language", async
   await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toBeVisible();
 });
 
-test("the side navigation reaches the assistant catalog", async ({ page }) => {
+test("the side navigation reaches the assistant catalog", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/spaces/list");
   const navigation = page.getByRole("navigation", { name: /huvudmeny|main menu/i });
   await navigation.getByRole("link", { name: /^(assistenter|assistants)$/i }).click();

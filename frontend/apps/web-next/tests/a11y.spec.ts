@@ -412,25 +412,42 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("assistant catalogue (dashboard)", async ({ page }) => {
+    test("assistant catalogue (dashboard)", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/dashboard", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
     });
 
-    test("assistant catalogue with the SideNav collapsed to its icon rail", async ({
-      page,
-      baseURL
-    }) => {
-      await page
-        .context()
-        .addCookies([{ name: SIDE_NAV_COLLAPSED_COOKIE, value: "1", url: baseURL! }]);
-      await scan(page, "/dashboard", async () => {
-        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-        await expect(
-          page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
-        ).toBeVisible();
-      });
+    test(
+      "assistant catalogue with the SideNav collapsed to its icon rail",
+      { tag: "@vite" },
+      async ({ page, baseURL }) => {
+        await page
+          .context()
+          .addCookies([{ name: SIDE_NAV_COLLAPSED_COOKIE, value: "1", url: baseURL! }]);
+        await scan(page, "/dashboard", async () => {
+          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+          await expect(
+            page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
+          ).toBeVisible();
+        });
+      }
+    );
+
+    test("dashboard app and result", { tag: "@vite" }, async ({ page }) => {
+      const work = await spaceWithWork(page, uniqueName("E2E Dashboard App"));
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await scan(page, work.dashboardApp, async () => {
+          await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
+        });
+        await scan(page, work.dashboardResult, async () => {
+          await expect(page.getByText("Ditt resultat genereras.")).toBeVisible();
+          await expect(
+            page.getByRole("link", { name: "Ny körning" }).filter({ visible: true })
+          ).toHaveAttribute("href", work.dashboardApp);
+        });
+      }
     });
 
     test("space overview, members and settings", { tag: "@vite" }, async ({ page }) => {
@@ -878,7 +895,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           }
         });
 
-        test("Nyheter", async ({ page }) => {
+        test("Nyheter", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/whats-new", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
@@ -956,7 +973,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     }
   });
 
-  test("Nyheter", async ({ page }) => {
+  test("Nyheter", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/whats-new");
     await expect(page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })).toBeVisible();
     await expectNoSidewaysPageScroll(page);

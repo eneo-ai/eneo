@@ -16,6 +16,7 @@ import { Route as LogoutRouteImport } from "./routes/logout"
 import { Route as PasswordChangeRouteImport } from "./routes/password-change"
 import { Route as AppSplatRouteImport } from "./routes/_app/$"
 import { Route as AppAccountRouteImport } from "./routes/_app/account"
+import { Route as AppWhatsNewRouteImport } from "./routes/_app/whats-new"
 import { Route as InviteSplatRouteImport } from "./routes/invite/$"
 import { Route as LoginIndexRouteImport } from "./routes/login/index"
 import { Route as LoginFailedRouteImport } from "./routes/login/failed"
@@ -28,19 +29,23 @@ import { Route as AppAccountAppearanceRouteImport } from "./routes/_app/account/
 import { Route as AppAccountCopyFormatRouteImport } from "./routes/_app/account/copy-format"
 import { Route as AppAccountIntegrationsRouteImport } from "./routes/_app/account/integrations"
 import { Route as AppAccountPasswordRouteImport } from "./routes/_app/account/password"
+import { Route as AppDashboardIndexRouteImport } from "./routes/_app/dashboard/index"
 import { Route as AppSpacesIndexRouteImport } from "./routes/_app/spaces/index"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
 import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
 import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
+import { Route as AppDashboardAssistantIdChar123SessionIdChar125RouteImport } from "./routes/_app/dashboard/$assistantId/{-$sessionId}"
 import { Route as AppSpacesSpaceIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/index"
 import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
 import { Route as AppSpacesSpaceIdChatRouteImport } from "./routes/_app/spaces/$spaceId/chat"
 import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/spaces/$spaceId/members"
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
+import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
 import { Route as AppSpacesSpaceIdSkillsIndexRouteImport } from "./routes/_app/spaces/$spaceId/skills/index"
 import { Route as AppSpacesSpaceIdSkillsSkillIdRouteImport } from "./routes/_app/spaces/$spaceId/skills/$skillId"
 import { Route as AppSpacesSpaceIdSkillsNewRouteImport } from "./routes/_app/spaces/$spaceId/skills/new"
+import { Route as AppDashboardAppAppIdResultsResultIdRouteImport } from "./routes/_app/dashboard/app/$appId/results/$resultId"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -74,6 +79,11 @@ const AppSplatRoute = AppSplatRouteImport.update({
 const AppAccountRoute = AppAccountRouteImport.update({
   id: "/account",
   path: "/account",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWhatsNewRoute = AppWhatsNewRouteImport.update({
+  id: "/whats-new",
+  path: "/whats-new",
   getParentRoute: () => AppRoute,
 } as any)
 const InviteSplatRoute = InviteSplatRouteImport.update({
@@ -136,6 +146,11 @@ const AppAccountPasswordRoute = AppAccountPasswordRouteImport.update({
   path: "/password",
   getParentRoute: () => AppAccountRoute,
 } as any)
+const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
+  id: "/dashboard/",
+  path: "/dashboard/",
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSpacesIndexRoute = AppSpacesIndexRouteImport.update({
   id: "/spaces/",
   path: "/spaces/",
@@ -156,6 +171,12 @@ const IntegrationsCallbackTokenRoute =
     id: "/integrations/callback/token",
     path: "/integrations/callback/token",
     getParentRoute: () => rootRouteImport,
+  } as any)
+const AppDashboardAssistantIdChar123SessionIdChar125Route =
+  AppDashboardAssistantIdChar123SessionIdChar125RouteImport.update({
+    id: "/dashboard/$assistantId/{-$sessionId}",
+    path: "/dashboard/$assistantId/{-$sessionId}",
+    getParentRoute: () => AppRoute,
   } as any)
 const AppSpacesSpaceIdIndexRoute = AppSpacesSpaceIdIndexRouteImport.update({
   id: "/",
@@ -189,6 +210,12 @@ const AppSpacesSpaceIdSettingsRoute =
     path: "/settings",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
+const AppDashboardAppAppIdIndexRoute =
+  AppDashboardAppAppIdIndexRouteImport.update({
+    id: "/dashboard/app/$appId/",
+    path: "/dashboard/app/$appId/",
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppSpacesSpaceIdSkillsIndexRoute =
   AppSpacesSpaceIdSkillsIndexRouteImport.update({
     id: "/skills/",
@@ -207,6 +234,12 @@ const AppSpacesSpaceIdSkillsNewRoute =
     path: "/skills/new",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
+const AppDashboardAppAppIdResultsResultIdRoute =
+  AppDashboardAppAppIdResultsResultIdRouteImport.update({
+    id: "/dashboard/app/$appId/results/$resultId",
+    path: "/dashboard/app/$appId/results/$resultId",
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -215,6 +248,7 @@ export interface FileRoutesByFullPath {
   "/password-change": typeof PasswordChangeRoute
   "/$": typeof AppSplatRoute
   "/account": typeof AppAccountRouteWithChildren
+  "/whats-new": typeof AppWhatsNewRoute
   "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
@@ -230,7 +264,9 @@ export interface FileRoutesByFullPath {
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account/": typeof AppAccountIndexRoute
+  "/dashboard/": typeof AppDashboardIndexRoute
   "/spaces/": typeof AppSpacesIndexRoute
+  "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
   "/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
   "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
@@ -239,7 +275,9 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
   "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
+  "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -247,6 +285,7 @@ export interface FileRoutesByTo {
   "/logout": typeof LogoutRoute
   "/password-change": typeof PasswordChangeRoute
   "/$": typeof AppSplatRoute
+  "/whats-new": typeof AppWhatsNewRoute
   "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
@@ -261,7 +300,9 @@ export interface FileRoutesByTo {
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account": typeof AppAccountIndexRoute
+  "/dashboard": typeof AppDashboardIndexRoute
   "/spaces": typeof AppSpacesIndexRoute
+  "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
   "/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
   "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
@@ -270,7 +311,9 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/dashboard/app/$appId": typeof AppDashboardAppAppIdIndexRoute
   "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
+  "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -281,6 +324,7 @@ export interface FileRoutesById {
   "/password-change": typeof PasswordChangeRoute
   "/_app/$": typeof AppSplatRoute
   "/_app/account": typeof AppAccountRouteWithChildren
+  "/_app/whats-new": typeof AppWhatsNewRoute
   "/invite/$": typeof InviteSplatRoute
   "/login/failed": typeof LoginFailedRoute
   "/login/switch-organisation": typeof LoginSwitchOrganisationRoute
@@ -296,7 +340,9 @@ export interface FileRoutesById {
   "/_app/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/_app/account/": typeof AppAccountIndexRoute
+  "/_app/dashboard/": typeof AppDashboardIndexRoute
   "/_app/spaces/": typeof AppSpacesIndexRoute
+  "/_app/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
   "/_app/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
   "/_app/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
@@ -305,7 +351,9 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
   "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
+  "/_app/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
   "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
+  "/_app/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -316,6 +364,7 @@ export interface FileRouteTypes {
     | "/password-change"
     | "/$"
     | "/account"
+    | "/whats-new"
     | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
@@ -331,7 +380,9 @@ export interface FileRouteTypes {
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account/"
+    | "/dashboard/"
     | "/spaces/"
+    | "/dashboard/$assistantId/{-$sessionId}"
     | "/spaces/$spaceId/$"
     | "/spaces/$spaceId/chat"
     | "/spaces/$spaceId/members"
@@ -340,7 +391,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
+    | "/dashboard/app/$appId/"
     | "/spaces/$spaceId/skills/"
+    | "/dashboard/app/$appId/results/$resultId"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -348,6 +401,7 @@ export interface FileRouteTypes {
     | "/logout"
     | "/password-change"
     | "/$"
+    | "/whats-new"
     | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
@@ -362,7 +416,9 @@ export interface FileRouteTypes {
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account"
+    | "/dashboard"
     | "/spaces"
+    | "/dashboard/$assistantId/{-$sessionId}"
     | "/spaces/$spaceId/$"
     | "/spaces/$spaceId/chat"
     | "/spaces/$spaceId/members"
@@ -371,7 +427,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
+    | "/dashboard/app/$appId"
     | "/spaces/$spaceId/skills"
+    | "/dashboard/app/$appId/results/$resultId"
   id:
     | "__root__"
     | "/"
@@ -381,6 +439,7 @@ export interface FileRouteTypes {
     | "/password-change"
     | "/_app/$"
     | "/_app/account"
+    | "/_app/whats-new"
     | "/invite/$"
     | "/login/failed"
     | "/login/switch-organisation"
@@ -396,7 +455,9 @@ export interface FileRouteTypes {
     | "/_app/spaces/list"
     | "/integrations/callback/token"
     | "/_app/account/"
+    | "/_app/dashboard/"
     | "/_app/spaces/"
+    | "/_app/dashboard/$assistantId/{-$sessionId}"
     | "/_app/spaces/$spaceId/$"
     | "/_app/spaces/$spaceId/chat"
     | "/_app/spaces/$spaceId/members"
@@ -405,7 +466,9 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/"
     | "/_app/spaces/$spaceId/skills/$skillId"
     | "/_app/spaces/$spaceId/skills/new"
+    | "/_app/dashboard/app/$appId/"
     | "/_app/spaces/$spaceId/skills/"
+    | "/_app/dashboard/app/$appId/results/$resultId"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -472,6 +535,13 @@ declare module "@tanstack/react-router" {
       path: "/account"
       fullPath: "/account"
       preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/whats-new": {
+      id: "/_app/whats-new"
+      path: "/whats-new"
+      fullPath: "/whats-new"
+      preLoaderRoute: typeof AppWhatsNewRouteImport
       parentRoute: typeof AppRoute
     }
     "/invite/$": {
@@ -558,6 +628,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAccountPasswordRouteImport
       parentRoute: typeof AppAccountRoute
     }
+    "/_app/dashboard/": {
+      id: "/_app/dashboard/"
+      path: "/dashboard"
+      fullPath: "/dashboard/"
+      preLoaderRoute: typeof AppDashboardIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     "/_app/spaces/": {
       id: "/_app/spaces/"
       path: "/spaces"
@@ -585,6 +662,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/integrations/callback/token"
       preLoaderRoute: typeof IntegrationsCallbackTokenRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/_app/dashboard/$assistantId/{-$sessionId}": {
+      id: "/_app/dashboard/$assistantId/{-$sessionId}"
+      path: "/dashboard/$assistantId/{-$sessionId}"
+      fullPath: "/dashboard/$assistantId/{-$sessionId}"
+      preLoaderRoute: typeof AppDashboardAssistantIdChar123SessionIdChar125RouteImport
+      parentRoute: typeof AppRoute
     }
     "/_app/spaces/$spaceId/": {
       id: "/_app/spaces/$spaceId/"
@@ -628,6 +712,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdSettingsRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
+    "/_app/dashboard/app/$appId/": {
+      id: "/_app/dashboard/app/$appId/"
+      path: "/dashboard/app/$appId"
+      fullPath: "/dashboard/app/$appId/"
+      preLoaderRoute: typeof AppDashboardAppAppIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     "/_app/spaces/$spaceId/skills/": {
       id: "/_app/spaces/$spaceId/skills/"
       path: "/skills"
@@ -648,6 +739,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/spaces/$spaceId/skills/new"
       preLoaderRoute: typeof AppSpacesSpaceIdSkillsNewRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/dashboard/app/$appId/results/$resultId": {
+      id: "/_app/dashboard/app/$appId/results/$resultId"
+      path: "/dashboard/app/$appId/results/$resultId"
+      fullPath: "/dashboard/app/$appId/results/$resultId"
+      preLoaderRoute: typeof AppDashboardAppAppIdResultsResultIdRouteImport
+      parentRoute: typeof AppRoute
     }
   }
 }
@@ -704,17 +802,29 @@ const AppSpacesSpaceIdRouteWithChildren =
 interface AppRouteChildren {
   AppSplatRoute: typeof AppSplatRoute
   AppAccountRoute: typeof AppAccountRouteWithChildren
+  AppWhatsNewRoute: typeof AppWhatsNewRoute
   AppSpacesSpaceIdRoute: typeof AppSpacesSpaceIdRouteWithChildren
   AppSpacesListRoute: typeof AppSpacesListRoute
+  AppDashboardIndexRoute: typeof AppDashboardIndexRoute
   AppSpacesIndexRoute: typeof AppSpacesIndexRoute
+  AppDashboardAssistantIdChar123SessionIdChar125Route: typeof AppDashboardAssistantIdChar123SessionIdChar125Route
+  AppDashboardAppAppIdIndexRoute: typeof AppDashboardAppAppIdIndexRoute
+  AppDashboardAppAppIdResultsResultIdRoute: typeof AppDashboardAppAppIdResultsResultIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppSplatRoute: AppSplatRoute,
   AppAccountRoute: AppAccountRouteWithChildren,
+  AppWhatsNewRoute: AppWhatsNewRoute,
   AppSpacesSpaceIdRoute: AppSpacesSpaceIdRouteWithChildren,
   AppSpacesListRoute: AppSpacesListRoute,
+  AppDashboardIndexRoute: AppDashboardIndexRoute,
   AppSpacesIndexRoute: AppSpacesIndexRoute,
+  AppDashboardAssistantIdChar123SessionIdChar125Route:
+    AppDashboardAssistantIdChar123SessionIdChar125Route,
+  AppDashboardAppAppIdIndexRoute: AppDashboardAppAppIdIndexRoute,
+  AppDashboardAppAppIdResultsResultIdRoute:
+    AppDashboardAppAppIdResultsResultIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
