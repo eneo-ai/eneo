@@ -5,11 +5,11 @@
   }
 
   /* A table cell keeps its words whole: anywhere (above) lets a cell shrink to
-     one character, so a four-column table on a phone tore "Förvaltningschef"
-     over three lines and never needed its scroll region. */
+     one character, so a wide table on a phone could tear "Förvaltningschef"
+     over three lines instead of using its sideways scroll. No min-width: a
+     column of short values stays narrow. */
   .eneo-answer table :is(th, td) {
     overflow-wrap: normal;
-    min-width: 7.5rem;
   }
 
   .eneo-answer [data-streamdown="code-block"],

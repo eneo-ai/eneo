@@ -101,29 +101,33 @@ export function UsageAreaChart({ data }: { data: MetadataStatisticsAggregated })
           ))}
         </AreaChart>
       </ResponsiveContainer>
-      <table className="sr-only">
-        <caption>{t("assistant_usage")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("migration_history_date")}</th>
-            {SERIES.map((s) => (
-              <th key={s.key} scope="col">
-                {t(s.labelKey)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {series.map((point) => (
-            <tr key={point.date}>
-              <th scope="row">{formatDay(point.date)}</th>
+      {/* A table ignores overflow: hidden, so the visually hidden one sits in a clipped block, or it
+          would make the page panel scroll sideways. */}
+      <div className="sr-only">
+        <table>
+          <caption>{t("assistant_usage")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t("migration_history_date")}</th>
               {SERIES.map((s) => (
-                <td key={s.key}>{format.number(Number(point[s.key] ?? 0))}</td>
+                <th key={s.key} scope="col">
+                  {t(s.labelKey)}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {series.map((point) => (
+              <tr key={point.date}>
+                <th scope="row">{formatDay(point.date)}</th>
+                {SERIES.map((s) => (
+                  <td key={s.key}>{format.number(Number(point[s.key] ?? 0))}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

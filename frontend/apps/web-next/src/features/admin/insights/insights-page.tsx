@@ -225,7 +225,7 @@ export function InsightsPage() {
             <p className="text-muted-foreground text-sm">{t("assistant_usage_description")}</p>
           </div>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex gap-1" role="group" aria-label={t("timeframe")}>
+            <div className="flex flex-wrap gap-1" role="group" aria-label={t("timeframe")}>
               {PRESET_DAYS.map((preset) => (
                 <Button
                   key={preset}

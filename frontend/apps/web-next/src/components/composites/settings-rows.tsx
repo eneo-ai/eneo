@@ -53,7 +53,7 @@ export function SettingsGroup({
             ) : null}
           </div>
           {headerEnd ? (
-            <div data-settings-group-end="" className="flex shrink-0 flex-wrap gap-1.5">
+            <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
               {headerEnd}
             </div>
           ) : null}
