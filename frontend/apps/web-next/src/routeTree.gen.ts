@@ -23,10 +23,16 @@ import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/swit
 import { Route as ModuleLoginIndexRouteImport } from "./routes/module-login/index"
 import { Route as ModuleLoginFailedRouteImport } from "./routes/module-login/failed"
 import { Route as AppAccountIndexRouteImport } from "./routes/_app/account/index"
+import { Route as AppSpacesIndexRouteImport } from "./routes/_app/spaces/index"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
 import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
 import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
+import { Route as AppSpacesSpaceIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/index"
 import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
+import { Route as AppSpacesSpaceIdChatRouteImport } from "./routes/_app/spaces/$spaceId/chat"
+import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/spaces/$spaceId/members"
+import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
+import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -97,6 +103,11 @@ const AppAccountIndexRoute = AppAccountIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AppAccountRoute,
 } as any)
+const AppSpacesIndexRoute = AppSpacesIndexRouteImport.update({
+  id: "/spaces/",
+  path: "/spaces/",
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSpacesSpaceIdRoute = AppSpacesSpaceIdRouteImport.update({
   id: "/spaces/$spaceId",
   path: "/spaces/$spaceId",
@@ -113,11 +124,38 @@ const IntegrationsCallbackTokenRoute =
     path: "/integrations/callback/token",
     getParentRoute: () => rootRouteImport,
   } as any)
+const AppSpacesSpaceIdIndexRoute = AppSpacesSpaceIdIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AppSpacesSpaceIdRoute,
+} as any)
 const AppSpacesSpaceIdSplatRoute = AppSpacesSpaceIdSplatRouteImport.update({
   id: "/$",
   path: "/$",
   getParentRoute: () => AppSpacesSpaceIdRoute,
 } as any)
+const AppSpacesSpaceIdChatRoute = AppSpacesSpaceIdChatRouteImport.update({
+  id: "/chat",
+  path: "/chat",
+  getParentRoute: () => AppSpacesSpaceIdRoute,
+} as any)
+const AppSpacesSpaceIdMembersRoute = AppSpacesSpaceIdMembersRouteImport.update({
+  id: "/members",
+  path: "/members",
+  getParentRoute: () => AppSpacesSpaceIdRoute,
+} as any)
+const AppSpacesSpaceIdOverviewRoute =
+  AppSpacesSpaceIdOverviewRouteImport.update({
+    id: "/overview",
+    path: "/overview",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdSettingsRoute =
+  AppSpacesSpaceIdSettingsRouteImport.update({
+    id: "/settings",
+    path: "/settings",
+    getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -136,7 +174,13 @@ export interface FileRoutesByFullPath {
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account/": typeof AppAccountIndexRoute
+  "/spaces/": typeof AppSpacesIndexRoute
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
+  "/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
+  "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
+  "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
+  "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -150,11 +194,16 @@ export interface FileRoutesByTo {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login": typeof LoginIndexRoute
   "/module-login": typeof ModuleLoginIndexRoute
-  "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account": typeof AppAccountIndexRoute
+  "/spaces": typeof AppSpacesIndexRoute
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
+  "/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
+  "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
+  "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
+  "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -175,7 +224,13 @@ export interface FileRoutesById {
   "/_app/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/_app/account/": typeof AppAccountIndexRoute
+  "/_app/spaces/": typeof AppSpacesIndexRoute
   "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
+  "/_app/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
+  "/_app/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
+  "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
+  "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -196,7 +251,13 @@ export interface FileRouteTypes {
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account/"
+    | "/spaces/"
     | "/spaces/$spaceId/$"
+    | "/spaces/$spaceId/chat"
+    | "/spaces/$spaceId/members"
+    | "/spaces/$spaceId/overview"
+    | "/spaces/$spaceId/settings"
+    | "/spaces/$spaceId/"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -210,11 +271,16 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login"
     | "/module-login"
-    | "/spaces/$spaceId"
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account"
+    | "/spaces"
     | "/spaces/$spaceId/$"
+    | "/spaces/$spaceId/chat"
+    | "/spaces/$spaceId/members"
+    | "/spaces/$spaceId/overview"
+    | "/spaces/$spaceId/settings"
+    | "/spaces/$spaceId"
   id:
     | "__root__"
     | "/"
@@ -234,7 +300,13 @@ export interface FileRouteTypes {
     | "/_app/spaces/list"
     | "/integrations/callback/token"
     | "/_app/account/"
+    | "/_app/spaces/"
     | "/_app/spaces/$spaceId/$"
+    | "/_app/spaces/$spaceId/chat"
+    | "/_app/spaces/$spaceId/members"
+    | "/_app/spaces/$spaceId/overview"
+    | "/_app/spaces/$spaceId/settings"
+    | "/_app/spaces/$spaceId/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -352,6 +424,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAccountIndexRouteImport
       parentRoute: typeof AppAccountRoute
     }
+    "/_app/spaces/": {
+      id: "/_app/spaces/"
+      path: "/spaces"
+      fullPath: "/spaces/"
+      preLoaderRoute: typeof AppSpacesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     "/_app/spaces/$spaceId": {
       id: "/_app/spaces/$spaceId"
       path: "/spaces/$spaceId"
@@ -373,11 +452,46 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof IntegrationsCallbackTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/_app/spaces/$spaceId/": {
+      id: "/_app/spaces/$spaceId/"
+      path: "/"
+      fullPath: "/spaces/$spaceId/"
+      preLoaderRoute: typeof AppSpacesSpaceIdIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
     "/_app/spaces/$spaceId/$": {
       id: "/_app/spaces/$spaceId/$"
       path: "/$"
       fullPath: "/spaces/$spaceId/$"
       preLoaderRoute: typeof AppSpacesSpaceIdSplatRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/chat": {
+      id: "/_app/spaces/$spaceId/chat"
+      path: "/chat"
+      fullPath: "/spaces/$spaceId/chat"
+      preLoaderRoute: typeof AppSpacesSpaceIdChatRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/members": {
+      id: "/_app/spaces/$spaceId/members"
+      path: "/members"
+      fullPath: "/spaces/$spaceId/members"
+      preLoaderRoute: typeof AppSpacesSpaceIdMembersRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/overview": {
+      id: "/_app/spaces/$spaceId/overview"
+      path: "/overview"
+      fullPath: "/spaces/$spaceId/overview"
+      preLoaderRoute: typeof AppSpacesSpaceIdOverviewRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/settings": {
+      id: "/_app/spaces/$spaceId/settings"
+      path: "/settings"
+      fullPath: "/spaces/$spaceId/settings"
+      preLoaderRoute: typeof AppSpacesSpaceIdSettingsRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
   }
@@ -397,10 +511,20 @@ const AppAccountRouteWithChildren = AppAccountRoute._addFileChildren(
 
 interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdSplatRoute: typeof AppSpacesSpaceIdSplatRoute
+  AppSpacesSpaceIdChatRoute: typeof AppSpacesSpaceIdChatRoute
+  AppSpacesSpaceIdMembersRoute: typeof AppSpacesSpaceIdMembersRoute
+  AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
+  AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
+  AppSpacesSpaceIdIndexRoute: typeof AppSpacesSpaceIdIndexRoute
 }
 
 const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdSplatRoute: AppSpacesSpaceIdSplatRoute,
+  AppSpacesSpaceIdChatRoute: AppSpacesSpaceIdChatRoute,
+  AppSpacesSpaceIdMembersRoute: AppSpacesSpaceIdMembersRoute,
+  AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
+  AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,
+  AppSpacesSpaceIdIndexRoute: AppSpacesSpaceIdIndexRoute,
 }
 
 const AppSpacesSpaceIdRouteWithChildren =
@@ -411,6 +535,7 @@ interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRouteWithChildren
   AppSpacesSpaceIdRoute: typeof AppSpacesSpaceIdRouteWithChildren
   AppSpacesListRoute: typeof AppSpacesListRoute
+  AppSpacesIndexRoute: typeof AppSpacesIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -418,6 +543,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRouteWithChildren,
   AppSpacesSpaceIdRoute: AppSpacesSpaceIdRouteWithChildren,
   AppSpacesListRoute: AppSpacesListRoute,
+  AppSpacesIndexRoute: AppSpacesIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

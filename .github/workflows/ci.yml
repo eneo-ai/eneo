@@ -601,7 +601,7 @@ jobs:
           E2E_PASSWORD: E2ePassword123!
         run: >-
           bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
-          tests/smoke.spec.ts tests/a11y.spec.ts
+          tests/smoke.spec.ts tests/a11y.spec.ts tests/chat.spec.ts tests/space-members.spec.ts
           --grep 'csp\.spec\.ts|web-app\.spec\.ts|@vite'
 
       - name: Capture E2E stack diagnostics
