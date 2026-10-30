@@ -172,7 +172,6 @@ export function AttachmentPreviewDialog({
               ) : !url ? (
                 <Spinner size="lg" aria-label={t("loading")} />
               ) : isImage ? (
-                // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
                 <img
                   src={url}
                   alt={name}

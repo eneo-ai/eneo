@@ -23,8 +23,5 @@ export const VENDOR: Record<
 
 /** The vendor's logo; decorative, since it always sits next to the item's or vendor's name. */
 export function VendorIcon({ type, size = 16 }: { type: IntegrationType; size?: number }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element -- static public asset, same in Next and Vite
-    <img src={VENDOR[type].logo} alt="" width={size} height={size} className="shrink-0" />
-  );
+  return <img src={VENDOR[type].logo} alt="" width={size} height={size} className="shrink-0" />;
 }

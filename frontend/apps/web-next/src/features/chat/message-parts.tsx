@@ -440,7 +440,6 @@ export function InlineImage({ file }: { file: Schema<"FilePublic"> }) {
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- signed file URL
     <img
       src={url}
       alt={file.name}
@@ -501,7 +500,6 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
           key={reference.id}
           className="border-ax-border rounded-ax-container shadow-ax-low max-w-80 overflow-hidden border"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- external MCP resource URL */}
           <img src={src} alt={title} className="max-h-96 w-auto object-contain" />
         </div>
       ))}
