@@ -1,0 +1,1309 @@
+{
+ "ipad-landscape|/*": [],
+ "ipad-landscape|/account": [
+  "clipped x label:språk",
+  "clipped x span:– inte uppfyllt ännu",
+  "small button[combobox]:svenska",
+  "small button[radio]:"
+ ],
+ "ipad-landscape|/account/api-keys": [
+  "clipped x label:utgångspåminnelser"
+ ],
+ "ipad-landscape|/account/appearance": [
+  "clipped x span:språk"
+ ],
+ "ipad-landscape|/account/copy-format": [
+  "small button[radio]:"
+ ],
+ "ipad-landscape|/account/integrations": [],
+ "ipad-landscape|/account/password": [
+  "clipped x span:– inte uppfyllt ännu"
+ ],
+ "ipad-landscape|/admin": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "ipad-landscape|/admin/api-keys": [
+  "outside button:fler åtgärder för påminnelse",
+  "small button[radio]:",
+  "small button[switch]:",
+  "small input[combobox]:"
+ ],
+ "ipad-landscape|/admin/crawler": [
+  "clipped x caption:resultat för denna körning",
+  "clipped x span:uppgift saknas",
+  "small button[combobox]:alla statusar",
+  "small button[combobox]:idag"
+ ],
+ "ipad-landscape|/admin/federation": [],
+ "ipad-landscape|/admin/help-assistants": [],
+ "ipad-landscape|/admin/insights": [
+  "clipped x div:assistentanvändningdatumkonv",
+  "clipped x p:upptäck hur människor intera"
+ ],
+ "ipad-landscape|/admin/integrations": [],
+ "ipad-landscape|/admin/mcp-servers": [],
+ "ipad-landscape|/admin/models": [
+  "clipped x label:aktivera ee mock",
+  "clipped x label:aktivera ee mock embedding",
+  "clipped x label:aktivera ee mock transcripti",
+  "clipped x label:aktivera ee-wizard-model",
+  "clipped x label:sök modeller och leverantöre",
+  "clipped x span:ingen",
+  "clipped x span:pris okänt",
+  "clipped x span:åtgärder",
+  "small a:/admin"
+ ],
+ "ipad-landscape|/admin/modules": [
+  "small a:/admin/api-keys",
+  "small select:välj en aktiv service keying"
+ ],
+ "ipad-landscape|/admin/personal-assistant": [
+  "small button[switch]:"
+ ],
+ "ipad-landscape|/admin/prompt-library": [],
+ "ipad-landscape|/admin/roles": [
+  "clipped x span:ingår inte:",
+  "clipped x span:ingår:",
+  "small summary:visa behörigheter för ai con",
+  "small summary:visa behörigheter för owner",
+  "small summary:visa behörigheter för user"
+ ],
+ "ipad-landscape|/admin/security-classifications": [
+  "small button[switch]:"
+ ],
+ "ipad-landscape|/admin/settings": [
+  "small a:/admin"
+ ],
+ "ipad-landscape|/admin/skills": [
+  "small button[switch]:tillåt aktivering vid behov"
+ ],
+ "ipad-landscape|/admin/storage": [
+  "clipped x legend:var ska nya filer lagras?",
+  "small input:",
+  "small select:enhet för gräns för kunskaps",
+  "small select:enhet för gräns för sessions",
+  "small select:enhet för gräns för transkri",
+  "small select:objektlagringpostgresql"
+ ],
+ "ipad-landscape|/admin/templates": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "ipad-landscape|/admin/tools": [
+  "small button:anslut en extern mcp-server"
+ ],
+ "ipad-landscape|/admin/usage": [],
+ "ipad-landscape|/admin/users": [
+  "clipped x span:ingen",
+  "clipped x span:åtgärder",
+  "small a:/admin",
+  "small button[combobox]:alla roller"
+ ],
+ "ipad-landscape|/dashboard": [
+  "clipped x label:sök assistenter och appar"
+ ],
+ "ipad-landscape|/dashboard/$/*": [
+  "clipped x span:retur ger en ny rad. skicka "
+ ],
+ "ipad-landscape|/dashboard/app/$": [
+  "small a:/dashboard",
+  "small button[tab]:kör"
+ ],
+ "ipad-landscape|/dashboard/app/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/dashboard/app/$"
+ ],
+ "ipad-landscape|/deactivated": [],
+ "ipad-landscape|/integrations/callback/token": [],
+ "ipad-landscape|/invite/*": [],
+ "ipad-landscape|/login": [],
+ "ipad-landscape|/login/failed": [],
+ "ipad-landscape|/login/switch-organisation": [],
+ "ipad-landscape|/module-login": [],
+ "ipad-landscape|/module-login/failed": [],
+ "ipad-landscape|/password-change": [],
+ "ipad-landscape|/spaces/$": [
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/*": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/apps": [
+  "clipped x label:filtrera appar",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/apps/$": [
+  "small a:/spaces/$/apps",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list",
+  "small button[tab]:kör"
+ ],
+ "ipad-landscape|/spaces/$/apps/$/edit": [
+  "clipped x label:chattmodell",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:publiceringpublicering",
+  "small a:/spaces/$/apps",
+  "small a:/spaces/$/overview",
+  "small button:chattmodell: ee mock"
+ ],
+ "ipad-landscape|/spaces/$/apps/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/spaces/$/apps/$",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/assistants": [
+  "clipped x label:filtrera assistenter",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/assistants/$/edit": [
+  "clipped x label:chattmodell",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:publiceringpublicering",
+  "outside a:säkerhet & integritetsäkerhe",
+  "small a:/spaces/$/assistants",
+  "small a:/spaces/$/overview",
+  "small button:chattmodell: ee mock",
+  "small button[switch]:"
+ ],
+ "ipad-landscape|/spaces/$/chat": [
+  "clipped x label:chattmodell",
+  "clipped x span:retur ger en ny rad. skicka ",
+  "small button:chattmodell: ee mock",
+  "small button:gör en plansteg",
+  "small button:sammanfatta någotprotokoll",
+  "small button:skriv ett utkasttjänsteskriv"
+ ],
+ "ipad-landscape|/spaces/$/group-chats/$/edit": [
+  "small a:/spaces/$/assistants",
+  "small a:/spaces/$/overview",
+  "small button[switch]:"
+ ],
+ "ipad-landscape|/spaces/$/knowledge": [
+  "clipped x label:filtrera samlingar",
+  "clipped x span:åtgärder",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/knowledge/collections/$": [
+  "small a:/spaces/$/knowledge",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/knowledge/integrations": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/knowledge/websites/$": [
+  "clipped x label:filtrera indexeringar",
+  "small a:/spaces/$/knowledge",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/members": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/overview": [
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/services": [
+  "clipped x label:filtrera tjänster",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/services/$": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/$/services",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/settings": [
+  "outside a:farozonfarozon",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list",
+  "small button[switch]:"
+ ],
+ "ipad-landscape|/spaces/$/skills": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-landscape|/spaces/$/skills/new": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/$/skills",
+  "small a:/spaces/list",
+  "small summary:avancerade alternativ"
+ ],
+ "ipad-landscape|/spaces/list": [
+  "clipped x label:filtrera ytor"
+ ],
+ "ipad-landscape|/whats-new": [
+  "small a:alla versionsnyheter på docs",
+  "small button:administration",
+  "small button:alla",
+  "small button:kunskap",
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/*": [],
+ "ipad-portrait|/account": [
+  "clipped x span:"
+ ],
+ "ipad-portrait|/account/api-keys": [
+  "clipped x h1:mina api-nycklar",
+  "clipped x label:utgångspåminnelser",
+  "outside button:fler åtgärder för påminnelse"
+ ],
+ "ipad-portrait|/account/appearance": [
+  "clipped x h1:utseende och språk",
+  "clipped x span:språk"
+ ],
+ "ipad-portrait|/account/copy-format": [
+  "clipped x h1:kopieringsformat",
+  "clipped x h2:kopieringsformat",
+  "small button[radio]:"
+ ],
+ "ipad-portrait|/account/integrations": [
+  "clipped x h1:integrationer"
+ ],
+ "ipad-portrait|/account/password": [
+  "clipped x h1:byt lösenord",
+  "clipped x h2:byt lösenord",
+  "clipped x span:– inte uppfyllt ännu"
+ ],
+ "ipad-portrait|/admin": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "ipad-portrait|/admin/api-keys": [
+  "outside button:fler åtgärder för påminnelse",
+  "small button[radio]:",
+  "small button[switch]:",
+  "small input[combobox]:"
+ ],
+ "ipad-portrait|/admin/crawler": [
+  "clipped x caption:resultat för denna körning",
+  "clipped x span:uppgift saknas",
+  "small button[combobox]:alla statusar",
+  "small button[combobox]:idag"
+ ],
+ "ipad-portrait|/admin/federation": [],
+ "ipad-portrait|/admin/help-assistants": [],
+ "ipad-portrait|/admin/insights": [
+  "clipped x div:assistentanvändningdatumkonv",
+  "clipped x p:upptäck hur människor intera"
+ ],
+ "ipad-portrait|/admin/integrations": [],
+ "ipad-portrait|/admin/mcp-servers": [],
+ "ipad-portrait|/admin/models": [
+  "clipped x label:aktivera ee mock",
+  "clipped x label:aktivera ee mock embedding",
+  "clipped x label:aktivera ee mock transcripti",
+  "clipped x label:aktivera ee-wizard-model",
+  "clipped x label:sök modeller och leverantöre",
+  "clipped x span:ingen",
+  "clipped x span:pris okänt",
+  "clipped x span:åtgärder",
+  "outside button:fler åtgärder för ee mock",
+  "outside button:fler åtgärder för ee mock em",
+  "outside button:fler åtgärder för ee mock tr",
+  "outside button:fler åtgärder för ee-wizard-",
+  "small a:/admin"
+ ],
+ "ipad-portrait|/admin/modules": [
+  "small a:/admin/api-keys",
+  "small select:välj en aktiv service keying"
+ ],
+ "ipad-portrait|/admin/personal-assistant": [
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/admin/prompt-library": [],
+ "ipad-portrait|/admin/roles": [
+  "clipped x span:ingår inte:",
+  "clipped x span:ingår:",
+  "small summary:visa behörigheter för ai con",
+  "small summary:visa behörigheter för owner",
+  "small summary:visa behörigheter för user"
+ ],
+ "ipad-portrait|/admin/security-classifications": [
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/admin/settings": [
+  "small a:/admin"
+ ],
+ "ipad-portrait|/admin/skills": [
+  "small button[switch]:tillåt aktivering vid behov"
+ ],
+ "ipad-portrait|/admin/storage": [
+  "clipped x legend:var ska nya filer lagras?",
+  "small input:",
+  "small select:enhet för gräns för kunskaps",
+  "small select:enhet för gräns för sessions",
+  "small select:enhet för gräns för transkri",
+  "small select:objektlagringpostgresql"
+ ],
+ "ipad-portrait|/admin/templates": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "ipad-portrait|/admin/tools": [
+  "small button:anslut en extern mcp-server"
+ ],
+ "ipad-portrait|/admin/usage": [],
+ "ipad-portrait|/admin/users": [
+  "clipped x span:ingen",
+  "clipped x span:åtgärder",
+  "small a:/admin",
+  "small button[combobox]:alla roller"
+ ],
+ "ipad-portrait|/dashboard": [
+  "clipped x label:sök assistenter och appar"
+ ],
+ "ipad-portrait|/dashboard/$/*": [
+  "clipped x span:retur ger en ny rad. skicka "
+ ],
+ "ipad-portrait|/dashboard/app/$": [
+  "small a:/dashboard",
+  "small button[tab]:kör"
+ ],
+ "ipad-portrait|/dashboard/app/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/dashboard/app/$"
+ ],
+ "ipad-portrait|/deactivated": [],
+ "ipad-portrait|/integrations/callback/token": [],
+ "ipad-portrait|/invite/*": [],
+ "ipad-portrait|/login": [],
+ "ipad-portrait|/login/failed": [],
+ "ipad-portrait|/login/switch-organisation": [],
+ "ipad-portrait|/module-login": [],
+ "ipad-portrait|/module-login/failed": [],
+ "ipad-portrait|/password-change": [],
+ "ipad-portrait|/spaces/$": [
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/*": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/apps": [
+  "clipped x label:filtrera appar",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/apps/$": [
+  "small a:/spaces/$/apps",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list",
+  "small button[tab]:kör"
+ ],
+ "ipad-portrait|/spaces/$/apps/$/edit": [
+  "clipped x label:chattmodell",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:publiceringpublicering",
+  "outside a:säkerhet & integritetsäkerhe",
+  "small a:/spaces/$/apps",
+  "small a:/spaces/$/overview",
+  "small button:chattmodell: ee mock"
+ ],
+ "ipad-portrait|/spaces/$/apps/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/spaces/$/apps/$",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/assistants": [
+  "clipped x label:filtrera assistenter",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/assistants/$/edit": [
+  "clipped x label:chattmodell",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:publiceringpublicering",
+  "outside a:säkerhet & integritetsäkerhe",
+  "small a:/spaces/$/assistants",
+  "small a:/spaces/$/overview",
+  "small button:chattmodell: ee mock",
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/spaces/$/chat": [
+  "clipped x label:chattmodell",
+  "clipped x span:retur ger en ny rad. skicka ",
+  "small button:chattmodell: ee mock",
+  "small button:gör en plansteg",
+  "small button:sammanfatta någotprotokoll",
+  "small button:skriv ett utkasttjänsteskriv"
+ ],
+ "ipad-portrait|/spaces/$/group-chats/$/edit": [
+  "small a:/spaces/$/assistants",
+  "small a:/spaces/$/overview",
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/spaces/$/knowledge": [
+  "clipped x label:filtrera samlingar",
+  "clipped x span:åtgärder",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/knowledge/collections/$": [
+  "small a:/spaces/$/knowledge",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/knowledge/integrations": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/knowledge/websites/$": [
+  "clipped x label:filtrera indexeringar",
+  "small a:/spaces/$/knowledge",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/members": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/overview": [
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/services": [
+  "clipped x label:filtrera tjänster",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/services/$": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/$/services",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/settings": [
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:farozonfarozon",
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list",
+  "small button[switch]:"
+ ],
+ "ipad-portrait|/spaces/$/skills": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/list"
+ ],
+ "ipad-portrait|/spaces/$/skills/new": [
+  "small a:/spaces/$/overview",
+  "small a:/spaces/$/skills",
+  "small a:/spaces/list",
+  "small summary:avancerade alternativ"
+ ],
+ "ipad-portrait|/spaces/list": [
+  "clipped x label:filtrera ytor"
+ ],
+ "ipad-portrait|/whats-new": [
+  "small a:alla versionsnyheter på docs",
+  "small button:administration",
+  "small button:alla",
+  "small button:kunskap",
+  "small button[switch]:"
+ ],
+ "phone-320|/*": [
+  "small a:/"
+ ],
+ "phone-320|/account": [
+  "clipped x span:",
+  "small a:/"
+ ],
+ "phone-320|/account/api-keys": [
+  "clipped x h1:mina api-nycklar",
+  "clipped x label:utgångspåminnelser",
+  "outside button:fler åtgärder för påminnelse",
+  "outside button[tab]:utgångenutgången",
+  "outside button[tab]:återkalladåterkallad"
+ ],
+ "phone-320|/account/appearance": [
+  "clipped x h1:utseende och språk",
+  "clipped x span:språk"
+ ],
+ "phone-320|/account/copy-format": [
+  "clipped x h1:kopieringsformat",
+  "clipped x h2:kopieringsformat",
+  "small button[radio]:"
+ ],
+ "phone-320|/account/integrations": [
+  "clipped x h1:integrationer"
+ ],
+ "phone-320|/account/password": [
+  "clipped x h1:byt lösenord",
+  "clipped x h2:byt lösenord",
+  "clipped x span:– inte uppfyllt ännu"
+ ],
+ "phone-320|/admin": [
+  "clipped x span:fel:",
+  "small a:/",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-320|/admin/api-keys": [
+  "outside a:/admin/users",
+  "outside button:fler åtgärder för påminnelse",
+  "outside button[tab]:alla statusar",
+  "outside button[tab]:utgången",
+  "small button[radio]:",
+  "small button[switch]:",
+  "small input[combobox]:"
+ ],
+ "phone-320|/admin/crawler": [
+  "clipped x caption:resultat för denna körning",
+  "clipped x span:uppgift saknas",
+  "outside button[tab]:schemaschema",
+  "small button[combobox]:alla statusar",
+  "small button[combobox]:idag"
+ ],
+ "phone-320|/admin/federation": [],
+ "phone-320|/admin/help-assistants": [],
+ "phone-320|/admin/insights": [
+  "clipped x div:assistentanvändningdatumkonv",
+  "clipped x p:upptäck hur människor intera"
+ ],
+ "phone-320|/admin/integrations": [],
+ "phone-320|/admin/mcp-servers": [],
+ "phone-320|/admin/models": [
+  "clipped x label:aktivera ee mock",
+  "clipped x label:aktivera ee mock embedding",
+  "clipped x label:aktivera ee mock transcripti",
+  "clipped x label:aktivera ee-wizard-model",
+  "clipped x label:modelltyp",
+  "clipped x label:sök modeller och leverantöre",
+  "clipped x span:hosting-region:",
+  "outside button[tab]:inställningarinställningar",
+  "small a:/admin",
+  "small button[combobox]:modelltyp: alla ()"
+ ],
+ "phone-320|/admin/modules": [
+  "small a:/admin/api-keys",
+  "small select:välj en aktiv service keying"
+ ],
+ "phone-320|/admin/personal-assistant": [
+  "clipped x section:bilagorinaktiv",
+  "clipped x section:gemensam promptinaktiv – ing",
+  "clipped x section:resonemanginaktiv",
+  "clipped x section:verktyginaktiv – inga verkty",
+  "small button[switch]:"
+ ],
+ "phone-320|/admin/prompt-library": [],
+ "phone-320|/admin/roles": [
+  "clipped x span:ingår inte:",
+  "clipped x span:ingår:",
+  "small summary:visa behörigheter för ai con",
+  "small summary:visa behörigheter för owner",
+  "small summary:visa behörigheter för user"
+ ],
+ "phone-320|/admin/security-classifications": [
+  "small button[switch]:"
+ ],
+ "phone-320|/admin/settings": [
+  "small a:/admin"
+ ],
+ "phone-320|/admin/skills": [
+  "small button[switch]:tillåt aktivering vid behov"
+ ],
+ "phone-320|/admin/storage": [
+  "clipped x legend:var ska nya filer lagras?",
+  "small input:",
+  "small select:enhet för gräns för kunskaps",
+  "small select:enhet för gräns för sessions",
+  "small select:enhet för gräns för transkri",
+  "small select:objektlagringpostgresql"
+ ],
+ "phone-320|/admin/templates": [
+  "clipped x span:fel:",
+  "small a:/",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-320|/admin/tools": [
+  "small button:anslut en extern mcp-server"
+ ],
+ "phone-320|/admin/usage": [
+  "outside button:sortera efter beräknad kostn",
+  "outside button:sortera efter inmatning toke",
+  "outside button:sortera efter totalt tokens",
+  "outside button:sortera efter utmatning toke"
+ ],
+ "phone-320|/admin/users": [
+  "clipped x span:ingen",
+  "clipped x span:åtgärder",
+  "outside button:fler åtgärder för ee@example",
+  "outside button[tab]:inaktiva användareinaktiva a",
+  "small a:/admin",
+  "small button[combobox]:alla roller"
+ ],
+ "phone-320|/dashboard": [
+  "clipped x label:sök assistenter och appar",
+  "small a:/",
+  "small a:/dashboard/$",
+  "small a:/dashboard/app/$",
+  "small a:/spaces/personal/chat"
+ ],
+ "phone-320|/dashboard/$/*": [
+  "clipped x span:retur ger en ny rad. skicka "
+ ],
+ "phone-320|/dashboard/app/$": [
+  "small a:/",
+  "small a:/dashboard",
+  "small button[tab]:kör"
+ ],
+ "phone-320|/dashboard/app/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/",
+  "small a:/dashboard/app/$"
+ ],
+ "phone-320|/deactivated": [],
+ "phone-320|/integrations/callback/token": [],
+ "phone-320|/invite/*": [],
+ "phone-320|/login": [],
+ "phone-320|/login/failed": [],
+ "phone-320|/login/switch-organisation": [],
+ "phone-320|/module-login": [],
+ "phone-320|/module-login/failed": [],
+ "phone-320|/password-change": [],
+ "phone-320|/spaces/$": [
+  "clipped x span:()",
+  "outside a:/spaces/$/knowledge",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-320|/spaces/$/*": [],
+ "phone-320|/spaces/$/apps": [
+  "clipped x label:filtrera appar",
+  "outside a:/spaces/$/knowledge",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-320|/spaces/$/apps/$": [
+  "small a:/spaces/$/apps",
+  "small button[tab]:kör"
+ ],
+ "phone-320|/spaces/$/apps/$/edit": [
+  "clipped x h1:protokoll",
+  "clipped x span:"
+ ],
+ "phone-320|/spaces/$/apps/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-320|/spaces/$/assistants": [
+  "clipped x label:filtrera assistenter",
+  "outside a:/spaces/$/knowledge",
+  "small a:/spaces/$/chat"
+ ],
+ "phone-320|/spaces/$/assistants/$/edit": [
+  "clipped x h1:bygglov",
+  "clipped x span:"
+ ],
+ "phone-320|/spaces/$/chat": [
+  "clipped x label:chattmodell",
+  "clipped x span:retur ger en ny rad. skicka ",
+  "outside button:skicka meddelande",
+  "small button:chattmodell: ee mock",
+  "small button:sammanfatta någotprotokoll",
+  "small button:skriv ett utkasttjänsteskriv"
+ ],
+ "phone-320|/spaces/$/group-chats/$/edit": [
+  "clipped x h1:grupp",
+  "clipped x span:"
+ ],
+ "phone-320|/spaces/$/knowledge": [
+  "clipped x div:kunskapsamlingar",
+  "clipped x label:filtrera samlingar",
+  "clipped x label:kunskapskällor",
+  "outside a:/spaces/$/overview",
+  "small button[combobox]:samlingar"
+ ],
+ "phone-320|/spaces/$/knowledge/collections/$": [
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-320|/spaces/$/knowledge/integrations": [
+  "clipped x div:kunskapsamlingar",
+  "clipped x label:kunskapskällor",
+  "outside a:/spaces/$/overview",
+  "small button[combobox]:integrationer"
+ ],
+ "phone-320|/spaces/$/knowledge/websites/$": [
+  "clipped x label:filtrera indexeringar",
+  "outside button:sortera efter resultat",
+  "outside button:sortera efter status",
+  "outside button:sortera efter varaktighet",
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-320|/spaces/$/members": [
+  "clipped x h1:contract",
+  "clipped x span:roll: administratör"
+ ],
+ "phone-320|/spaces/$/overview": [
+  "clipped x span:()",
+  "outside a:/spaces/$/knowledge",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-320|/spaces/$/services": [
+  "clipped x h1:contract",
+  "clipped x label:filtrera tjänster",
+  "small a:/spaces/$/services/$"
+ ],
+ "phone-320|/spaces/$/services/$": [
+  "small a:/spaces/$/services"
+ ],
+ "phone-320|/spaces/$/settings": [
+  "clipped x h1:contract",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:farozonfarozon",
+  "outside a:funktionerfunktioner",
+  "outside a:modellermodeller",
+  "outside a:verktyg och anslutningarverk",
+  "outside button[tab]:utgångenutgången",
+  "outside button[tab]:återkalladåterkallad",
+  "small button[switch]:"
+ ],
+ "phone-320|/spaces/$/skills": [
+  "clipped x h1:contract"
+ ],
+ "phone-320|/spaces/$/skills/new": [
+  "small a:/spaces/$/skills",
+  "small summary:avancerade alternativ"
+ ],
+ "phone-320|/spaces/list": [
+  "clipped x label:filtrera ytor",
+  "small a:/",
+  "small a:/spaces/$/overview"
+ ],
+ "phone-320|/whats-new": [
+  "small a:alla versionsnyheter på docs",
+  "small button:administration",
+  "small button:alla",
+  "small button:kunskap",
+  "small button[switch]:"
+ ],
+ "phone-390|/*": [],
+ "phone-390|/account": [
+  "clipped x span:"
+ ],
+ "phone-390|/account/api-keys": [
+  "clipped x h1:mina api-nycklar",
+  "clipped x label:utgångspåminnelser",
+  "outside button:fler åtgärder för påminnelse",
+  "outside button[tab]:utgångenutgången"
+ ],
+ "phone-390|/account/appearance": [
+  "clipped x h1:utseende och språk",
+  "clipped x span:språk"
+ ],
+ "phone-390|/account/copy-format": [
+  "clipped x h1:kopieringsformat",
+  "clipped x h2:kopieringsformat",
+  "small button[radio]:"
+ ],
+ "phone-390|/account/integrations": [
+  "clipped x h1:integrationer"
+ ],
+ "phone-390|/account/password": [
+  "clipped x h1:byt lösenord",
+  "clipped x h2:byt lösenord",
+  "clipped x span:– inte uppfyllt ännu"
+ ],
+ "phone-390|/admin": [
+  "clipped x span:fel:",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-390|/admin/api-keys": [
+  "outside button:fler åtgärder för påminnelse",
+  "small button[radio]:",
+  "small button[switch]:",
+  "small input[combobox]:"
+ ],
+ "phone-390|/admin/crawler": [
+  "clipped x caption:resultat för denna körning",
+  "clipped x span:uppgift saknas",
+  "small button[combobox]:alla statusar",
+  "small button[combobox]:idag"
+ ],
+ "phone-390|/admin/federation": [],
+ "phone-390|/admin/help-assistants": [],
+ "phone-390|/admin/insights": [
+  "clipped x div:assistentanvändningdatumkonv",
+  "clipped x p:upptäck hur människor intera"
+ ],
+ "phone-390|/admin/integrations": [],
+ "phone-390|/admin/mcp-servers": [],
+ "phone-390|/admin/models": [
+  "clipped x label:aktivera ee mock",
+  "clipped x label:aktivera ee mock embedding",
+  "clipped x label:aktivera ee mock transcripti",
+  "clipped x label:aktivera ee-wizard-model",
+  "clipped x label:modelltyp",
+  "clipped x label:sök modeller och leverantöre",
+  "clipped x span:hosting-region:",
+  "small a:/admin",
+  "small button[combobox]:modelltyp: alla ()"
+ ],
+ "phone-390|/admin/modules": [
+  "small a:/admin/api-keys",
+  "small select:välj en aktiv service keying"
+ ],
+ "phone-390|/admin/personal-assistant": [
+  "small button[switch]:"
+ ],
+ "phone-390|/admin/prompt-library": [],
+ "phone-390|/admin/roles": [
+  "clipped x span:ingår inte:",
+  "clipped x span:ingår:",
+  "small summary:visa behörigheter för ai con",
+  "small summary:visa behörigheter för owner",
+  "small summary:visa behörigheter för user"
+ ],
+ "phone-390|/admin/security-classifications": [
+  "small button[switch]:"
+ ],
+ "phone-390|/admin/settings": [
+  "small a:/admin"
+ ],
+ "phone-390|/admin/skills": [
+  "small button[switch]:tillåt aktivering vid behov"
+ ],
+ "phone-390|/admin/storage": [
+  "clipped x legend:var ska nya filer lagras?",
+  "small input:",
+  "small select:enhet för gräns för kunskaps",
+  "small select:enhet för gräns för sessions",
+  "small select:enhet för gräns för transkri",
+  "small select:objektlagringpostgresql"
+ ],
+ "phone-390|/admin/templates": [
+  "clipped x span:fel:",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-390|/admin/tools": [
+  "small button:anslut en extern mcp-server"
+ ],
+ "phone-390|/admin/usage": [
+  "outside button:sortera efter beräknad kostn",
+  "outside button:sortera efter totalt tokens",
+  "outside button:sortera efter utmatning toke"
+ ],
+ "phone-390|/admin/users": [
+  "clipped x span:ingen",
+  "clipped x span:åtgärder",
+  "outside button:fler åtgärder för ee@example",
+  "small a:/admin",
+  "small button[combobox]:alla roller"
+ ],
+ "phone-390|/dashboard": [
+  "clipped x label:sök assistenter och appar",
+  "small a:/dashboard/$",
+  "small a:/dashboard/app/$",
+  "small a:/spaces/personal/chat"
+ ],
+ "phone-390|/dashboard/$/*": [
+  "clipped x span:retur ger en ny rad. skicka "
+ ],
+ "phone-390|/dashboard/app/$": [
+  "small a:/dashboard",
+  "small button[tab]:kör"
+ ],
+ "phone-390|/dashboard/app/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/dashboard/app/$"
+ ],
+ "phone-390|/deactivated": [],
+ "phone-390|/integrations/callback/token": [],
+ "phone-390|/invite/*": [],
+ "phone-390|/login": [],
+ "phone-390|/login/failed": [],
+ "phone-390|/login/switch-organisation": [],
+ "phone-390|/module-login": [],
+ "phone-390|/module-login/failed": [],
+ "phone-390|/password-change": [],
+ "phone-390|/spaces/$": [
+  "clipped x span:()",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-390|/spaces/$/*": [],
+ "phone-390|/spaces/$/apps": [
+  "clipped x label:filtrera appar",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-390|/spaces/$/apps/$": [
+  "small a:/spaces/$/apps",
+  "small button[tab]:kör"
+ ],
+ "phone-390|/spaces/$/apps/$/edit": [
+  "clipped x h1:protokoll",
+  "clipped x span:"
+ ],
+ "phone-390|/spaces/$/apps/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-390|/spaces/$/assistants": [
+  "clipped x label:filtrera assistenter",
+  "small a:/spaces/$/chat"
+ ],
+ "phone-390|/spaces/$/assistants/$/edit": [
+  "clipped x h1:bygglov",
+  "clipped x span:"
+ ],
+ "phone-390|/spaces/$/chat": [
+  "clipped x label:chattmodell",
+  "clipped x span:retur ger en ny rad. skicka ",
+  "outside button:skicka meddelande",
+  "small button:chattmodell: ee mock",
+  "small button:gör en plansteg",
+  "small button:sammanfatta någotprotokoll",
+  "small button:skriv ett utkasttjänsteskriv"
+ ],
+ "phone-390|/spaces/$/group-chats/$/edit": [
+  "clipped x h1:grupp",
+  "clipped x span:"
+ ],
+ "phone-390|/spaces/$/knowledge": [
+  "clipped x div:kunskapsamlingar",
+  "clipped x label:filtrera samlingar",
+  "small a:/spaces/$/knowledge/collections/$"
+ ],
+ "phone-390|/spaces/$/knowledge/collections/$": [
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-390|/spaces/$/knowledge/integrations": [
+  "clipped x div:kunskapsamlingar"
+ ],
+ "phone-390|/spaces/$/knowledge/websites/$": [
+  "clipped x label:filtrera indexeringar",
+  "outside button:sortera efter resultat",
+  "outside button:sortera efter varaktighet",
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-390|/spaces/$/members": [
+  "clipped x h1:contract",
+  "clipped x span:roll: administratör"
+ ],
+ "phone-390|/spaces/$/overview": [
+  "clipped x span:()",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-390|/spaces/$/services": [
+  "clipped x h1:contract",
+  "clipped x label:filtrera tjänster",
+  "small a:/spaces/$/services/$"
+ ],
+ "phone-390|/spaces/$/services/$": [
+  "small a:/spaces/$/services"
+ ],
+ "phone-390|/spaces/$/settings": [
+  "clipped x h1:contract",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:farozonfarozon",
+  "outside a:funktionerfunktioner",
+  "outside a:modellermodeller",
+  "outside a:verktyg och anslutningarverk",
+  "outside button[tab]:utgångenutgången",
+  "small button[switch]:"
+ ],
+ "phone-390|/spaces/$/skills": [
+  "clipped x h1:contract"
+ ],
+ "phone-390|/spaces/$/skills/new": [
+  "small a:/spaces/$/skills",
+  "small summary:avancerade alternativ"
+ ],
+ "phone-390|/spaces/list": [
+  "clipped x label:filtrera ytor",
+  "small a:/spaces/$/overview"
+ ],
+ "phone-390|/whats-new": [
+  "small a:alla versionsnyheter på docs",
+  "small button:administration",
+  "small button:alla",
+  "small button:kunskap",
+  "small button[switch]:"
+ ],
+ "phone-landscape|/*": [],
+ "phone-landscape|/account": [
+  "clipped x span:"
+ ],
+ "phone-landscape|/account/api-keys": [
+  "clipped x h1:mina api-nycklar",
+  "clipped x label:utgångspåminnelser",
+  "outside button:fler åtgärder för påminnelse"
+ ],
+ "phone-landscape|/account/appearance": [
+  "clipped x h1:utseende och språk",
+  "clipped x span:språk"
+ ],
+ "phone-landscape|/account/copy-format": [
+  "clipped x h1:kopieringsformat",
+  "clipped x h2:kopieringsformat",
+  "small button[radio]:"
+ ],
+ "phone-landscape|/account/integrations": [
+  "clipped x h1:integrationer"
+ ],
+ "phone-landscape|/account/password": [
+  "clipped x h1:byt lösenord",
+  "clipped x h2:byt lösenord",
+  "clipped x span:– inte uppfyllt ännu"
+ ],
+ "phone-landscape|/admin": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-landscape|/admin/api-keys": [
+  "outside button:fler åtgärder för påminnelse",
+  "small button[radio]:",
+  "small button[switch]:",
+  "small input[combobox]:"
+ ],
+ "phone-landscape|/admin/crawler": [
+  "clipped x caption:resultat för denna körning",
+  "clipped x span:uppgift saknas",
+  "small button[combobox]:alla statusar",
+  "small button[combobox]:idag"
+ ],
+ "phone-landscape|/admin/federation": [],
+ "phone-landscape|/admin/help-assistants": [],
+ "phone-landscape|/admin/insights": [
+  "clipped x div:assistentanvändningdatumkonv",
+  "clipped x p:upptäck hur människor intera"
+ ],
+ "phone-landscape|/admin/integrations": [],
+ "phone-landscape|/admin/mcp-servers": [],
+ "phone-landscape|/admin/models": [
+  "clipped x label:aktivera ee mock",
+  "clipped x label:aktivera ee mock embedding",
+  "clipped x label:aktivera ee mock transcripti",
+  "clipped x label:aktivera ee-wizard-model",
+  "clipped x label:modelltyp",
+  "clipped x label:sök modeller och leverantöre",
+  "clipped x span:hosting-region:",
+  "small a:/admin",
+  "small button[combobox]:modelltyp: alla ()"
+ ],
+ "phone-landscape|/admin/modules": [
+  "small a:/admin/api-keys",
+  "small select:välj en aktiv service keying"
+ ],
+ "phone-landscape|/admin/personal-assistant": [
+  "small button[switch]:"
+ ],
+ "phone-landscape|/admin/prompt-library": [],
+ "phone-landscape|/admin/roles": [
+  "clipped x span:ingår inte:",
+  "clipped x span:ingår:",
+  "small summary:visa behörigheter för ai con",
+  "small summary:visa behörigheter för owner",
+  "small summary:visa behörigheter för user"
+ ],
+ "phone-landscape|/admin/security-classifications": [
+  "small button[switch]:"
+ ],
+ "phone-landscape|/admin/settings": [
+  "small a:/admin"
+ ],
+ "phone-landscape|/admin/skills": [
+  "small button[switch]:tillåt aktivering vid behov"
+ ],
+ "phone-landscape|/admin/storage": [
+  "clipped x legend:var ska nya filer lagras?",
+  "small input:",
+  "small select:enhet för gräns för kunskaps",
+  "small select:enhet för gräns för sessions",
+  "small select:enhet för gräns för transkri",
+  "small select:objektlagringpostgresql"
+ ],
+ "phone-landscape|/admin/templates": [
+  "clipped x span:fel:",
+  "small a:/admin/audit-logs",
+  "small a:/admin/crawler",
+  "small a:/admin/models",
+  "small a:/admin/usage",
+  "small a:/admin/users"
+ ],
+ "phone-landscape|/admin/tools": [
+  "small button:anslut en extern mcp-server"
+ ],
+ "phone-landscape|/admin/usage": [
+  "outside button:sortera efter beräknad kostn"
+ ],
+ "phone-landscape|/admin/users": [
+  "clipped x span:ingen",
+  "clipped x span:åtgärder",
+  "outside button:fler åtgärder för ee@example",
+  "small a:/admin",
+  "small button[combobox]:alla roller"
+ ],
+ "phone-landscape|/dashboard": [
+  "clipped x label:sök assistenter och appar",
+  "small a:/dashboard/$",
+  "small a:/dashboard/app/$",
+  "small a:/spaces/personal/chat"
+ ],
+ "phone-landscape|/dashboard/$/*": [
+  "clipped x span:retur ger en ny rad. skicka "
+ ],
+ "phone-landscape|/dashboard/app/$": [
+  "small a:/dashboard",
+  "small button[tab]:kör"
+ ],
+ "phone-landscape|/dashboard/app/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/dashboard/app/$"
+ ],
+ "phone-landscape|/deactivated": [],
+ "phone-landscape|/integrations/callback/token": [],
+ "phone-landscape|/invite/*": [],
+ "phone-landscape|/login": [],
+ "phone-landscape|/login/failed": [],
+ "phone-landscape|/login/switch-organisation": [],
+ "phone-landscape|/module-login": [],
+ "phone-landscape|/module-login/failed": [],
+ "phone-landscape|/password-change": [],
+ "phone-landscape|/spaces/$": [
+  "clipped x span:()",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-landscape|/spaces/$/*": [],
+ "phone-landscape|/spaces/$/apps": [
+  "clipped x label:filtrera appar",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-landscape|/spaces/$/apps/$": [
+  "small a:/spaces/$/apps",
+  "small button[tab]:kör"
+ ],
+ "phone-landscape|/spaces/$/apps/$/edit": [
+  "clipped x h1:protokoll",
+  "clipped x span:"
+ ],
+ "phone-landscape|/spaces/$/apps/$/results/$": [
+  "clipped x span:laddar...",
+  "small a:/spaces/$/apps/$"
+ ],
+ "phone-landscape|/spaces/$/assistants": [
+  "clipped x label:filtrera assistenter",
+  "small a:/spaces/$/chat"
+ ],
+ "phone-landscape|/spaces/$/assistants/$/edit": [
+  "clipped x h1:bygglov",
+  "clipped x span:"
+ ],
+ "phone-landscape|/spaces/$/chat": [
+  "clipped x label:chattmodell",
+  "clipped x span:retur ger en ny rad. skicka ",
+  "small button:chattmodell: ee mock",
+  "small button:gör en plansteg",
+  "small button:sammanfatta någotprotokoll",
+  "small button:skriv ett utkasttjänsteskriv"
+ ],
+ "phone-landscape|/spaces/$/group-chats/$/edit": [
+  "clipped x h1:grupp",
+  "clipped x span:"
+ ],
+ "phone-landscape|/spaces/$/knowledge": [
+  "clipped x div:kunskapsamlingar",
+  "clipped x label:filtrera samlingar",
+  "small a:/spaces/$/knowledge/collections/$"
+ ],
+ "phone-landscape|/spaces/$/knowledge/collections/$": [
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-landscape|/spaces/$/knowledge/integrations": [
+  "clipped x div:kunskapsamlingar"
+ ],
+ "phone-landscape|/spaces/$/knowledge/websites/$": [
+  "clipped x label:filtrera indexeringar",
+  "small a:/spaces/$/knowledge"
+ ],
+ "phone-landscape|/spaces/$/members": [
+  "clipped x h1:contract",
+  "clipped x span:roll: administratör"
+ ],
+ "phone-landscape|/spaces/$/overview": [
+  "clipped x span:()",
+  "small a:/spaces/$/members",
+  "small a:/spaces/$/services",
+  "small a:/spaces/$/settings",
+  "small a:/spaces/$/skills"
+ ],
+ "phone-landscape|/spaces/$/services": [
+  "clipped x h1:contract",
+  "clipped x label:filtrera tjänster",
+  "small a:/spaces/$/services/$"
+ ],
+ "phone-landscape|/spaces/$/services/$": [
+  "small a:/spaces/$/services"
+ ],
+ "phone-landscape|/spaces/$/settings": [
+  "clipped x h1:contract",
+  "outside a:api-nycklarapi-nycklar",
+  "outside a:farozonfarozon",
+  "outside a:funktionerfunktioner",
+  "small button[switch]:"
+ ],
+ "phone-landscape|/spaces/$/skills": [
+  "clipped x h1:contract"
+ ],
+ "phone-landscape|/spaces/$/skills/new": [
+  "overlap input: x button:skapa skill",
+  "small a:/spaces/$/skills",
+  "small summary:avancerade alternativ"
+ ],
+ "phone-landscape|/spaces/list": [
+  "clipped x label:filtrera ytor",
+  "small a:/spaces/$/overview"
+ ],
+ "phone-landscape|/whats-new": [
+  "small a:alla versionsnyheter på docs",
+  "small button:administration",
+  "small button:alla",
+  "small button:kunskap",
+  "small button[switch]:"
+ ]
+}

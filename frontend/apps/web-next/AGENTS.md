@@ -603,15 +603,29 @@ sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
 - Confirm a copy with a toast over a docked composer: confirm at the button.
 - Make a visible target smaller than 44 px on touch, or two targets overlap.
 
-**The check.** `tests/responsive-contract.spec.ts` opens every route of
-`tests/responsive-routes.ts` at seven phone and tablet sizes with touch and
-fails on a sideways scroll, a target under 44 px, a target outside the screen,
-two on top of each other and text cut off sideways. A route missing from the
-list fails a unit test (`src/test/responsive-routes.test.ts`), so a new screen
-cannot ship unchecked: add its route, with a way to open it. What is already
-wrong is in `tests/responsive-contract.baseline.json`; it only shrinks (a
-violation that is not there fails, and so does an entry that no longer occurs).
-Run it with `CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
+**The checks, so nobody walks screens by hand.** Every one is generated from
+the route list `tests/responsive-routes.ts`; a route missing from it fails a
+unit test (`src/test/responsive-routes.test.ts`), so a new screen cannot ship
+unchecked: add its route, with a way to open it.
+
+| What it finds                                                                                                        | Run                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)           |
+| WCAG 2.2 A/AA by axe (contrast, names, target size, structure) on every route, phone and iPad, light and dark        | `tests/a11y-routes.spec.ts` (`A11Y_ROUTES`, `A11Y_SHOTS=<dir>` saves a picture of each) |
+| The same with a dialog, menu or panel open, and what axe cannot see (collapsed table columns, reflow at 320)         | `tests/a11y.spec.ts`                                                                    |
+| Keyboard, safe areas, short screens, header and focus across a breakpoint                                            | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                       |
+| Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                       | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                          |
+
+What is already wrong is in `tests/responsive-contract.baseline.json`; it only
+shrinks: a violation that is not there fails, so does an entry that no longer
+occurs, and `BASELINE_BUDGET` in `src/test/responsive-baseline.test.ts` caps
+the total. Fix a screen, run the contract with `CONTRACT_UPDATE=1`, lower the
+budget. Example of a narrow run:
+`CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
+
+Automation finds the mechanical faults; it does not feel a tap, hear a screen
+reader or judge whether a flow makes sense. Those stay with a person on a
+device, once per feature (below).
 
 **By hand, once a feature is done.** Open it on a phone (a real one, or the
 iOS Simulator over https: Safari does not load a plain `http://localhost` app

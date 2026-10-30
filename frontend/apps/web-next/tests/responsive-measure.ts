@@ -1,0 +1,126 @@
+import type { Page } from "@playwright/test";
+
+/**
+ * What a phone user would trip over on the screen that is open, measured in the
+ * page itself. Names are normalised (digits and case dropped, cut at a comma, 28
+ * characters; a link by its path with ids dropped) so a test's unique names, a
+ * loading state and whatever data the stack holds do not make a violation look
+ * new on every run.
+ */
+export type Violation = { kind: "small" | "outside" | "overlap" | "clipped"; key: string };
+
+export type PageMeasure = {
+  /** Page and panel scroll sideways by this many px (0 = fine). */
+  overflowDoc: number;
+  overflowPanel: number;
+  violations: Violation[];
+};
+
+/** Targets under this many px, measured on a touch pointer (the Eneo standard). */
+export const MIN_TARGET = 44;
+
+export function measure(page: Page): Promise<PageMeasure> {
+  return page.evaluate((minTarget) => {
+    const width = innerWidth;
+    const shown = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      if (!box.width || !box.height) return false;
+      const style = getComputedStyle(element);
+      return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+    };
+    // A link is named by where it goes, ids dropped: a list's rows carry the names of
+    // whatever the stack holds, so naming them by text makes the baseline depend on data.
+    const linkName = (link: HTMLAnchorElement) => {
+      const url = new URL(link.href, location.href);
+      if (url.origin !== location.origin) return `a:${url.host}`;
+      const id =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{20,}$|^[0-9]{4,}$/i;
+      const path = url.pathname
+        .split("/")
+        .map((segment) => (id.test(segment) ? "$" : segment))
+        .join("/");
+      return `a:${path}${url.hash ? "#" : ""}`;
+    };
+    const name = (element: Element) => {
+      if (element instanceof HTMLAnchorElement && element.getAttribute("href")?.startsWith("/"))
+        return linkName(element);
+      const role = element.getAttribute("role");
+      // What follows a comma or a dot is state (loading, a count, a status), which
+      // differs from one run to the next; the leading label names the control.
+      const text = (element.getAttribute("aria-label") ?? element.textContent ?? "")
+        .split(/[,·]/)[0]!
+        .replace(/[0-9]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase()
+        .slice(0, 28);
+      return `${element.tagName.toLowerCase()}${role ? `[${role}]` : ""}:${text}`;
+    };
+    const controls =
+      "a[href], button, [role=button], [role=tab], [role=menuitem], [role=option], [role=switch], [role=checkbox], [role=radio], input:not([type=hidden]), select, textarea, summary";
+    const violations: { kind: "small" | "outside" | "overlap" | "clipped"; key: string }[] = [];
+    const targets: { element: Element; box: DOMRect }[] = [];
+    // A text field is tapped anywhere in its frame, not only on the <input>
+    // inside it: Astryx draws the 44 px frame around a 23 px input.
+    const hitArea = (element: Element) =>
+      element.matches("input:not([type=checkbox], [type=radio], [type=file]), textarea")
+        ? (element.closest("label, [class*='text-input'], [class*='textarea']") ?? element)
+        : element;
+    // A control under something else at its centre cannot be tapped: a list
+    // clipped by its scroll area, a menu under another. Below the fold or
+    // beside the screen it is reachable by scrolling, so it still counts.
+    const covered = (element: Element, box: DOMRect) => {
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
+      const top = document.elementFromPoint(x, y);
+      return !top || !(element.contains(top) || top.contains(element));
+    };
+    for (const element of document.querySelectorAll(controls)) {
+      if (!shown(element) || element.closest("[inert], [aria-hidden=true]")) continue;
+      const area = hitArea(element);
+      const box = area.getBoundingClientRect();
+      // Skip link: visually hidden until focused.
+      if (box.width <= 1 && box.height <= 1) continue;
+      if (covered(area, box)) continue;
+      // A link inside running text is sized by its line, not by a finger.
+      const inline =
+        element.tagName === "A" &&
+        getComputedStyle(element).display === "inline" &&
+        !!element.closest("p, li, span, td");
+      if (box.right > width + 1 || box.left < -1)
+        violations.push({ kind: "outside", key: name(element) });
+      if (!inline && (box.width < minTarget - 0.5 || box.height < minTarget - 0.5))
+        violations.push({ kind: "small", key: name(element) });
+      targets.push({ element: area, box });
+    }
+    for (let i = 0; i < targets.length; i++) {
+      for (let j = i + 1; j < targets.length; j++) {
+        const a = targets[i]!;
+        const b = targets[j]!;
+        if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+        const w = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
+        const h = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
+        if (w > 4 && h > 4)
+          violations.push({ kind: "overlap", key: `${name(a.element)} x ${name(b.element)}` });
+      }
+    }
+    const panel = document.getElementById("main-content") ?? document.body;
+    for (const element of panel.querySelectorAll("*")) {
+      const style = getComputedStyle(element);
+      const text = (element.textContent ?? "").trim();
+      if (!text || !shown(element)) continue;
+      const sideways =
+        (style.overflowX === "hidden" || style.overflowX === "clip") &&
+        style.textOverflow !== "ellipsis" &&
+        element.scrollWidth > element.clientWidth + 2;
+      if (sideways) violations.push({ kind: "clipped", key: `x ${name(element)}` });
+    }
+    const doc = document.documentElement;
+    return {
+      overflowDoc: doc.scrollWidth - doc.clientWidth,
+      overflowPanel: panel.scrollWidth - panel.clientWidth,
+      violations
+    };
+  }, MIN_TARGET);
+}
