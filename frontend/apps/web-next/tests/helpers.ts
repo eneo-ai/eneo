@@ -1,4 +1,5 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
+import type { components } from "../src/lib/api/schema";
 
 export const MOCK_REPLY = process.env.MOCK_REPLY ?? "E2E mock completion: pong";
 export const E2E_CREDENTIALS = {
@@ -22,6 +23,38 @@ export function isChatStream(url: URL): boolean {
     url.pathname === "/api/chat" ||
     (url.pathname === "/api/v1/conversations/" && url.searchParams.get("version") === "3")
   );
+}
+
+/**
+ * Stream fixtures forward through Playwright's API client, which has no browser
+ * fetch metadata. FastAPI therefore requires a Bearer token for this write;
+ * ordinary page requests still exercise the browser session cookie.
+ */
+export async function fetchChatStream(route: Route) {
+  let headers: Record<string, string> | undefined;
+  if (process.env.E2E_BASE_URL) {
+    const request = route.request();
+    const login = await request
+      .frame()
+      .page()
+      .request.post(new URL("/api/v1/users/login/token/", request.url()).href, {
+        form: E2E_CREDENTIALS
+      });
+    expect(login.status(), "Stream fixture authentication").toBe(200);
+    const token: components["schemas"]["AccessToken"] = await login.json();
+    headers = { ...request.headers(), authorization: `Bearer ${token.access_token}` };
+  }
+  const response = await route.fetch({ headers });
+  expect(response.status(), "Stream fixture response").toBe(200);
+  return response;
+}
+
+/** A successful API fixture belongs to the document that requested it. */
+export function sessionResponseHeaders(route: Route): Record<string, string> {
+  if (!process.env.E2E_BASE_URL) return {};
+  const generation = route.request().headers()["eneo-session-generation"];
+  if (!generation) throw new Error("Fixture request must identify its browser session");
+  return { "Eneo-Session-Generation": generation };
 }
 
 /** The chat composer's accessible name ("Fråga <assistent>"). */
@@ -78,7 +111,7 @@ const ANSWER_ACTIVITY = [
  */
 export async function addActivityToAnswers(page: Page) {
   await page.route(isChatStream, async (route) => {
-    const response = await route.fetch();
+    const response = await fetchChatStream(route);
     const events = (await response.text()).split(/\r?\n\r?\n/).filter((event) => event.trim());
     const answerStart = events.findIndex((event) => /"type":\s*"(text-start|finish)"/.test(event));
     events.splice(
@@ -90,6 +123,7 @@ export async function addActivityToAnswers(page: Page) {
     await route.fulfill({
       status: response.status(),
       headers: {
+        ...sessionResponseHeaders(route),
         "content-type": headers["content-type"] ?? "text/event-stream",
         "x-vercel-ai-ui-message-stream": headers["x-vercel-ai-ui-message-stream"] ?? "v1"
       },
