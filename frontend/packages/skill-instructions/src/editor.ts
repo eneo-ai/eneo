@@ -271,6 +271,8 @@ export function createInstructionEditor(options: EditorOptions) {
       return true;
     },
     handleDrop: (_view, event) => {
+      // ProseMirror preserves the slice and owns moving versus copying internally.
+      if (view.dragging) return false;
       // External HTML is never imported as editor nodes or fetched resources.
       const text = event.dataTransfer?.getData("text/plain");
       if (text) {
@@ -278,10 +280,9 @@ export function createInstructionEditor(options: EditorOptions) {
           left: event.clientX,
           top: event.clientY,
         });
+        if (!at) return true;
         view.dispatch(
-          closeHistory(view.state.tr)
-            .insertText(text, at?.pos)
-            .scrollIntoView(),
+          closeHistory(view.state.tr).insertText(text, at.pos).scrollIntoView(),
         );
       }
       return true;

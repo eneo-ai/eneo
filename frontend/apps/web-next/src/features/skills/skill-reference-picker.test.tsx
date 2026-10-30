@@ -30,6 +30,26 @@ function catalog(overrides: Partial<ReferenceCatalog> = {}): ReferenceCatalog {
 afterEach(cleanup);
 
 describe("instruction references", () => {
+  it("handles Escape inside an inline picker before it reaches the enclosing form", async () => {
+    const onClose = vi.fn();
+    const outerKeyDown = vi.fn();
+    renderInApp(
+      <div onKeyDown={outerKeyDown}>
+        <SkillReferencePicker
+          inline
+          catalog={catalog()}
+          selection={{ documentVersion: 0, from: 0, to: 0 }}
+          onSelect={vi.fn()}
+          onClose={onClose}
+          onRemove={vi.fn()}
+        />
+      </div>
+    );
+    const input = await screen.findByRole("textbox", { name: "Sök referens" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(outerKeyDown).not.toHaveBeenCalled();
+  });
   it("reviews the pinned Skill, recovers a failed preview, and supports keyboard selection", async () => {
     const preview = vi
       .fn()
@@ -75,7 +95,7 @@ describe("instruction references", () => {
     };
     const tool: ReferenceCandidate = {
       label: "Today",
-      description: "",
+      description: "Full tool description. ".repeat(30) + "No external data is fetched.",
       target: {
         kind: "mcp_tool",
         server_id: "33333333-3333-4333-8333-333333333333",
@@ -106,7 +126,11 @@ describe("instruction references", () => {
     fireEvent.click(screen.getByRole("button", { name: "Använd hela anslutningen" }));
     expect(onSelect).toHaveBeenCalledWith(server);
     fireEvent.click(screen.getByRole("button", { name: "Välj specifikt verktyg" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Today" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Today/ }));
+    expect(onSelect).not.toHaveBeenCalledWith(tool);
+    expect(screen.getByText(tool.description!)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Välj specifikt verktyg" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Infoga referens" }));
     expect(onSelect).toHaveBeenCalledWith(tool);
     expect(source.preview).not.toHaveBeenCalled();
   });

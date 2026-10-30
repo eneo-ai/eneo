@@ -177,6 +177,7 @@ export function SkillForm(props: Props) {
             <SkillInstructionEditor
               ref={instructionEditorRef}
               id={`${id}-instructions`}
+              describedBy={`${id}-instructions-problem`}
               value={instructions}
               onChange={setInstructions}
               disabled={busy}
@@ -201,7 +202,9 @@ export function SkillForm(props: Props) {
             <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
           )}
           {attempted && !instructions.trim() && (
-            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+            <p id={`${id}-instructions-problem`} className="text-destructive text-xs">
+              {t("skills_required_field")}
+            </p>
           )}
         </div>
         {props.mode === "create" && (

@@ -42,6 +42,51 @@ function key(key: string, options: KeyboardEventInit = {}) {
 }
 
 describe("literal instruction editor", () => {
+  it.each([false, true])(
+    "preserves a reference when dragging within the editor (copy=%s)",
+    (copy) => {
+      const original = "Before " + token + " after.";
+      setup(original);
+      editor.focus();
+      const chip = mount.querySelector("button")!;
+      chip.click();
+      const input = mount.querySelector("[contenteditable]")!;
+      const dataTransfer = new DataTransfer();
+      const start = chip.getBoundingClientRect();
+      const range = document.createRange();
+      const tail = input.querySelector("p")!.lastChild!;
+      range.setStart(tail, tail.textContent!.length);
+      range.collapse(true);
+      const end = range.getBoundingClientRect();
+      chip.dispatchEvent(
+        new DragEvent("dragstart", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          clientX: start.left + 1,
+          clientY: start.top + 1,
+          ctrlKey: copy,
+          altKey: copy
+        })
+      );
+      input.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          clientX: end.right + 1,
+          clientY: end.top + 1,
+          ctrlKey: copy,
+          altKey: copy
+        })
+      );
+      input.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+      expect(editor.getValue()).toBe((copy ? original : "Before  after.") + token);
+      expect(mount.querySelectorAll("button")).toHaveLength(copy ? 2 : 1);
+      key("z", { ctrlKey: true });
+      expect(editor.getValue()).toBe(original);
+    }
+  );
   it("shows the reference type and preserves the complete name and source behind a compact label", () => {
     const name = "A very long name ".repeat(15);
     const source = serializeReference(name, target);
