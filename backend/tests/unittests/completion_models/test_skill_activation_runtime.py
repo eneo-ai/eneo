@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -88,7 +89,10 @@ def _apply_activation_requests(
     ]
 
 
-def test_selective_runtime_advertises_descriptors_without_instruction_bodies():
+@pytest.mark.parametrize("with_helper", [False, True])
+def test_selective_runtime_advertises_descriptors_without_instruction_bodies(
+    with_helper,
+):
     always = _skill(
         key="skill-1",
         name="Safety",
@@ -105,6 +109,25 @@ def test_selective_runtime_advertises_descriptors_without_instruction_bodies():
         instructions="Secret payroll instructions.",
         initially_active=False,
     )
+
+    if with_helper:
+        helper = _skill(
+            key="helper",
+            name="Klartext",
+            description="Use plain language",
+            position=0,
+            instructions="Write clearly.",
+            initially_active=False,
+        )
+        always = replace(
+            always,
+            binding=replace(
+                always.binding,
+                instructions=always.binding.instructions
+                + f" Use [Klartext](eneo-skill:{helper.binding.skill_id}@{helper.binding.skill_revision_id}).",
+                dependencies=(helper.binding,),
+            ),
+        )
 
     runtime = SkillActivationRuntime.create(
         base_instructions="Base",
@@ -134,6 +157,15 @@ def test_selective_runtime_advertises_descriptors_without_instruction_bodies():
     assert "Use for payroll and salary questions" in tool.description
     assert "Secret payroll instructions." not in tool.description
     assert tool.schema["properties"]["skill_key"]["enum"] == ["skill-2"]
+    if with_helper:
+        reference = re.search(r"Use \[Klartext\] \(([^)]+)\)", runtime.prompt)
+        assert reference is not None
+        identity = reference[1]
+        assert f"[{identity}]\nWrite clearly." in runtime.prompt
+        assert (
+            identity.lower().replace(" ", "-")
+            not in tool.schema["properties"]["skill_key"]["enum"]
+        )
 
 
 def test_tool_references_use_exact_prepared_identity_and_survive_activation_staging():

@@ -186,12 +186,7 @@ def reference_identity(
     target: InstructionTarget, skill_identities: Mapping[UUID, str]
 ) -> str:
     if isinstance(target, SkillInstructionReference):
-        identity = skill_identities.get(target.revision_id)
-        if identity is None:
-            raise BadRequestException(
-                "Referenced Skill revision is missing from the activation group"
-            )
-        return identity
+        return skill_identities[target.revision_id]
     if isinstance(target, FunctionInstructionReference):
         return f"Function {target.purpose}"
     if isinstance(target, McpToolInstructionReference):

@@ -1088,7 +1088,7 @@ def compose_skill_instructions(
     effective = effective_skill_bindings(ordered, configured_order=configured_order)
     # Prompt-local identities stay unambiguous even when layers reuse a name or slug.
     skill_identities = {
-        binding.skill_revision_id: f"Skill {position + 1}"
+        binding.skill_revision_id: f"ref-{position + 1}"
         for position, binding in enumerate(effective)
     }
     if any(
