@@ -1,4 +1,4 @@
-"""Seed the E2E tenant with models wired to the mock server.
+"""Seed the E2E tenant with mock models and a migrated helper owner.
 
 Runs at stack startup (after init_db). Creates a model provider whose
 `endpoint` points at the in-network mock, and on it a default completion model
@@ -8,6 +8,9 @@ embedding model its knowledge collections need and the transcription model an
 app needs to be created, as with a real organisation's defaults. Idempotent:
 each row is created only when missing, so a rerun also completes a database
 seeded by an older version of this script.
+
+The tenant is created after migrations, so it also needs the inactive system
+user that the help-assistant infrastructure migration adds to existing tenants.
 
 The provider's API key is stored encrypted with the stack's fixed test
 ENCRYPTION_KEY, as the backend stores keys in production: with a key set it
@@ -28,6 +31,7 @@ from eneo.database.tables.ai_models_table import (
 )
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.settings.encryption_service import EncryptionService
 
@@ -54,6 +58,30 @@ async def main() -> None:
         tenant_id = (
             await session.execute(select(Tenants.id).where(Tenants.name == TENANT_NAME))
         ).scalar_one()
+
+        # init_db creates this tenant after the infrastructure migration. Give
+        # helper route tests the same inactive owner as a migrated tenant.
+        system_user = await session.scalar(
+            select(Users.id).where(
+                Users.tenant_id == tenant_id, Users.is_system_user.is_(True)
+            )
+        )
+        if system_user is None:
+            session.add(
+                Users(
+                    tenant_id=tenant_id,
+                    email=f"system+{tenant_id}@eneo.local",
+                    username=f"system+{tenant_id}",
+                    email_verified=False,
+                    password=None,
+                    salt=None,
+                    is_active=False,
+                    state="inactive",
+                    is_system_user=True,
+                    used_tokens=0,
+                )
+            )
+            done.append("created E2E helper owner")
 
         provider = (
             await session.execute(
