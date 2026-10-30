@@ -28,6 +28,6 @@ describe("AdminUsageRoute", () => {
     );
 
     expect(hydratedKeys).toHaveLength(2);
-    expect(hydratedKeys).toEqual(expect.arrayContaining(["admin-token-usage", "admin-storage"]));
+    expect(hydratedKeys).toEqual(expect.arrayContaining(["admin-token-usage", "storage"]));
   });
 });

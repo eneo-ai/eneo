@@ -561,9 +561,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # Stack build (~2 min), install, build and the specs take ~10 min; a hung
-    # stack or browser must not hold a runner for GitHub's 6-hour default.
-    timeout-minutes: 30
+    # During migration this job runs both Next and Vite suites sequentially.
+    # Setup plus both suites takes about 30 minutes; leave room for runner
+    # variation while still bounding a hung stack or browser.
+    timeout-minutes: 45
     env:
       # env.ts validates at import time, during the build and in `next start`.
       # The server talks to the stack's backend on the loopback port.

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { storageQueryOptions } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { sessionQueries } from "@/lib/api/session";
@@ -147,7 +148,7 @@ function UploadBlobsForm({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { limits, user, tenant, can } = useAppContext();
+  const { limits, user, can } = useAppContext();
   const queryClient = useQueryClient();
   // The collection's files, for the duplicate-title warning (cached on its
   // page); loaded when the dialog opens, so Upload rarely waits for them.
@@ -164,8 +165,7 @@ function UploadBlobsForm({
   );
 
   const { data: storage } = useQuery({
-    queryKey: ["storage", tenant.id],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
+    ...storageQueryOptions(browserApi),
     enabled: can("admin")
   });
   // The quota needs a fresh answer: the backend computes it live, and deleted

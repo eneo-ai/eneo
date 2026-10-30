@@ -16,6 +16,7 @@ import { Route as LogoutRouteImport } from "./routes/logout"
 import { Route as PasswordChangeRouteImport } from "./routes/password-change"
 import { Route as AppSplatRouteImport } from "./routes/_app/$"
 import { Route as AppAccountRouteImport } from "./routes/_app/account"
+import { Route as AppAdminRouteRouteImport } from "./routes/_app/admin/route"
 import { Route as AppWhatsNewRouteImport } from "./routes/_app/whats-new"
 import { Route as InviteSplatRouteImport } from "./routes/invite/$"
 import { Route as LoginIndexRouteImport } from "./routes/login/index"
@@ -29,11 +30,20 @@ import { Route as AppAccountAppearanceRouteImport } from "./routes/_app/account/
 import { Route as AppAccountCopyFormatRouteImport } from "./routes/_app/account/copy-format"
 import { Route as AppAccountIntegrationsRouteImport } from "./routes/_app/account/integrations"
 import { Route as AppAccountPasswordRouteImport } from "./routes/_app/account/password"
+import { Route as AppAdminIndexRouteImport } from "./routes/_app/admin/index"
+import { Route as AppAdminApiKeysRouteImport } from "./routes/_app/admin/api-keys"
+import { Route as AppAdminAuditLogsRouteImport } from "./routes/_app/admin/audit-logs"
+import { Route as AppAdminCrawlerRouteImport } from "./routes/_app/admin/crawler"
+import { Route as AppAdminRolesRouteImport } from "./routes/_app/admin/roles"
+import { Route as AppAdminSettingsRouteImport } from "./routes/_app/admin/settings"
+import { Route as AppAdminStorageRouteImport } from "./routes/_app/admin/storage"
+import { Route as AppAdminUsersRouteImport } from "./routes/_app/admin/users"
 import { Route as AppDashboardIndexRouteImport } from "./routes/_app/dashboard/index"
 import { Route as AppSpacesIndexRouteImport } from "./routes/_app/spaces/index"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
 import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
 import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
+import { Route as AppAdminUsageIndexRouteImport } from "./routes/_app/admin/usage/index"
 import { Route as AppDashboardAssistantIdChar123SessionIdChar125RouteImport } from "./routes/_app/dashboard/$assistantId/{-$sessionId}"
 import { Route as AppSpacesSpaceIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/index"
 import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
@@ -42,6 +52,7 @@ import { Route as AppSpacesSpaceIdFlowsRouteImport } from "./routes/_app/spaces/
 import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/spaces/$spaceId/members"
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
+import { Route as AppAdminUsageUsersUserIdRouteImport } from "./routes/_app/admin/usage/users/$userId"
 import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
 import { Route as AppSpacesSpaceIdAppsIndexRouteImport } from "./routes/_app/spaces/$spaceId/apps/index"
 import { Route as AppSpacesSpaceIdAssistantsIndexRouteImport } from "./routes/_app/spaces/$spaceId/assistants/index"
@@ -99,6 +110,11 @@ const AppSplatRoute = AppSplatRouteImport.update({
 const AppAccountRoute = AppAccountRouteImport.update({
   id: "/account",
   path: "/account",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdminRouteRoute = AppAdminRouteRouteImport.update({
+  id: "/admin",
+  path: "/admin",
   getParentRoute: () => AppRoute,
 } as any)
 const AppWhatsNewRoute = AppWhatsNewRouteImport.update({
@@ -166,6 +182,46 @@ const AppAccountPasswordRoute = AppAccountPasswordRouteImport.update({
   path: "/password",
   getParentRoute: () => AppAccountRoute,
 } as any)
+const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminApiKeysRoute = AppAdminApiKeysRouteImport.update({
+  id: "/api-keys",
+  path: "/api-keys",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminAuditLogsRoute = AppAdminAuditLogsRouteImport.update({
+  id: "/audit-logs",
+  path: "/audit-logs",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminCrawlerRoute = AppAdminCrawlerRouteImport.update({
+  id: "/crawler",
+  path: "/crawler",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
+  id: "/roles",
+  path: "/roles",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminSettingsRoute = AppAdminSettingsRouteImport.update({
+  id: "/settings",
+  path: "/settings",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminStorageRoute = AppAdminStorageRouteImport.update({
+  id: "/storage",
+  path: "/storage",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: "/users",
+  path: "/users",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
 const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
   id: "/dashboard/",
   path: "/dashboard/",
@@ -192,6 +248,11 @@ const IntegrationsCallbackTokenRoute =
     path: "/integrations/callback/token",
     getParentRoute: () => rootRouteImport,
   } as any)
+const AppAdminUsageIndexRoute = AppAdminUsageIndexRouteImport.update({
+  id: "/usage/",
+  path: "/usage/",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
 const AppDashboardAssistantIdChar123SessionIdChar125Route =
   AppDashboardAssistantIdChar123SessionIdChar125RouteImport.update({
     id: "/dashboard/$assistantId/{-$sessionId}",
@@ -234,6 +295,12 @@ const AppSpacesSpaceIdSettingsRoute =
     id: "/settings",
     path: "/settings",
     getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppAdminUsageUsersUserIdRoute =
+  AppAdminUsageUsersUserIdRouteImport.update({
+    id: "/usage/users/$userId",
+    path: "/usage/users/$userId",
+    getParentRoute: () => AppAdminRouteRoute,
   } as any)
 const AppDashboardAppAppIdIndexRoute =
   AppDashboardAppAppIdIndexRouteImport.update({
@@ -387,6 +454,7 @@ export interface FileRoutesByFullPath {
   "/deactivated": typeof DeactivatedRoute
   "/logout": typeof LogoutRoute
   "/password-change": typeof PasswordChangeRoute
+  "/admin": typeof AppAdminRouteRouteWithChildren
   "/$": typeof AppSplatRoute
   "/account": typeof AppAccountRouteWithChildren
   "/whats-new": typeof AppWhatsNewRoute
@@ -401,10 +469,18 @@ export interface FileRoutesByFullPath {
   "/account/copy-format": typeof AppAccountCopyFormatRoute
   "/account/integrations": typeof AppAccountIntegrationsRoute
   "/account/password": typeof AppAccountPasswordRoute
+  "/admin/api-keys": typeof AppAdminApiKeysRoute
+  "/admin/audit-logs": typeof AppAdminAuditLogsRoute
+  "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/roles": typeof AppAdminRolesRoute
+  "/admin/settings": typeof AppAdminSettingsRoute
+  "/admin/storage": typeof AppAdminStorageRoute
+  "/admin/users": typeof AppAdminUsersRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account/": typeof AppAccountIndexRoute
+  "/admin/": typeof AppAdminIndexRoute
   "/dashboard/": typeof AppDashboardIndexRoute
   "/spaces/": typeof AppSpacesIndexRoute
   "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
@@ -414,7 +490,9 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/admin/usage/": typeof AppAdminUsageIndexRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
   "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
@@ -458,9 +536,17 @@ export interface FileRoutesByTo {
   "/account/copy-format": typeof AppAccountCopyFormatRoute
   "/account/integrations": typeof AppAccountIntegrationsRoute
   "/account/password": typeof AppAccountPasswordRoute
+  "/admin/api-keys": typeof AppAdminApiKeysRoute
+  "/admin/audit-logs": typeof AppAdminAuditLogsRoute
+  "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/roles": typeof AppAdminRolesRoute
+  "/admin/settings": typeof AppAdminSettingsRoute
+  "/admin/storage": typeof AppAdminStorageRoute
+  "/admin/users": typeof AppAdminUsersRoute
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/account": typeof AppAccountIndexRoute
+  "/admin": typeof AppAdminIndexRoute
   "/dashboard": typeof AppDashboardIndexRoute
   "/spaces": typeof AppSpacesIndexRoute
   "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
@@ -469,7 +555,9 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/admin/usage": typeof AppAdminUsageIndexRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
+  "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
@@ -501,6 +589,7 @@ export interface FileRoutesById {
   "/deactivated": typeof DeactivatedRoute
   "/logout": typeof LogoutRoute
   "/password-change": typeof PasswordChangeRoute
+  "/_app/admin": typeof AppAdminRouteRouteWithChildren
   "/_app/$": typeof AppSplatRoute
   "/_app/account": typeof AppAccountRouteWithChildren
   "/_app/whats-new": typeof AppWhatsNewRoute
@@ -515,10 +604,18 @@ export interface FileRoutesById {
   "/_app/account/copy-format": typeof AppAccountCopyFormatRoute
   "/_app/account/integrations": typeof AppAccountIntegrationsRoute
   "/_app/account/password": typeof AppAccountPasswordRoute
+  "/_app/admin/api-keys": typeof AppAdminApiKeysRoute
+  "/_app/admin/audit-logs": typeof AppAdminAuditLogsRoute
+  "/_app/admin/crawler": typeof AppAdminCrawlerRoute
+  "/_app/admin/roles": typeof AppAdminRolesRoute
+  "/_app/admin/settings": typeof AppAdminSettingsRoute
+  "/_app/admin/storage": typeof AppAdminStorageRoute
+  "/_app/admin/users": typeof AppAdminUsersRoute
   "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/_app/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
   "/_app/account/": typeof AppAccountIndexRoute
+  "/_app/admin/": typeof AppAdminIndexRoute
   "/_app/dashboard/": typeof AppDashboardIndexRoute
   "/_app/spaces/": typeof AppSpacesIndexRoute
   "/_app/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
@@ -528,7 +625,9 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
   "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
+  "/_app/admin/usage/": typeof AppAdminUsageIndexRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/_app/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/_app/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
   "/_app/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
@@ -561,6 +660,7 @@ export interface FileRouteTypes {
     | "/deactivated"
     | "/logout"
     | "/password-change"
+    | "/admin"
     | "/$"
     | "/account"
     | "/whats-new"
@@ -575,10 +675,18 @@ export interface FileRouteTypes {
     | "/account/copy-format"
     | "/account/integrations"
     | "/account/password"
+    | "/admin/api-keys"
+    | "/admin/audit-logs"
+    | "/admin/crawler"
+    | "/admin/roles"
+    | "/admin/settings"
+    | "/admin/storage"
+    | "/admin/users"
     | "/spaces/$spaceId"
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account/"
+    | "/admin/"
     | "/dashboard/"
     | "/spaces/"
     | "/dashboard/$assistantId/{-$sessionId}"
@@ -588,7 +696,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/members"
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
+    | "/admin/usage/"
     | "/spaces/$spaceId/"
+    | "/admin/usage/users/$userId"
     | "/spaces/$spaceId/flows/$flowId"
     | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
@@ -632,9 +742,17 @@ export interface FileRouteTypes {
     | "/account/copy-format"
     | "/account/integrations"
     | "/account/password"
+    | "/admin/api-keys"
+    | "/admin/audit-logs"
+    | "/admin/crawler"
+    | "/admin/roles"
+    | "/admin/settings"
+    | "/admin/storage"
+    | "/admin/users"
     | "/spaces/list"
     | "/integrations/callback/token"
     | "/account"
+    | "/admin"
     | "/dashboard"
     | "/spaces"
     | "/dashboard/$assistantId/{-$sessionId}"
@@ -643,7 +761,9 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/members"
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
+    | "/admin/usage"
     | "/spaces/$spaceId"
+    | "/admin/usage/users/$userId"
     | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
@@ -674,6 +794,7 @@ export interface FileRouteTypes {
     | "/deactivated"
     | "/logout"
     | "/password-change"
+    | "/_app/admin"
     | "/_app/$"
     | "/_app/account"
     | "/_app/whats-new"
@@ -688,10 +809,18 @@ export interface FileRouteTypes {
     | "/_app/account/copy-format"
     | "/_app/account/integrations"
     | "/_app/account/password"
+    | "/_app/admin/api-keys"
+    | "/_app/admin/audit-logs"
+    | "/_app/admin/crawler"
+    | "/_app/admin/roles"
+    | "/_app/admin/settings"
+    | "/_app/admin/storage"
+    | "/_app/admin/users"
     | "/_app/spaces/$spaceId"
     | "/_app/spaces/list"
     | "/integrations/callback/token"
     | "/_app/account/"
+    | "/_app/admin/"
     | "/_app/dashboard/"
     | "/_app/spaces/"
     | "/_app/dashboard/$assistantId/{-$sessionId}"
@@ -701,7 +830,9 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/members"
     | "/_app/spaces/$spaceId/overview"
     | "/_app/spaces/$spaceId/settings"
+    | "/_app/admin/usage/"
     | "/_app/spaces/$spaceId/"
+    | "/_app/admin/usage/users/$userId"
     | "/_app/spaces/$spaceId/flows/$flowId"
     | "/_app/spaces/$spaceId/services/$serviceId"
     | "/_app/spaces/$spaceId/skills/$skillId"
@@ -792,6 +923,13 @@ declare module "@tanstack/react-router" {
       path: "/account"
       fullPath: "/account"
       preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/admin": {
+      id: "/_app/admin"
+      path: "/admin"
+      fullPath: "/admin"
+      preLoaderRoute: typeof AppAdminRouteRouteImport
       parentRoute: typeof AppRoute
     }
     "/_app/whats-new": {
@@ -885,6 +1023,62 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAccountPasswordRouteImport
       parentRoute: typeof AppAccountRoute
     }
+    "/_app/admin/": {
+      id: "/_app/admin/"
+      path: "/"
+      fullPath: "/admin/"
+      preLoaderRoute: typeof AppAdminIndexRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/api-keys": {
+      id: "/_app/admin/api-keys"
+      path: "/api-keys"
+      fullPath: "/admin/api-keys"
+      preLoaderRoute: typeof AppAdminApiKeysRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/audit-logs": {
+      id: "/_app/admin/audit-logs"
+      path: "/audit-logs"
+      fullPath: "/admin/audit-logs"
+      preLoaderRoute: typeof AppAdminAuditLogsRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/crawler": {
+      id: "/_app/admin/crawler"
+      path: "/crawler"
+      fullPath: "/admin/crawler"
+      preLoaderRoute: typeof AppAdminCrawlerRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/roles": {
+      id: "/_app/admin/roles"
+      path: "/roles"
+      fullPath: "/admin/roles"
+      preLoaderRoute: typeof AppAdminRolesRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/settings": {
+      id: "/_app/admin/settings"
+      path: "/settings"
+      fullPath: "/admin/settings"
+      preLoaderRoute: typeof AppAdminSettingsRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/storage": {
+      id: "/_app/admin/storage"
+      path: "/storage"
+      fullPath: "/admin/storage"
+      preLoaderRoute: typeof AppAdminStorageRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/users": {
+      id: "/_app/admin/users"
+      path: "/users"
+      fullPath: "/admin/users"
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
     "/_app/dashboard/": {
       id: "/_app/dashboard/"
       path: "/dashboard"
@@ -919,6 +1113,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/integrations/callback/token"
       preLoaderRoute: typeof IntegrationsCallbackTokenRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/_app/admin/usage/": {
+      id: "/_app/admin/usage/"
+      path: "/usage"
+      fullPath: "/admin/usage/"
+      preLoaderRoute: typeof AppAdminUsageIndexRouteImport
+      parentRoute: typeof AppAdminRouteRoute
     }
     "/_app/dashboard/$assistantId/{-$sessionId}": {
       id: "/_app/dashboard/$assistantId/{-$sessionId}"
@@ -975,6 +1176,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/spaces/$spaceId/settings"
       preLoaderRoute: typeof AppSpacesSpaceIdSettingsRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/admin/usage/users/$userId": {
+      id: "/_app/admin/usage/users/$userId"
+      path: "/usage/users/$userId"
+      fullPath: "/admin/usage/users/$userId"
+      preLoaderRoute: typeof AppAdminUsageUsersUserIdRouteImport
+      parentRoute: typeof AppAdminRouteRoute
     }
     "/_app/dashboard/app/$appId/": {
       id: "/_app/dashboard/app/$appId/"
@@ -1147,6 +1355,36 @@ declare module "@tanstack/react-router" {
   }
 }
 
+interface AppAdminRouteRouteChildren {
+  AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
+  AppAdminAuditLogsRoute: typeof AppAdminAuditLogsRoute
+  AppAdminCrawlerRoute: typeof AppAdminCrawlerRoute
+  AppAdminRolesRoute: typeof AppAdminRolesRoute
+  AppAdminSettingsRoute: typeof AppAdminSettingsRoute
+  AppAdminStorageRoute: typeof AppAdminStorageRoute
+  AppAdminUsersRoute: typeof AppAdminUsersRoute
+  AppAdminIndexRoute: typeof AppAdminIndexRoute
+  AppAdminUsageIndexRoute: typeof AppAdminUsageIndexRoute
+  AppAdminUsageUsersUserIdRoute: typeof AppAdminUsageUsersUserIdRoute
+}
+
+const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
+  AppAdminApiKeysRoute: AppAdminApiKeysRoute,
+  AppAdminAuditLogsRoute: AppAdminAuditLogsRoute,
+  AppAdminCrawlerRoute: AppAdminCrawlerRoute,
+  AppAdminRolesRoute: AppAdminRolesRoute,
+  AppAdminSettingsRoute: AppAdminSettingsRoute,
+  AppAdminStorageRoute: AppAdminStorageRoute,
+  AppAdminUsersRoute: AppAdminUsersRoute,
+  AppAdminIndexRoute: AppAdminIndexRoute,
+  AppAdminUsageIndexRoute: AppAdminUsageIndexRoute,
+  AppAdminUsageUsersUserIdRoute: AppAdminUsageUsersUserIdRoute,
+}
+
+const AppAdminRouteRouteWithChildren = AppAdminRouteRoute._addFileChildren(
+  AppAdminRouteRouteChildren,
+)
+
 interface AppAccountRouteChildren {
   AppAccountApiKeysRoute: typeof AppAccountApiKeysRoute
   AppAccountAppearanceRoute: typeof AppAccountAppearanceRoute
@@ -1272,6 +1510,7 @@ const AppSpacesSpaceIdRouteWithChildren =
   AppSpacesSpaceIdRoute._addFileChildren(AppSpacesSpaceIdRouteChildren)
 
 interface AppRouteChildren {
+  AppAdminRouteRoute: typeof AppAdminRouteRouteWithChildren
   AppSplatRoute: typeof AppSplatRoute
   AppAccountRoute: typeof AppAccountRouteWithChildren
   AppWhatsNewRoute: typeof AppWhatsNewRoute
@@ -1285,6 +1524,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRouteRoute: AppAdminRouteRouteWithChildren,
   AppSplatRoute: AppSplatRoute,
   AppAccountRoute: AppAccountRouteWithChildren,
   AppWhatsNewRoute: AppWhatsNewRoute,

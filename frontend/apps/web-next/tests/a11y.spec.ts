@@ -735,7 +735,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("admin overview", async ({ page }) => {
+    test("admin overview", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
@@ -750,7 +750,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin settings", async ({ page }) => {
+    test("admin settings", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/settings", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Inställningar|Settings)$/ })
@@ -759,7 +759,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin users", async ({ page }) => {
+    test("admin users", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/users", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
@@ -786,7 +786,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin crawler", async ({ page }) => {
+    test("admin crawler", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/crawler", async () => {
         await expect(page.getByRole("heading", { level: 1, name: /^Crawler$/ })).toBeVisible();
         await expect(page.getByRole("group", { name: /schemaläggare|scheduler/i })).toBeVisible();
@@ -943,7 +943,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           await expectNoAxeViolations(page);
         });
 
-        test("admin users", async ({ page }) => {
+        test("admin users", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/admin/users", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
@@ -970,7 +970,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         // A phone only: each scan opens an access session, and the backend
         // allows five an hour (admin-audit.spec.ts opens one more).
         if (layout.phone) {
-          test("admin audit log", async ({ page }) => {
+          test("admin audit log", { tag: "@vite" }, async ({ page }) => {
             await auditLogs(page);
             await expectNoAxeViolations(page);
           });
@@ -1137,7 +1137,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("admin users", async ({ page }) => {
+  test("admin users", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/admin/users");
     await expect(
       page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })

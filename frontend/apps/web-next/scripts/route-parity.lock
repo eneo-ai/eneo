@@ -5,6 +5,17 @@ dad18e7a5d42d0d5d20019cd0ced14c4bbb23074  (app)/account/integrations/page.tsx
 0273606893ac5ebac328abb8cf032fdaf9a9e99f  (app)/account/layout.tsx
 c213f2dc385fbd1d07c22549f4d90df0d09ebf47  (app)/account/page.tsx
 c67bd2212612b3e43cccb4164f65344c94d1219d  (app)/account/password/page.tsx
+abbb2886f8810ffe5074f8586b41878e244b0e8f  (app)/admin/api-keys/page.tsx
+f777a0f7fdd533ca33789807ef7b9ca7af1e8aa1  (app)/admin/audit-logs/page.tsx
+268dfcf83b7ad2454fb177e2184eddef6a568ece  (app)/admin/crawler/page.tsx
+54f63046e28ea8be4b8d835db5a65885cf5822ad  (app)/admin/layout.tsx
+d336e87b9323900cb7377b735b0a7329b4338482  (app)/admin/page.tsx
+d9a04e1b5a5b6341f6d33d5d3d85a57a4f4c2bfc  (app)/admin/roles/page.tsx
+95abf44c1dc7079d2f49f72ba3cec44d313ad38a  (app)/admin/settings/page.tsx
+ef5462b7da4ce492a2136c8b6c125c5aa5d6d3bd  (app)/admin/storage/page.tsx
+eb238fd891a4c5ab52740df5d4254f90279995d8  (app)/admin/usage/page.tsx
+2591025fae84a55b7a07af9042f5e823c0e9e1ff  (app)/admin/usage/users/[userId]/page.tsx
+75258deb259eb8879b36976f5b03d31c29e1f3ee  (app)/admin/users/page.tsx
 a646dc8f1657d4583abc392b213725399399422e  (app)/dashboard/[assistantId]/[[...sessionId]]/page.tsx
 5bb8ce90aac94e8b4aa0877a6c9a94fca4355bae  (app)/dashboard/app/[appId]/page.tsx
 feef18a8fba4fb0d373ecee29ec154c4f47bd5f0  (app)/dashboard/app/[appId]/results/[resultId]/page.tsx

@@ -7,7 +7,7 @@ import type { Schema } from "@/lib/api/models";
 export type TokenUsage = Schema<"TokenUsageSummary">;
 export type UserTokenUsage = Schema<"UserTokenUsageSummary">;
 export type UserTokenUsageDetail = Schema<"UserTokenUsageSummaryDetail">;
-export type StorageModel = Schema<"StorageModel">;
+export { storageQueryOptions, type StorageModel } from "@/features/storage/storage";
 export type StorageInfo = Schema<"StorageInfoModel">;
 export type UserUsageRow = Schema<"UserTokenUsage">;
 
@@ -277,15 +277,9 @@ export function formatCost(amount: number | null): string {
     maximumFractionDigits: amount > 0 && amount < 1 ? 4 : 2
   }).format(amount);
 }
-export function storageQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-storage"],
-    queryFn: (): Promise<StorageModel> => unwrap(api.GET("/api/v1/storage/"))
-  });
-}
 export function storageSpacesQueryOptions(api: EneoClient) {
   return queryOptions({
-    queryKey: ["admin-storage-spaces"],
+    queryKey: ["storage", "spaces"],
     queryFn: (): Promise<StorageInfo> => unwrap(api.GET("/api/v1/storage/spaces/"))
   });
 }

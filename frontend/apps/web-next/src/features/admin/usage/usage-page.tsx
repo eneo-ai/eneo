@@ -25,6 +25,7 @@ import { blockingError, QueryStateBoundary } from "@/components/composites/query
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { storageQueryOptions, type StorageModel } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
@@ -36,10 +37,8 @@ import {
   isDefaultUsageRange,
   MAX_SEARCH_LENGTH,
   readUsageView,
-  storageQueryOptions,
   storageSpacesQueryOptions,
   type StorageInfo,
-  type StorageModel,
   type TokenUsage,
   tokenUsageQueryOptions,
   type UsageIntensity,
