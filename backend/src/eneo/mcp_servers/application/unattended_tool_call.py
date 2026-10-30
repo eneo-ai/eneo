@@ -33,10 +33,8 @@ if TYPE_CHECKING:
 # and the caller leaves with the connection closed.
 EXCHANGE_STOP_GRACE_SECONDS = 1.0
 
-# An exchange is told to stop this many times, each with an equal share of
-# the grace. One time is not enough while it connects: the client answers
-# that cancellation by asking the server why the connect failed, a request
-# the server can keep open for as long as it likes, and the next one ends it.
+# Retry cancellation within the same grace when an exchange suppresses the
+# first request while cleaning up.
 _STOP_ATTEMPTS = 2
 
 # An exchange that was let go is still a running task; its name tells it apart
@@ -67,9 +65,8 @@ async def _stop(exchange: asyncio.Task[MCPToolAnswer]) -> None:
     """Tell the exchange to stop and wait for it, within the grace.
 
     A caller that is cancelled while it waits here still tells the exchange
-    every time and waits each share out: left after the first time, the
-    exchange would stay on the client's question for as long as the server
-    likes. The caller's own cancellation is raised when this is done.
+    every time and waits each share out, even if cleanup suppresses the first
+    cancellation. The caller's own cancellation is raised when this is done.
     """
     loop = asyncio.get_running_loop()
     cancelled = False
@@ -138,10 +135,8 @@ class UnattendedToolCaller:
             terminate_session_on_close=False,
             http_client_factory=http_client_factory,
         )
-        # A task of its own: the client closes on the task that connected,
-        # and it answers a cancellation during connect or close with a failed
-        # connect or a finished close. The caller's cancellation is therefore
-        # taken here, at this task's own wait, where nothing can rewrite it.
+        # A separate exchange lets the caller enforce its whole-call budget
+        # and bounded stop grace even when cleanup suppresses cancellation.
         exchange = asyncio.create_task(
             _exchange(client, tool_name, arguments), name=EXCHANGE_TASK_NAME
         )

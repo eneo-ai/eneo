@@ -29,7 +29,6 @@ from eneo.mcp_servers.application.unattended_tool_call import (
     UnattendedToolCaller,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
-from eneo.mcp_servers.infrastructure.client import mcp_client
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPHttpClientFactory,
@@ -542,14 +541,8 @@ async def test_closing_sends_nothing_that_a_server_could_leave_unanswered() -> N
 
 
 async def test_an_exchange_stopped_while_it_connects_stops_asking_the_server() -> None:
-    # Kills the mutant that tells an exchange to stop once. This server never
-    # answers an initialize: the budget ends during connect, the client then
-    # asks the server why the connect failed, and that request is held too.
-    # Stopped once, the exchange stays on that request for as long as the
-    # server likes, with the connection and the credential. Also kills the
-    # mutant that asks that question with an HTTP client of its own instead
-    # of one the caller's factory builds (an unattended call then reaches an
-    # address nobody vetted).
+    # A timed-out handshake must close its connection without sending a
+    # diagnostic request or finishing initialization after the caller leaves.
     app = one_tool_app(
         lambda request_id: tool_result(request_id, _text("never asked")),
         before_initialize=lambda: app.state.shutting_down.wait(),
@@ -577,36 +570,28 @@ async def test_an_exchange_stopped_while_it_connects_stops_asking_the_server() -
 
     assert elapsed < ONE_SECOND_BUDGET_ENDS_BY
     assert still_running == 0
-    assert sent_through_the_factory == app.state.requests == ["initialize"] * 2
-    assert app.state.requests == ["initialize", "initialize"]
+    assert sent_through_the_factory == app.state.requests == ["initialize"]
 
 
 async def test_an_exchange_that_does_not_stop_when_told_is_let_go_and_ends_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Kills the mutant that waits for a stopped exchange as long as it takes,
-    # the one that reports a budget that ended during connect as "could not
-    # connect", and the one that lets go without reading how the exchange
-    # ended (asyncio then reports an exception that nobody retrieved). The
-    # client's question about the failed connect stands in for anything in an
-    # exchange that goes on through every cancellation.
+    # Even a tool implementation that suppresses cancellation cannot hold
+    # the caller beyond the stop grace; its eventual failure is retrieved.
     loop = asyncio.get_running_loop()
     goes_on_for = 3 * EXCHANGE_STOP_GRACE_SECONDS
 
-    async def question_that_does_not_stop(*_: object, **__: object) -> str:
+    async def call_that_does_not_stop(*_: object, **__: object) -> MCPToolAnswer:
         ends = loop.time() + goes_on_for
         while (left := ends - loop.time()) > 0:
             try:
                 await asyncio.sleep(left)
             except asyncio.CancelledError:
                 continue
-        return "asked too late"
+        raise MCPClientError("Tool call ended after its caller left")
 
-    monkeypatch.setattr(mcp_client, "_diagnose_http", question_that_does_not_stop)
-    app = one_tool_app(
-        lambda request_id: tool_result(request_id, _text("never asked")),
-        before_initialize=lambda: app.state.shutting_down.wait(),
-    )
+    monkeypatch.setattr(MCPClient, "call_tool_as_sent", call_that_does_not_stop)
+    app = one_tool_app(lambda request_id: tool_result(request_id, _text("unused")))
     unretrieved: list[object] = []
     handler = loop.get_exception_handler()
     loop.set_exception_handler(lambda _, context: unretrieved.append(context))
@@ -636,39 +621,45 @@ async def test_an_exchange_that_does_not_stop_when_told_is_let_go_and_ends_alone
 )
 async def test_a_caller_cancelled_while_it_stops_the_exchange_still_stops_it(
     cancelled: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Kills the mutants whose stop ends at a cancellation of the caller, or
-    # goes on without waiting its share out. This server never answers an
-    # initialize, so an exchange that was told to stop once goes on to the
-    # client's question about the failed connect, and would stay on it, with
-    # the connection and the credential, as long as the server likes. The
-    # caller is cancelled while that question is out (after its budget ended,
-    # or for a second time), or twice in a row, the second time before the
-    # exchange has got as far as the question.
-    app = one_tool_app(
-        lambda request_id: tool_result(request_id, _text("never asked")),
-        before_initialize=lambda: app.state.shutting_down.wait(),
-    )
+    # Hold cleanup after the first cancellation, independently of transport
+    # diagnostics. A second cancellation of the caller must not abandon it.
+    calling = asyncio.Event()
+    stopping = asyncio.Event()
 
-    async def initializes(count: int) -> None:
-        while app.state.requests != ["initialize"] * count:
-            await asyncio.sleep(0.01)
+    async def call_with_slow_cleanup(*_: object, **__: object) -> MCPToolAnswer:
+        calling.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopping.set()
+            await asyncio.Event().wait()
+            raise
+        raise AssertionError("The held call must be cancelled")
+
+    monkeypatch.setattr(MCPClient, "call_tool_as_sent", call_with_slow_cleanup)
+    app = one_tool_app(lambda request_id: tool_result(request_id, _text("unused")))
 
     async with serve_test_app(app) as url:
         caller = asyncio.create_task(
             _call(url, timeout=1 if cancelled == "after-the-budget" else 5)
         )
-        if cancelled != "after-the-budget":
-            await asyncio.wait_for(initializes(1), timeout=3)
+        try:
+            await asyncio.wait_for(calling.wait(), timeout=3)
+            if cancelled != "after-the-budget":
+                caller.cancel()
+            if cancelled == "twice-in-a-row":
+                await asyncio.sleep(0)
+            else:
+                await asyncio.wait_for(stopping.wait(), timeout=3)
             caller.cancel()
-        if cancelled == "twice-in-a-row":
-            await asyncio.sleep(0)
-        else:
-            # The second initialize is the client's question.
-            await asyncio.wait_for(initializes(2), timeout=3)
-        caller.cancel()
-        await asyncio.wait({caller}, timeout=ONE_SECOND_BUDGET_ENDS_BY)
-        still_running = _exchanges_still_running()
+            await asyncio.wait({caller}, timeout=ONE_SECOND_BUDGET_ENDS_BY)
+            still_running = _exchanges_still_running()
+        finally:
+            if not caller.done():
+                caller.cancel()
+            await asyncio.gather(caller, return_exceptions=True)
 
     assert caller.done() and caller.cancelled()
     assert still_running == 0

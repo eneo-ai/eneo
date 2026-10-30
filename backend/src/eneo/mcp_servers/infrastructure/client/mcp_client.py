@@ -1120,9 +1120,9 @@ class _ConnectionHost:
                 # Connecting failed; the connector reports it. The contexts
                 # entered so far have already been left on this task.
                 if interrupted:
-                    # Only the host itself was cancelled (a shutdown drain, a
-                    # stop deadline), never the connector, which must not see
-                    # a cancellation it did not receive.
+                    # A connector still waiting must see a connection failure,
+                    # not a cancellation it did not receive. Its own
+                    # cancellation is handled at wait_ready instead.
                     self._ready.set_exception(
                         MCPClientError(
                             "The MCP connection was closed before its handshake "
@@ -1490,9 +1490,11 @@ class MCPClient:
             try:
                 await host.wait_ready()
             except BaseException:
-                # A failed handshake has already left its contexts; a cancelled
-                # connector leaves the host to finish on its own and unwind.
+                # A failed handshake has already left its contexts. Cancel a
+                # pending one on its owner task so it cannot send initialized
+                # or retain credentials after the connector gives up.
                 host.request_stop()
+                host.task.cancel()
                 raise
             self._host = host
 
