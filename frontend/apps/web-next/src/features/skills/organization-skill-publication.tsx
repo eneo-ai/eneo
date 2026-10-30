@@ -292,7 +292,7 @@ export function OrganizationSkillPublication({
               <dd>{rollout.concurrent}</dd>
             </div>
             <div>
-              <dt>{t("organization_skills_rollout_context_window")}</dt>
+              <dt>{t("organization_skills_rollout_incompatible")}</dt>
               <dd>{rollout.incompatible}</dd>
             </div>
           </dl>

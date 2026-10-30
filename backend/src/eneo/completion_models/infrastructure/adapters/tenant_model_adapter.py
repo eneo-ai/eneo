@@ -1148,6 +1148,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         tool_names: list[str],
         litellm_kwargs: dict[str, Any],
         skill_runtime: SkillActivationRuntime | None = None,
+        *,
+        messages: list[dict[str, object]],
     ) -> None:
         """Re-list MCP tools after a tool round; re-advertise them if changed.
 
@@ -1175,6 +1177,17 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
         if refreshed_tools:
             litellm_kwargs["tools"] = refreshed_tools
+        else:
+            litellm_kwargs.pop("tools", None)
+        if skill_runtime is not None and skill_runtime.has_tool_references:
+            try:
+                skill_runtime.refresh_reference_tools(
+                    mcp_proxy.get_model_tool_identities(), messages=messages
+                )
+            except SkillPromptOwnershipError as error:
+                raise OpenAIException(
+                    str(error), code="skill_prompt_ownership"
+                ) from error
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -1700,6 +1713,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             tool_names=[call.name for call in external_calls],
                             litellm_kwargs=litellm_kwargs,
                             skill_runtime=skill_runtime,
+                            messages=cast("list[dict[str, object]]", messages),
                         )
                     self._note_tool_rounds_left(
                         messages, rounds_left=max_rounds - tool_round
@@ -2733,6 +2747,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         tool_names=[tc["function"]["name"] for tc in tool_calls],
                         litellm_kwargs=litellm_kwargs,
                         skill_runtime=skill_runtime,
+                        messages=cast("list[dict[str, object]]", messages),
                     )
 
                     self._note_tool_rounds_left(

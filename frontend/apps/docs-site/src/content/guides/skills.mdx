@@ -70,6 +70,66 @@ decision-document structure, and safe intranet navigation.
 Reuse one Skill when the capability has one real owner and release cycle. Do not
 merge Skills only because parts of their text look similar.
 
+## Refer to Skills and tools in instructions
+
+Type **@** in the instructions or choose **Insert reference**. Select a Skill,
+a Function, an MCP connection, or a specific tool within that connection. A
+reference identifies the selected resource even if its display name changes.
+Writing its name as ordinary text does not create a reference.
+
+For example, a Communication guide can say: “Use [Plain language] when writing
+public information. Use [Time] to check today's date, then [Web search] to find
+the current guidance.” Choose each bracketed reference in the picker. These
+are instructions for the model; they do not define a guaranteed execution order.
+
+When choosing a Skill, review its exact version before inserting it. The preview
+keeps the name, version, and insertion controls visible while you read long
+instructions. Expand **Description** to read its full description. **Source**
+in the editor shows the stored Markdown, including reference addresses.
+
+### Included Skills
+
+Choose the main Skill on an Assistant, App, or Personal Chat. Its referenced
+Skills are included automatically when it activates; users do not need to
+select each helper separately. The configuration shows which helpers are
+included and where they come from. An **Always** Skill includes its helpers
+from the start. An **On demand** Skill includes them when the model activates
+that Skill. A shared helper is included once.
+
+Skills can refer to other Skills in the same Space. Organisation Skills can
+refer to published versions in the organisation catalogue. The author approves
+the included versions when saving the reference, and the organisation's
+publication and attachment controls still apply. Readers can use the approved
+group without permission to edit or browse its helper Skills. This does not
+grant access to another Space or to a tool.
+
+References pin exact versions, including nested helpers. Later edits do not
+change existing references. To adopt a newer version, select it explicitly and
+save a new version of the containing Skill. Cycles and conflicting versions of
+the same included Skill are refused. Helpers count toward the existing Skill
+and context limits; a group that does not fit is not partially activated.
+Updating published versions on existing resources checks the entire proposed
+Skill group too. Resources with conflicting versions or too many included
+Skills keep their current pin and report the reason.
+
+An execution block on an included organisation Skill also blocks groups that
+need it. Retained versions protect their referenced local Skills from permanent
+deletion, including when a newer version no longer contains that reference.
+
+### Functions and MCP connections
+
+A Function reference selects a capability such as Web search or Charts. An MCP
+reference can select an entire connection or one exact tool. Neither turns the
+capability on, bypasses approval, or grants the author's permissions to the
+person chatting. Eneo checks the tools actually available to that user in the
+current turn, including organisation policy and the chat's settings.
+
+If a referenced tool is missing or off, the Skill can still run the parts that
+are possible. The model receives the limitation instead of a substitute tool
+chosen by a similar name. The reference does not fetch a URL, execute code, or
+contact an MCP server when you save it. External information is retrieved only
+through an available tool during the chat.
+
 ## Use a Skill with MCP
 
 The same guidance applies to [Functions](/guides/capabilities) backed by
@@ -483,13 +543,13 @@ Eneo refuses a Skill change rather than silently overwriting someone else's work
 or breaking a resource that is in use. The message names the exact blocker and
 the next safe action.
 
-| Blocker                             | What happened                                                                                                                                                                 | What to do                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                        |
-| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action |
-| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                    | Tick the detach option in the confirmation, or remove the attachments |
-| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                    |
-| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again       |
+| Blocker                             | What happened                                                                                                                                                                 | What to do                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                         |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action  |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                   | Tick the detach option in the confirmation, or remove the attachments |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                     |
+| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again        |
 
 The Skill editor keeps unsaved edits when a save is refused, so nothing has to
 be retyped. A separate refusal applies at save time when the selected models or
@@ -521,6 +581,12 @@ measurement, activation rounds, and selection time.
 
 Activation evidence records that instructions entered the model context; it
 does not prove the model followed them.
+
+For turns using references, the panel also shows included helper versions,
+the source of each reference, and whether the matching tool was available.
+Recorded tool calls can be matched to the offered tool identities. This shows
+what was available and called; it does not prove that a particular sentence in
+a Skill caused a call. The evidence is retained for partial replies too.
 
 The panel is for development and support diagnostics. It does not expose Skill
 instructions, model reasoning, credentials, or an administrator's incident

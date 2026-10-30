@@ -15,6 +15,7 @@ import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { PersonalChatVersionNotice } from "./personal-chat-skills";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { SkillRevisionHistory } from "./skill-revision-history";
 import { skillQueryKey } from "./skill-revisions";
 
@@ -106,6 +107,10 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
                 </AlertDescription>
               </Alert>
               <SkillForm
+                referenceCatalog={skillReferenceCatalog(
+                  { type: "space", spaceId: space.id },
+                  skillId
+                )}
                 key={value.current_revision_id}
                 mode="revision"
                 initialValue={{

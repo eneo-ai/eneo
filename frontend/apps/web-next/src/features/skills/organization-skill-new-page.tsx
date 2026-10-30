@@ -12,6 +12,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 
 export function OrganizationSkillNewPage() {
   const t = useTranslations();
@@ -45,6 +46,7 @@ export function OrganizationSkillNewPage() {
             <AlertDescription>{t("organization_skills_draft_notice_description")}</AlertDescription>
           </Alert>
           <SkillForm
+            referenceCatalog={skillReferenceCatalog({ type: "organization" })}
             mode="create"
             onSubmit={async (value) => {
               const skill = await unwrap(

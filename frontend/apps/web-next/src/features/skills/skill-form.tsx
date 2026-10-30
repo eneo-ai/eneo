@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrorMessage } from "@/lib/api/errors";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import type { ReferenceCatalog } from "@eneo/skill-instructions";
+import { SkillInstructionEditor } from "./skill-instruction-editor";
 import {
   deriveSkillSlug,
   normalizedSkillContent,
@@ -16,7 +18,7 @@ import {
   type SkillCreation
 } from "./skill-model";
 
-type Props =
+type Props = { referenceCatalog?: ReferenceCatalog; referencePickerInline?: boolean } & (
   | {
       mode: "create";
       onSubmit: (value: SkillCreation) => Promise<void>;
@@ -28,7 +30,8 @@ type Props =
       onSubmit: (value: SkillContent) => Promise<void>;
       initialValue: SkillContent;
       onDirtyChange?: (dirty: boolean) => void;
-    };
+    }
+);
 
 export function SkillForm(props: Props) {
   const t = useTranslations();
@@ -53,6 +56,7 @@ export function SkillForm(props: Props) {
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
+  const instructionEditorRef = useRef<{ focus: () => void }>(null);
   const slugRef = useRef<HTMLInputElement>(null);
   const dirty =
     name !== baseline.name ||
@@ -77,8 +81,10 @@ export function SkillForm(props: Props) {
     const submittedSlug = slug.trim();
     if (!content.display_name) nameRef.current?.focus();
     else if (!content.description) descriptionRef.current?.focus();
-    else if (!content.instructions) instructionsRef.current?.focus();
-    else if (props.mode === "create" && !submittedSlug) {
+    else if (!content.instructions) {
+      if (props.referenceCatalog) instructionEditorRef.current?.focus();
+      else instructionsRef.current?.focus();
+    } else if (props.mode === "create" && !submittedSlug) {
       document.getElementById(`${id}-advanced`)?.setAttribute("open", "");
       slugRef.current?.focus();
     } else {
@@ -167,20 +173,38 @@ export function SkillForm(props: Props) {
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
-          <Textarea
-            ref={instructionsRef}
-            id={`${id}-instructions`}
-            value={instructions}
-            rows={props.mode === "create" ? 8 : 12}
-            className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
-            required
-            disabled={busy}
-            aria-invalid={attempted && !instructions.trim()}
-            onChange={(event) => setInstructions(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
+          {props.referenceCatalog ? (
+            <SkillInstructionEditor
+              ref={instructionEditorRef}
+              id={`${id}-instructions`}
+              describedBy={`${id}-instructions-problem`}
+              value={instructions}
+              onChange={setInstructions}
+              disabled={busy}
+              invalid={attempted && !instructions.trim()}
+              catalog={props.referenceCatalog}
+              inlinePicker={props.referencePickerInline}
+            />
+          ) : (
+            <Textarea
+              ref={instructionsRef}
+              id={`${id}-instructions`}
+              value={instructions}
+              rows={props.mode === "create" ? 8 : 12}
+              className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+              required
+              disabled={busy}
+              aria-invalid={attempted && !instructions.trim()}
+              onChange={(event) => setInstructions(event.target.value)}
+            />
+          )}
+          {!props.referenceCatalog && (
+            <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
+          )}
           {attempted && !instructions.trim() && (
-            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+            <p id={`${id}-instructions-problem`} className="text-destructive text-xs">
+              {t("skills_required_field")}
+            </p>
           )}
         </div>
         {props.mode === "create" && (

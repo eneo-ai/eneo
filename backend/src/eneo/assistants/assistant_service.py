@@ -125,8 +125,10 @@ from eneo.skills.domain.skill import (
     SkillActivationMode,
     SkillActivationRejectionReason,
     SkillActivationUnavailableException,
+    SkillAttachmentLimitError,
     SkillBindingIntent,
     SkillBindingProjection,
+    SkillBindingRevisionConflictError,
     SkillBindingSource,
     SkillComposition,
     SkillExecutionReference,
@@ -134,6 +136,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimeResolution,
     SkillTurnEffectiveMode,
     SkillTurnPlan,
+    validate_skill_binding_group,
 )
 from eneo.skills.infrastructure.skill_repo_impl import (
     acquire_personal_default_fit_lock,
@@ -1364,6 +1367,15 @@ class AssistantService:
                 for binding in resolution.blocked
             ),
         )
+        try:
+            validate_skill_binding_group(
+                (*candidate_resolution.eligible, *candidate_resolution.blocked),
+                max_attached_skills=runtime_policy.max_attached_skills,
+            )
+        except SkillAttachmentLimitError:
+            return AssistantPinAdvanceIncompatibleReason.ATTACHMENT_LIMIT
+        except SkillBindingRevisionConflictError:
+            return AssistantPinAdvanceIncompatibleReason.CONFLICTING_REVISIONS
         validation_plan = SkillTurnPlan.create(
             base_instructions=assistant.get_prompt_text(),
             resolution=candidate_resolution,
@@ -1494,6 +1506,12 @@ class AssistantService:
             base_instructions=effective_config.enforced_prompt_text or "",
             resolution=effective_config.governance_skill_resolution,
         )
+        if personal_chat_pin_override is not None:
+            resolution = effective_config.governance_skill_resolution
+            validate_skill_binding_group(
+                (*resolution.eligible, *resolution.blocked),
+                max_attached_skills=policy_plan.policy.max_attached_skills,
+            )
         policy_validation_plan = policy_plan.for_full_save_validation()
         candidate_skill_ids = frozenset(
             frozen.binding.skill_id
