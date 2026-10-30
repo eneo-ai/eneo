@@ -15,6 +15,7 @@ import {
   createSpace,
   MOCK_REPLY,
   openCreateCollectionDialog,
+  sessionResponseHeaders,
   spaceWithWork,
   uniqueName
 } from "./helpers";
@@ -751,12 +752,14 @@ for (const colorScheme of ["light", "dark"] as const) {
         token_endpoint_auth_method: "client_secret_post",
         revision: "e2e-revision"
       };
-      await page.route("**/api/v1/admin/federation", (route) => route.fulfill({ json: view }));
+      await page.route("**/api/v1/admin/federation", (route) =>
+        route.fulfill({ headers: sessionResponseHeaders(route), json: view })
+      );
       await scan(page, "/admin/federation", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: "Inloggning (SSO)" })
         ).toBeVisible();
-        await expect(page.getByLabel("Klient-ID", { exact: true })).toHaveValue("e2e-client");
+        await expect(page.getByRole("textbox", { name: /^Klient-ID\b/ })).toHaveValue("e2e-client");
         await expect(
           page.getByRole("link", { name: "Inloggning (SSO)", exact: true })
         ).toBeVisible();
