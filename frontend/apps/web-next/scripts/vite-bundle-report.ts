@@ -22,7 +22,7 @@ export interface BundleReport {
   scopes: { startup: ScopeReport; chat: ScopeReport | null };
 }
 
-/** Build evidence only; lazy-loading tasks own their later package budgets. */
+/** Module ownership and static edges enforce feature boundaries independently of chunk names. */
 export function bundleReport(): Plugin {
   let root: string;
   let reportPath: string;
@@ -95,6 +95,18 @@ export function bundleReport(): Plugin {
       };
       await mkdir(path.dirname(reportPath), { recursive: true });
       await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n");
+
+      for (const [name, scope] of Object.entries(report.scopes)) {
+        const eager = scope?.modules.filter(
+          (id) =>
+            /(?:^|\/)node_modules\/(?:driver\.js|@tiptap\/[^/]+|prosemirror-[^/]+|rehype-stringify)\//.test(
+              id
+            ) || id.split("?")[0] === "src/components/ai-elements/answer-clipboard.ts"
+        );
+        if (eager?.length) {
+          this.error(`Eager feature dependencies in ${name}:\n${eager.join("\n")}`);
+        }
+      }
     }
   };
 }

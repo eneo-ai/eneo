@@ -153,7 +153,7 @@ it("keeps the formula as written when KaTeX cannot be fetched, and the next answ
 });
 
 it("makes a rich-text copy made before KaTeX arrives wait for it, then carry MathML", async () => {
-  const { renderAnswerForClipboard } = await import("./answer-markdown");
+  const { renderAnswerForClipboard } = await import("./answer-clipboard");
   const copy = renderAnswerForClipboard("Låt $x^2$ vara talet.");
   expect(copy.plainText).toBe("Låt x^2 vara talet.");
   let html: string | undefined;
@@ -168,7 +168,7 @@ it("makes a rich-text copy made before KaTeX arrives wait for it, then carry Mat
 
 it("fails a rich-text copy of a formula when KaTeX cannot be fetched; the next copy loads it anew", async () => {
   state.fail = true;
-  const { renderAnswerForClipboard } = await import("./answer-markdown");
+  const { renderAnswerForClipboard } = await import("./answer-clipboard");
   arrive();
   await expect(renderAnswerForClipboard("Låt $x^2$ vara talet.").html()).rejects.toThrow();
 

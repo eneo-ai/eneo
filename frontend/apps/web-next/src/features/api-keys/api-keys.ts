@@ -84,16 +84,25 @@ export function invalidateExpiringApiKeys(queryClient: QueryClient): Promise<unk
 }
 
 export const API_KEY_POLICY_CONSTRAINTS_KEY = ["api-key-policy-constraints"] as const;
+export const API_KEY_NOTIFICATION_PREFERENCES_KEY = ["api-key-notification-preferences"] as const;
+
+export function apiKeyNotificationPreferencesQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: API_KEY_NOTIFICATION_PREFERENCES_KEY,
+    queryFn: ({ signal }) =>
+      unwrap(api.GET("/api/v1/api-keys/notification-preferences", { signal }))
+  });
+}
 
 /**
  * The tenant policy as it bounds a new key, a rotation or an expiry change:
  * required expiry, the longest expiry, the highest rate limit and the
- * rotation grace period. The forms only show these; the backend enforces them.
+ * rotation grace period and notification constraints. The backend enforces them.
  */
 export function apiKeyPolicyConstraintsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: API_KEY_POLICY_CONSTRAINTS_KEY,
-    queryFn: () => unwrap(api.GET("/api/v1/api-keys/policy-constraints"))
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/api-keys/policy-constraints", { signal }))
   });
 }
 

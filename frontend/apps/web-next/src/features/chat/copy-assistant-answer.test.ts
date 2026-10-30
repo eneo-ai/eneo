@@ -46,6 +46,15 @@ describe("getPreferredAssistantCopyFormat", () => {
 
 describe("assistantRichTextClipboardPayload", () => {
   it.each([
+    '**Answer** <inref id="aaaaaaaa"/> <script>alert(1)</script> [link](javascript:alert(1))',
+    "Start $P$.\n\n\\[A = P(1+r)^n\\]\n\nPriser: $5 och $10.",
+    "| År | Belopp |\n| --- | ---: |\n| 1 | 100 |\n\n```mermaid\ngraph LR\nA --> B\n```"
+  ])("preserves the complete clipboard representation of %s", async (answer) => {
+    const payload = await assistantRichTextClipboardPayload(answer);
+    expect({ plainText: payload.plainText, html: await payload.html() }).toMatchSnapshot();
+  });
+
+  it.each([
     { property: "trust", value: true },
     { property: "processor", value: (value: unknown) => (value === false ? true : value) }
   ])(
@@ -54,7 +63,7 @@ describe("assistantRichTextClipboardPayload", () => {
       // Model pre-existing prototype pollution without leaking it to other tests.
       // Inherited setting processors must not turn our explicit trust:false into true.
       const previous = Object.getOwnPropertyDescriptor(Object.prototype, property);
-      let payload: ReturnType<typeof assistantRichTextClipboardPayload>;
+      let payload: Awaited<ReturnType<typeof assistantRichTextClipboardPayload>>;
       let copied: string;
       try {
         Object.defineProperty(Object.prototype, property, {
@@ -62,7 +71,7 @@ describe("assistantRichTextClipboardPayload", () => {
           configurable: true,
           writable: true
         });
-        payload = assistantRichTextClipboardPayload(
+        payload = await assistantRichTextClipboardPayload(
           "Start $x^2$. $\\href{javascript:alert(1)}{x}$ " +
             "$\\includegraphics{https://example.test/tracking.png}$"
         );
@@ -81,7 +90,7 @@ describe("assistantRichTextClipboardPayload", () => {
   );
 
   it("renders markdown, strips inrefs, and removes unsafe html", async () => {
-    const payload = assistantRichTextClipboardPayload(
+    const payload = await assistantRichTextClipboardPayload(
       '**Answer** <inref id="aaaaaaaa"/> <script>alert(1)</script> [link](javascript:alert(1))'
     );
     const copied = await payload.html();
@@ -94,7 +103,7 @@ describe("assistantRichTextClipboardPayload", () => {
   });
 
   it("copies formulas once as semantic MathML with a readable plain-text twin", async () => {
-    const payload = assistantRichTextClipboardPayload(
+    const payload = await assistantRichTextClipboardPayload(
       "Start $P$.\n\n\\[A = P(1+r)^n\\]\n\nPriser: $5 och $10."
     );
     const html = document.createElement("div");
@@ -108,7 +117,7 @@ describe("assistantRichTextClipboardPayload", () => {
   });
 
   it("keeps table structure, code and diagram source without interactive controls", async () => {
-    const payload = assistantRichTextClipboardPayload(
+    const payload = await assistantRichTextClipboardPayload(
       "| År | Belopp |\n| --- | ---: |\n| 1 | 100 |\n\n" +
         "```python\nprice = '$5'\n```\n\n```mermaid\ngraph LR\nA --> B\n```"
     );
@@ -122,7 +131,7 @@ describe("assistantRichTextClipboardPayload", () => {
   });
 
   it("uses the same sanitization for event handlers and unsafe links as answers", async () => {
-    const payload = assistantRichTextClipboardPayload(
+    const payload = await assistantRichTextClipboardPayload(
       '<img src="x" onerror="alert(1)"><iframe src="https://example.com"></iframe>' +
         '<a href="javascript:alert(1)">unsafe</a>'
     );
@@ -145,7 +154,7 @@ describe("rich text while KaTeX cannot be loaded", () => {
     ["a dollar in code", "```js\nconst price = '$5';\n```"]
   ])("still copies an answer with %s and no formula", async (_name, answer) => {
     katexUnavailable();
-    const html = await assistantRichTextClipboardPayload(answer).html();
+    const html = await (await assistantRichTextClipboardPayload(answer)).html();
     expect(html).not.toContain("<math");
     expect(html.length).toBeGreaterThan(0);
   });
@@ -153,7 +162,7 @@ describe("rich text while KaTeX cannot be loaded", () => {
   it("fails rather than copy a formula as code", async () => {
     katexUnavailable();
     await expect(
-      assistantRichTextClipboardPayload("Låt $x^2$ vara talet.").html()
+      (await assistantRichTextClipboardPayload("Låt $x^2$ vara talet.")).html()
     ).rejects.toThrow();
   });
 });

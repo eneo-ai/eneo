@@ -1,4 +1,3 @@
-import { driver } from "driver.js";
 import type { Locale, ReleaseEntry } from "@eneo/whats-new";
 
 export type TourOutcome = "completed" | "cancelled" | "unavailable";
@@ -67,7 +66,7 @@ export async function runTour(
   }
 }
 
-/** Next navigation is asynchronous; observe only the intended route and anchor. */
+/** Navigation is asynchronous; observe only the intended route and anchor. */
 function waitForAnchor(
   href: string,
   anchor: string,
@@ -104,7 +103,7 @@ function waitForAnchor(
   });
 }
 
-function spotlight(
+async function spotlight(
   element: HTMLElement,
   entry: ReleaseEntry,
   locale: Locale,
@@ -112,6 +111,11 @@ function spotlight(
   progress: { index: number; total: number },
   signal: AbortSignal
 ): Promise<SpotlightOutcome> {
+  const [{ driver }] = await Promise.all([
+    import("driver.js"),
+    import("driver.js/dist/driver.css")
+  ]);
+  if (signal.aborted) return "closed";
   return new Promise((resolve, reject) => {
     let finished = false;
     const isFirst = progress.index === 0;

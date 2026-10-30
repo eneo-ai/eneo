@@ -220,7 +220,7 @@ Space lookups made on behalf of a request also resolve only within the caller's 
 
 ### Creation
 
-Keys are created via `POST /api/v1/api-keys` (request fields: `name`, `description`, `key_type`, `permission`, `scope_type`, `scope_id`, `ownership`, `allowed_origins`, `allowed_ips`, `expires_at`, `rate_limit`, `resource_permissions`), or from the web app under **Account → API keys** and, for tenant administrators, **Admin → API keys**. Creation requires a session login and the `api_keys` role permission. `GET /api/v1/api-keys/policy-constraints` returns the tenant limits a client should respect before submitting (expiration rules, rate-limit ceiling, rotation grace). The policy service validates:
+Keys are created via `POST /api/v1/api-keys` (request fields: `name`, `description`, `key_type`, `permission`, `scope_type`, `scope_id`, `ownership`, `allowed_origins`, `allowed_ips`, `expires_at`, `rate_limit`, `resource_permissions`), or from the web app under **Account → API keys** and, for tenant administrators, **Admin → API keys**. Creation requires a session login and the `api_keys` role permission. `GET /api/v1/api-keys/policy-constraints` returns the tenant limits a client should respect before submitting (expiration rules, rate-limit ceiling, rotation grace). Its `notification_policy` also exposes the tenant's expiry-reminder settings to signed-in users: whether reminders are enabled, default and maximum reminder days, and which automatic-follow options are allowed. Changing that policy still requires tenant-administrator access. The policy service validates:
 
 - Scope and permission compatibility
 - Service key guardrails (admin-only creation, IP/expiry for write/admin permission)
@@ -231,6 +231,8 @@ Keys are created via `POST /api/v1/api-keys` (request fields: `name`, `descripti
 - Tenant policy limits (expiration requirements, rate limit ceilings)
 
 The plain key secret is returned **exactly once** in the response. It is never stored or retrievable again.
+
+In the React beta, **Account → API keys** shows a key's scope, restrictions, last use and state-change reason. Search filters the keys already loaded; use **Load more** to include later pages. Under **Expiry reminders**, enter comma-separated days before expiry (for example, `30, 14, 7`). Presets add a reminder day while preserving the others. The form shows the organization's maximum and explains options disabled by its policy. Preferences save when you leave the field or press Enter; if saving fails, the draft stays available to retry.
 
 ### Rotation
 

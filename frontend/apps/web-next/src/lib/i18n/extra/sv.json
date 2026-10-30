@@ -1781,5 +1781,12 @@
   "organization_skills_rollout_incompatible": "Kunde inte uppdateras med nuvarande inställningar",
   "unsaved_navigation_title": "Lämna sidan?",
   "unsaved_navigation_description": "Du har osparade ändringar. Om du lämnar sidan försvinner de.",
-  "unsaved_navigation_leave": "Lämna utan att spara"
+  "unsaved_navigation_leave": "Lämna utan att spara",
+  "api_keys_search_label": "Sök API-nycklar",
+  "api_keys_search_loaded_hint": "Söker i inlästa nycklar efter namn, beskrivning eller nyckelns sista tecken.",
+  "api_keys_no_search_matches": "Inga matchande API-nycklar",
+  "api_keys_notifications_days_validation": "Ange positiva heltal separerade med kommatecken, inom organisationens gräns.",
+  "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
+  "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
+  "api_keys_notifications_add_day": "Lägg till {days} dagar"
 }

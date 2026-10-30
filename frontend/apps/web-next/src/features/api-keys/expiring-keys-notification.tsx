@@ -11,6 +11,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
+import { apiKeyNotificationPreferencesQueryOptions } from "./api-keys";
 import { summaryToDisplayItems, type ExpiringKeyDisplayItem } from "./expiration-utils";
 import { apiKeyNotificationSubscriptionsQueryOptions } from "./notification-follows";
 
@@ -45,8 +46,7 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
   const featureEnabled = settings.api_key_expiry_notifications !== false;
 
   const preferences = useQuery({
-    queryKey: ["api-key-notification-preferences"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/api-keys/notification-preferences")),
+    ...apiKeyNotificationPreferencesQueryOptions(browserApi),
     enabled: featureEnabled,
     staleTime: 60_000
   });
