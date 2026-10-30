@@ -11,6 +11,7 @@ import {
   type ReactNode
 } from "react";
 import type { ChatPage } from "@/features/chat/chat-page";
+import type { Schema } from "@/lib/api/models";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
 import {
@@ -911,11 +912,98 @@ it.each([
   }
 );
 
-it("does not open the organization Skill editor for a non-admin", async () => {
-  const { router } = await renderRoute("/spaces/organization/skills/new");
-  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
-  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
-  expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+it.each(["", "/skill-1", "/new"])(
+  "denies organization Skills%s before reading them for a non-admin",
+  async (suffix) => {
+    const { router } = await renderRoute(`/spaces/organization/skills${suffix}`);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+    expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
+    expect(requestedPaths().some((path) => path.startsWith("/api/v1/skills/organization/"))).toBe(
+      false
+    );
+    expect(screen.queryByRole("textbox", { name: messages.skills_instructions_label })).toBeNull();
+  }
+);
+
+it("opens the organization Skill list, saved editor and creation form for an administrator", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set(
+    "/api/v1/spaces/type/organization/",
+    makeSpace({ overrides: { organization: true } })
+  );
+  const revision: Schema<"SkillRevisionPublic"> = {
+    id: "revision-1",
+    skill_id: "skill-1",
+    revision_number: 1,
+    display_name: "Report guide",
+    description: "Find the report",
+    instructions: "Search carefully",
+    content_digest: "fixture",
+    created_by_user_id: "user-1",
+    created_at: "2026-09-01T12:00:00Z"
+  };
+  const skill: Schema<"OrganizationSkillPublic"> = {
+    id: revision.skill_id,
+    space_id: "space-1",
+    slug: "report-guide",
+    is_active: true,
+    current_revision_id: revision.id,
+    current_revision_number: 1,
+    current_revision: revision,
+    display_name: revision.display_name,
+    description: revision.description,
+    content_digest: revision.content_digest,
+    created_by_user_id: revision.created_by_user_id,
+    created_at: revision.created_at,
+    updated_at: revision.created_at,
+    publication_state: "draft",
+    published_revision_number: null,
+    first_published_at: null,
+    execution_blocked: false,
+    removed_at: null,
+    usage: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      personal_chat_pinned: false
+    }
+  };
+  replies.set("/api/v1/skills/organization/", { items: [skill], next_cursor: null });
+  replies.set("/api/v1/skills/organization/skill-1/", skill);
+  replies.set("/api/v1/skills/organization/skill-1/revisions/", {
+    items: [revision],
+    next_cursor: null
+  });
+  replies.set("/api/v1/skills/organization/skill-1/adoption/", {
+    items: [],
+    next_cursor: null,
+    summary: null
+  });
+  const { router } = await renderRoute("/spaces/organization/skills");
+  const link = await screen.findByRole("link", { name: revision.display_name });
+  expect(link.getAttribute("href")).toBe("/spaces/organization/skills/skill-1");
+  await waitFor(() =>
+    expect(document.title).toBe(`${messages.skills} · ${messages.organization} · Eneo`)
+  );
+  await act(() => router.navigate({ href: "/spaces/organization/skills/skill-1" }));
+  expect(
+    ((await screen.findByRole("textbox", { name: messages.name })) as HTMLInputElement).value
+  ).toBe(revision.display_name);
+  expect(
+    screen.getByRole("textbox", { name: messages.skills_instructions_label }).textContent
+  ).toBe(revision.instructions);
+  expect(screen.getByRole("button", { name: messages.save_changes })).toBeTruthy();
+  expect(document.title).toBe(`${messages.skills} · ${messages.organization} · Eneo`);
+  await act(() => router.navigate({ href: "/spaces/organization/skills/new" }));
+  await screen.findByRole("button", { name: messages.skills_create_action });
+  expect((screen.getByRole("textbox", { name: messages.name }) as HTMLInputElement).value).toBe("");
+  await waitFor(() =>
+    expect(document.title).toBe(
+      `${messages.skills_library_new_heading} · ${messages.organization} · Eneo`
+    )
+  );
+  expect(requestedPaths()).not.toContain("/api/v1/spaces/space-1/skills/");
 });
 
 it("renders the spaces list with its document title and keeps list distinct from a space ID", async () => {

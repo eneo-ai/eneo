@@ -504,6 +504,38 @@ for (const colorScheme of ["light", "dark"] as const) {
     );
 
     test(
+      "organization Skills: create, saved detail and catalogue",
+      { tag: "@vite" },
+      async ({ page }) => {
+        const name = uniqueName(`Organization Skill ${colorScheme}`);
+        await page.goto("/spaces/organization/skills");
+        await page.getByRole("link", { name: /^(Skapa skill|Create skill)$/i }).click();
+        await expect(page).toHaveURL(/\/spaces\/organization\/skills\/new$/);
+        await expectNoAxeViolations(page);
+        await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+        await page
+          .getByRole("textbox", { name: /^(Beskrivning|Description)$/ })
+          .fill("A report writing guide.");
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.evaluate(() =>
+          navigator.clipboard.writeText("Write clearly and check the report's facts.")
+        );
+        await page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ }).focus();
+        await page.keyboard.press("ControlOrMeta+V");
+        await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
+        await page.waitForURL(/\/spaces\/organization\/skills\/[\da-f-]+$/);
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expectNoAxeViolations(page);
+        await page.reload();
+        await expect(page.getByRole("textbox", { name: /^(Namn|Name)$/ })).toHaveValue(name);
+        await page.getByRole("main").getByRole("link", { name: "Skills", exact: true }).click();
+        await expect(page).toHaveURL(/\/spaces\/organization\/skills$/);
+        await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+        await expectNoAxeViolations(page);
+      }
+    );
+
+    test(
       "Skills: create, saved detail and a long reference preview",
       { tag: "@vite" },
       async ({ page }) => {
