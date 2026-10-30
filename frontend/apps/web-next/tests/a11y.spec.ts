@@ -642,7 +642,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("account", async ({ page }) => {
+        test("account", { tag: "@vite" }, async ({ page }) => {
           // Where the drawer is, Konto is a page (decision 22); sideways,
           // "Mitt konto" and its tabs.
           await scan(page, "/account", async () => {
@@ -734,7 +734,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        test("Konto's pages, and Nyheter", async ({ page }) => {
+        test("Konto's pages", { tag: "@vite" }, async ({ page }) => {
           for (const [path, title] of [
             ["/account/password", /^(Byt lösenord|Change password)$/],
             ["/account/copy-format", /^(Kopieringsformat|Copy format)$/],
@@ -751,6 +751,9 @@ for (const colorScheme of ["light", "dark"] as const) {
               ).toBeAttached();
             });
           }
+        });
+
+        test("Nyheter", async ({ page }) => {
           await scan(page, "/whats-new", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
@@ -809,7 +812,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("account", async ({ page }) => {
+  test("account", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
@@ -818,8 +821,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
       "/account/copy-format",
       "/account/password",
       "/account/api-keys",
-      "/account/integrations",
-      "/whats-new"
+      "/account/integrations"
     ]) {
       await page.goto(path);
       await expect(
@@ -827,6 +829,12 @@ test.describe("reflow at 320 px (1.4.10)", () => {
       ).toBeVisible();
       await expectNoSidewaysPageScroll(page);
     }
+  });
+
+  test("Nyheter", async ({ page }) => {
+    await page.goto("/whats-new");
+    await expect(page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
   });
 
   test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {

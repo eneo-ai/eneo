@@ -1,5 +1,10 @@
+370adadc6430c4c548567a670234bf68be124d06  (app)/account/api-keys/page.tsx
+c735e65af694523b796f0bea338dac864ed89c20  (app)/account/appearance/page.tsx
+2e3642d56c64e66450497243cbb4691493b66a9b  (app)/account/copy-format/page.tsx
+dad18e7a5d42d0d5d20019cd0ced14c4bbb23074  (app)/account/integrations/page.tsx
 0273606893ac5ebac328abb8cf032fdaf9a9e99f  (app)/account/layout.tsx
 c213f2dc385fbd1d07c22549f4d90df0d09ebf47  (app)/account/page.tsx
+c67bd2212612b3e43cccb4164f65344c94d1219d  (app)/account/password/page.tsx
 addb9e8f056c3c02753b51541411767dd847040b  (app)/layout.tsx
 49d1147631ae6eae3ef98046b1f406fcdf99280d  (app)/spaces/[spaceId]/layout.tsx
 a5e21675d2eece261591f7d33d9719a2039cbb8c  (app)/spaces/[spaceId]/page.tsx

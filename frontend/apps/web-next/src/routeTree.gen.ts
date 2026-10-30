@@ -23,6 +23,11 @@ import { Route as LoginSwitchOrganisationRouteImport } from "./routes/login/swit
 import { Route as ModuleLoginIndexRouteImport } from "./routes/module-login/index"
 import { Route as ModuleLoginFailedRouteImport } from "./routes/module-login/failed"
 import { Route as AppAccountIndexRouteImport } from "./routes/_app/account/index"
+import { Route as AppAccountApiKeysRouteImport } from "./routes/_app/account/api-keys"
+import { Route as AppAccountAppearanceRouteImport } from "./routes/_app/account/appearance"
+import { Route as AppAccountCopyFormatRouteImport } from "./routes/_app/account/copy-format"
+import { Route as AppAccountIntegrationsRouteImport } from "./routes/_app/account/integrations"
+import { Route as AppAccountPasswordRouteImport } from "./routes/_app/account/password"
 import { Route as AppSpacesSpaceIdRouteImport } from "./routes/_app/spaces/$spaceId"
 import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
 import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
@@ -97,6 +102,31 @@ const AppAccountIndexRoute = AppAccountIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AppAccountRoute,
 } as any)
+const AppAccountApiKeysRoute = AppAccountApiKeysRouteImport.update({
+  id: "/api-keys",
+  path: "/api-keys",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountAppearanceRoute = AppAccountAppearanceRouteImport.update({
+  id: "/appearance",
+  path: "/appearance",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountCopyFormatRoute = AppAccountCopyFormatRouteImport.update({
+  id: "/copy-format",
+  path: "/copy-format",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountIntegrationsRoute = AppAccountIntegrationsRouteImport.update({
+  id: "/integrations",
+  path: "/integrations",
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountPasswordRoute = AppAccountPasswordRouteImport.update({
+  id: "/password",
+  path: "/password",
+  getParentRoute: () => AppAccountRoute,
+} as any)
 const AppSpacesSpaceIdRoute = AppSpacesSpaceIdRouteImport.update({
   id: "/spaces/$spaceId",
   path: "/spaces/$spaceId",
@@ -132,6 +162,11 @@ export interface FileRoutesByFullPath {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
   "/module-login/": typeof ModuleLoginIndexRoute
+  "/account/api-keys": typeof AppAccountApiKeysRoute
+  "/account/appearance": typeof AppAccountAppearanceRoute
+  "/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/account/integrations": typeof AppAccountIntegrationsRoute
+  "/account/password": typeof AppAccountPasswordRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -150,6 +185,11 @@ export interface FileRoutesByTo {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login": typeof LoginIndexRoute
   "/module-login": typeof ModuleLoginIndexRoute
+  "/account/api-keys": typeof AppAccountApiKeysRoute
+  "/account/appearance": typeof AppAccountAppearanceRoute
+  "/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/account/integrations": typeof AppAccountIntegrationsRoute
+  "/account/password": typeof AppAccountPasswordRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -171,6 +211,11 @@ export interface FileRoutesById {
   "/module-login/failed": typeof ModuleLoginFailedRoute
   "/login/": typeof LoginIndexRoute
   "/module-login/": typeof ModuleLoginIndexRoute
+  "/_app/account/api-keys": typeof AppAccountApiKeysRoute
+  "/_app/account/appearance": typeof AppAccountAppearanceRoute
+  "/_app/account/copy-format": typeof AppAccountCopyFormatRoute
+  "/_app/account/integrations": typeof AppAccountIntegrationsRoute
+  "/_app/account/password": typeof AppAccountPasswordRoute
   "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/_app/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -192,6 +237,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login/"
     | "/module-login/"
+    | "/account/api-keys"
+    | "/account/appearance"
+    | "/account/copy-format"
+    | "/account/integrations"
+    | "/account/password"
     | "/spaces/$spaceId"
     | "/spaces/list"
     | "/integrations/callback/token"
@@ -210,6 +260,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login"
     | "/module-login"
+    | "/account/api-keys"
+    | "/account/appearance"
+    | "/account/copy-format"
+    | "/account/integrations"
+    | "/account/password"
     | "/spaces/$spaceId"
     | "/spaces/list"
     | "/integrations/callback/token"
@@ -230,6 +285,11 @@ export interface FileRouteTypes {
     | "/module-login/failed"
     | "/login/"
     | "/module-login/"
+    | "/_app/account/api-keys"
+    | "/_app/account/appearance"
+    | "/_app/account/copy-format"
+    | "/_app/account/integrations"
+    | "/_app/account/password"
     | "/_app/spaces/$spaceId"
     | "/_app/spaces/list"
     | "/integrations/callback/token"
@@ -352,6 +412,41 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAccountIndexRouteImport
       parentRoute: typeof AppAccountRoute
     }
+    "/_app/account/api-keys": {
+      id: "/_app/account/api-keys"
+      path: "/api-keys"
+      fullPath: "/account/api-keys"
+      preLoaderRoute: typeof AppAccountApiKeysRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/appearance": {
+      id: "/_app/account/appearance"
+      path: "/appearance"
+      fullPath: "/account/appearance"
+      preLoaderRoute: typeof AppAccountAppearanceRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/copy-format": {
+      id: "/_app/account/copy-format"
+      path: "/copy-format"
+      fullPath: "/account/copy-format"
+      preLoaderRoute: typeof AppAccountCopyFormatRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/integrations": {
+      id: "/_app/account/integrations"
+      path: "/integrations"
+      fullPath: "/account/integrations"
+      preLoaderRoute: typeof AppAccountIntegrationsRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    "/_app/account/password": {
+      id: "/_app/account/password"
+      path: "/password"
+      fullPath: "/account/password"
+      preLoaderRoute: typeof AppAccountPasswordRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
     "/_app/spaces/$spaceId": {
       id: "/_app/spaces/$spaceId"
       path: "/spaces/$spaceId"
@@ -384,10 +479,20 @@ declare module "@tanstack/react-router" {
 }
 
 interface AppAccountRouteChildren {
+  AppAccountApiKeysRoute: typeof AppAccountApiKeysRoute
+  AppAccountAppearanceRoute: typeof AppAccountAppearanceRoute
+  AppAccountCopyFormatRoute: typeof AppAccountCopyFormatRoute
+  AppAccountIntegrationsRoute: typeof AppAccountIntegrationsRoute
+  AppAccountPasswordRoute: typeof AppAccountPasswordRoute
   AppAccountIndexRoute: typeof AppAccountIndexRoute
 }
 
 const AppAccountRouteChildren: AppAccountRouteChildren = {
+  AppAccountApiKeysRoute: AppAccountApiKeysRoute,
+  AppAccountAppearanceRoute: AppAccountAppearanceRoute,
+  AppAccountCopyFormatRoute: AppAccountCopyFormatRoute,
+  AppAccountIntegrationsRoute: AppAccountIntegrationsRoute,
+  AppAccountPasswordRoute: AppAccountPasswordRoute,
   AppAccountIndexRoute: AppAccountIndexRoute,
 }
 
