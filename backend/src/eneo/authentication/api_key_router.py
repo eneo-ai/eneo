@@ -457,7 +457,7 @@ async def _collect_manageable_keys_for_page(
     summary="Get API key policy constraints",
     description=(
         "Returns tenant policy limits relevant to key UX — applies to creation, "
-        "rotation, and expiration changes (expiration, rate limit, rotation grace)."
+        "rotation, expiration changes, and notification preferences."
     ),
     responses={
         200: {"description": "Policy constraints for the current tenant."},
@@ -476,6 +476,7 @@ async def get_policy_constraints(
     policy: dict[str, Any] = getattr(user.tenant, "api_key_policy", None) or {}
     settings = get_settings()
     return ApiKeyCreationConstraints(
+        notification_policy=_notification_policy_for_user(user),
         require_expiration=bool(policy.get("require_expiration")),
         max_expiration_days=policy.get("max_expiration_days"),
         max_rate_limit=policy.get("max_rate_limit_override"),

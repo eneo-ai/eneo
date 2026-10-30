@@ -1429,6 +1429,15 @@ it.each([
       days_before_expiry: [7],
       auto_follow_published_assistants: false
     });
+    replies.set("/api/v1/api-keys/policy-constraints", {
+      notification_policy: {
+        enabled: true,
+        default_days_before_expiry: [7],
+        max_days_before_expiry: null,
+        allow_auto_follow_published_assistants: true,
+        allow_auto_follow_published_apps: true
+      }
+    });
     await renderRoute(`/account/${page}`);
     await waitFor(() => expect(document.title).toBe(`${messages[titleKey]} · Eneo`));
     const navigation = screen.getByRole("navigation", { name: messages.shell_account_nav_label });

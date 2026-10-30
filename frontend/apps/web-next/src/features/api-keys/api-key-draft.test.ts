@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ApiKey } from "./api-keys";
+import type { ApiKey, ApiKeyCreationConstraints } from "./api-keys";
 import {
   createRequest,
   draftFromApiKey,
@@ -17,7 +17,18 @@ import {
 const t = (key: string, values?: Record<string, string | number>) =>
   values ? `${key} ${JSON.stringify(values)}` : key;
 
-const constraints = { require_expiration: false, max_expiration_days: null, max_rate_limit: 1000 };
+const constraints: ApiKeyCreationConstraints = {
+  require_expiration: false,
+  max_expiration_days: null,
+  max_rate_limit: 1000,
+  notification_policy: {
+    enabled: true,
+    default_days_before_expiry: [30, 14, 7, 3, 1],
+    max_days_before_expiry: 365,
+    allow_auto_follow_published_assistants: false,
+    allow_auto_follow_published_apps: false
+  }
+};
 
 const key = {
   id: "key-1",

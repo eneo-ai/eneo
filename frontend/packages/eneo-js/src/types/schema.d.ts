@@ -177,7 +177,7 @@ export interface paths {
     };
     /**
      * Get API key policy constraints
-     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, and expiration changes (expiration, rate limit, rotation grace).
+     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, expiration changes, and notification preferences.
      */
     get: operations["get_policy_constraints_api_v1_api_keys_policy_constraints_get"];
     put?: never;
@@ -10276,9 +10276,10 @@ export interface components {
     };
     /**
      * ApiKeyCreationConstraints
-     * @description Fields relevant to key creation UX, from tenant policy.
+     * @description Tenant policy limits for key forms and notification preferences.
      */
     ApiKeyCreationConstraints: {
+      notification_policy: components["schemas"]["ApiKeyNotificationPolicyResponse"];
       /**
        * Require Expiration
        * @default false
