@@ -4,7 +4,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from eneo.files.mime_support import supported_audio_mimes, supported_text_mimes
+from eneo.files.mime_support import (
+    canonicalize_mime,
+    supported_audio_mimes,
+    supported_text_mimes,
+)
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
 from eneo.main.exceptions import BadRequestException
 
@@ -52,7 +56,20 @@ def build_runtime_input_config(
 
 def runtime_input_accept_mimetypes(config: FlowRuntimeInputConfig) -> list[str]:
     if config.accepted_mimetypes_override:
-        return list(config.accepted_mimetypes_override)
+        accepted = list(config.accepted_mimetypes_override)
+        canonical = {canonicalize_mime(value) for value in accepted}
+        # Browsers name the same audio container differently. Advertise every
+        # supported spelling so a file picker enforces the server's format policy.
+        return list(
+            dict.fromkeys(
+                accepted
+                + [
+                    mime
+                    for mime in supported_audio_mimes()
+                    if canonicalize_mime(mime) in canonical
+                ]
+            )
+        )
     if config.input_format == "audio":
         return supported_audio_mimes()
     return supported_text_mimes()

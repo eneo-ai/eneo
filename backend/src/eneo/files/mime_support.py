@@ -46,17 +46,11 @@ _LEGACY_ADVICE: dict[str, str] = {
 _MIMETYPE_CANONICAL_ALIASES: dict[str, str] = {
     "audio/mp3": "audio/mpeg",
     "audio/x-m4a": "audio/mp4",
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
     "video/mp4": "audio/mp4",
     "video/webm": "audio/webm",
-}
-
-# Spellings a content sniffer emits that no client is told to send. They are
-# normalized only where a detected type is compared, never where a declared one
-# is, so the set of types the server accepts stays equal to the set it
-# advertises — an accepted type is one every later consumer already handles.
-_SNIFFED_MIMETYPE_ALIASES: dict[str, str] = {
-    # libmagic reports RIFF/WAVE as the older `audio/x-wav` spelling.
-    "audio/x-wav": "audio/wav",
 }
 
 
@@ -69,19 +63,6 @@ def canonicalize_mime(mimetype: str | None) -> str:
     if not base:
         return ""
     return _MIMETYPE_CANONICAL_ALIASES.get(base, base)
-
-
-def canonicalize_sniffed_mime(mimetype: str | None) -> str:
-    """Canonical form for a type detected from file contents.
-
-    Content sniffers name some formats differently from the spelling clients
-    are told to send. Resolving that difference here keeps a detected type
-    comparable with the advertised list without widening what a client may
-    declare.
-    """
-
-    canonical = canonicalize_mime(mimetype)
-    return _SNIFFED_MIMETYPE_ALIASES.get(canonical, canonical)
 
 
 def classify_mime(mimetype: str | None) -> tuple[MimeSupport, str | None]:

@@ -54,6 +54,9 @@ class AudioMimeTypes(MimeTypesBase):
     M4A = "audio/x-m4a"
     OGG = "audio/ogg"
     WAV = "audio/wav"
+    X_WAV = "audio/x-wav"
+    WAVE = "audio/wave"
+    VND_WAVE = "audio/vnd.wave"
     MPEG = "audio/mpeg"
     MP3 = "audio/mp3"
     WEBM = "video/webm"  # Same container as for video

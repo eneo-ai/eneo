@@ -23,7 +23,7 @@ from eneo.files.audio import (
 )
 from eneo.files.file_models import FileInfo, FileInUseError, FileUsageKind
 from eneo.files.file_service import FileService
-from eneo.files.mime_support import canonicalize_mime, canonicalize_sniffed_mime
+from eneo.files.mime_support import canonicalize_mime
 from eneo.files.text import PdfExtractionLimitExceeded, PdfExtractionLimits
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -94,7 +94,7 @@ def _sniff_mimetype(upload_file: UploadFile) -> str | None:
         chunk = chunk.encode("utf-8", errors="ignore")
 
     try:
-        return canonicalize_sniffed_mime(magic.from_buffer(chunk, mime=True))
+        return canonicalize_mime(magic.from_buffer(chunk, mime=True))
     except Exception:
         logger.debug("Failed to sniff file MIME type from content.", exc_info=True)
         return None

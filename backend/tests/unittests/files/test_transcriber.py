@@ -235,7 +235,13 @@ async def test_transcriber_auto_language_reuses_cache_even_if_model_changes():
 
 
 @pytest.mark.asyncio
-async def test_transcribe_returns_the_durable_winner_from_a_racing_write() -> None:
+@pytest.mark.parametrize(
+    "mimetype",
+    ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"],
+)
+async def test_transcribe_returns_the_durable_winner_from_a_racing_write(
+    mimetype: str,
+) -> None:
     file_service = MagicMock()
     file_service.save_transcription = AsyncMock(return_value="durable winner")
     transcriber = Transcriber(file_service)
@@ -245,7 +251,7 @@ async def test_transcribe_returns_the_durable_winner_from_a_racing_write() -> No
     file = SimpleNamespace(
         id=uuid4(),
         blob=b"audio",
-        mimetype="audio/mpeg",
+        mimetype=mimetype,
         transcription=None,
     )
 

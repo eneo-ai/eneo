@@ -32,6 +32,8 @@ const TYPE_NAMES: Record<string, string> = {
   "audio/mp3": "MP3",
   "audio/wav": "WAV",
   "audio/x-wav": "WAV",
+  "audio/wave": "WAV",
+  "audio/vnd.wave": "WAV",
   "audio/ogg": "OGG",
   "audio/webm": "WebM",
   "audio/mp4": "M4A",

@@ -2,8 +2,34 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.domain.runtime_input import parse_runtime_input_config
+from eneo.flows.domain.flow import FlowRuntimeInputConfig
+from eneo.flows.domain.runtime_input import (
+    parse_runtime_input_config,
+    runtime_input_accept_mimetypes,
+)
 from eneo.main.exceptions import BadRequestException
+
+
+@pytest.mark.parametrize("override", [None, ["audio/wav"], ["audio/x-wav"]])
+def test_audio_input_advertises_browser_wav_types(override: list[str] | None) -> None:
+    config = FlowRuntimeInputConfig(
+        enabled=True, input_format="audio", accepted_mimetypes_override=override
+    )
+
+    accepted = runtime_input_accept_mimetypes(config)
+
+    wav_types = {"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"}
+    assert wav_types <= set(accepted)
+    if override:
+        assert set(accepted) == wav_types
+
+
+def test_audio_format_override_keeps_other_formats_excluded() -> None:
+    config = FlowRuntimeInputConfig(
+        enabled=True, input_format="audio", accepted_mimetypes_override=["audio/mpeg"]
+    )
+
+    assert set(runtime_input_accept_mimetypes(config)) == {"audio/mpeg", "audio/mp3"}
 
 
 def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None:

@@ -163,6 +163,27 @@ describe("StartRunDialog", () => {
     expect(FakeUpload.sent).toEqual([]);
   });
 
+  it.each(["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"])(
+    "uploads WAV declared as %s through the contract-backed file picker",
+    async (mimetype) => {
+      const { dialog } = await openDialog({
+        ...contract,
+        steps_requiring_input: [
+          makeInput({
+            input_format: "audio",
+            accepted_mimetypes: ["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"]
+          })
+        ]
+      });
+      const file = new File(["RIFF....WAVEfmt "], "meeting.wav", { type: mimetype });
+      pickFile(dialog, file);
+
+      expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
+      expect(FakeUpload.sent[0]?.body.get("upload_file")).toBe(file);
+      expect(within(dialog).getByText(/^WAV · högst/)).toBeTruthy();
+    }
+  );
+
   it("uploads the files, sums up what is sent and starts the run pinned to the published version", async () => {
     const run = makeRunSummary({ id: "run-9", status: "queued" });
     api.routes[START] = () => ({ status: 201, body: run });
