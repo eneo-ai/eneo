@@ -1,0 +1,17 @@
+0273606893ac5ebac328abb8cf032fdaf9a9e99f  (app)/account/layout.tsx
+c213f2dc385fbd1d07c22549f4d90df0d09ebf47  (app)/account/page.tsx
+addb9e8f056c3c02753b51541411767dd847040b  (app)/layout.tsx
+49d1147631ae6eae3ef98046b1f406fcdf99280d  (app)/spaces/[spaceId]/layout.tsx
+a5e21675d2eece261591f7d33d9719a2039cbb8c  (app)/spaces/[spaceId]/page.tsx
+0725559d609d0ff2033094d85a5ad386e4346fb4  (app)/spaces/list/page.tsx
+f0ad8f5a043b9c1dc8ea1d47dbf4d3ab421c51b3  (public)/deactivated/page.tsx
+e72b8147f4715492e913ddbd19576edf73d65bf8  (public)/integrations/callback/token/page.tsx
+36886c872f4b40f6b6abe90b1a10f17c59e3bb78  (public)/invite/[[...rest]]/page.tsx
+4d7ec2f90305d430c25ff58ce52c7a1a19464373  (public)/login/failed/page.tsx
+de874d2de02a6c9eaa1af7cdd14427fa1a61c604  (public)/login/page.tsx
+4b86b36bb9fc81b95fd06c43bbb22714553a74eb  (public)/module-login/failed/page.tsx
+9aa1942085111583297e5c8c7aab4faa8369ad43  (public)/password-change/page.tsx
+a12262b41d4c33386338602dfd599cd0cb1aec58  ../../next.config.ts
+f5652c3272406bb5aba080290f714c41ee5da7ea  ../proxy.ts
+1eae4fc2e5f2bf1fdeb14d2c86bd57f2a6c225c7  layout.tsx
+2e69a4505b05ab01f4ff58f29753d9ddb2dba3e6  page.tsx
