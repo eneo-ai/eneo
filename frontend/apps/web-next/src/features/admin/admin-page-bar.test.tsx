@@ -36,6 +36,12 @@ function renderAdminPage(path: string) {
 const back = (name: string) => screen.getByRole("link", { name: `Tillbaka till ${name}` });
 
 describe("AdminPageBar on a phone", () => {
+  it("keeps the federation title in the bar", () => {
+    setViewport("phone");
+    renderAdminPage("/admin/federation");
+    expect(screen.getByText("Inloggning (SSO)").closest("[data-own-mobile-header]")).toBeTruthy();
+  });
+
   it("takes an admin area back to Administration, in place of the top bar", async () => {
     setViewport("phone");
     const { container } = renderAdminPage("/admin/users");
