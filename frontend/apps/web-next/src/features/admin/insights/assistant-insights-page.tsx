@@ -172,6 +172,8 @@ function AnalysisTab({
             status={questionProblem ? { type: "error", message: questionProblem } : undefined}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              // A phone's keyboard has no Shift+Enter: Return adds a line there, the button sends.
+              if (window.matchMedia("(pointer: coarse)").matches) return;
               event.preventDefault();
               event.currentTarget.closest("form")?.requestSubmit();
             }}

@@ -215,9 +215,16 @@ function StoragePolicyEditor({
       toast.success(t("storage_settings_save_success"));
     } catch (error) {
       if (error instanceof EneoApiError && error.status === 403) setAuthorityRevoked(true);
-      else if (error instanceof EneoApiError && error.code === 9046) setStale(true);
-      else if (error instanceof EneoApiError && error.code === 9047) setTargetUnavailable(true);
-      else setSaveOutcomeUnknown(true);
+      else if (error instanceof EneoApiError && error.code === 9046) {
+        setStale(true);
+        toast.error(t("storage_settings_stale_title"));
+      } else if (error instanceof EneoApiError && error.code === 9047) {
+        setTargetUnavailable(true);
+        toast.error(t("storage_settings_target_unavailable_title"));
+      } else {
+        setSaveOutcomeUnknown(true);
+        toast.error(t("storage_settings_save_outcome_unknown_title"));
+      }
     } finally {
       setSaving(false);
       setConfirmOpen(false);
