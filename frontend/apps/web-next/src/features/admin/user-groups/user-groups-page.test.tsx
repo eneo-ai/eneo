@@ -240,10 +240,13 @@ describe("AdminUserGroupsPage members", () => {
     await waitFor(() =>
       expect(within(dialog).queryByRole("checkbox", { name: /per\.berg@kommun\.se/ })).toBeNull()
     );
-    expect(api.GET).toHaveBeenCalledWith("/api/v1/users/", {
-      params: { query: { email: "eva", limit: 100, cursor: undefined } },
-      signal: expect.any(AbortSignal)
-    });
+    // The old list disappears during pending, before the new query starts its request.
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/users/", {
+        params: { query: { email: "eva", limit: 100, cursor: undefined } },
+        signal: expect.any(AbortSignal)
+      })
+    );
     expect(within(dialog).getByRole("list", { name: "Valda användare" }).textContent).toContain(
       "per.berg@kommun.se"
     );
