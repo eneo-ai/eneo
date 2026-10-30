@@ -1052,6 +1052,47 @@ describe("ChatService saved conversation choices", () => {
     expect(chat.settings?.require_tool_approval).toBeUndefined();
   });
 
+  it("reloads the saved choices after a rejected send instead of locking the composer", async () => {
+    const rejected = new EneoError("Attachment too large", "RESPONSE", 400, 0);
+    const ask = vi
+      .fn()
+      .mockRejectedValueOnce(rejected)
+      .mockImplementation(async ({ callbacks }) => {
+        callbacks.onFirstChunk({
+          id: "message-2",
+          session_id: "saved",
+          answer: "",
+          references: []
+        });
+      });
+    const resolveSettings = vi.fn().mockResolvedValue({
+      revision: 2,
+      settings: { require_tool_approval: false },
+      effective_model: { id: "model-1", name: "model-1", token_limit: 128000 },
+      available_models: [],
+      model_unavailable: false
+    });
+    const chat = chatService(vi.fn(), {
+      ask,
+      resolveSettings,
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 2, settings: {} }
+      }
+    });
+    await chat.loadSettings();
+    const resolved = resolveSettings.mock.calls.length;
+    await expect(chat.askQuestion("hello")).rejects.toThrow("Attachment too large");
+    // The failure belongs to the answer; the choices are re-read, not locked.
+    expect(chat.settingsError).toBeNull();
+    expect(resolveSettings.mock.calls.length).toBeGreaterThan(resolved);
+    await vi.waitFor(() => expect(chat.settingsBusy).toBe(false));
+    await chat.askQuestion("hello again");
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps saved choices on a conflict and blocks send until the user reloads", async () => {
     const ask = completedAsk();
     const conflict = new EneoError("Changed elsewhere", "RESPONSE", 409, 0);
@@ -1512,7 +1553,7 @@ describe("ChatService browser start choices", () => {
     expect(chat.settings?.completion_model_id).toBe("model-1");
   });
 
-  it("never overwrites saved conversation choices with browser defaults", async () => {
+  it("keeps saved choices and browser start choices apart when a conversation is opened", async () => {
     const draft = chatService(vi.fn(), { draftOwner: owner });
     await draft.loadSettings();
     await draft.updateSettings({ completion_model_id: "model-2" });
@@ -1528,5 +1569,17 @@ describe("ChatService browser start choices", () => {
     await existing.loadSettings();
     expect(existing.settings?.completion_model_id).toBe("model-1");
     expect(existing.currentConversation.settings?.revision).toBe(3);
+    // Reading the saved conversation did not replace the browser's start choices.
+    const next = chatService(vi.fn(), { draftOwner: owner });
+    await next.loadSettings();
+    expect(next.settings?.completion_model_id).toBe("model-2");
+    // A change made inside the saved conversation does become the next start choice.
+    await existing.updateSettings({ require_tool_approval: true });
+    const later = chatService(vi.fn(), { draftOwner: owner });
+    await later.loadSettings();
+    expect(later.settings).toMatchObject({
+      completion_model_id: "model-1",
+      require_tool_approval: true
+    });
   });
 });

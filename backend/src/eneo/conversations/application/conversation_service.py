@@ -1,5 +1,6 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Collection, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
@@ -38,6 +39,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.sessions.conversation_settings import (
+    TOOL_APPROVAL_REQUIRES_STREAMING,
     ConversationCapability,
     ConversationMcpServer,
     ConversationSettings,
@@ -75,6 +77,15 @@ def _litellm_token_counter_name(model: "CompletionModel") -> str:
     return model.name
 
 
+@dataclass(frozen=True)
+class _AssistantContext:
+    """One load of what settings resolution needs for an assistant."""
+
+    assistant: "Assistant"
+    config: "EffectiveConfig | None"
+    space: "Space"
+
+
 class ConversationService:
     """
     Service for handling conversations with assistants and group chats.
@@ -98,12 +109,24 @@ class ConversationService:
         self.space_service = space_service
         self.file_service = file_service
 
+    async def _assistant_context(self, assistant_id: "UUID") -> _AssistantContext:
+        (
+            assistant,
+            _,
+            config,
+        ) = await self.assistant_service.get_assistant_with_effective_config(
+            assistant_id
+        )
+        space = await self.space_service.get_space_by_assistant(assistant_id)
+        return _AssistantContext(assistant=assistant, config=config, space=space)
+
     async def settings_defaults(
         self,
         *,
         session_id: "UUID | None" = None,
         assistant_id: "UUID | None" = None,
         group_chat_id: "UUID | None" = None,
+        context: _AssistantContext | None = None,
     ) -> ConversationSettings:
         if session_id is not None:
             session = await self.session_service.get_context(session_id)
@@ -114,15 +137,10 @@ class ConversationService:
             return ConversationSettings()
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
+        context = context or await self._assistant_context(assistant_id)
+        return self._assistant_settings_defaults(
+            context.assistant, context.space, context.config
         )
-        space = await self.space_service.get_space_by_assistant(assistant_id)
-        return self._assistant_settings_defaults(assistant, space, config)
 
     @staticmethod
     def _assistant_settings_defaults(
@@ -198,14 +216,8 @@ class ConversationService:
             )
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
-        space = await self.space_service.get_space_by_assistant(assistant_id)
+        context = await self._assistant_context(assistant_id)
+        assistant, config, space = context.assistant, context.config, context.space
         if settings is None:
             settings = self._assistant_settings_defaults(assistant, space, config)
         result = ConversationSettingsResolution(
@@ -232,14 +244,13 @@ class ConversationService:
             result.available_models = []
             allowed_ids: set[UUID] = set()
             for candidate in space.completion_models:
-                try:
-                    self.assistant_service.resolve_personal_chat_model_override(
-                        space=space,
-                        assistant=assistant,
-                        effective_config=config,
-                        completion_model_id=candidate.id,
-                    )
-                except BadRequestException:
+                rejection = self.assistant_service.personal_chat_model_rejection(
+                    space=space,
+                    assistant=assistant,
+                    effective_config=config,
+                    completion_model_id=candidate.id,
+                )
+                if rejection is not None:
                     continue
                 allowed_ids.add(candidate.id)
                 result.available_models.append(
@@ -351,6 +362,7 @@ class ConversationService:
         assistant_id: "UUID | None",
         group_chat_id: "UUID | None",
         previous_settings: ConversationSettings | None = None,
+        context: _AssistantContext | None = None,
     ) -> None:
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
@@ -365,15 +377,22 @@ class ConversationService:
             return
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
+        if context is not None:
+            assistant, config = context.assistant, context.config
+        else:
+            (
+                assistant,
+                _,
+                config,
+            ) = await self.assistant_service.get_assistant_with_effective_config(
+                assistant_id
+            )
         if settings.completion_model_id is not None:
-            space = await self.space_service.get_space_by_assistant(assistant_id)
+            space = (
+                context.space
+                if context is not None
+                else await self.space_service.get_space_by_assistant(assistant_id)
+            )
             model = self.assistant_service.resolve_personal_chat_model_override(
                 space=space,
                 assistant=assistant,
@@ -456,11 +475,22 @@ class ConversationService:
                 "Conversation settings changed elsewhere. Reload the conversation and try again."
             )
         if state is None:
+            # Defaults and validation share one assistant/policy/space load.
+            context = (
+                await self._assistant_context(assistant_id)
+                if group_chat_id is None and assistant_id is not None
+                else None
+            )
             choices = settings or await self.settings_defaults(
-                assistant_id=assistant_id, group_chat_id=group_chat_id
+                assistant_id=assistant_id,
+                group_chat_id=group_chat_id,
+                context=context,
             )
             await self.validate_settings(
-                choices, assistant_id=assistant_id, group_chat_id=group_chat_id
+                choices,
+                assistant_id=assistant_id,
+                group_chat_id=group_chat_id,
+                context=context,
             )
             if session_id is not None:
                 state = await self.session_service.update_settings(
@@ -472,7 +502,7 @@ class ConversationService:
         if (
             require_tool_approval or state.settings.require_tool_approval
         ) and not stream:
-            raise BadRequestException("Tool approval requires streaming.")
+            raise BadRequestException(TOOL_APPROVAL_REQUIRES_STREAMING)
         if group_chat_id is not None:
             if require_tool_approval:
                 raise BadRequestException(
@@ -542,10 +572,15 @@ class ConversationService:
             if session.settings:
                 session.settings.require_supported()
                 settings = session.settings.settings
+        context = None
         if settings is None:
+            # The defaults and the model resolution below share this load.
+            if group_chat_id is None and assistant_id is not None:
+                context = await self._assistant_context(assistant_id)
             settings = await self.settings_defaults(
                 assistant_id=assistant_id,
                 group_chat_id=group_chat_id,
+                context=context,
             )
         completion_model_id = (
             settings.completion_model_id
@@ -560,6 +595,7 @@ class ConversationService:
             tool_assistant_id=tool_assistant_id,
             completion_model_id=completion_model_id,
             session=session,
+            context=context,
         )
         model_name = _litellm_token_counter_name(model)
 
@@ -718,6 +754,7 @@ class ConversationService:
         tool_assistant_id: Optional["UUID"] = None,
         completion_model_id: Optional["UUID"] = None,
         session: "SessionContext | None" = None,
+        context: _AssistantContext | None = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
@@ -760,6 +797,7 @@ class ConversationService:
                     session.assistant_id,
                     completion_model_id=completion_model_id,
                     tool_assistant_id=tool_assistant_id,
+                    context=context,
                 )
                 selector_tokens = 0
         elif assistant_id:
@@ -767,6 +805,7 @@ class ConversationService:
                 assistant_id,
                 completion_model_id=completion_model_id,
                 tool_assistant_id=tool_assistant_id,
+                context=context,
             )
             selector_tokens = 0
         elif group_chat_id:
@@ -791,6 +830,7 @@ class ConversationService:
         assistant_id: "UUID",
         completion_model_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
+        context: _AssistantContext | None = None,
     ) -> tuple["CompletionModel | None", bool]:
         """Governance-aware model and file-inlining mode for one assistant.
 
@@ -798,13 +838,17 @@ class ConversationService:
         assistant's own model is disallowed, and the governed file policy —
         so the estimate never disagrees with the actual request.
         """
-        (
-            assistant,
-            _,
-            effective_config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
+        if context is not None and context.assistant.id == assistant_id:
+            assistant, effective_config = context.assistant, context.config
+        else:
+            context = None
+            (
+                assistant,
+                _,
+                effective_config,
+            ) = await self.assistant_service.get_assistant_with_effective_config(
+                assistant_id
+            )
         if tool_assistant_id is not None:
             if tool_assistant_id not in [tool.id for tool in assistant.tool_assistants]:
                 raise BadRequestException(
@@ -812,7 +856,11 @@ class ConversationService:
                 )
             return await self._assistant_preflight_settings(tool_assistant_id)
         if completion_model_id is not None:
-            space = await self.space_service.get_space_by_assistant(assistant_id)
+            space = (
+                context.space
+                if context is not None
+                else await self.space_service.get_space_by_assistant(assistant_id)
+            )
             model = self.assistant_service.resolve_personal_chat_model_override(
                 space=space,
                 assistant=assistant,

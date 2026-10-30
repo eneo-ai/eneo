@@ -23,22 +23,21 @@ export function usePreflight(request: {
   settingsRevision?: number;
   disabled?: boolean;
 }): PreflightState {
-  const [result, setResult] = useState<{ key: string; value: PreflightState } | null>(null);
+  const [result, setResult] = useState<{ context: string; value: PreflightState } | null>(null);
   const generation = useRef(0);
 
   const { question, sessionId, assistantId, groupChatId, settings, settingsRevision, disabled } =
     request;
   const settingsKey = JSON.stringify(settings);
   const fileKey = request.fileIds.join(",");
-  const requestKey = JSON.stringify([
-    question,
-    fileKey,
+  // An estimate stays valid while the same conversation context is typed
+  // into; a model, revision or partner change invalidates it at once.
+  const contextKey = JSON.stringify([
     sessionId,
     assistantId,
     groupChatId,
     settingsKey,
-    settingsRevision,
-    disabled
+    settingsRevision
   ]);
 
   useEffect(() => {
@@ -60,7 +59,7 @@ export function usePreflight(request: {
             }
           })
         );
-        if (generation.current === current) setResult({ key: requestKey, value: response });
+        if (generation.current === current) setResult({ context: contextKey, value: response });
       } catch {
         // Preflight is best-effort UX; stay silent on errors (incl. 429).
       }
@@ -84,7 +83,7 @@ export function usePreflight(request: {
   ]);
 
   // Empty input: report no pending cost (derived, not reset via setState).
-  return !disabled && (question || fileKey) && result?.key === requestKey ? result.value : null;
+  return !disabled && (question || fileKey) && result?.context === contextKey ? result.value : null;
 }
 
 /**

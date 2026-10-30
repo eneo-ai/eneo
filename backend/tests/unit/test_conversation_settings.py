@@ -132,6 +132,7 @@ def service_with_policy():
             return_value=(assistant, [], policy)
         ),
         resolve_personal_chat_model_override=AssistantService.resolve_personal_chat_model_override,
+        personal_chat_model_rejection=AssistantService.personal_chat_model_rejection,
         requested_capabilities=AssistantService.requested_capabilities,
         ask=AsyncMock(),
     )

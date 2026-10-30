@@ -372,6 +372,13 @@ export class ChatService {
     } else {
       this.#draftSettings = resolution.settings;
     }
+    this.#clearPreflight();
+  }
+
+  // The browser's start choices for new chats follow what the user set up:
+  // a draft, or a change made in a conversation. Opening an older
+  // conversation only reads its saved choices and leaves the draft alone.
+  #rememberDraft(resolution: ConversationSettingsResolution) {
     const scope = this.#draftScope();
     if (
       browser &&
@@ -381,7 +388,6 @@ export class ChatService {
     ) {
       rememberConversationDraft(scope, resolution.settings);
     }
-    this.#clearPreflight();
   }
 
   async loadSettings(force = false) {
@@ -414,6 +420,7 @@ export class ChatService {
       if (conversation !== this.currentConversation) return;
       this.settingsError = null;
       this.#setResolvedSettings(conversation, resolution);
+      if (!conversation.id) this.#rememberDraft(resolution);
     } catch (error) {
       if (conversation === this.currentConversation) this.settingsError = error;
     } finally {
@@ -451,6 +458,7 @@ export class ChatService {
       });
       if (conversation !== this.currentConversation) return;
       this.#setResolvedSettings(conversation, resolution);
+      this.#rememberDraft(resolution);
     } catch (error) {
       if (conversation === this.currentConversation) this.settingsError = error;
     } finally {
@@ -1296,8 +1304,17 @@ export class ChatService {
           }
         });
       } catch (error) {
-        if (!isStale() && error instanceof EneoError && [400, 409].includes(error.status)) {
-          this.settingsError = error;
+        // A rejected send is reported as the answer's failure. The saved
+        // choices are re-read so a stale revision or a model that became
+        // unavailable shows up as current state, instead of locking the
+        // composer behind an unrelated 400.
+        if (
+          !isStale() &&
+          this.#settingsEnabled &&
+          error instanceof EneoError &&
+          [400, 409].includes(error.status)
+        ) {
+          void this.loadSettings(true);
         }
         if (!requestOpened && ref) {
           // The backend never took the question, so the pending echo comes

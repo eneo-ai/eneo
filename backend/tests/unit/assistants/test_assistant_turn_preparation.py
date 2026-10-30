@@ -186,6 +186,8 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
     )
     history.create_question_placeholder = AsyncMock(return_value=(uuid4(), now))
     history.get_session_by_uuid = AsyncMock(return_value=session)
+    # ask() reads the saved settings from the session's metadata only.
+    history.get_context = AsyncMock(return_value=session)
     history.complete_question_with_answer = AsyncMock()
     requests: list[dict[str, object]] = []
 

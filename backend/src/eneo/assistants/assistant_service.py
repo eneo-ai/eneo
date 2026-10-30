@@ -108,6 +108,7 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.sessions.conversation_settings import TOOL_APPROVAL_REQUIRES_STREAMING
 from eneo.skills.domain.personal_chat_skill_layers import (
     PersonalSkillLayerSave,
     assert_personal_skill_layer_save,
@@ -666,7 +667,41 @@ class AssistantService:
         )
 
     @staticmethod
+    def personal_chat_model_rejection(
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        completion_model_id: UUID,
+    ) -> str | None:
+        """Why a conversation cannot select this model now, or None when it can.
+
+        The single owner of the personal-chat model rules: the override and the
+        settings resolution's list of selectable models both read it.
+        """
+        if (
+            not space.is_personal()
+            or space.default_assistant is None
+            or assistant.id != space.default_assistant.id
+        ):
+            return "A model can only be selected for personal chat."
+        if not space.is_completion_model_available(completion_model_id):
+            return "The selected model is no longer available."
+        if effective_config is not None and effective_config.models_enforced:
+            allowed_ids = {model.id for model in effective_config.available_models}
+            if completion_model_id not in allowed_ids:
+                return "The selected model is no longer allowed by the personal chat policy."
+        try:
+            space.validate_model_security_compatibility(
+                space.get_completion_model(completion_model_id)
+            )
+        except BadRequestException as error:
+            return str(error)
+        return None
+
+    @classmethod
     def resolve_personal_chat_model_override(
+        cls,
         *,
         space: "Space",
         assistant: Assistant,
@@ -674,23 +709,15 @@ class AssistantService:
         completion_model_id: UUID,
     ) -> "CompletionModel":
         """Validate a conversation's model against current space and policy rules."""
-        if (
-            not space.is_personal()
-            or space.default_assistant is None
-            or assistant.id != space.default_assistant.id
-        ):
-            raise BadRequestException("A model can only be selected for personal chat.")
-        if not space.is_completion_model_available(completion_model_id):
-            raise BadRequestException("The selected model is no longer available.")
-        if effective_config is not None and effective_config.models_enforced:
-            allowed_ids = {model.id for model in effective_config.available_models}
-            if completion_model_id not in allowed_ids:
-                raise BadRequestException(
-                    "The selected model is no longer allowed by the personal chat policy."
-                )
-        model = space.get_completion_model(completion_model_id)
-        space.validate_model_security_compatibility(model)
-        return model
+        rejection = cls.personal_chat_model_rejection(
+            space=space,
+            assistant=assistant,
+            effective_config=effective_config,
+            completion_model_id=completion_model_id,
+        )
+        if rejection is not None:
+            raise BadRequestException(rejection)
+        return space.get_completion_model(completion_model_id)
 
     @staticmethod
     def _governed_base_instructions(
@@ -3933,8 +3960,9 @@ class AssistantService:
             )
 
         if conversation_settings is None and session_id is not None:
-            existing = await self.session_service.get_session_by_uuid(
-                id=session_id,
+            # Metadata only; the turn itself loads the history later.
+            existing = await self.session_service.get_context(
+                session_id,
                 assistant_id=assistant_id if group_chat_id is None else None,
                 group_chat_id=group_chat_id,
             )
@@ -3946,7 +3974,7 @@ class AssistantService:
                 or conversation_settings.settings.require_tool_approval
             )
         if require_tool_approval and not stream:
-            raise BadRequestException("Tool approval requires streaming.")
+            raise BadRequestException(TOOL_APPROVAL_REQUIRES_STREAMING)
         prepared = await self._prepare_turn(
             question=question,
             assistant_id=assistant_id,

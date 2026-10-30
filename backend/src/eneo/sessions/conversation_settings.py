@@ -27,6 +27,13 @@ from eneo.mcp_servers.domain.capabilities import (
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
+# A saved approval requirement cannot be lifted by one request, so a
+# non-streaming client must change the conversation's settings instead.
+TOOL_APPROVAL_REQUIRES_STREAMING = (
+    "Tool approval requires streaming. Send stream=true, or turn tool approval "
+    "off in this conversation's settings before continuing without a stream."
+)
+
 
 class ConversationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")

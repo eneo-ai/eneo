@@ -275,23 +275,12 @@ class SessionService:
 
         if not self._is_owner(session):
             raise UnauthorizedException("Session belongs to other principal")
-
-        # Handle cross-endpoint access attempt
-        if assistant_id is not None and session.group_chat_id is not None:
-            raise BadRequestException(
-                "Cannot access a group chat session through the assistant endpoint. "
-                "Use the conversation endpoints instead."
-            )
-
-        # Verify the session belongs to the specified assistant/group chat
-        if (
-            assistant_id is not None
-            and session.assistant is not None
-            and session.assistant.id != assistant_id
-        ):
-            raise NotFoundException("Session belongs to another assistant")
-        if group_chat_id is not None and session.group_chat_id != group_chat_id:
-            raise NotFoundException("Session belongs to another group chat")
+        self._check_chat_partner(
+            session_assistant_id=session.assistant.id if session.assistant else None,
+            session_group_chat_id=session.group_chat_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
 
         return session
 
@@ -307,12 +296,46 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
-    async def get_context(self, id: UUID) -> SessionContext:
+    @staticmethod
+    def _check_chat_partner(
+        *,
+        session_assistant_id: UUID | None,
+        session_group_chat_id: UUID | None,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> None:
+        """Reject a session reached through another assistant or group chat."""
+        if assistant_id is not None and session_group_chat_id is not None:
+            raise BadRequestException(
+                "Cannot access a group chat session through the assistant endpoint. "
+                "Use the conversation endpoints instead."
+            )
+        if (
+            assistant_id is not None
+            and session_assistant_id is not None
+            and session_assistant_id != assistant_id
+        ):
+            raise NotFoundException("Session belongs to another assistant")
+        if group_chat_id is not None and session_group_chat_id != group_chat_id:
+            raise NotFoundException("Session belongs to another group chat")
+
+    async def get_context(
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionContext:
         session = await self.session_repo.get_context(id, tenant_id=self.user.tenant_id)
         if session is None:
             raise NotFoundException("Session not found")
         if not self._is_owner(session):
             raise UnauthorizedException("Session belongs to other principal")
+        self._check_chat_partner(
+            session_assistant_id=session.assistant_id,
+            session_group_chat_id=session.group_chat_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
         return session
 
     async def get_tool_call_result(

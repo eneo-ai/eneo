@@ -22,7 +22,6 @@ type ConversationSettingsContext = {
   error: unknown;
   hasMessages: boolean;
   running: boolean;
-  invalidate: (error: unknown) => void;
   setRunning: (running: boolean) => void;
   reload: () => Promise<void>;
   update: (patch: Partial<Settings>) => Promise<void>;
@@ -70,6 +69,12 @@ export function ConversationSettingsProvider({
     if (!mounted.current) return;
     current.current = next;
     setResolution(next);
+  }
+
+  // The browser's start choices follow what the user set up: a draft, or a
+  // change made in a conversation. Opening an older conversation only reads
+  // its saved choices and leaves the draft alone.
+  function remember(next: Resolution) {
     if (next.settings_compatible !== false && !next.model_unavailable) {
       rememberConversationDraft(scope, next.settings);
     }
@@ -109,10 +114,12 @@ export function ConversationSettingsProvider({
   function load() {
     if (locked.current) return Promise.resolve();
     locked.current = true;
+    const draft = !sessionId.current;
     return readSettings()
       .then(
         (next) => {
           install(next);
+          if (draft) remember(next);
           if (mounted.current) setError(null);
         },
         (cause: unknown) => {
@@ -163,7 +170,9 @@ export function ConversationSettingsProvider({
         );
         install({ ...current.current, ...state });
       }
-      install(await resolve(settings));
+      const next = await resolve(settings);
+      install(next);
+      remember(next);
     } catch (cause) {
       if (mounted.current) setError(cause);
     } finally {
@@ -187,7 +196,6 @@ export function ConversationSettingsProvider({
         error,
         hasMessages,
         running,
-        invalidate: setError,
         setRunning,
         reload,
         update,

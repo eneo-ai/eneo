@@ -368,8 +368,11 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
+        // The failure is reported as the answer's; a stale revision or a model
+        // that became unavailable shows up as current settings after the reload
+        // instead of locking the composer behind an unrelated 400.
         if (failure instanceof EneoApiError && [400, 409].includes(failure.status))
-          conversationSettings.invalidate(failure);
+          void conversationSettings.reload();
         announce(describeChatFailure(failure, streamErrorCodeRef.current, t).message);
         if (!pending || streamStartedRef.current) return;
         // Failed before the answer started: the question goes back to the

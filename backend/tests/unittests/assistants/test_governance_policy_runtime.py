@@ -984,6 +984,7 @@ def _runtime_service(
             return_value=(session, uuid4(), None)
         ),
         get_session_by_uuid=AsyncMock(return_value=session),
+        get_context=AsyncMock(return_value=session),
     )
     service = _service_with_effective_config(effective_config_service)
     service.skill_service = skill_service

@@ -78,3 +78,23 @@ it("uses the saved revision and ignores a late estimate after settings become bl
   await act(async () => finish({ data: estimate, response: new Response() }));
   expect(view.result.current).toBeNull();
 });
+
+it("keeps the last estimate while the same conversation is typed into", async () => {
+  let request = {
+    question: "Hello",
+    fileIds: [] as string[],
+    assistantId: "assistant",
+    settings: { completion_model_id: "model-1" }
+  };
+  const view = renderHookInApp(() => usePreflight(request));
+  await act(() => vi.advanceTimersByTimeAsync(400));
+  expect(view.result.current).toEqual(estimate);
+  request = { ...request, question: "Hello there" };
+  view.rerender();
+  // The previous estimate stays until the new one lands; only the context
+  // (model, session, partner) invalidates it at once.
+  expect(view.result.current).toEqual(estimate);
+  await act(() => vi.advanceTimersByTimeAsync(400));
+  expect(api.POST).toHaveBeenCalledTimes(2);
+  expect(view.result.current).toEqual(estimate);
+});

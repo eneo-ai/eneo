@@ -159,7 +159,7 @@ POST /api/v1/conversations/
 
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
-Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`. The same `400` applies when the conversation's saved settings have `require_tool_approval: true` and the request does not stream: a request cannot lift a saved restriction, so continue with `stream: true` or turn approval off through the settings endpoint first. A service API key cannot continue a conversation a user started in the web app; only requests for the same user can.
 
 ### Conversation settings
 
