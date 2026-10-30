@@ -174,7 +174,7 @@ def use_bundle_backend(services, backend_image, token):
         service.pop("build", None)
         service["image"] = backend_image
         service["networks"] = ["e2e", "tools"]
-        service["environment"].update(
+        service.setdefault("environment", {}).update(
             {
                 "TOOL_RUNTIME_URL": "http://tool-runtime:3010",
                 "TOOL_RUNTIME_TOKEN": token,
