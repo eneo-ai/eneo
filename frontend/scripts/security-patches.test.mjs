@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
@@ -12,6 +13,52 @@ const glob = createRequire(nextra.resolve("fast-glob"));
 const match = createRequire(glob.resolve("micromatch"));
 const braces = match("braces");
 
+// Resolve the patched package through a real build-tool consumer.
+const sveltePlugin = createRequire(
+  realpathSync(
+    new URL(
+      "../apps/web/node_modules/@sveltejs/vite-plugin-svelte/package.json",
+      import.meta.url,
+    ),
+  ),
+);
+const deepmerge = sveltePlugin("deepmerge");
+const deepmergeUmd = sveltePlugin("deepmerge/dist/umd.js");
+
+for (const [entry, merge] of [
+  ["cjs", deepmerge],
+  ["umd", deepmergeUmd],
+]) {
+  test(`deepmerge ${entry}: ordinary nested configuration, arrays and symbols still merge`, () => {
+    const symbol = Symbol("option");
+    const target = { nested: { enabled: true }, items: [1], [symbol]: "kept" };
+    assert.deepEqual(merge(target, { nested: { value: 2 }, items: [2] }), {
+      nested: { enabled: true, value: 2 },
+      items: [1, 2],
+      [symbol]: "kept",
+    });
+    assert.deepEqual(target.items, [1]);
+  });
+
+  test(`deepmerge ${entry}: neither source nor target can poison the returned prototype`, () => {
+    const payload = JSON.parse('{"__proto__":{"injected":true},"safe":1}');
+    for (const result of [
+      merge(Object.create(null), payload),
+      merge(payload, {}),
+      merge(payload, payload),
+      merge({ nested: null }, { nested: payload }).nested,
+      merge({ nested: 0 }, { nested: payload }).nested,
+      merge({ nested: undefined }, { nested: payload }).nested,
+      merge.all([payload, { safe: 2 }]),
+    ]) {
+      assert.equal(Object.getPrototypeOf(result), Object.prototype);
+      assert.equal(result.injected, undefined);
+      assert.equal(Object.hasOwn(result, "__proto__"), false);
+      assert.equal(typeof result.safe, "number");
+    }
+    assert.equal({}.injected, undefined);
+  });
+}
 // Exercise the resolution used by the beta's installed query devtools.
 const webNext = createRequire(
   new URL("../apps/web-next/package.json", import.meta.url),

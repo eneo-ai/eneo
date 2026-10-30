@@ -35,7 +35,19 @@ const api = vi.hoisted(() => ({
     }
     return { data: undefined, error: { message: "unexpected" }, response: new Response() };
   }),
-  POST: vi.fn(async () => ({ data: undefined, response: new Response() })),
+  POST: vi.fn(async (path: string, init?: { body?: { session_id?: string } }) => ({
+    data: path.endsWith("/settings/resolve/")
+      ? {
+          revision: init?.body?.session_id ? 1 : 0,
+          settings: {},
+          supports_tool_calling: true,
+          settings_compatible: true,
+          mcp_servers: [],
+          capabilities: []
+        }
+      : undefined,
+    response: new Response()
+  })),
   PUT: vi.fn(async (_path: string, init: { body: unknown }) => ({
     data: init.body,
     response: new Response()
@@ -144,6 +156,42 @@ describe("ChatView start state", () => {
 });
 
 describe("ChatView conversation", () => {
+  it("shows readable history and an announced explanation when saved settings are unsupported", async () => {
+    api.POST.mockResolvedValueOnce({
+      data: {
+        revision: 2,
+        settings: {},
+        supports_tool_calling: true,
+        settings_compatible: false,
+        mcp_servers: [],
+        capabilities: []
+      },
+      response: new Response()
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const notice = await screen.findByText(
+      /Den här appversionen stöder inte alla sparade inställningar/
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    expect(screen.getByText("Direktupphandlingsgränsen är 700 000 kr.")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: /Meddelande till/ }), {
+      target: { value: "Fortsätt" }
+    });
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      true
+    );
+    expect(api.PATCH).not.toHaveBeenCalled();
+    const reload = screen.getByRole("button", { name: "Läs in sparade val" });
+    reload.focus();
+    fireEvent.click(reload);
+    await waitFor(() => expect(notice.isConnected).toBe(false));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: /Meddelande till/ }))
+    );
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      false
+    );
+  });
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp, testAppContext } from "@/test/render";
 import { SpaceChat } from "./space-chat.client";
 
 const route = vi.hoisted(() => ({
+  unavailableModel: false,
   space: {
     id: "space-1",
     name: "Upphandling",
@@ -22,7 +23,24 @@ const api = vi.hoisted(() => ({
     response: new Response(null, { status: 403 })
   })),
   POST: vi.fn(async (_path: string, init?: { body?: unknown }) => ({
-    data: init?.body,
+    data: _path.includes("settings/resolve")
+      ? {
+          revision: 0,
+          settings: {
+            completion_model_id: route.unavailableModel ? "removed" : "model-1",
+            ...(init?.body as { settings?: object })?.settings
+          },
+          reasoning_effort_options: (
+            route.space.default_assistant as typeof personalSpace.default_assistant | null
+          )?.effective_config.reasoning_effort_user_configurable
+            ? ["low", "medium", "high"]
+            : [],
+          default_reasoning_effort: "medium",
+          available_models: [reasoningModel],
+          effective_model: reasoningModel,
+          model_unavailable: route.unavailableModel
+        }
+      : init?.body,
     response: new Response()
   }))
 }));
@@ -71,10 +89,13 @@ vi.mock("@/features/spaces/use-space", () => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
+beforeEach(() => localStorage.clear());
+
 afterEach(() => {
   cleanup();
   api.GET.mockClear();
   api.POST.mockClear();
+  route.unavailableModel = false;
   route.space.personal = false;
   route.space.completion_models = [];
   route.space.default_assistant = null;
@@ -88,6 +109,29 @@ function renderRoute(url = "/spaces/space-1/chat", permissions: string[] = []) {
 }
 
 describe("SpaceChat", () => {
+  it("keeps the picker usable when the saved model is unavailable and only one replacement remains", async () => {
+    Object.assign(route.space, personalSpace);
+    route.unavailableModel = true;
+    renderRoute("/spaces/personal/chat");
+    await screen.findByText("Den sparade modellen är inte tillgänglig");
+    const picker = await screen.findByRole("button", { name: /^Chattmodell:/ });
+    fireEvent.click(picker);
+    const option = await screen.findByRole("option", { name: /GPT-5/ });
+    route.unavailableModel = false;
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: null }
+        }
+      })
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Den sparade modellen är inte tillgänglig")).toBeNull()
+    );
+  });
+
   it("offers a retry when an assistant in the space can't be loaded", async () => {
     renderRoute("/spaces/space-1/chat?type=assistant&id=assistant-9");
     expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
@@ -101,7 +145,7 @@ describe("SpaceChat", () => {
     expect(api.GET).not.toHaveBeenCalled();
   });
 
-  it("lets the personal assistant's reasoning effort be picked beside the model and saves it on the assistant", async () => {
+  it("lets the personal assistant's reasoning effort be picked beside the model and keeps it in the conversation draft", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
@@ -112,9 +156,11 @@ describe("SpaceChat", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
 
     await waitFor(() =>
-      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-        params: { path: { id: "assistant-1" } },
-        body: { completion_model_kwargs: { reasoning_effort: "high" } }
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: "high" }
+        }
       })
     );
   });

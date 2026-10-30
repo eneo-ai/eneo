@@ -4,64 +4,36 @@
     AI Elements-style model selector for the chat input toolbar: a command
     palette grouped by model vendor with provider logos and text search.
     Policy-filtered models, a locked label when the policy pins a single model,
-    and a plain label when only one model is available. Switching updates the
-    personal space's default assistant. Only meaningful for the default
-    assistant — callers gate on partner.type.
+    and a plain label when only one model is available. Selection belongs to
+    the personal conversation, not the default assistant.
 -->
 <script lang="ts">
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { getChatService } from "../../ChatService.svelte";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
-  import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { m } from "$lib/paraglide/messages";
   import Cpu from "@lucide/svelte/icons/cpu";
   import Lock from "@lucide/svelte/icons/lock";
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
-  const {
-    state: { currentSpace },
-    updateDefaultAssistant
-  } = getSpacesManager();
+  const chat = getChatService();
+  const { onNewConversation }: { onNewConversation: () => void } = $props();
 
-  // Only rendered when chat.partner.type === "default-assistant", which
-  // guarantees the personal space's default_assistant is present.
-  const defaultAssistant = $derived($currentSpace.default_assistant!);
-  const effectiveConfig = $derived(defaultAssistant.effective_config);
-
-  // When the admin policy locks the model to one option, show the locked name
-  // instead of a picker.
-  const lockedModel = $derived(
-    effectiveConfig?.models_enforced && effectiveConfig.locked_model
-      ? ($currentSpace.completion_models.find(
-          (model) => model.id === effectiveConfig.locked_model?.id
-        ) ?? effectiveConfig.locked_model)
-      : null
+  const visibleModels = $derived(sortModels(chat.settingsResolution?.available_models ?? []));
+  const selectedModel = $derived(chat.settingsResolution?.effective_model ?? null);
+  const lockedModel = $derived(chat.settingsResolution?.model_locked ? selectedModel : null);
+  const selectedId = $derived(chat.settings?.completion_model_id ?? selectedModel?.id ?? "");
+  const savedModelUnavailable = $derived(chat.settingsResolution?.model_unavailable ?? false);
+  const selectedLabel = $derived(
+    savedModelUnavailable
+      ? m.conversation_settings_model_unavailable()
+      : (selectedModel?.nickname ?? m.select_a_model())
   );
-  const policyAllowedModelIds = $derived(
-    effectiveConfig?.models_enforced
-      ? new Set(effectiveConfig.available_models.map((model) => model.id))
-      : null
-  );
-  const visibleModels = $derived(
-    sortModels(
-      policyAllowedModelIds
-        ? $currentSpace.completion_models.filter((model) => policyAllowedModelIds.has(model.id))
-        : $currentSpace.completion_models
-    )
-  );
-  const selectedModel = $derived.by(() => {
-    return (
-      selectEffectiveChatModel(
-        defaultAssistant.completion_model,
-        effectiveConfig,
-        $currentSpace.completion_models
-      ) ?? null
-    );
-  });
-  const selectedId = $derived(selectedModel?.id ?? "");
-  const selectedLabel = $derived(selectedModel?.nickname ?? m.select_a_model());
   let selectorOpen = $state(false);
+  let pendingModelId = $state<string | null>(null);
   let previewedModelId = $state<string | null>(null);
   const previewedModel = $derived(
     visibleModels.find((model) => model.id === previewedModelId) ??
@@ -79,16 +51,37 @@
   // identically.
   const modelGroups = $derived(groupModelsByVendor(visibleModels, m.model_group_other()));
 
+  $effect(() => chat.setModelCatalog(chat.settingsResolution?.available_models ?? []));
+
+  async function applyModel(id: string, newConversation = false) {
+    const model = visibleModels.find((candidate) => candidate.id === id);
+    if (!model) return;
+    pendingModelId = null;
+    // Capture the model before resetting clears the current resolution/catalog.
+    if (newConversation) onNewConversation();
+    await chat.loadSettings();
+    await chat.selectPersonalModel(model);
+  }
+
   function selectModel(id: string) {
-    if (!id || id === selectedId) return;
-    // Persist the model on the personal default assistant. The chat page keeps
-    // the chat partner synced with SpacesManager, so no manual partner update
-    // is needed here.
-    updateDefaultAssistant({ completionModel: { id } });
+    if (
+      !id ||
+      id === selectedId ||
+      chat.askQuestion.isLoading ||
+      chat.settingsBusy ||
+      !chat.settings
+    )
+      return;
+    selectorOpen = false;
+    if (chat.currentConversation.messages.length > 0) {
+      pendingModelId = id;
+    } else {
+      applyModel(id);
+    }
   }
 </script>
 
-{#if lockedModel}
+{#if lockedModel && !savedModelUnavailable}
   <div
     class="text-muted-foreground flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm @[36rem]/composer:gap-1.5 @[36rem]/composer:px-2.5"
     title={`${lockedModel.nickname} · ${m.governance_locked_by_admin()}`}
@@ -99,7 +92,7 @@
       >{lockedModel.nickname}</span
     >
   </div>
-{:else if visibleModels.length <= 1}
+{:else if visibleModels.length === 0 || (visibleModels.length === 1 && !savedModelUnavailable)}
   <div
     class="flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm @[36rem]/composer:px-2.5"
     title={selectedLabel}
@@ -113,6 +106,10 @@
 {:else}
   <ModelSelector.Root bind:open={selectorOpen}>
     <ModelSelector.Trigger
+      disabled={chat.settingsBusy ||
+        !chat.settings ||
+        chat.askQuestion.isLoading ||
+        chat.settingsResolution?.settings_compatible === false}
       class="min-w-0 gap-1 px-2 @[36rem]/composer:gap-1.5 @[36rem]/composer:px-2.5 [&>svg:last-child]:hidden @[26rem]/composer:[&>svg:last-child]:block"
       aria-label={`${m.choose_a_completion_model()}: ${selectedLabel}`}
       title={selectedLabel}
@@ -160,3 +157,36 @@
     </ModelSelector.Content>
   </ModelSelector.Root>
 {/if}
+
+<AlertDialog.Root
+  open={pendingModelId !== null}
+  onOpenChange={(open) => {
+    if (!open) pendingModelId = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.personal_chat_model_change_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.personal_chat_model_change_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button
+        variant="outline"
+        onclick={() => {
+          const id = pendingModelId;
+          if (!id) return;
+          applyModel(id, true);
+        }}>{m.personal_chat_model_new_conversation()}</Button
+      >
+      <AlertDialog.Action
+        onclick={() => {
+          if (pendingModelId) applyModel(pendingModelId);
+        }}
+      >
+        {m.personal_chat_model_change_anyway()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

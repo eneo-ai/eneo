@@ -59,6 +59,7 @@ def _call(
 
 def _conversation(*questions: list[ToolCallInfo], files: list | None = None):
     return SimpleNamespace(
+        settings=None,
         assistant=SimpleNamespace(id=ASSISTANT_ID),
         questions=[
             SimpleNamespace(
@@ -439,3 +440,17 @@ async def test_view_handle_only_resolves_when_original_call_and_conversation_bot
     )
     assert result.signed_files == []
     assert _sent_link(proxy) == file_handle(other)
+
+
+async def test_incompatible_saved_settings_block_view_tool_execution():
+    from eneo.sessions.conversation_settings import ConversationSettingsState
+
+    conversation = _conversation([_call()])
+    conversation.settings = ConversationSettingsState.model_validate(
+        {"revision": 3, "settings": {"future_safety": True}}
+    )
+    assistants, factory, proxy = _setup()
+    with pytest.raises(BadRequestException, match="unsupported"):
+        await _run(conversation, assistants, factory)
+    assert proxy.called == []
+    assert factory.created_with == {}

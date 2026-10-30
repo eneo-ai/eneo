@@ -30,14 +30,20 @@ from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.main.exceptions import ConversationSettingsConflictException
 from eneo.mcp_apps.application.current_views import show_current_views
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
     McpAppViewRepo,
 )
 from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -212,6 +218,38 @@ class SessionRepository:
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self._hydrate_optional(await self.delegate.update(session))
 
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        """Compare and swap after SessionService has checked ownership."""
+        stored = await self.session.scalar(
+            sa.select(Sessions.settings).where(Sessions.id == id)
+        )
+        previous = ConversationSettingsState.model_validate(stored) if stored else None
+        if (previous.revision if previous else 0) != expected_revision:
+            raise ConversationSettingsConflictException()
+        state = (
+            previous.with_settings(settings)
+            if previous
+            else ConversationSettingsState(revision=1, settings=settings)
+        )
+        predicate = (
+            Sessions.settings.is_(None)
+            if expected_revision == 0
+            else Sessions.settings["revision"].as_integer() == expected_revision
+        )
+        result = await self.session.scalar(
+            sa.update(Sessions)
+            .where(Sessions.id == id, predicate)
+            .values(settings=state.to_storage())
+            .returning(Sessions.id)
+        )
+        if result is None:
+            raise ConversationSettingsConflictException(
+                "Conversation settings changed elsewhere. Reload the conversation and try again."
+            )
+        return state
+
     async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
         stmt = (
             sa.Update(Sessions)
@@ -232,6 +270,30 @@ class SessionRepository:
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def get_context(self, id: UUID, tenant_id: UUID) -> SessionContext | None:
+        """Read bounded metadata for settings and scope checks, without hydration."""
+        query = (
+            sa.select(
+                Sessions.id,
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+                sa.func.coalesce(Assistants.space_id, GroupChatsTable.space_id).label(
+                    "space_id"
+                ),
+                Sessions.settings,
+            )
+            .outerjoin(Assistants, Sessions.assistant_id == Assistants.id)
+            .outerjoin(GroupChatsTable, Sessions.group_chat_id == GroupChatsTable.id)
+            .where(Sessions.id == id)
+        )
+        query = self._exclude_helper_run_sessions(
+            self._filter_by_tenant(query, tenant_id)
+        )
+        row = (await self.session.execute(query)).mappings().one_or_none()
+        return SessionContext.model_validate(row) if row is not None else None
 
     async def get_owned_chat_partner(
         self,

@@ -213,6 +213,8 @@ export type IntegrationKnowledgePreview = components["schemas"]["IntegrationPrev
 export type Conversation = components["schemas"]["SessionPublic"] & {
   messages: ConversationMessage[];
 };
+export type ConversationSettings = components["schemas"]["ConversationSettings"];
+export type ConversationSettingsState = components["schemas"]["ConversationSettingsState"];
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
 export type ConversationMessage = components["schemas"]["Message"];
@@ -315,3 +317,6 @@ export type InitiateAuthResponse = {
 };
 
 export type AccessTokenResponse = components["schemas"]["AccessTokenResponse"];
+
+export type ConversationSettingsResolution =
+  components["schemas"]["ConversationSettingsResolution"];

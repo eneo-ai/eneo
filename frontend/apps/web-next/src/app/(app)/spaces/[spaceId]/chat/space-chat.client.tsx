@@ -1,15 +1,16 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Button } from "@astryxdesign/core/Button";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
-import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import {
   ChatPartnerError,
   ChatPartnerLoading,
@@ -20,8 +21,7 @@ import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
-import { queuePartnerUpdate } from "@/features/chat/partner-updates";
-import { reasoningEffortOptions } from "@/features/chat/reasoning-effort";
+import { useConversationSettings } from "@/features/chat/conversation-settings";
 import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
 import { useSpace } from "@/features/spaces/use-space";
 
@@ -29,118 +29,66 @@ import { useSpace } from "@/features/spaces/use-space";
 const COMPOSER_PICKER_CLASS =
   "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11";
 
-/**
- * Default-assistant completion model switcher (personal chat only). Switching
- * persists on the personal space's default assistant — a global change (see the
- * "personal chat model is global" contract) — and honours the admin governance
- * policy: a pinned model shows a locked label, an enforced allow-list filters
- * the list, and the effective pick is resolved when the saved one is disallowed.
- */
 function ModelSwitcher() {
-  const t = useTranslations();
-  const { space, routeId } = useSpace();
   const { tenant } = useAppContext();
-  const queryClient = useQueryClient();
-  const assistant = space.default_assistant;
-  const config = assistant?.effective_config ?? null;
-
-  const update = useMutation({
-    mutationFn: (modelId: string) =>
-      queuePartnerUpdate(() =>
-        unwrap(
-          // RB-5(b): assistants use POST-as-update.
-          browserApi.POST("/api/v1/assistants/{id}/", {
-            params: { path: { id: assistant!.id } },
-            body: { completion_model: { id: modelId } }
-          })
-        )
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
-    onError: (error) => toastApiError(error, t)
-  });
-
-  if (!assistant) return null;
-
-  const lockedModel =
-    config?.models_enforced && config.locked_model
-      ? (space.completion_models.find((model) => model.id === config.locked_model!.id) ??
-        config.locked_model)
-      : null;
-
-  const allowedIds = config?.models_enforced
-    ? new Set(config.available_models.map((model) => model.id))
-    : null;
-  const visibleModels = allowedIds
-    ? space.completion_models.filter((model) => allowedIds.has(model.id))
-    : space.completion_models;
-
-  const selectedId =
-    selectEffectiveModelId(assistant.completion_model?.id, config) ??
-    assistant.completion_model?.id ??
-    null;
-
+  const { resolution, update, busy, running, hasMessages } = useConversationSettings();
+  const t = useTranslations();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const models = resolution?.available_models ?? [];
   return (
-    <ModelSelector
-      models={visibleModels}
-      selectedId={selectedId}
-      // The picker shows the new model while it saves and keeps focus; a
-      // disabled trigger would drop focus to the page.
-      onSelect={(id) => update.mutateAsync(id)}
-      locked={lockedModel}
-      size="sm"
-      showPricing={tenant.show_model_pricing}
-      className={COMPOSER_PICKER_CLASS}
-    />
+    <>
+      <ModelSelector
+        models={models}
+        selectedId={
+          resolution?.settings.completion_model_id ?? resolution?.effective_model?.id ?? null
+        }
+        onSelect={(id) => {
+          if (hasMessages) setPendingId(id);
+          else return update({ completion_model_id: id, reasoning_effort: null });
+        }}
+        disabled={busy || running || !resolution || resolution.settings_compatible === false}
+        size="sm"
+        showPricing={tenant.show_model_pricing}
+        className={COMPOSER_PICKER_CLASS}
+      />
+      <Dialog
+        isOpen={pendingId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingId(null);
+        }}
+      >
+        <DialogHeader title={t("personal_chat_model_change_title")} />
+        <p>{t("personal_chat_model_change_description")}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button label={t("cancel")} variant="secondary" onClick={() => setPendingId(null)} />
+          <Button
+            label={t("personal_chat_model_change_anyway")}
+            onClick={() => {
+              if (pendingId)
+                void update({ completion_model_id: pendingId, reasoning_effort: null });
+              setPendingId(null);
+            }}
+          />
+        </div>
+      </Dialog>
+    </>
   );
 }
 
-/**
- * Reasoning-effort switcher beside the model picker (personal chat only),
- * for models that offer a choice of level and when the governance policy
- * lets users change it. The pick is saved on the personal space's default
- * assistant as `completion_model_kwargs.reasoning_effort` (null = the
- * organisation default), exactly as the Svelte app does; the backend reads
- * it from the stored assistant when it answers, so nothing travels with the
- * question itself.
- */
 function ReasoningSwitcher() {
-  const t = useTranslations();
-  const { space, routeId } = useSpace();
-  const queryClient = useQueryClient();
-  const assistant = space.default_assistant;
-  const config = assistant?.effective_config ?? null;
-
-  const update = useMutation({
-    mutationFn: (effort: string | null) =>
-      queuePartnerUpdate(() =>
-        unwrap(
-          browserApi.POST("/api/v1/assistants/{id}/", {
-            params: { path: { id: assistant!.id } },
-            body: { completion_model_kwargs: { reasoning_effort: effort } }
-          })
-        )
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
-    onError: (error) => toastApiError(error, t)
-  });
-
-  if (!assistant || !config?.reasoning_effort_user_configurable) return null;
-  const effectiveId =
-    selectEffectiveModelId(assistant.completion_model?.id, config) ??
-    assistant.completion_model?.id;
-  const options = reasoningEffortOptions(
-    space.completion_models.find((model) => model.id === effectiveId)
-  );
+  const { resolution, update, busy, running } = useConversationSettings();
+  const options = resolution?.reasoning_effort_options ?? [];
   if (options.length === 0) return null;
-
   return (
-    <ReasoningEffortSelector
-      options={options}
-      stored={assistant.completion_model_kwargs?.reasoning_effort ?? null}
-      policyDefault={config.default_reasoning_effort ?? null}
-      onSelect={(effort) => update.mutateAsync(effort)}
-      className={COMPOSER_PICKER_CLASS}
-    />
+    <fieldset disabled={busy || running || resolution?.settings_compatible === false}>
+      <ReasoningEffortSelector
+        options={options}
+        stored={resolution?.settings.reasoning_effort ?? null}
+        policyDefault={resolution?.default_reasoning_effort ?? null}
+        onSelect={(effort) => update({ reasoning_effort: effort })}
+        className={COMPOSER_PICKER_CLASS}
+      />
+    </fieldset>
   );
 }
 

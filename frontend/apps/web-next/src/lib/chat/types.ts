@@ -62,6 +62,7 @@ export type CompletionModelInfo = {
 /** `data-session` part: v3's replacement for the v2 first_chunk metadata. */
 export type SessionData = {
   session_id: string;
+  settings?: Schema<"ConversationSettingsState"> | null;
   completion_model: CompletionModelInfo | null;
   files: Schema<"FilePublic">[];
   web_search_references: { id: string; title: string; url: string }[];
@@ -180,6 +181,8 @@ export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;
 /** The request body the /api/chat proxy forwards to the backend (v3). */
 export type ConversationBody = {
   question: string;
+  settings?: Schema<"ConversationSettings">;
+  settings_revision?: number;
   session_id?: string | null;
   assistant_id?: string | null;
   group_chat_id?: string | null;

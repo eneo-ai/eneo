@@ -8,13 +8,12 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";
-import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
 import type { ChatCapability } from "./chat-capabilities";
 
 export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
   "id" | "name" | "description" | "icon_url"
-> & { is_enabled?: boolean };
+> & { is_enabled?: boolean; available?: boolean; reason?: string | null };
 
 /**
  * Why a server cannot be used in this conversation, or null. An administrator
@@ -24,30 +23,10 @@ export type McpServerSummary = Pick<
 export function mcpServerUnavailableReason(
   server: McpServerSummary,
   modelSupportsTools: boolean
-): "server_disabled" | "model_no_tool_calling" | null {
+): string | null {
+  if (server.available === false) return server.reason ?? "no_active_provider";
   if (server.is_enabled === false) return "server_disabled";
   return modelSupportsTools ? null : "model_no_tool_calling";
-}
-
-export function chatPartnerMcpServers(partner: ChatPartner): McpServerSummary[] {
-  if (partner.effectiveConfig?.mcp_enforced) {
-    return (partner.effectiveConfig.available_mcp_servers ?? []).filter(
-      (server) => server.purpose === "general"
-    );
-  }
-  return (partner.mcpServers ?? []).filter((server) => server.purpose === "general");
-}
-
-export function defaultDisabledMcpServerIds(partner: ChatPartner): string[] {
-  return partner.effectiveConfig?.default_disabled_mcp_server_ids ?? [];
-}
-
-export function pruneDisabledMcpServerIds(
-  disabledServerIds: Set<string>,
-  servers: McpServerSummary[]
-): Set<string> {
-  const validIds = new Set(servers.map((server) => server.id));
-  return new Set([...disabledServerIds].filter((id) => validIds.has(id)));
 }
 
 /** Capabilities that will be offered: switched on and available. */
@@ -71,27 +50,6 @@ export function activeMcpServerCount(
       !disabledServerIds.has(server.id) &&
       mcpServerUnavailableReason(server, modelSupportsTools) === null
   ).length;
-}
-
-export function mcpConversationOptions({
-  servers,
-  disabledServerIds,
-  autoAcceptTools,
-  supportsToolApproval
-}: {
-  servers: McpServerSummary[];
-  disabledServerIds: Set<string>;
-  autoAcceptTools: boolean;
-  supportsToolApproval: boolean;
-}): Pick<ConversationBody, "require_tool_approval" | "disabled_mcp_server_ids"> {
-  const disabledIds = [...disabledServerIds].filter((id) =>
-    servers.some((server) => server.id === id)
-  );
-  return {
-    require_tool_approval:
-      supportsToolApproval && servers.length > 0 && !autoAcceptTools ? true : undefined,
-    disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
-  };
 }
 
 /** The composer's popover pills (Verktyg, Skills): icon, label (icon-only on phones) and count. */
@@ -133,13 +91,17 @@ export function ChatTools({
   modelSupportsTools = true,
   onDisabledCapabilitiesChange,
   onDisabledServerIdsChange,
-  onAutoAcceptToolsChange
+  onAutoAcceptToolsChange,
+  onSelectionChange,
+  supportsToolApproval = true
 }: {
   capabilities?: ChatCapability[];
   disabledCapabilities?: Set<Capability>;
   servers?: McpServerSummary[];
   disabledServerIds?: Set<string>;
   autoAcceptTools: boolean;
+  supportsToolApproval?: boolean;
+  onSelectionChange?: (servers: Set<string>, capabilities: Set<Capability>) => void;
   /** Whether the partner's model can call tools at all; false renders every row unavailable. */
   modelSupportsTools?: boolean;
   onDisabledCapabilitiesChange?: (next: Set<Capability>) => void;
@@ -170,23 +132,22 @@ export function ChatTools({
 
   // All-on / all-off only sweeps the rows that can be used.
   function setAll(enabled: boolean) {
-    if (capabilities.length > 0) {
-      const next = new Set(disabledCapabilities);
-      for (const capability of capabilities) {
-        if (!capability.available) continue;
-        if (enabled) next.delete(capability.purpose);
-        else next.add(capability.purpose);
-      }
-      onDisabledCapabilitiesChange?.(next);
+    const nextCapabilities = new Set(disabledCapabilities);
+    const nextServers = new Set(disabledServerIds);
+    for (const capability of capabilities) {
+      if (!capability.available) continue;
+      if (enabled) nextCapabilities.delete(capability.purpose);
+      else nextCapabilities.add(capability.purpose);
     }
-    if (servers.length > 0) {
-      const next = new Set(disabledServerIds);
-      for (const server of servers) {
-        if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
-        if (enabled) next.delete(server.id);
-        else next.add(server.id);
-      }
-      onDisabledServerIdsChange?.(next);
+    for (const server of servers) {
+      if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
+      if (enabled) nextServers.delete(server.id);
+      else nextServers.add(server.id);
+    }
+    if (onSelectionChange) onSelectionChange(nextServers, nextCapabilities);
+    else {
+      onDisabledCapabilitiesChange?.(nextCapabilities);
+      onDisabledServerIdsChange?.(nextServers);
     }
   }
 
@@ -305,7 +266,7 @@ export function ChatTools({
             )}
           </div>
 
-          {modelSupportsTools && (
+          {modelSupportsTools && supportsToolApproval && (
             <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">
               <ShieldCheck
                 aria-hidden="true"

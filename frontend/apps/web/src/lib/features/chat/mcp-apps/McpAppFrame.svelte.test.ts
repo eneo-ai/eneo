@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../ChatService.svelte", () => ({
   getChatService: () => ({
+    settings: { require_tool_approval: false },
     partialInputOf: () => undefined,
     getToolCallOutcome: async () => null,
     callToolFromView: mocks.callTool
@@ -25,7 +26,6 @@ vi.mock("./McpAppUrlService.svelte", () => ({
   })
 }));
 vi.mock("$lib/core/theme", () => ({ getThemeStore: () => writable("light") }));
-vi.mock("../toolApprovalPreference", () => ({ toolsRunAutomatically: () => true }));
 vi.mock("./bridge", () => ({
   McpAppBridge: class {
     constructor(options: McpAppBridgeOptions) {

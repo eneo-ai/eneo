@@ -303,9 +303,63 @@ ask a file is not granted to service keys.
 ## What users see in the chat
 
 - The tools popover in the chat input lists each enabled function with an
-  on/off toggle. Opting out is stored per purpose, so it survives a provider
-  switch on the admin side. Governance defaults seed the toggles for new
-  chats.
+  on/off toggle. New conversations reuse the latest setup remembered in this
+  browser for the same account and assistant or group chat. Clearing browser
+  storage, using another browser, or blocked storage restores current assistant
+  defaults, including governance defaults in Personal Chat. These start choices
+  are stored only in the browser; they do not change other saved conversations.
+  Tool choices and the approval preference belong to that conversation. They
+  are stored on the server and restored when it is reopened or refreshed,
+  including on another browser or device signed in to the same account.
+  A function's toggle follows its purpose, so changing its provider does not
+  change the saved choice. A newly available tool uses its current default.
+- In Personal Chat, the completion model and, where policy allows it,
+  reasoning effort also belong to the conversation. Changing them does not
+  change the default assistant. The browser remembers the choices as a starting
+  point for later conversations. A model change resets
+  reasoning effort to the organisation's default for the selected model.
+  Ordinary assistant chats use their configured model and reasoning settings;
+  group chats use the responding assistant's settings. Group chats do not
+  offer per-call tool approval.
+- Switching models after a conversation has messages asks for confirmation and
+  recommends starting a new conversation to avoid mixing replies from different
+  models. You can still choose to change models and continue in the same
+  conversation. The new model may fit less history or support different tools
+  and images. Messages remain stored; the backend prepares
+  context for the selected model on each request. Changing the completion
+  model does not reindex knowledge sources, which use a separate embedding
+  model. Provider prompt caching can affect response time and cost, but a cache
+  miss does not delete saved messages or require a new conversation. The model
+  that produced each answer remains recorded with that message.
+- Changes in an existing conversation are saved immediately, before the next
+  message. A draft is saved on the server together with its first question;
+  refreshing an unsent draft restores this browser's remembered setup. Its
+  message text and attachments are not part of these preferences. A remembered
+  model that is no longer allowed falls back to current defaults for new drafts,
+  and unsupported reasoning choices are cleared. Older conversations without saved
+  settings initialize once from current defaults when opened. If the default
+  model is unavailable, select an available replacement before saving those
+  initial settings. Old browser
+  preferences cannot reliably be attributed to a conversation and are not imported.
+- Saved choices cannot grant access removed by an administrator. Availability,
+  policy and security classification are checked again when answering. If a
+  saved model is unavailable, sending is paused and the model picker still offers
+  the models that pass current access, policy and classification checks, even
+  when only one replacement remains. Choose one explicitly or start a new conversation.
+  Temporarily unavailable tool choices stay saved and apply again when the tool
+  becomes available. The chat refreshes availability when opened, after saving
+  choices and after a completed turn; backend checks still apply to every request.
+  These rules apply in both the standard chat and the React beta.
+  Interactive built-in tool views use the open conversation's approval choice;
+  external views always ask before executing another tool.
+  If policy locks reasoning effort, the policy value applies. A previous saved
+  effort does not prevent you from changing tools or approval preferences.
+  If another tab changes the settings, Eneo asks you to reload the saved choices
+  instead of overwriting them. A turn already running keeps the settings it started with.
+  If the server cannot interpret a saved setting from a newer version, you can
+  still read the history. Eneo explains that a compatible app version is needed
+  before you can send another message or change settings; it does not silently
+  reset your choices. Removed capability choices remain dormant and are preserved.
 - Unavailable functions show why: no active source, the space's classification
   is not met, or the role lacks the permission.
 - Tool activity is shown inline. External search and image tools appear under

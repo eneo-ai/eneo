@@ -65,6 +65,27 @@ message's text parts (joined with `\n`) and the per-send options
 Exactly one of `session_id`, `assistant_id`, `group_chat_id` identifies the
 target (backend `ConversationRequest`).
 
+## Saved choices and current policy
+
+The canonical [conversation settings API contract](https://docs.eneo.ai/dev/docs/api#conversation-settings)
+separates assistant policy, saved conversation choices and per-turn restrictions.
+`ConversationSettingsProvider` owns the mounted conversation's revision and
+lifecycle. Tool controls render the backend's `selected` and `available` fields;
+they do not compute policy defaults. `settings_compatible: false` keeps history
+readable while disabling edits, sends and automatic interactive-tool execution.
+The backend enforces the same compatibility boundary independently.
+
+The transport's `disabled_capabilities` is still useful for a per-turn feature
+restriction such as hidden web search; it only narrows the saved and allowed set.
+New options belong in the typed backend contract and generated types before a
+client control is added. Both frontends use the same resolution response.
+
+Both clients use `@eneo/eneo-js/conversations/draft-preferences` for browser-local
+start choices, scoped by tenant, user and partner. These seed only new drafts;
+saved and legacy conversations still read their state/defaults from the server.
+Storage clearing or failure returns new drafts to current defaults. A remembered
+model no longer available falls back to current defaults only for new drafts.
+
 ## Stream parts
 
 All parts are JSON objects with a `type` discriminator. Fields marked
@@ -72,6 +93,14 @@ _eneo_ are Eneo-specific payloads carried inside the SDK's extension points
 (`providerMetadata.eneo` or custom `data-*` parts). Every part the backend
 emits is listed; the SDK rejects anything else (see
 [Failures](#what-the-client-treats-as-failure)).
+
+New drafts send `settings`; existing conversations send `settings_revision`.
+Both preflight and answer use the same snapshot. Choices are loaded through
+`POST /api/v1/conversations/settings/resolve/` and saved through
+`PATCH /api/v1/conversations/{session_id}/settings/` with `expected_revision`.
+The resolution includes the current catalog of allowed models, the effective model and
+reasoning level, and an explicit unavailable-model state. HTTP 409 requires
+reloading the saved choices; clients never overwrite another tab automatically.
 
 ### Lifecycle
 
@@ -91,6 +120,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
   "type": "data-session",
   "data": {
     "session_id": "<uuid>",
+    "settings": {/* ConversationSettingsState: revision and saved choices */},
     "completion_model": {/* CompletionModelPublic (OpenAPI), or null */},
     "files": [/* FilePublic[] — the question's uploaded attachments */],
     "web_search_references": [],
@@ -101,7 +131,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
 ```
 
 The client reads `session_id` (to continue the conversation and to enable
-title generation), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
+title generation), `settings` (the authoritative revision for subsequent saves and turns), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
 
 ### Text and reasoning
 

@@ -5,7 +5,6 @@
   import { getThemeStore } from "$lib/core/theme";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getChatService } from "../ChatService.svelte";
-  import { toolsRunAutomatically } from "../toolApprovalPreference";
   import { McpAppBridge, type McpAppToolResult, type McpAppToolState } from "./bridge";
   import { hostContext } from "./hostContext";
   import { getMcpAppPane } from "./McpAppPane.svelte";
@@ -171,7 +170,14 @@
   }
 
   function permissionToRunTools(name: string, args: Record<string, unknown>): Promise<boolean> {
-    if (call.is_bundled === true && toolsRunAutomatically()) return Promise.resolve(true);
+    if (
+      call.is_bundled === true &&
+      chat.settingsResolution?.settings_compatible !== false &&
+      chat.settings?.require_tool_approval === false &&
+      !chat.settingsBusy &&
+      !chat.settingsError
+    )
+      return Promise.resolve(true);
     // Concurrent requests cannot share the approval of another call.
     if (asking) return Promise.resolve(false);
     return new Promise((resolve) => {

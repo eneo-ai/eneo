@@ -28,6 +28,7 @@
 
   const {
     user,
+    tenant,
     state: { userInfo }
   } = getAppContext();
 
@@ -35,7 +36,9 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const chat = untrack(() => initChatService(data));
+  const chat = untrack(() =>
+    initChatService({ ...data, draftOwner: { userId: user.id, tenantId: tenant.id } })
+  );
   // Keep the conversation's preview state when moving between chat and history.
   initFilePreview(getAttachmentUrlService());
 
@@ -95,11 +98,8 @@
     });
   });
 
-  // Single sync point for the personal chat: keep the chat partner pointed at
-  // the canonical default assistant held by SpacesManager. The page loader only
-  // snapshots it, so without this the partner (and its model) could drift from
-  // what the model picker writes. Same id, so this never resets the open
-  // conversation (see ChatService.changeChatPartner).
+  // Keep the partner's admin-controlled defaults and policy current. The model
+  // chosen for this conversation is held separately by ChatService.
   $effect(() => {
     const canonical = $currentSpace.default_assistant;
     untrack(() => {

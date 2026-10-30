@@ -1207,7 +1207,9 @@ class TestReadOverrideSnapshot:
             "delete_message_feedback",
             "export_conversation_document",
             "leave_feedback",
+            "resolve_conversation_settings",
             "set_message_feedback",
+            "update_conversation_settings",
         ],
         "APPS_READ_OVERRIDES": [
             "run_app",

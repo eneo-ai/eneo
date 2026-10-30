@@ -92,6 +92,7 @@ class ErrorCodes(int, Enum):
     SKILL_REMOVAL_BUSY = 9062
     WEBSITE_CRAWL_ACTIVE = 9063
     WEBSITE_CRAWL_CLEANUP_PENDING = 9064
+    CONVERSATION_SETTINGS_CONFLICT = 9065
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
@@ -394,6 +395,10 @@ class NameCollisionException(Exception):
     pass
 
 
+class ConversationSettingsConflictException(Exception):
+    pass
+
+
 class PromptInUseException(Exception):
     """Raised when deleting a prompt library entry that the personal assistant
     governance policy still uses.
@@ -551,6 +556,11 @@ EXCEPTION_MAP = {
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    ConversationSettingsConflictException: (
+        409,
+        None,
+        ErrorCodes.CONVERSATION_SETTINGS_CONFLICT,
+    ),
     PromptInUseException: (409, None, ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE),
     SkillRevisionConflictException: (
         409,

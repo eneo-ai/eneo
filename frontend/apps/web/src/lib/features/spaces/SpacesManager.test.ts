@@ -24,8 +24,6 @@ function deferred<T>(): Deferred<T> {
 }
 
 const modelA = { id: "model-a", nickname: "A" };
-const modelB = { id: "model-b", nickname: "B" };
-const modelC = { id: "model-c", nickname: "C" };
 
 function space(defaultAssistant: Record<string, unknown>) {
   return {
@@ -41,7 +39,7 @@ function space(defaultAssistant: Record<string, unknown>) {
       websites: { items: [], permissions: [] },
       integration_knowledge_list: { items: [], permissions: [] }
     },
-    completion_models: [modelA, modelB, modelC],
+    completion_models: [modelA],
     default_assistant: defaultAssistant
   } as never;
 }
@@ -55,65 +53,12 @@ function manager(update: (...args: unknown[]) => Promise<unknown>) {
   });
 }
 
-describe("SpacesManager.updateDefaultAssistant", () => {
-  it("shows the new model at once but only reports settled after the server confirms it", async () => {
-    const pending = deferred<Record<string, unknown>>();
-    const m = manager(() => pending.promise);
-
-    const done = m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
-    let settled = false;
-    void m.awaitDefaultAssistantUpdates().then(() => (settled = true));
-
-    // The queued update starts on the next microtask and applies the
-    // optimistic model before its request is awaited.
-    await Promise.resolve();
-    expect(get(m.state.currentSpace).default_assistant?.completion_model).toEqual(modelB);
-    expect(settled).toBe(false);
-
-    pending.resolve({ id: "assistant-1", completion_model: modelB });
-    await done;
-    expect(settled).toBe(true);
-    expect(get(m.state.currentSpace).default_assistant?.completion_model).toEqual(modelB);
-  });
-
-  it("applies quick successive switches in order so the last choice wins", async () => {
-    const calls: Deferred<Record<string, unknown>>[] = [];
-    const m = manager(() => {
-      const d = deferred<Record<string, unknown>>();
-      calls.push(d);
-      return d.promise;
-    });
-
-    void m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
-    void m.updateDefaultAssistant({ completionModel: { id: "model-c" } });
-    await Promise.resolve();
-    // The second update waits for the first; only one request is in flight.
-    expect(calls).toHaveLength(1);
-
-    calls[0].resolve({ id: "assistant-1", completion_model: modelB });
-    await vi.waitFor(() => expect(calls).toHaveLength(2));
-    calls[1].resolve({ id: "assistant-1", completion_model: modelC });
-    await m.awaitDefaultAssistantUpdates();
-
-    expect(get(m.state.currentSpace).default_assistant?.completion_model).toEqual(modelC);
-  });
-
-  it("rolls the optimistic choice back and still settles when the update fails", async () => {
-    const m = manager(() => Promise.reject(new Error("nope")));
-
-    await m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
-    await m.awaitDefaultAssistantUpdates();
-
-    expect(get(m.state.currentSpace).default_assistant?.completion_model).toEqual(modelA);
-  });
-});
-
 describe("SpacesManager.updateDefaultAssistantSkills", () => {
   const skillBindings = [
     { skill_id: "skill-1", skill_revision_id: "revision-1", activation_mode: "always" as const }
   ];
 
-  it("saves the person's Skills after a pending model switch, and a send waits for both", async () => {
+  it("saves the person's Skills one at a time, and a send waits for all of them", async () => {
     const calls: { args: unknown; done: Deferred<Record<string, unknown>> }[] = [];
     const m = manager((args) => {
       const done = deferred<Record<string, unknown>>();
@@ -122,16 +67,15 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
     });
     const buildBindings = vi.fn(async () => skillBindings);
 
-    void m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
+    void m.updateDefaultAssistantSkills({ id: "assistant-1" }, async () => []);
     const saved = m.updateDefaultAssistantSkills({ id: "assistant-1" }, buildBindings);
     let settled = false;
     void m.awaitDefaultAssistantUpdates().then(() => (settled = true));
-    await Promise.resolve();
-    expect(calls).toHaveLength(1);
-    // The list is built when its turn comes, from what is saved by then.
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    // The second save waits for the first; its list is built when its turn comes.
     expect(buildBindings).not.toHaveBeenCalled();
 
-    calls[0].done.resolve({ id: "assistant-1", completion_model: modelB });
+    calls[0].done.resolve({ id: "assistant-1", completion_model: modelA });
     await vi.waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1].args).toEqual({
       assistant: { id: "assistant-1" },
@@ -139,7 +83,7 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
     });
     expect(settled).toBe(false);
 
-    calls[1].done.resolve({ id: "assistant-1", completion_model: modelB, name: "Saved" });
+    calls[1].done.resolve({ id: "assistant-1", completion_model: modelA, name: "Saved" });
     await saved;
     await vi.waitFor(() => expect(settled).toBe(true));
     expect(get(m.state.currentSpace).default_assistant).toMatchObject({ name: "Saved" });

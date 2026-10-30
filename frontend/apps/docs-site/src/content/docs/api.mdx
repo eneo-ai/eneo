@@ -159,7 +159,81 @@ POST /api/v1/conversations/
 
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
-Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`. The same `400` applies when the conversation's saved settings have `require_tool_approval: true` and the request does not stream: a request cannot lift a saved restriction, so continue with `stream: true` or turn approval off through the settings endpoint first. A service API key cannot continue a conversation a user started in the web app; only requests for the same user can.
+
+### Conversation settings
+
+`ConversationSettings` holds user choices for one conversation: personal-chat
+model, reasoning effort, explicit MCP server and capability selections, and tool
+approval. Send `settings` when starting a conversation. For an existing
+conversation, send `settings_revision` and use its stored settings; request-level
+settings do not replace them.
+
+- `POST /api/v1/conversations/settings/resolve/` accepts the same target identifiers
+  and returns saved choices with current availability. It is read-only.
+- `PATCH /api/v1/conversations/{session_id}/settings/` takes
+  `{ "expected_revision": 0, "settings": { ... } }`. Revision zero initializes a
+  conversation without saved settings; subsequent writes use the current revision.
+  A concurrent change returns `409` instead of overwriting it.
+- Preflight and sending accept `settings_revision: 0` for an existing conversation
+  that has no saved settings yet. Sending checks that observed revision before
+  initializing revision one. A concurrent initialization still returns `409`;
+  an existing nonzero revision must match exactly.
+- Each returned MCP server and capability has `selected` and `available`.
+  `selected` represents user intent resolved against current defaults;
+  `available` represents current eligibility. A selected but unavailable tool
+  stays selected and can become usable again. Clients display these fields rather
+  than reproducing default-selection rules.
+
+The backend checks ownership, current permissions, model eligibility and tool
+availability on each new request. Saved choices are never authorization grants.
+`disabled_mcp_server_ids` and `disabled_capabilities` remain optional per-turn
+restrictions, and request-level approval can require more confirmation. None can
+widen the permissions or undo a saved restriction. Group chats retain their
+assistant-routing and model policy; model/reasoning overrides and tool approval
+are not supported for them.
+
+Older conversations without settings adopt current defaults when first opened by
+the clients or continued through the API. Historical choices cannot be
+reconstructed from old browser preferences. Explicit selections are saved; a tool
+introduced later follows its current policy default until explicitly selected.
+A turn already running uses the configuration with which it started.
+
+The clients keep browser-local starting choices per tenant, user and conversation
+partner. These are used only to seed new drafts, never to replace an existing
+conversation's saved state or initialize an older conversation. The draft's
+choices travel in `settings` on its first question. Clearing or blocking browser
+storage restores current defaults; remembered model and reasoning choices are
+resolved against current policy before a new draft can send.
+
+`settings_compatible: false` means the stored state contains an option this server
+version cannot interpret. History remains readable, but settings writes, new
+turns, preflight and interactive view tool calls are rejected with `400`. Clients
+show the reason and disable changes and sending. Upgrade to a compatible server
+version to continue. Unknown capability names are instead preserved as dormant
+choices across settings writes; they are omitted from the editable response and
+cannot activate a runtime capability. Unknown incoming API fields still return
+`422`. Invalid values for known stored fields require repair or a migration, and
+are not silently replaced with defaults.
+
+#### Extending this contract
+
+The canonical schema and persisted-state boundary are in
+`backend/src/eneo/sessions/conversation_settings.py`. `ConversationService` owns
+defaults, validation and resolution; `AssistantService`, group-chat routing and
+capability resolution enforce current runtime policy. `SessionRepository` owns
+atomic revision checks and preservation of opaque stored choices. Frontends are
+adapters to this contract, with generated OpenAPI types.
+
+For a new option (including a future skill selection), extend the existing typed
+settings owner and its resolver/runtime consumer together. Define the meaning of
+an absent value, eligibility, group-chat support and the effect on existing
+conversations. Add behavior tests for persistence, current-policy denial and the
+resolved UI state, then regenerate both clients' types. Do not add a parallel
+preference store or a separate client default calculator. An incompatible change
+to a known field needs an explicit data migration; the unknown-field reader is
+not a migration substitute. Rollback is safe only to versions with this reader
+and compatible known-field semantics; older binaries may reject newer state.
 
 ### Non-streaming response
 

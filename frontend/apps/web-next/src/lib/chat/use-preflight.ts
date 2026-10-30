@@ -19,16 +19,30 @@ export function usePreflight(request: {
   sessionId?: string | null;
   assistantId?: string | null;
   groupChatId?: string | null;
+  settings?: Schema<"ConversationSettings">;
+  settingsRevision?: number;
+  disabled?: boolean;
 }): PreflightState {
-  const [preflight, setPreflight] = useState<PreflightState>(null);
+  const [result, setResult] = useState<{ context: string; value: PreflightState } | null>(null);
   const generation = useRef(0);
 
-  const { question, sessionId, assistantId, groupChatId } = request;
+  const { question, sessionId, assistantId, groupChatId, settings, settingsRevision, disabled } =
+    request;
+  const settingsKey = JSON.stringify(settings);
   const fileKey = request.fileIds.join(",");
+  // An estimate stays valid while the same conversation context is typed
+  // into; a model, revision or partner change invalidates it at once.
+  const contextKey = JSON.stringify([
+    sessionId,
+    assistantId,
+    groupChatId,
+    settingsKey,
+    settingsRevision
+  ]);
 
   useEffect(() => {
     const current = ++generation.current;
-    if (!question && !fileKey) return;
+    if (disabled || (!question && !fileKey)) return;
 
     const timer = setTimeout(async () => {
       try {
@@ -39,21 +53,37 @@ export function usePreflight(request: {
               file_ids: fileKey ? fileKey.split(",") : [],
               session_id: sessionId ?? null,
               assistant_id: assistantId ?? null,
-              group_chat_id: groupChatId ?? null
+              group_chat_id: groupChatId ?? null,
+              settings,
+              settings_revision: settingsRevision
             }
           })
         );
-        if (generation.current === current) setPreflight(response);
+        if (generation.current === current) setResult({ context: contextKey, value: response });
       } catch {
         // Preflight is best-effort UX; stay silent on errors (incl. 429).
       }
     }, DEBOUNCE_MS);
 
-    return () => clearTimeout(timer);
-  }, [question, fileKey, sessionId, assistantId, groupChatId]);
+    return () => {
+      generation.current = current + 1;
+      clearTimeout(timer);
+    };
+    // Compare settings by value, not an incidental object identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    question,
+    fileKey,
+    sessionId,
+    assistantId,
+    groupChatId,
+    settingsKey,
+    settingsRevision,
+    disabled
+  ]);
 
   // Empty input: report no pending cost (derived, not reset via setState).
-  return question || fileKey ? preflight : null;
+  return !disabled && (question || fileKey) && result?.context === contextKey ? result.value : null;
 }
 
 /**

@@ -1600,6 +1600,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/settings/resolve/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve Conversation Settings
+     * @description Resolve saved or draft choices against current model and tool availability without replacing unavailable choices.
+     */
+    post: operations["resolve_conversation_settings_api_v1_conversations_settings_resolve__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/settings/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Conversation Settings
+     * @description Save choices for an owned conversation using its expected revision; reject concurrent changes with HTTP 409.
+     */
+    patch: operations["update_conversation_settings_api_v1_conversations__session_id__settings__patch"];
+    trace?: never;
+  };
   "/api/v1/conversations/recent/": {
     parameters: {
       query?: never;
@@ -11023,6 +11063,7 @@ export interface components {
     };
     /** AskResponse */
     AskResponse: {
+      settings?: components["schemas"]["ConversationSettingsState"] | null;
       /** Id */
       id?: string | null;
       /** Created At */
@@ -12836,6 +12877,26 @@ export interface components {
        */
       stream?: boolean;
     };
+    /** ConversationCapability */
+    ConversationCapability: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose:
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?: string | null;
+      /** Selected */
+      selected: boolean;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -12844,6 +12905,29 @@ export interface components {
       total_questions: number;
       /** @description Ratings on the answers in these conversations. Conversation-level feedback is not included. */
       feedback: components["schemas"]["MessageFeedbackCounts"];
+    };
+    /**
+     * ConversationMcpServer
+     * @description A general tool offered by current policy, including why it cannot run.
+     */
+    ConversationMcpServer: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Available */
+      available: boolean;
+      /** Selected */
+      selected: boolean;
+      /** Reason */
+      reason?: string | null;
     };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
@@ -12869,6 +12953,9 @@ export interface components {
       assistant_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
+      settings?: components["schemas"]["ConversationSettings"] | null;
+      /** Settings Revision */
+      settings_revision?: number | null;
       /** Question */
       question: string;
       /**
@@ -12896,6 +12983,92 @@ export interface components {
       disabled_capabilities?: (
         "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
       )[];
+    };
+    /** ConversationSettings */
+    ConversationSettings: {
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Reasoning Effort */
+      reasoning_effort?: string | null;
+      /** Mcp Server States */
+      mcp_server_states?: {
+        [key: string]: boolean;
+      };
+      /** Capability States */
+      capability_states?: {
+        [key: string]: boolean;
+      };
+      /**
+       * Require Tool Approval
+       * @default false
+       */
+      require_tool_approval?: boolean;
+    };
+    /**
+     * ConversationSettingsResolution
+     * @description Saved choices and current model/tool availability; never rewrites saved choices.
+     */
+    ConversationSettingsResolution: {
+      /** Revision */
+      revision: number;
+      settings: components["schemas"]["ConversationSettings"];
+      /**
+       * Settings Compatible
+       * @default true
+       */
+      settings_compatible?: boolean;
+      /** Available Models */
+      available_models?: components["schemas"]["CompletionModelPublic"][] | null;
+      effective_model?: components["schemas"]["CompletionModelPublic"] | null;
+      /**
+       * Model Unavailable
+       * @default false
+       */
+      model_unavailable?: boolean;
+      /**
+       * Model Locked
+       * @default false
+       */
+      model_locked?: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
+      /** Effective Reasoning Effort */
+      effective_reasoning_effort?: string | null;
+      /** Default Reasoning Effort */
+      default_reasoning_effort?: string | null;
+      /** Reasoning Effort Options */
+      reasoning_effort_options?: string[];
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["ConversationMcpServer"][];
+      /** Capabilities */
+      capabilities?: components["schemas"]["ConversationCapability"][];
+    };
+    /** ConversationSettingsState */
+    ConversationSettingsState: {
+      /** Revision */
+      revision: number;
+      settings: components["schemas"]["ConversationSettings"];
+    };
+    /** ConversationSettingsUpdate */
+    ConversationSettingsUpdate: {
+      /** Expected Revision */
+      expected_revision: number;
+      settings: components["schemas"]["ConversationSettings"];
+    };
+    /** ConversationTurnTarget */
+    ConversationTurnTarget: {
+      /** Session Id */
+      session_id?: string | null;
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /** Group Chat Id */
+      group_chat_id?: string | null;
+      settings?: components["schemas"]["ConversationSettings"] | null;
+      /** Settings Revision */
+      settings_revision?: number | null;
     };
     /** Counts */
     Counts: {
@@ -14540,6 +14713,7 @@ export interface components {
       | 9062
       | 9063
       | 9064
+      | 9065
       | 9069
       | 9070
       | 9075
@@ -19632,7 +19806,7 @@ export interface components {
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
-     *     Inherits the "exactly one target" rule from `_ConversationTarget`. Adds
+     *     Inherits the "exactly one target" rule from `ConversationTarget`. Adds
      *     its own rule that at least one of `question` or `file_ids` must be
      *     non-empty, except for a bare assistant target. That empty assistant request
      *     is useful: it returns the assistant's always-present prompt/attachment
@@ -19646,6 +19820,9 @@ export interface components {
       assistant_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
+      settings?: components["schemas"]["ConversationSettings"] | null;
+      /** Settings Revision */
+      settings_revision?: number | null;
       /**
        * Question
        * @default
@@ -20977,6 +21154,7 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      settings?: components["schemas"]["ConversationSettingsState"] | null;
       /** Messages */
       messages: components["schemas"]["Message"][];
       feedback?: components["schemas"]["SessionFeedback"] | null;
@@ -25666,6 +25844,8 @@ export interface components {
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
+      /** @default null */
+      settings?: components["schemas"]["ConversationSettingsState"] | null;
       /**
        * Id
        * @default null
@@ -30243,6 +30423,7 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            settings?: components["schemas"]["ConversationSettingsState"] | null;
             /** Id */
             id?: string | null;
             /** Created At */
@@ -30368,6 +30549,32 @@ export interface operations {
                 provider_name?: string | null;
                 /** Deprecation Date */
                 deprecation_date?: string | null;
+              };
+              /** ConversationSettings */
+              ConversationSettings: {
+                /** Completion Model Id */
+                completion_model_id?: string | null;
+                /** Reasoning Effort */
+                reasoning_effort?: string | null;
+                /** Mcp Server States */
+                mcp_server_states?: {
+                  [key: string]: boolean;
+                };
+                /** Capability States */
+                capability_states?: {
+                  [key: string]: boolean;
+                };
+                /**
+                 * Require Tool Approval
+                 * @default false
+                 */
+                require_tool_approval?: boolean;
+              };
+              /** ConversationSettingsState */
+              ConversationSettingsState: {
+                /** Revision */
+                revision: number;
+                settings: components["schemas"]["ConversationSettings"];
               };
               /** FilePublic */
               FilePublic: {
@@ -30691,6 +30898,7 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            settings?: components["schemas"]["ConversationSettingsState"] | null;
             /** Id */
             id?: string | null;
             /** Created At */
@@ -30816,6 +31024,32 @@ export interface operations {
                 provider_name?: string | null;
                 /** Deprecation Date */
                 deprecation_date?: string | null;
+              };
+              /** ConversationSettings */
+              ConversationSettings: {
+                /** Completion Model Id */
+                completion_model_id?: string | null;
+                /** Reasoning Effort */
+                reasoning_effort?: string | null;
+                /** Mcp Server States */
+                mcp_server_states?: {
+                  [key: string]: boolean;
+                };
+                /** Capability States */
+                capability_states?: {
+                  [key: string]: boolean;
+                };
+                /**
+                 * Require Tool Approval
+                 * @default false
+                 */
+                require_tool_approval?: boolean;
+              };
+              /** ConversationSettingsState */
+              ConversationSettingsState: {
+                /** Revision */
+                revision: number;
+                settings: components["schemas"]["ConversationSettings"];
               };
               /** FilePublic */
               FilePublic: {
@@ -32215,6 +32449,7 @@ export interface operations {
                 };
               }
             | {
+                settings?: components["schemas"]["ConversationSettingsState"] | null;
                 /** Id */
                 id?: string | null;
                 /** Created At */
@@ -32340,6 +32575,32 @@ export interface operations {
                     provider_name?: string | null;
                     /** Deprecation Date */
                     deprecation_date?: string | null;
+                  };
+                  /** ConversationSettings */
+                  ConversationSettings: {
+                    /** Completion Model Id */
+                    completion_model_id?: string | null;
+                    /** Reasoning Effort */
+                    reasoning_effort?: string | null;
+                    /** Mcp Server States */
+                    mcp_server_states?: {
+                      [key: string]: boolean;
+                    };
+                    /** Capability States */
+                    capability_states?: {
+                      [key: string]: boolean;
+                    };
+                    /**
+                     * Require Tool Approval
+                     * @default false
+                     */
+                    require_tool_approval?: boolean;
+                  };
+                  /** ConversationSettingsState */
+                  ConversationSettingsState: {
+                    /** Revision */
+                    revision: number;
+                    settings: components["schemas"]["ConversationSettings"];
                   };
                   /** FilePublic */
                   FilePublic: {
@@ -32580,6 +32841,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32690,6 +32960,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32706,6 +32985,146 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  resolve_conversation_settings_api_v1_conversations_settings_resolve__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConversationTurnTarget"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConversationSettingsResolution"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_conversation_settings_api_v1_conversations__session_id__settings__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConversationSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConversationSettingsState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

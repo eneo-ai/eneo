@@ -888,3 +888,20 @@ async def test_sse_framing_and_headers():
     parsed = [json.loads(payload) for payload in payloads[:-1]]
     assert parsed[0]["type"] == "start"
     assert parsed[-1]["type"] == "finish"
+
+
+@pytest.mark.asyncio
+async def test_session_chunk_carries_the_saved_settings_revision():
+    from eneo.sessions.conversation_settings import (
+        ConversationSettings,
+        ConversationSettingsState,
+    )
+
+    response = _response([])
+    state = ConversationSettingsState(
+        revision=3, settings=ConversationSettings(require_tool_approval=True)
+    )
+    response.session.settings = state
+    chunks = await _collect(response)
+    session = next(chunk for chunk in chunks if chunk["type"] == "data-session")
+    assert session["data"]["settings"] == state.model_dump(mode="json")

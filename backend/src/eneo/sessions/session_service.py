@@ -24,8 +24,13 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionUpdate,
@@ -245,7 +250,7 @@ class SessionService:
             return None, key.id
         return self.user.id, None
 
-    def _is_owner(self, session: SessionInDB) -> bool:
+    def _is_owner(self, session: SessionInDB | SessionContext) -> bool:
         """Match the session's principal against the current request's principal.
 
         Both branches require a non-None match; we never treat NULL == NULL
@@ -270,23 +275,12 @@ class SessionService:
 
         if not self._is_owner(session):
             raise UnauthorizedException("Session belongs to other principal")
-
-        # Handle cross-endpoint access attempt
-        if assistant_id is not None and session.group_chat_id is not None:
-            raise BadRequestException(
-                "Cannot access a group chat session through the assistant endpoint. "
-                "Use the conversation endpoints instead."
-            )
-
-        # Verify the session belongs to the specified assistant/group chat
-        if (
-            assistant_id is not None
-            and session.assistant is not None
-            and session.assistant.id != assistant_id
-        ):
-            raise NotFoundException("Session belongs to another assistant")
-        if group_chat_id is not None and session.group_chat_id != group_chat_id:
-            raise NotFoundException("Session belongs to another group chat")
+        self._check_chat_partner(
+            session_assistant_id=session.assistant.id if session.assistant else None,
+            session_group_chat_id=session.group_chat_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
 
         return session
 
@@ -301,6 +295,48 @@ class SessionService:
         return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+
+    @staticmethod
+    def _check_chat_partner(
+        *,
+        session_assistant_id: UUID | None,
+        session_group_chat_id: UUID | None,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> None:
+        """Reject a session reached through another assistant or group chat."""
+        if assistant_id is not None and session_group_chat_id is not None:
+            raise BadRequestException(
+                "Cannot access a group chat session through the assistant endpoint. "
+                "Use the conversation endpoints instead."
+            )
+        if (
+            assistant_id is not None
+            and session_assistant_id is not None
+            and session_assistant_id != assistant_id
+        ):
+            raise NotFoundException("Session belongs to another assistant")
+        if group_chat_id is not None and session_group_chat_id != group_chat_id:
+            raise NotFoundException("Session belongs to another group chat")
+
+    async def get_context(
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionContext:
+        session = await self.session_repo.get_context(id, tenant_id=self.user.tenant_id)
+        if session is None:
+            raise NotFoundException("Session not found")
+        if not self._is_owner(session):
+            raise UnauthorizedException("Session belongs to other principal")
+        self._check_chat_partner(
+            session_assistant_id=session.assistant_id,
+            session_group_chat_id=session.group_chat_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        return session
 
     async def get_tool_call_result(
         self,
@@ -332,6 +368,17 @@ class SessionService:
             previous=previous,
             name_filter=name_filter,
         )
+
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        await self.get_context(id)
+        # A short transaction avoids holding the parent row lock while a
+        # streaming turn commits its question in a separate transaction.
+        async with sessionmanager.session() as db_session, db_session.begin():
+            return await self._session_repository(db_session).update_settings(
+                id, settings, expected_revision
+            )
 
     async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
         session = await self.session_repo.update(session_update)
@@ -434,6 +481,7 @@ class SessionService:
         self,
         *,
         name: str,
+        settings: ConversationSettingsState | None = None,
         question: str,
         files: Sequence[File] | None = None,
         session_assistant_id: UUID | None = None,
@@ -449,6 +497,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
+        session_add.settings = settings
         async with sessionmanager.session() as db_session, db_session.begin():
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(

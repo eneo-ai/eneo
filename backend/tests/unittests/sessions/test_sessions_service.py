@@ -6,9 +6,13 @@ import pytest
 
 import eneo.sessions.session_service as session_service_module
 from eneo.assistants.api.assistant_models import AssistantSparse
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.questions.question import MessageFeedback
-from eneo.sessions.session import SessionInDB, SessionUpdate
+from eneo.sessions.session import SessionContext, SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import OwnedChatPartner
 from eneo.skills.domain.skill import (
@@ -272,3 +276,36 @@ async def test_clear_message_feedback_is_scoped_to_the_principal(
         user_id=TEST_USER.id,
         api_key_id=None,
     )
+
+
+async def test_get_context_applies_the_chat_partner_checks(service: SessionService):
+    def context(**overrides):
+        fields = dict(
+            id=TEST_UUID,
+            user_id=TEST_USER.id,
+            api_key_id=None,
+            assistant_id=TEST_ASSISTANT.id,
+            group_chat_id=None,
+            space_id=None,
+            settings=None,
+        )
+        return SessionContext(**{**fields, **overrides})
+
+    service.session_repo.get_context.return_value = context()
+    assert (
+        await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id)
+    ).id == TEST_UUID
+    with pytest.raises(NotFoundException, match="belongs to another assistant"):
+        await service.get_context(TEST_UUID, assistant_id=uuid4())
+
+    group_chat_id = uuid4()
+    service.session_repo.get_context.return_value = context(
+        assistant_id=None, group_chat_id=group_chat_id
+    )
+    with pytest.raises(BadRequestException, match="through the assistant endpoint"):
+        await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id)
+    with pytest.raises(NotFoundException, match="belongs to another group chat"):
+        await service.get_context(TEST_UUID, group_chat_id=uuid4())
+    assert (
+        await service.get_context(TEST_UUID, group_chat_id=group_chat_id)
+    ).id == TEST_UUID

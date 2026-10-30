@@ -8,7 +8,6 @@ import { createContext } from "$lib/core/context";
 import type {
   AssistantSkillBindingInput,
   Eneo,
-  ModelKwargs,
   ResourcePermission,
   Space,
   SpaceSparse
@@ -165,20 +164,12 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  // Model and reasoning changes are applied optimistically, so a message sent
-  // right after a switch must not race the update: sends wait for this chain
-  // (see awaitDefaultAssistantUpdates) and updates run one at a time so a
-  // quick A → B → C never lets an older response win.
+  // Skills changes are saved on the default assistant while the user chats, so
+  // a message sent right after a change must not race the save: sends wait for
+  // this chain (see awaitDefaultAssistantUpdates) and saves run one at a time so
+  // a quick A → B → C never lets an older write land last. The model and
+  // reasoning choices are conversation settings owned by ChatService.
   let pendingDefaultAssistantUpdate: Promise<void> = Promise.resolve();
-
-  function updateDefaultAssistant(update: {
-    completionModel?: { id: string };
-    modelKwargs?: ModelKwargs;
-  }): Promise<void> {
-    const run = () => applyDefaultAssistantUpdate(update);
-    pendingDefaultAssistantUpdate = pendingDefaultAssistantUpdate.then(run, run);
-    return pendingDefaultAssistantUpdate;
-  }
 
   /** Resolves once every queued default-assistant update has settled. */
   function awaitDefaultAssistantUpdates(): Promise<void> {
@@ -215,54 +206,6 @@ function SpacesManager(data: SpacesManagerParams) {
     return saved;
   }
 
-  async function applyDefaultAssistantUpdate({
-    completionModel,
-    modelKwargs
-  }: {
-    completionModel?: { id: string };
-    modelKwargs?: ModelKwargs;
-  }) {
-    const defaultAssistant = get(currentSpace).default_assistant;
-    if (!defaultAssistant) return;
-    const id = defaultAssistant.id;
-    // Optimistic: the picker label and chat partner follow the store, so
-    // reflect the choice immediately and let the server response confirm it.
-    const optimisticModel = completionModel
-      ? get(currentSpace).completion_models.find((model) => model.id === completionModel.id)
-      : undefined;
-    if (optimisticModel) {
-      currentSpace.update(($currentSpace) => {
-        $currentSpace.default_assistant = {
-          ...defaultAssistant,
-          completion_model: optimisticModel
-        };
-        return $currentSpace;
-      });
-    }
-    try {
-      const updatedAssistant = await eneo.assistants.update({
-        assistant: { id },
-        update: {
-          ...(completionModel ? { completion_model: completionModel } : {}),
-          ...(modelKwargs ? { completion_model_kwargs: modelKwargs } : {})
-        }
-      });
-      currentSpace.update(($currentSpace) => {
-        $currentSpace.default_assistant = updatedAssistant;
-        return $currentSpace;
-      });
-    } catch (e) {
-      if (optimisticModel) {
-        currentSpace.update(($currentSpace) => {
-          $currentSpace.default_assistant = defaultAssistant;
-          return $currentSpace;
-        });
-      }
-      toastError(e);
-      console.error(e);
-    }
-  }
-
   return Object.freeze({
     state: {
       accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
@@ -275,7 +218,6 @@ function SpacesManager(data: SpacesManagerParams) {
     updateSpace,
     deleteSpace,
     watchPageData,
-    updateDefaultAssistant,
     updateDefaultAssistantSkills,
     awaitDefaultAssistantUpdates
   });

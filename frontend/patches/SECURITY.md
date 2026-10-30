@@ -3,6 +3,30 @@
 Frontend maintainers own these patches. Remove each patch and its exception as
 soon as a fixed upstream version is installed; retain the behavior regressions.
 
+## deepmerge 4.3.1 — CVE-2026-93753 / GHSA-gcqx-w48m-w2h4
+
+Reviewed 2026-10-28. Review/exception expires 2026-11-27 (CI fails after that date).
+The [advisory](https://github.com/advisories/GHSA-gcqx-w48m-w2h4) lists no fixed
+release. The transitive build dependency is used by the Svelte Vite plugin and
+Rollup's node-resolve plugin. The downstream patch rejects `__proto__` keys in
+both the target-copy and source-merge loops, including recursive merges, so a
+null-prototype target or an own `__proto__` property cannot change the returned
+object's prototype. Source, CommonJS and UMD distributions receive the same fix.
+
+`scripts/security-patches.test.mjs` resolves the installed package through the
+Svelte plugin and tests both shipped distributions. It covers poisoned target
+and source objects, null-prototype targets, nested null/undefined/primitive
+placeholders and `merge.all`, as well as ordinary nested configuration, arrays
+and symbol keys. The poisoning tests fail against unpatched 4.3.1. CI runs these
+regressions before accepting only this advisory and exact affected range; the
+accepted entry in `scripts/audit-dependencies.mjs` also records that the
+dependency is build-time only and never sees request input.
+
+Frontend maintainers must replace this mitigation with a fixed upstream release
+when available, removing the patch and audit exception together. Reverting the
+patch requires reverting the exception too; container scanners may continue to
+report the upstream version. No product configuration or permission changes.
+
 ## braces 3.0.3 — CVE-2026-93687 / GHSA-vfj7-8cjw-p6xm
 
 Reviewed 2026-10-05. Review/exception expires 2026-11-05 (CI fails after that date).
