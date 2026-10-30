@@ -19,7 +19,10 @@ vi.mock("@/features/spaces/use-space", () => ({
     can: () => true
   })
 }));
-vi.mock("@/lib/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/lib/navigation", async () => ({
+  ...(await import("@/test/navigation")),
+  useRouter: () => ({ push })
+}));
 vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"

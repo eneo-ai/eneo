@@ -18,7 +18,8 @@
 import { createElement, useSyncExternalStore } from "react";
 import { vi } from "vitest";
 import type { LinkProps } from "@/lib/link";
-import type { UrlOptions, UrlState } from "@/lib/navigation";
+import type { LeaveConfirmationState, UrlOptions, UrlState } from "@/lib/navigation";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 
 /** The route before a test sets one. */
 const HOME = "/";
@@ -125,4 +126,10 @@ export function Link(props: LinkProps) {
   delete anchor.scroll;
   delete anchor.replace;
   return createElement("a", anchor);
+}
+
+/** Router-free feature tests retain beforeunload; blocker behavior uses renderWithRouter. */
+export function useLeaveConfirmation(active: boolean): LeaveConfirmationState {
+  useBeforeUnloadWarning(active);
+  return { blocked: false, leave() {}, stay() {} };
 }

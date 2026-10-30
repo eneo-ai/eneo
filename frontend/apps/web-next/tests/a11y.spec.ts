@@ -525,6 +525,14 @@ for (const colorScheme of ["light", "dark"] as const) {
         ).toBeVisible();
         await expectNoAxeViolations(page);
         await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+        if (process.env.E2E_BASE_URL) {
+          await page.getByRole("main").getByRole("link", { name: "Skills", exact: true }).click();
+          const leave = page.getByRole("alertdialog", { name: "Lämna sidan?" });
+          await expect(leave).toBeVisible();
+          await expectNoAxeViolations(page);
+          await leave.getByRole("button", { name: "Avbryt", exact: true }).click();
+          await expect(leave).not.toBeVisible();
+        }
         await page.getByRole("textbox", { name: /^(Beskrivning|Description)$/ }).fill(description);
         await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
         await page.evaluate((text) => navigator.clipboard.writeText(text), instructions);

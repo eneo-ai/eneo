@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,11 @@ export function SpaceSkillNewPage() {
   const queryClient = useQueryClient();
   const { space, routeId } = useSpace();
   const [createdHref, setCreatedHref] = useState<string | null>(null);
+  // Navigate after the saved state has unmounted the form and its leave guard.
+  // A response arriving after this page unmounts must not navigate back here.
+  useEffect(() => {
+    if (createdHref) router.push(createdHref);
+  }, [createdHref, router]);
   const base = `/spaces/${routeId}/skills`;
 
   return (
@@ -55,7 +60,6 @@ export function SpaceSkillNewPage() {
             await queryClient.invalidateQueries({
               queryKey: skillQueryKey({ type: "space", spaceId: space.id })
             });
-            router.push(href);
           }}
         />
       )}

@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,11 @@ export function OrganizationSkillNewPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [createdHref, setCreatedHref] = useState<string | null>(null);
+  // Navigate after the saved state has unmounted the form and its leave guard.
+  // A response arriving after this page unmounts must not navigate back here.
+  useEffect(() => {
+    if (createdHref) router.push(createdHref);
+  }, [createdHref, router]);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
@@ -55,7 +60,6 @@ export function OrganizationSkillNewPage() {
               const href = `/spaces/organization/skills/${skill.id}`;
               setCreatedHref(href);
               await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
-              router.push(href);
             }}
           />
         </>

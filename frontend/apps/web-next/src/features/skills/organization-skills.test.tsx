@@ -11,7 +11,8 @@ const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("@/lib/navigation", () => ({
+vi.mock("@/lib/navigation", async () => ({
+  ...(await import("@/test/navigation")),
   useRouter: () => ({ push }),
   useSearchParams: () => new URLSearchParams()
 }));

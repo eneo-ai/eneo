@@ -13,6 +13,20 @@ import {
   useSearchParams as nextUseSearchParams
 } from "next/navigation";
 
+import { useBeforeUnloadWarning } from "./hooks/use-before-unload-warning";
+
+export type LeaveConfirmationState = {
+  blocked: boolean;
+  leave(): void;
+  stay(): void;
+};
+
+/** During Next coexistence, keep its existing reload/tab-close protection. */
+export function useLeaveConfirmation(active: boolean): LeaveConfirmationState {
+  useBeforeUnloadWarning(active);
+  return { blocked: false, leave() {}, stay() {} };
+}
+
 export type NavigateOptions = {
   /** `false` keeps the scroll position; by default the page scrolls to the top. */
   scroll?: boolean;

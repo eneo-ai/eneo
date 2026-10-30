@@ -1778,5 +1778,8 @@
   "logout_failed": "Utloggningen misslyckades. Försök igen.",
   "login_options_unavailable": "Inloggningsalternativen kunde inte hämtas.",
   "skills_reference_preview_ready": "Förhandsgranskningen är klar.",
-  "organization_skills_rollout_incompatible": "Kunde inte uppdateras med nuvarande inställningar"
+  "organization_skills_rollout_incompatible": "Kunde inte uppdateras med nuvarande inställningar",
+  "unsaved_navigation_title": "Lämna sidan?",
+  "unsaved_navigation_description": "Du har osparade ändringar. Om du lämnar sidan försvinner de.",
+  "unsaved_navigation_leave": "Lämna utan att spara"
 }

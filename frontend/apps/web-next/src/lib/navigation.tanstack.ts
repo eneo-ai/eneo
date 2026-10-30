@@ -9,11 +9,13 @@
  */
 import {
   useRouter as useTanStackRouter,
+  useBlocker,
   type AnyRouter,
   type ParsedLocation
 } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type * as Seam from "./navigation";
+import { stringifySearch } from "./router/search";
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
@@ -132,4 +134,21 @@ export const pushUrl: typeof Seam.pushUrl = (href, options) => navigateUrl(href,
 export const readUrlState: typeof Seam.readUrlState = () => {
   if (!boundRouter) throw new Error("URL state needs the app's router: createAppRouter binds it.");
   return renderedLocation(boundRouter).get().state;
+};
+
+/** The router keeps the pending transition, including its history action and fragment. */
+export const useLeaveConfirmation: typeof Seam.useLeaveConfirmation = (active) => {
+  const blocker = useBlocker({
+    shouldBlockFn: ({ current, next }) =>
+      active &&
+      (current.pathname !== next.pathname ||
+        stringifySearch(current.search) !== stringifySearch(next.search)),
+    withResolver: true,
+    enableBeforeUnload: active
+  });
+  return {
+    blocked: blocker.status === "blocked",
+    leave: () => blocker.proceed?.(),
+    stay: () => blocker.reset?.()
+  };
 };

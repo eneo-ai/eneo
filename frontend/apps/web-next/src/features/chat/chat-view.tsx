@@ -32,7 +32,7 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { AnswerRating, ChatPartner, EneoDataParts, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
@@ -477,8 +477,6 @@ function ConversationView({
           }
         }
       : null;
-  // Leaving the page would lose unsaved edits to a document.
-  useBeforeUnloadWarning(panel.dirty);
 
   // The panel and an answer's activity share the side region, one at a time.
   const panelOpen = panel.occupant.kind !== "closed";
@@ -1037,6 +1035,7 @@ function ConversationView({
 
   return (
     <ToolApprovalsContext value={approvalsHere}>
+      <LeaveConfirmation active={panel.dirty} />
       <SidePanel
         panel={panel}
         messages={messages}

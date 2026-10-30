@@ -20,7 +20,8 @@ import {
   Outlet,
   RouterProvider,
   type AnyRootRoute,
-  type AnyRoute
+  type AnyRoute,
+  type RouterHistory
 } from "@tanstack/react-router";
 import { act } from "@testing-library/react";
 import { createContext, use } from "react";
@@ -32,6 +33,8 @@ import { renderInApp, testQueryClient, type RenderInAppOptions } from "./render"
 export type RenderWithRouterOptions = Omit<RenderInAppOptions, "route"> & {
   /** Where the history starts, e.g. `/admin/users?page=2`. Default: `/`. */
   route?: string;
+  /** Supply browser history when exercising native popstate or beforeunload. */
+  history?: RouterHistory;
   /** Routes below the root, built on the root passed in; `ui` stays above them. */
   routes?: (root: AnyRootRoute) => AnyRoute[];
 };
@@ -55,7 +58,13 @@ const Ui = () => use(UiContext);
  */
 export async function renderWithRouter(
   ui: React.ReactNode,
-  { route = "/", routes, queryClient = testQueryClient(), ...options }: RenderWithRouterOptions = {}
+  {
+    route = "/",
+    history,
+    routes,
+    queryClient = testQueryClient(),
+    ...options
+  }: RenderWithRouterOptions = {}
 ) {
   const root = createRootRoute({
     component: routes
@@ -71,7 +80,7 @@ export async function renderWithRouter(
     { queryClient, t: createTranslator({ locale: "sv", messages }) },
     {
       routeTree: routes ? root.addChildren(routes(root)) : root,
-      history: createMemoryHistory({ initialEntries: [route] })
+      history: history ?? createMemoryHistory({ initialEntries: [route] })
     }
   );
   const app = (node: React.ReactNode) => (

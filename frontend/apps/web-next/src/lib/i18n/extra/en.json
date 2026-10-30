@@ -1778,5 +1778,8 @@
   "logout_failed": "Sign-out failed. Try again.",
   "login_options_unavailable": "Sign-in options could not be loaded.",
   "skills_reference_preview_ready": "The preview is ready.",
-  "organization_skills_rollout_incompatible": "Incompatible with the current configuration"
+  "organization_skills_rollout_incompatible": "Incompatible with the current configuration",
+  "unsaved_navigation_title": "Leave this page?",
+  "unsaved_navigation_description": "You have unsaved changes. If you leave this page, they will be lost.",
+  "unsaved_navigation_leave": "Leave without saving"
 }
