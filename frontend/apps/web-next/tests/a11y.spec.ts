@@ -531,7 +531,10 @@ for (const colorScheme of ["light", "dark"] as const) {
         await expectNoAxeViolations(page);
         await page.reload();
         await expect(page.getByRole("textbox", { name: /^(Namn|Name)$/ })).toHaveValue(name);
-        await page.getByRole("main").getByRole("link", { name: "Skills", exact: true }).click();
+        await page
+          .getByLabel(/^(Ytans innehåll|Space sections)$/)
+          .getByRole("link", { name: "Skills", exact: true })
+          .click();
         await expect(page).toHaveURL(/\/spaces\/organization\/skills$/);
         await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
         await expectNoAxeViolations(page);
@@ -561,7 +564,10 @@ for (const colorScheme of ["light", "dark"] as const) {
         await expectNoAxeViolations(page);
         await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
         if (process.env.E2E_BASE_URL) {
-          await page.getByRole("main").getByRole("link", { name: "Skills", exact: true }).click();
+          await page
+            .getByLabel(/^(Ytans innehåll|Space sections)$/)
+            .getByRole("link", { name: "Skills", exact: true })
+            .click();
           const leave = page.getByRole("alertdialog", { name: "Lämna sidan?" });
           await expect(leave).toBeVisible();
           await expectNoAxeViolations(page);
