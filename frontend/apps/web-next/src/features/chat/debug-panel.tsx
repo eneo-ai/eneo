@@ -237,7 +237,10 @@ function TurnDiagnostics({
       <KnowledgeSection knowledge={details.knowledge} />
       <FilesSection files={details.files} />
       {diagnostics.skill_activation ? (
-        <SkillActivationSection evidence={diagnostics.skill_activation} />
+        <SkillActivationSection
+          evidence={diagnostics.skill_activation}
+          toolCalls={message.tool_calls ?? []}
+        />
       ) : (
         <section
           aria-label={t("chat_debug_legacy_skills_title")}

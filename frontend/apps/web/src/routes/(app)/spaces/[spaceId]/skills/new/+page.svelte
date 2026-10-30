@@ -3,6 +3,7 @@
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
 
@@ -66,6 +67,10 @@
           {m.skills_library_new_intro()}
         </p>
         <SkillForm
+          referenceCatalog={skillReferenceCatalog(data.eneo, {
+            type: "space",
+            spaceId: data.currentSpace.id
+          })}
           class="max-w-none"
           onSubmit={createSkill}
           showDiscardAction

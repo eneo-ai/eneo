@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,9 +76,10 @@ describe("organisation skill detail", () => {
   it("saves a changed content version through the revision endpoint", async () => {
     show(<OrganizationSkillDetailPage skillId="skill-1" />);
     await screen.findByLabelText("skills_instructions_label");
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: " Search the archive " }
-    });
+    replaceInstructionText(
+      screen.getByLabelText("skills_instructions_label"),
+      " Search the archive "
+    );
     fireEvent.click(screen.getByRole("button", { name: "save_changes" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/skills/organization/{skill_id}/revisions/", {

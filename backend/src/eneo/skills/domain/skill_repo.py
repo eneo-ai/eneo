@@ -166,6 +166,7 @@ class SkillRepo(Protocol):
         tenant_id: UUID,
         skill_id: UUID,
         expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
         targets: Sequence[AppPinAdvanceTarget],
     ) -> list[AppPinAdvanceTargetResult]: ...
 
@@ -209,6 +210,7 @@ class SkillRepo(Protocol):
         content_digest: str,
         created_by_user_id: UUID,
         expected_current_revision_id: UUID | None = None,
+        restore_reference_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None: ...
 
     async def set_active(

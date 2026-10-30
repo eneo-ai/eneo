@@ -10614,7 +10614,8 @@ export interface components {
      * AppPinAdvanceIncompatibleReason
      * @enum {string}
      */
-    AppPinAdvanceIncompatibleReason: "context_window";
+    AppPinAdvanceIncompatibleReason:
+      "context_window" | "attachment_limit" | "conflicting_revisions";
     /**
      * AppPinAdvanceOutcome
      * @enum {string}
@@ -11292,7 +11293,8 @@ export interface components {
      * AssistantPinAdvanceIncompatibleReason
      * @enum {string}
      */
-    AssistantPinAdvanceIncompatibleReason: "activation_unavailable" | "context_window";
+    AssistantPinAdvanceIncompatibleReason:
+      "activation_unavailable" | "context_window" | "attachment_limit" | "conflicting_revisions";
     /**
      * AssistantPinAdvanceOutcome
      * @enum {string}
@@ -11462,6 +11464,8 @@ export interface components {
       source: components["schemas"]["SkillBindingSource"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Dependencies */
+      dependencies?: components["schemas"]["SkillDependencySummary"][];
       activation_mode: components["schemas"]["SkillActivationMode"];
     };
     /** AssistantSkillConfigurationPublic */
@@ -12228,6 +12232,7 @@ export interface components {
       skill_activation:
         | components["schemas"]["SkillActivationEvidenceV1"]
         | components["schemas"]["SkillActivationEvidenceV2"]
+        | components["schemas"]["SkillActivationEvidenceV3"]
         | null;
     };
     /** CollectionMetadata */
@@ -14539,7 +14544,8 @@ export interface components {
       | 9070
       | 9075
       | 9076
-      | 9080;
+      | 9080
+      | 9081;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -14872,6 +14878,25 @@ export interface components {
       extensions: string[];
       /** Vision */
       vision: boolean;
+    };
+    /** FunctionInstructionReference */
+    FunctionInstructionReference: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "function";
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose:
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
     };
     /** GeneralError */
     GeneralError: {
@@ -16834,6 +16859,34 @@ export interface components {
       /** Disabled Tool Ids */
       disabled_tool_ids: string[];
     };
+    /** McpServerInstructionReference */
+    McpServerInstructionReference: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "mcp_server";
+      /**
+       * Server Id
+       * Format: uuid
+       */
+      server_id: string;
+    };
+    /** McpToolInstructionReference */
+    McpToolInstructionReference: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "mcp_tool";
+      /**
+       * Server Id
+       * Format: uuid
+       */
+      server_id: string;
+      /** Tool Name */
+      tool_name: string;
+    };
     /**
      * McpToolReferencePublic
      * @description One MCP resource block captured from a tool call.
@@ -17380,6 +17433,23 @@ export interface components {
        * @description Replaces the configured outbound headers; omit to leave them unchanged
        */
       outbound_headers?: components["schemas"]["OutboundHeaderInput"][] | null;
+    };
+    /**
+     * ModelToolIdentity
+     * @description The exact model-visible name registered for one approved protocol tool.
+     */
+    ModelToolIdentity: {
+      /** Model Name */
+      model_name: string;
+      /**
+       * Server Id
+       * Format: uuid
+       */
+      server_id: string;
+      /** Tool Name */
+      tool_name: string;
+      /** Purpose */
+      purpose: string | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -21417,6 +21487,88 @@ export interface components {
       personal_layer: components["schemas"]["PersonalSkillLayerEvidence"];
     };
     /**
+     * SkillActivationEvidenceV3
+     * @description Reference provenance and the actual offered tool identities, without bodies.
+     */
+    SkillActivationEvidenceV3: {
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      /** Initially Active */
+      initially_active: string[];
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+      /**
+       * Version
+       * @default 3
+       * @constant
+       */
+      version?: 3;
+      personal_layer?: components["schemas"]["PersonalSkillLayerEvidence"] | null;
+      /**
+       * Helpers
+       * @default []
+       */
+      helpers?: components["schemas"]["SkillActivationReference"][];
+      /**
+       * Instruction References
+       * @default []
+       */
+      instruction_references?: components["schemas"]["SkillInstructionReferenceEvidence"][];
+      /**
+       * Reference Tools
+       * @default []
+       */
+      reference_tools?: components["schemas"]["ModelToolIdentity"][];
+      /**
+       * References Prepared
+       * @default false
+       */
+      references_prepared?: boolean;
+    };
+    /**
      * SkillActivationFallbackReason
      * @enum {string}
      */
@@ -21649,6 +21801,8 @@ export interface components {
       source: components["schemas"]["SkillBindingSource"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Dependencies */
+      dependencies?: components["schemas"]["SkillDependencySummary"][];
     };
     /** SkillCreateRequest */
     SkillCreateRequest: {
@@ -21660,6 +21814,23 @@ export interface components {
       instructions: string;
       /** Slug */
       slug: string;
+    };
+    /** SkillDependencySummary */
+    SkillDependencySummary: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
     };
     /**
      * SkillDetachmentTotalsPublic
@@ -21743,6 +21914,40 @@ export interface components {
        * Format: uuid
        */
       expected_block_id: string;
+    };
+    /** SkillInstructionReference */
+    SkillInstructionReference: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "skill";
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+    };
+    /** SkillInstructionReferenceEvidence */
+    SkillInstructionReferenceEvidence: {
+      /**
+       * Source Revision Id
+       * Format: uuid
+       */
+      source_revision_id: string;
+      /** Label */
+      label: string;
+      /** Target */
+      target:
+        | components["schemas"]["SkillInstructionReference"]
+        | components["schemas"]["FunctionInstructionReference"]
+        | components["schemas"]["McpServerInstructionReference"]
+        | components["schemas"]["McpToolInstructionReference"];
     };
     /** SkillPublic */
     SkillPublic: {

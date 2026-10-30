@@ -27,6 +27,7 @@
     "@eneo/markdown-math": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@eneo/eneo-js": "workspace:*",
+    "@eneo/skill-instructions": "workspace:*",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
     "@streamdown/cjk": "^1.0.3",

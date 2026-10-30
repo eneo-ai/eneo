@@ -29,6 +29,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimeResolution,
     SkillTurnEffectiveMode,
     SkillTurnPlan,
+    effective_skill_bindings,
 )
 
 
@@ -95,8 +96,10 @@ def assess_personal_skill_layer(
 
     if not holds_permission:
         return suspended(PersonalSkillLayerReason.PERMISSION_MISSING)
-    attached = len(organisation.eligible) + len(organisation.blocked)
-    if attached + len(personal_bindings) > policy.max_attached_skills:
+    attached = effective_skill_bindings(
+        (*organisation.eligible, *organisation.blocked, *personal_bindings)
+    )
+    if len(attached) > policy.max_attached_skills:
         return suspended(PersonalSkillLayerReason.ATTACHMENT_LIMIT_EXCEEDED)
 
     def runtime(resolution: SkillRuntimeResolution):

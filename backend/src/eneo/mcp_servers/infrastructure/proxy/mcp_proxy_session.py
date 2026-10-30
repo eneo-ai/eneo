@@ -48,6 +48,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     generated_filename,
     is_capability_purpose,
 )
+from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPAuthenticationError,
     MCPClient,
@@ -179,6 +180,7 @@ class MCPProxySession:
         """
         super().__init__()
         self.mcp_servers = mcp_servers
+        self._include_reference_identities = False
         self.auth_credentials_map = auth_credentials_map or {}
         self.identity_headers = identity_headers or {}
         self._mcp_server_tool_repo = mcp_server_tool_repo
@@ -219,6 +221,9 @@ class MCPProxySession:
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
+        # A model key keeps its protocol identity for the whole session, even
+        # after discovery removes it. Replay and call evidence rely on this.
+        self._tool_key_owners: dict[str, tuple[UUID, str]] = {}
         self._tools_for_llm: list[dict[str, Any]] = []
         self._build_tool_registry()
 
@@ -279,6 +284,16 @@ class MCPProxySession:
         tool_name_sanitized = self._sanitize_name(name)
         prefixed_name = f"{server_prefix}__{tool_name_sanitized}"
 
+        owner = (server.id, name)
+        previous_owner = self._tool_key_owners.get(prefixed_name)
+        if previous_owner is not None and previous_owner != owner:
+            logger.warning(
+                "[MCPProxy] Tool collision: '%s' skipped because its protocol identity "
+                "cannot change during a session",
+                prefixed_name,
+            )
+            return None
+
         # Check for collision before registering. A tool already owned by this
         # same server is not a collision — the refresh path clears a server's
         # entries before re-registering, so any leftover here is another server.
@@ -291,6 +306,7 @@ class MCPProxySession:
             )
             return None
 
+        self._tool_key_owners[prefixed_name] = owner
         self._tool_registry[prefixed_name] = (server, name, title)
         self._tools_for_llm.append(
             {
@@ -910,12 +926,28 @@ class MCPProxySession:
                     **tool["function"],
                     "description": FILE_HANDLE_INSTRUCTION
                     + "\n\n"
-                    + tool["function"]["description"],
+                    + tool["function"]["description"]
+                    + self._reference_identity_description(tool["function"]["name"]),
                     "parameters": model_file_schema(tool["function"]["parameters"]),
                 },
             }
             for tool in self._tools_for_llm
         ]
+
+    def include_reference_identities(self) -> None:
+        self._include_reference_identities = True
+
+    def _reference_identity_description(self, model_name: str) -> str:
+        if not self._include_reference_identities:
+            return ""
+        server, name, _ = self._tool_registry[model_name]
+        if server.purpose == "general":
+            identity = f"MCP {server.id}, tool {name}"
+        elif is_capability_purpose(server.purpose):
+            identity = f"Function {server.purpose}"
+        else:
+            return ""
+        return f"\nSkill reference identity: {identity}."
 
     def model_result_text(self, text: str) -> str:
         """Strip file credentials only from model text, preserving provider UI resources."""
@@ -929,6 +961,17 @@ class MCPProxySession:
             Set of prefixed tool names that are allowed
         """
         return set(self._tool_registry.keys())
+
+    def get_model_tool_identities(self) -> tuple[ModelToolIdentity, ...]:
+        return tuple(
+            ModelToolIdentity(
+                model_name=model_name,
+                server_id=server.id,
+                tool_name=name,
+                purpose=server.purpose,
+            )
+            for model_name, (server, name, _) in self._tool_registry.items()
+        )
 
     def get_tool_count(self) -> int:
         """Get total number of available tools."""

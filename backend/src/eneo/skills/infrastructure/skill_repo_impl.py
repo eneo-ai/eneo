@@ -22,6 +22,7 @@ from eneo.database.tables.skill_table import (
     AssistantSkillBindings,
     GovernancePolicySkillBindings,
     SkillExecutionBlocks,
+    SkillRevisionDependencies,
     SkillRevisions,
     SkillRuntimePolicies,
     Skills,
@@ -29,6 +30,7 @@ from eneo.database.tables.skill_table import (
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
@@ -69,6 +71,7 @@ from eneo.skills.domain.skill import (
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillHasReferencesError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRemovalBusyError,
@@ -86,6 +89,14 @@ from eneo.skills.domain.skill import (
     SkillSummary,
     SkillUsageCounts,
 )
+from eneo.skills.infrastructure.skill_db_errors import (
+    is_constraint_violation,
+    is_lock_not_available,
+)
+from eneo.skills.infrastructure.skill_revision_references import (
+    approve_revision_references,
+    store_revision_references,
+)
 
 _BindingRow = TypeVar(
     "_BindingRow",
@@ -96,14 +107,6 @@ _BindingRow = TypeVar(
 _SKILL_SLUG_CONSTRAINT = "uq_skills_space_id_slug"
 
 
-def _is_constraint_violation(error: IntegrityError, constraint_name: str) -> bool:
-    original = getattr(error, "orig", None)
-    reported_name = getattr(original, "constraint_name", None)
-    if reported_name == constraint_name:
-        return True
-    return constraint_name in str(original if original is not None else error)
-
-
 def _escape_like_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -112,17 +115,8 @@ _CurrentSkillRevision = aliased(SkillRevisions, name="current_skill_revision")
 _PublishedSkillRevision = aliased(SkillRevisions, name="published_skill_revision")
 
 
-_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
 # Reserved two-int advisory-lock class for personal-default fit serialization.
 _PERSONAL_DEFAULT_FIT_LOCK_CLASS = 0x50444654
-
-
-def _is_lock_not_available(error: DBAPIError) -> bool:
-    orig = error.orig
-    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
-    return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE or (
-        _LOCK_NOT_AVAILABLE_SQLSTATE in str(orig)
-    )
 
 
 async def acquire_personal_default_fit_lock(
@@ -389,6 +383,12 @@ class SkillRepoImpl:
     ) -> Skill:
         skill_id = uuid4()
         revision_id = uuid4()
+        dependencies = await approve_revision_references(
+            self.session,
+            space_id=space_id,
+            skill_id=skill_id,
+            instructions=instructions,
+        )
         try:
             await self.session.execute(
                 sa.insert(Skills).values(
@@ -401,7 +401,7 @@ class SkillRepoImpl:
                 )
             )
         except IntegrityError as error:
-            if _is_constraint_violation(error, _SKILL_SLUG_CONSTRAINT):
+            if is_constraint_violation(error, _SKILL_SLUG_CONSTRAINT):
                 raise SkillSlugConflictError from error
             raise
         await self.session.execute(
@@ -418,6 +418,7 @@ class SkillRepoImpl:
         )
         skill = await self.get(skill_id=skill_id)
         assert skill is not None
+        await store_revision_references(self.session, skill, revision_id, dependencies)
         return skill
 
     async def get(self, *, skill_id: UUID) -> Skill | None:
@@ -1301,12 +1302,10 @@ class SkillRepoImpl:
         )
         if published_revision_id != expected_published_revision_id:
             raise SkillRevisionConflictError
-        if (
-            await self.get_active_execution_block(
-                tenant_id=tenant_id,
-                skill_id=skill_id,
-            )
-            is not None
+        if await self._pin_candidate_group_is_blocked(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            revision_id=expected_published_revision_id,
         ):
             raise SkillBlockedForBindingError
         runtime_policy_version = await self._runtime_policy_version(
@@ -1463,6 +1462,7 @@ class SkillRepoImpl:
         tenant_id: UUID,
         skill_id: UUID,
         expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
         targets: Sequence[AppPinAdvanceTarget],
     ) -> list[AppPinAdvanceTargetResult]:
         ordered_targets = sorted(targets, key=lambda target: target.app_id)
@@ -1485,6 +1485,7 @@ class SkillRepoImpl:
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id,
             skill_id=skill_id,
+            shared=True,
         )
         if skill_row is None or skill_row.published_revision_number is None:
             raise SkillNotPublishedForBindingError
@@ -1496,14 +1497,18 @@ class SkillRepoImpl:
         )
         if published_revision_id != expected_published_revision_id:
             raise SkillRevisionConflictError
-        if (
-            await self.get_active_execution_block(
-                tenant_id=tenant_id,
-                skill_id=skill_id,
-            )
-            is not None
+        if await self._pin_candidate_group_is_blocked(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            revision_id=expected_published_revision_id,
         ):
             raise SkillBlockedForBindingError
+
+        runtime_policy_version = await self._runtime_policy_version(
+            tenant_id=tenant_id, shared_lock=True
+        )
+        if runtime_policy_version != expected_runtime_policy_version:
+            raise SkillRuntimePolicyChangedError
 
         binding_rows = (
             await self.session.execute(
@@ -1767,6 +1772,7 @@ class SkillRepoImpl:
         content_digest: str,
         created_by_user_id: UUID,
         expected_current_revision_id: UUID | None = None,
+        restore_reference_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None:
         skill_row = await self.session.scalar(
             sa.select(Skills)
@@ -1804,6 +1810,24 @@ class SkillRepoImpl:
 
         next_revision = skill_row.current_revision_number + 1
         revision_id = uuid4()
+        retained_instructions = current_row.instructions
+        retained_revision_id = current_row.id
+        if restore_reference_revision_id is not None:
+            restored = await self.get_revision(
+                skill_id=skill_id, revision_id=restore_reference_revision_id
+            )
+            if restored is None or restored.instructions != instructions:
+                raise BadRequestException("Invalid Skill revision restore")
+            retained_instructions = restored.instructions
+            retained_revision_id = restored.id
+        dependencies = await approve_revision_references(
+            self.session,
+            space_id=skill_row.space_id,
+            skill_id=skill_id,
+            instructions=instructions,
+            retained_instructions=retained_instructions,
+            retained_revision_id=retained_revision_id,
+        )
         await self.session.execute(
             sa.insert(SkillRevisions).values(
                 id=revision_id,
@@ -1824,6 +1848,7 @@ class SkillRepoImpl:
         skill = await self.get(skill_id=skill_id)
         if skill is None or skill.current_revision.id != revision_id:
             raise RuntimeError("New Skill revision was not persisted as current")
+        await store_revision_references(self.session, skill, revision_id, dependencies)
         return SkillRevisionChange(
             skill=skill,
             revision=skill.current_revision,
@@ -1867,6 +1892,32 @@ class SkillRepoImpl:
             skill=skill,
             changed=changed,
             previous_is_active=previous_is_active,
+        )
+
+    async def _pin_candidate_group_is_blocked(
+        self, *, tenant_id: UUID, skill_id: UUID, revision_id: UUID
+    ) -> bool:
+        # The approved closure is immutable. Hold every member FOR SHARE through
+        # the pin write so a concurrent helper block cannot pass this final gate.
+        helper_ids = sa.select(SkillRevisionDependencies.target_skill_id).where(
+            SkillRevisionDependencies.source_revision_id == revision_id
+        )
+        group_ids = list(
+            await self.session.scalars(
+                sa.select(Skills.id)
+                .join(Spaces, Spaces.id == Skills.space_id)
+                .where(
+                    sa.or_(Skills.id == skill_id, Skills.id.in_(helper_ids)),
+                    *self._organization_scope(tenant_id),
+                )
+                .order_by(Skills.id)
+                .with_for_update(read=True, of=Skills)
+            )
+        )
+        return bool(
+            await self.list_active_execution_blocks(
+                tenant_id=tenant_id, skill_ids=group_ids
+            )
         )
 
     async def _lock_organization_skill(
@@ -2109,7 +2160,7 @@ class SkillRepoImpl:
                     )
                 ).scalar_one_or_none()
         except DBAPIError as error:
-            if _is_lock_not_available(error):
+            if is_lock_not_available(error):
                 return PersonalChatPinConfirmOutcome.POLICY_CHANGED
             raise
         if locked_version != policy_version:
@@ -2121,7 +2172,7 @@ class SkillRepoImpl:
             shared=False,
         )
         skill_row = await self._lock_organization_skill(
-            tenant_id=tenant_id, skill_id=skill_id
+            tenant_id=tenant_id, skill_id=skill_id, shared=True
         )
         if skill_row is None or skill_row.published_revision_number is None:
             return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
@@ -2133,10 +2184,11 @@ class SkillRepoImpl:
         )
         if published_id != expected_published_revision_id:
             return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
-        active_block = await self.get_active_execution_block(
-            tenant_id=tenant_id, skill_id=skill_id
-        )
-        if active_block is not None:
+        if await self._pin_candidate_group_is_blocked(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            revision_id=expected_published_revision_id,
+        ):
             return PersonalChatPinConfirmOutcome.BLOCKED
 
         current_personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
@@ -2278,7 +2330,7 @@ class SkillRepoImpl:
         try:
             return await self.session.execute(statement)
         except DBAPIError as error:
-            if _is_lock_not_available(error):
+            if is_lock_not_available(error):
                 raise SkillRemovalBusyError from error
             raise
 
@@ -2630,6 +2682,12 @@ class SkillRepoImpl:
         # the service's restriction of hard deletion to local Space Skills.
         if skill.first_published_at is not None:
             raise PublishedSkillDeletionError
+        if await self.session.scalar(
+            sa.select(
+                sa.exists().where(SkillRevisionDependencies.target_skill_id == skill.id)
+            )
+        ):
+            raise SkillHasReferencesError
         if await self._is_bound(skill_id=skill.id):
             raise SkillHasBindingsError
         if await self._has_nonterminal_app_run(skill_id=skill.id):
@@ -2840,6 +2898,90 @@ class SkillRepoImpl:
             if reference in by_reference
         ]
 
+    async def _include_dependencies(
+        self,
+        bindings: list[ResolvedSkillBinding],
+        *,
+        lock: bool = False,
+    ) -> list[ResolvedSkillBinding]:
+        if not bindings:
+            return bindings
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(SkillRevisionDependencies)
+                    .where(
+                        SkillRevisionDependencies.source_revision_id.in_(
+                            {binding.skill_revision_id for binding in bindings}
+                        )
+                    )
+                    .order_by(
+                        SkillRevisionDependencies.source_revision_id,
+                        SkillRevisionDependencies.target_skill_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return bindings
+        references = list(
+            dict.fromkeys(
+                SkillBindingReference(row.target_skill_id, row.target_revision_id)
+                for row in rows
+            )
+        )
+        if lock:
+            # Retained approved helpers can be unpublished or removed. Only an
+            # execution block stops their use; serialize its write with this save.
+            await self.session.execute(
+                sa.select(Skills.id)
+                .where(Skills.id.in_({reference.skill_id for reference in references}))
+                .order_by(Skills.id)
+                .with_for_update(read=True, of=Skills)
+            )
+        resolved = await self._resolve_references(
+            source_scope=Skills.space_id.in_(
+                {binding.skill_space_id for binding in bindings}
+            ),
+            references=references,
+            lock_active_state=False,
+        )
+        by_reference = {
+            SkillBindingReference(binding.skill_id, binding.skill_revision_id): binding
+            for binding in resolved
+        }
+        if len(by_reference) != len(references):
+            raise BadRequestException("A referenced Skill revision is unavailable")
+        grouped: dict[UUID, list[ResolvedSkillBinding]] = {}
+        for row in rows:
+            grouped.setdefault(row.source_revision_id, []).append(
+                by_reference[
+                    SkillBindingReference(row.target_skill_id, row.target_revision_id)
+                ]
+            )
+        return [
+            replace(
+                binding, dependencies=tuple(grouped.get(binding.skill_revision_id, ()))
+            )
+            for binding in bindings
+        ]
+
+    async def _include_grouped_dependencies(
+        self,
+        grouped: dict[UUID, list[ResolvedSkillBinding]],
+    ) -> dict[UUID, list[ResolvedSkillBinding]]:
+        # One batch for the whole resource page, never one query per card.
+        flat = await self._include_dependencies(
+            [binding for bindings in grouped.values() for binding in bindings]
+        )
+        offset = 0
+        for resource_id, bindings in grouped.items():
+            grouped[resource_id] = flat[offset : offset + len(bindings)]
+            offset += len(bindings)
+        return grouped
+
     @classmethod
     def _resource_source_scope(
         cls,
@@ -2862,7 +3004,7 @@ class SkillRepoImpl:
         parent_space_id: UUID,
         references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
-        return await self._resolve_references(
+        bindings = await self._resolve_references(
             source_scope=self._resource_source_scope(
                 tenant_id=tenant_id,
                 parent_space_id=parent_space_id,
@@ -2870,6 +3012,7 @@ class SkillRepoImpl:
             references=references,
             lock_active_state=False,
         )
+        return await self._include_dependencies(bindings, lock=False)
 
     async def resolve_bound_references_for_binding_update(
         self,
@@ -2878,7 +3021,7 @@ class SkillRepoImpl:
         parent_space_id: UUID,
         references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
-        return await self._resolve_references(
+        bindings = await self._resolve_references(
             source_scope=self._resource_source_scope(
                 tenant_id=tenant_id,
                 parent_space_id=parent_space_id,
@@ -2886,6 +3029,7 @@ class SkillRepoImpl:
             references=references,
             lock_active_state=True,
         )
+        return await self._include_dependencies(bindings, lock=True)
 
     async def resolve_local_references_for_binding_update(
         self,
@@ -2893,11 +3037,12 @@ class SkillRepoImpl:
         space_id: UUID,
         references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
-        return await self._resolve_references(
+        bindings = await self._resolve_references(
             source_scope=Skills.space_id == space_id,
             references=references,
             lock_active_state=True,
         )
+        return await self._include_dependencies(bindings, lock=True)
 
     async def resolve_published_references_for_binding_update(
         self,
@@ -2946,7 +3091,7 @@ class SkillRepoImpl:
             ): (skill, revision, current_revision_id)
             for skill, revision, current_revision_id in rows.all()
         }
-        return [
+        bindings = [
             self._to_resolved(
                 *by_reference[reference],
                 True,
@@ -2957,6 +3102,7 @@ class SkillRepoImpl:
             for position, reference in enumerate(references)
             if reference in by_reference
         ]
+        return await self._include_dependencies(bindings, lock=True)
 
     async def lock_assistant_space_for_update(
         self, *, assistant_id: UUID
@@ -2981,7 +3127,7 @@ class SkillRepoImpl:
             .where(AssistantSkillBindings.assistant_id == assistant_id)
             .order_by(AssistantSkillBindings.position)
         )
-        return [
+        bindings = [
             self._to_resolved(
                 skill,
                 revision,
@@ -3002,6 +3148,7 @@ class SkillRepoImpl:
                 attachable_revision_number,
             ) in rows.all()
         ]
+        return await self._include_dependencies(bindings, lock=False)
 
     async def list_assistant_bindings_batch(
         self, *, assistant_ids: Sequence[UUID]
@@ -3041,7 +3188,7 @@ class SkillRepoImpl:
                     activation_mode=SkillActivationMode(binding.activation_mode),
                 )
             )
-        return grouped
+        return await self._include_grouped_dependencies(grouped)
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool:
         return bool(
@@ -3091,7 +3238,7 @@ class SkillRepoImpl:
             .where(AppSkillBindings.app_id == app_id)
             .order_by(AppSkillBindings.position)
         )
-        return [
+        bindings = [
             self._to_resolved(
                 skill,
                 revision,
@@ -3111,6 +3258,7 @@ class SkillRepoImpl:
                 attachable_revision_number,
             ) in rows.all()
         ]
+        return await self._include_dependencies(bindings, lock=False)
 
     async def list_app_bindings_batch(
         self, *, app_ids: Sequence[UUID]
@@ -3146,7 +3294,7 @@ class SkillRepoImpl:
                     binding.position,
                 )
             )
-        return grouped
+        return await self._include_grouped_dependencies(grouped)
 
     async def list_app_bindings_for_execution_plan(
         self, *, app_id: UUID
@@ -3157,7 +3305,7 @@ class SkillRepoImpl:
             .order_by(AppSkillBindings.position)
             .with_for_update(read=True, of=Skills)
         )
-        return [
+        bindings = [
             self._to_resolved(
                 skill,
                 revision,
@@ -3177,6 +3325,7 @@ class SkillRepoImpl:
                 attachable_revision_number,
             ) in rows.all()
         ]
+        return await self._include_dependencies(bindings, lock=True)
 
     async def replace_app_bindings(
         self,
@@ -3219,7 +3368,7 @@ class SkillRepoImpl:
             .where(GovernancePolicySkillBindings.policy_id == policy_id)
             .order_by(GovernancePolicySkillBindings.position)
         )
-        return [
+        bindings = [
             self._to_resolved(
                 skill,
                 revision,
@@ -3240,6 +3389,7 @@ class SkillRepoImpl:
                 attachable_revision_number,
             ) in rows.all()
         ]
+        return await self._include_dependencies(bindings, lock=False)
 
     async def replace_policy_bindings(
         self,

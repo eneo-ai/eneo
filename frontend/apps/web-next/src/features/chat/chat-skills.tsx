@@ -29,6 +29,7 @@ import {
   type PersonalSkillRow
 } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
+import { SkillDependencies } from "@/features/skills/skill-dependencies";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
@@ -79,7 +80,10 @@ function OrganisationRow({ skill }: { skill: PersonalChatSkills["organisation"][
   const t = useTranslations();
   return (
     <li className="flex items-start gap-3 py-2">
-      <SkillText name={skill.display_name} description={skill.description} />
+      <div className="min-w-0 flex-1">
+        <SkillText name={skill.display_name} description={skill.description} />
+        <SkillDependencies dependencies={skill.dependencies} />
+      </div>
       <div className="text-ax-text-secondary flex shrink-0 flex-col items-end gap-0.5 text-xs">
         <span className="flex items-center gap-1">
           <Lock aria-hidden="true" className="size-3.5" />
@@ -116,7 +120,15 @@ function OwnRow({
   return (
     <li className="flex flex-col gap-2 py-2.5">
       <div className={cn("flex gap-x-4 gap-y-2", stacked ? "flex-col" : "items-center")}>
-        <SkillText name={row.name} description={row.description} />
+        <div className="min-w-0 flex-1">
+          <SkillText name={row.name} description={row.description} />
+          {row.mode !== "off" && <SkillDependencies dependencies={row.dependencies} />}
+          {!!row.usedVia?.length && (
+            <p className="text-ax-text-secondary mt-1 text-xs">
+              {t("skills_reference_used_via", { names: row.usedVia.join(", ") })}
+            </p>
+          )}
+        </div>
         {skills.canEdit ? (
           <SegmentedControl
             ref={group}
