@@ -8,7 +8,7 @@ import { ThemeColor } from "@/components/providers/theme-color";
 import { Toaster } from "@/components/ui/sonner";
 import { eneoTheme } from "@/theme/eneo";
 import { surfaceColors } from "@/theme/surface-colors";
-import "./globals.css";
+import "@/styles/globals.css";
 
 export const metadata: Metadata = {
   // Child routes/layouts set a string title → "<Page> · Eneo"; routes without

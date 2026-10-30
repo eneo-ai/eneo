@@ -3,7 +3,7 @@ import { unwrap } from "@/lib/api/errors";
 import { eneoApi } from "@/lib/api/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { pageTitle } from "@/lib/page-metadata";
-import { AdminPageBar } from "./admin-page-bar.client";
+import { AdminPageBar } from "@/features/admin/admin-page-bar";
 
 /** Admin pages inherit "Administration · Eneo" unless they set their own title. */
 export const generateMetadata = pageTitle("shell_administration");

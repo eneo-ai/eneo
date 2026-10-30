@@ -4,7 +4,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { useEffect, useId, useRef } from "react";
 import { THEMES } from "@/components/shell/theme-switcher";

@@ -13,7 +13,7 @@ import {
   websiteQueryOptions
 } from "@/features/knowledge/knowledge";
 import { spacePageTitle } from "@/features/spaces/page-title";
-import { WebsiteDetail } from "./website-detail.client";
+import { WebsiteDetail } from "@/features/knowledge/detail/website-detail.client";
 
 export async function generateMetadata({
   params

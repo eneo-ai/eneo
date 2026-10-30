@@ -378,7 +378,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("spaces list", async ({ page }) => {
+    test("spaces list", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/spaces/list", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
@@ -537,7 +537,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("account", async ({ page }) => {
+    test("account", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
       });
@@ -601,7 +601,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("spaces list", async ({ page }) => {
+        test("spaces list", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/spaces/list", async () => {
             await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
           });
@@ -772,7 +772,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("spaces list", async ({ page }) => {
+  test("spaces list", { tag: "@vite" }, async ({ page }) => {
     await spacesList(page);
     await expectNoSidewaysPageScroll(page);
   });
@@ -883,21 +883,23 @@ test.describe("toasts never cover the focused element (2.4.11)", () => {
   }
 });
 
-test("the skip link is the first tab stop and moves focus to the main content", async ({
-  page
-}) => {
-  await page.goto("/spaces/list");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+test(
+  "the skip link is the first tab stop and moves focus to the main content",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/spaces/list");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  await page.keyboard.press("Tab");
-  const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
-  await expect(skipLink).toBeFocused();
-  // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
-  // shown at full size (2.4.7) and be a real target (2.5.8).
-  const box = await skipLink.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+    await page.keyboard.press("Tab");
+    const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
+    await expect(skipLink).toBeFocused();
+    // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
+    // shown at full size (2.4.7) and be a real target (2.5.8).
+    const box = await skipLink.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
 
-  await page.keyboard.press("Enter");
-  await expect(page.locator("#main-content")).toBeFocused();
-});
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+  }
+);

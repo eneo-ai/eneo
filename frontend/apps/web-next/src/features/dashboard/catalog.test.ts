@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { catalogGroups, filterCatalog } from "./catalog";
-import type { Dashboard } from "./queries";
+import { catalogGroups, filterCatalog } from "@/features/dashboard/catalog";
+import type { Dashboard } from "@/features/dashboard/queries";
 
 const DASHBOARD = {
   spaces: {

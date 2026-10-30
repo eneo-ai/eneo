@@ -4,8 +4,8 @@ import { PageHeader } from "@/components/composites/page-header";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { pageTitle } from "@/lib/page-metadata";
-import { DashboardList } from "./dashboard-list.client";
-import { dashboardQueryOptions } from "./queries";
+import { DashboardList } from "@/features/dashboard/dashboard-list.client";
+import { dashboardQueryOptions } from "@/features/dashboard/queries";
 
 export const generateMetadata = pageTitle("assistants");
 

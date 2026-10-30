@@ -7,7 +7,7 @@ import { eneoApi } from "@/lib/api/server";
 import { findWrapperSource } from "@/features/knowledge/integrations/sources";
 import { spacePageTitle } from "@/features/spaces/page-title";
 import { spaceQueryOptions } from "@/features/spaces/space";
-import { WrapperDetail } from "./wrapper-detail.client";
+import { WrapperDetail } from "@/features/knowledge/integrations/wrapper-detail.client";
 
 type Params = Promise<{ spaceId: string; wrapperId: string }>;
 

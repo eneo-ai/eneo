@@ -1,11 +1,12 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useTranslations } from "next-intl";
+import { useCollator } from "@astryxdesign/core/i18n";
+import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { useIsRemovingSource } from "@/features/knowledge/integrations/actions";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
-import { findWrapperSource } from "@/features/knowledge/integrations/sources";
+import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
 import {
   useSourceItems,
   type LoadedItems
@@ -13,24 +14,23 @@ import {
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * A SharePoint wrapper as one source. The items live on the space object
- * (prefetched by the space layout); `loaded` are the items as the server page
- * found them, which stand in while the cached space predates them
- * (useSourceItems). Once the last one is gone, say so.
+ * An item imported on its own (a file, a page, a site) as its own source.
+ * `loaded` is the item as the server page found it, which stands in while the
+ * cached space predates it (useSourceItems).
  */
-export function WrapperDetail({ wrapperId, loaded }: { wrapperId: string; loaded: LoadedItems }) {
+export function ItemDetail({ itemId, loaded }: { itemId: string; loaded: LoadedItems }) {
   const t = useTranslations();
+  const collator = useCollator();
   const { space, routeId } = useSpace();
   const items = useSourceItems(
     routeId,
-    findWrapperSource(
-      space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
-      wrapperId
-    )?.items ?? [],
+    space.knowledge.integration_knowledge_list.items.filter(
+      (entry) => entry.id === itemId && entry.space_id === space.id
+    ),
     loaded
   );
-  const source = findWrapperSource(items, wrapperId);
-  const removing = useIsRemovingSource(space.id, { kind: "wrapper", id: wrapperId });
+  const [source] = groupIntegrationSources(items, collator.compare);
+  const removing = useIsRemovingSource(space.id, { kind: "item", id: itemId });
 
   if (!source) {
     // Deleted from its own page, which is on its way back to the list.

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
-import { SpaceChat } from "./space-chat.client";
+import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
   space: {
@@ -65,7 +65,7 @@ const personalSpace = {
   }
 };
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: route.space, routeId: "space-1", can: () => true })
 }));

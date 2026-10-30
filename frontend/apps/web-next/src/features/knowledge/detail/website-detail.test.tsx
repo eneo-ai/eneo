@@ -42,8 +42,8 @@ const state = vi.hoisted(() => ({
 const post = vi.hoisted(() => vi.fn());
 
 // The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
-vi.mock("next/navigation", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("next/navigation")>()),
+vi.mock("@/lib/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/navigation")>()),
   useRouter: () => ({ push: () => {}, prefetch: () => {} }),
   useSearchParams: () => new URLSearchParams()
 }));
@@ -86,7 +86,7 @@ vi.mock("@/lib/api/browser", () => ({
   }
 }));
 
-import { WebsiteDetail } from "./website-detail.client";
+import { WebsiteDetail } from "@/features/knowledge/detail/website-detail.client";
 
 function setRuns(latest: Run | null, older: Run[] = []) {
   state.latest = latest;

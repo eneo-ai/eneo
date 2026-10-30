@@ -2,7 +2,7 @@ import { config as configureZod } from "zod";
 import { loadMessages, readCspNonce, resolveLocale, showBootError } from "./boot";
 import { loadRuntimeConfig, setRuntimeConfig } from "./lib/runtime-config";
 import { initializeBrowserSession } from "./lib/api/refusal";
-import "./app/globals.css";
+import "@/styles/globals.css";
 
 const locale = resolveLocale(document);
 const messages = loadMessages(locale);

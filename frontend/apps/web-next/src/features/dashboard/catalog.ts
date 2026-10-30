@@ -1,5 +1,5 @@
 import { NEW_CONVERSATION_HREF } from "@/components/shell/routes";
-import type { Dashboard } from "./queries";
+import type { Dashboard } from "@/features/dashboard/queries";
 
 /** Something the user can open from the catalog ("Assistenter") or the ⌘K palette. */
 export type CatalogEntry = {

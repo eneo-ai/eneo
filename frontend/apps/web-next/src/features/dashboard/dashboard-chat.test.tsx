@@ -5,7 +5,7 @@ import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
 import { EneoApiError } from "@/lib/api/errors";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { DashboardChat } from "./dashboard-chat.client";
+import { DashboardChat } from "@/features/dashboard/dashboard-chat.client";
 
 const api = vi.hoisted(() => ({
   assistantCalls: 0,
@@ -46,7 +46,7 @@ const api = vi.hoisted(() => ({
   POST: vi.fn(async () => ({ data: {}, response: new Response() }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();

@@ -9,7 +9,7 @@ import {
   collectionQueryOptions
 } from "@/features/knowledge/knowledge";
 import { spacePageTitle } from "@/features/spaces/page-title";
-import { CollectionDetail } from "./collection-detail.client";
+import { CollectionDetail } from "@/features/knowledge/detail/collection-detail.client";
 
 export async function generateMetadata({
   params

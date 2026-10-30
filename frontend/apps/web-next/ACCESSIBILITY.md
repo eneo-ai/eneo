@@ -140,7 +140,7 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
     (`pointer-coarse:min-h-11`).
 - axe's `target-size` rule in `tests/a11y.spec.ts` checks the 24 px minimum on
   real pages. It does not check the 44 px touch standard: that comes from the
-  theme overrides and `globals.css` (guarded by `src/app/globals-css.test.ts`)
+  theme overrides and `globals.css` (guarded by `src/styles/globals-css.test.ts`)
   and is checked by hand at phone width in the manual protocol.
 
 ### 5. Colour and contrast (1.4.1, 1.4.3, 1.4.11)

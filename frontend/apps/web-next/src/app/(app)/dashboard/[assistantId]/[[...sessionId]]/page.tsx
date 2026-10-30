@@ -1,4 +1,4 @@
-import { DashboardChat } from "./dashboard-chat.client";
+import { DashboardChat } from "@/features/dashboard/dashboard-chat.client";
 
 export default async function DashboardChatPage({
   params

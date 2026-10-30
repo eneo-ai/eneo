@@ -16,7 +16,7 @@
  * <style> injection for built themes, so the production CSP stays nonce-only.
  * `bun run lint` fails when the generated files are stale.
  *
- * The shadcn variables in src/app/globals.css (--background, --primary, …)
+ * The shadcn variables in src/styles/globals.css (--background, --primary, …)
  * point at these tokens, and the `ax-*` Tailwind bridge exposes them as
  * utilities. See AGENTS.md for the mapping.
  */
@@ -176,7 +176,7 @@ export const eneoTheme = defineTheme({
       "0 24px 56px light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.6)), " +
       "inset 0 0 0 1px light-dark(transparent, rgba(255, 255, 255, 0.09))",
 
-    // Fonts are self-hosted by src/app/globals.css (CSS variables on :root).
+    // Fonts are self-hosted by src/styles/globals.css (CSS variables on :root).
     "--font-family-body": FONT_BODY,
     "--font-family-heading": FONT_BODY,
     "--font-family-code": FONT_CODE

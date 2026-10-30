@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { usePathname } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { adminNavGroups } from "@/components/shell/admin-nav-items";
 import { PageBar } from "@/components/shell/page-bar";
 import { TOOLS_TAB_HREF } from "@/features/admin/tools/tools-tabs";

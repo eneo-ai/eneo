@@ -7,7 +7,7 @@ import { eneoApi } from "@/lib/api/server";
 import { sourceHref, sourceTabParam } from "@/features/knowledge/integrations/sources";
 import { spacePageTitle } from "@/features/spaces/page-title";
 import { spaceQueryOptions } from "@/features/spaces/space";
-import { ItemDetail } from "./item-detail.client";
+import { ItemDetail } from "@/features/knowledge/integrations/item-detail.client";
 
 type Params = Promise<{ spaceId: string; integrationKnowledgeId: string }>;
 type SearchParams = Promise<{ tab?: string | string[] }>;

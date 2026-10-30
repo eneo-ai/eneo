@@ -9,7 +9,7 @@ test("activate landing renders", async ({ page }) => {
   await expect(page.getByText(/nästan klar/i)).toBeVisible();
 });
 
-test("account shows the change-password card", async ({ page }) => {
+test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/account");
   await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
   await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
@@ -36,10 +36,10 @@ test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
 
-// Fonts (src/app/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
+// Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
 
-test("preloads only Figtree and renders with it", async ({ page }) => {
-  const response = await page.goto("/spaces/personal/chat");
+test("preloads only Figtree and renders with it", { tag: "@vite" }, async ({ page }) => {
+  const response = await page.goto("/spaces/list");
   // Next's font loader sent its preloads only as a Link header; Next mirrors
   // the app's own HTML preload into that header too. Both count, once each.
   const headerPreloads = (response?.headers()["link"] ?? "")
