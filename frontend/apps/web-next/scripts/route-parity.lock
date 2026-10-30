@@ -6,9 +6,14 @@ dad18e7a5d42d0d5d20019cd0ced14c4bbb23074  (app)/account/integrations/page.tsx
 c213f2dc385fbd1d07c22549f4d90df0d09ebf47  (app)/account/page.tsx
 c67bd2212612b3e43cccb4164f65344c94d1219d  (app)/account/password/page.tsx
 addb9e8f056c3c02753b51541411767dd847040b  (app)/layout.tsx
+36410d4987933616f071e65308dd27357a0b8da6  (app)/spaces/[spaceId]/chat/page.tsx
 49d1147631ae6eae3ef98046b1f406fcdf99280d  (app)/spaces/[spaceId]/layout.tsx
+5936eca91ea3175aaff8c5816681c8455e942a96  (app)/spaces/[spaceId]/members/page.tsx
+f6acd48eb96fb6e7eaa99dd98953d153a24bae75  (app)/spaces/[spaceId]/overview/page.tsx
 a5e21675d2eece261591f7d33d9719a2039cbb8c  (app)/spaces/[spaceId]/page.tsx
+ea195359e2145eb01b783dafd48d9dcb763ce366  (app)/spaces/[spaceId]/settings/page.tsx
 0725559d609d0ff2033094d85a5ad386e4346fb4  (app)/spaces/list/page.tsx
+31c152c90ffc3334b04cc212f9fcaa88eaeadce0  (app)/spaces/page.tsx
 f0ad8f5a043b9c1dc8ea1d47dbf4d3ab421c51b3  (public)/deactivated/page.tsx
 e72b8147f4715492e913ddbd19576edf73d65bf8  (public)/integrations/callback/token/page.tsx
 36886c872f4b40f6b6abe90b1a10f17c59e3bb78  (public)/invite/[[...rest]]/page.tsx

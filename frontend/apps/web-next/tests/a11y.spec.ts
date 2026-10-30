@@ -359,7 +359,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       );
     });
 
-    test("personal chat", async ({ page }) => {
+    test("personal chat", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
     });
 
@@ -431,6 +431,26 @@ for (const colorScheme of ["light", "dark"] as const) {
           page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
         ).toBeVisible();
       });
+    });
+
+    test("space overview, members and settings", { tag: "@vite" }, async ({ page }) => {
+      const name = uniqueName(`E2E Space Shell ${colorScheme}`);
+      const space = await createSpace(page, name);
+      await scan(page, `${space}/overview`, async () => {
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expect(page).toHaveTitle(`${name} · Eneo`);
+      });
+      for (const [tab, title] of [
+        ["members", "Medlemmar"],
+        ["settings", "Inställningar"]
+      ]) {
+        await scan(page, `${space}/${tab}`, async () => {
+          await expect(
+            page.getByRole("heading", { level: 2, name: title, exact: true })
+          ).toBeVisible();
+          await expect(page).toHaveTitle(`${title} · ${name} · Eneo`);
+        });
+      }
     });
 
     test("space overview, knowledge and websites, and the create-collection dialog", async ({
@@ -556,7 +576,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
         });
 
-        test("personal chat", async ({ page }) => {
+        test("personal chat", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
         });
 
@@ -769,7 +789,7 @@ for (const colorScheme of ["light", "dark"] as const) {
 test.describe("reflow at 320 px (1.4.10)", () => {
   test.use({ viewport: { width: 320, height: 640 }, contextOptions: { reducedMotion: "reduce" } });
 
-  test("personal chat", async ({ page }) => {
+  test("personal chat", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     await chatStartReady(page);
     await expectNoSidewaysPageScroll(page);
