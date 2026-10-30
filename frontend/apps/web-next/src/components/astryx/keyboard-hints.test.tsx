@@ -3,7 +3,9 @@ import { fireEvent, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { KEYBOARD } from "./keyboard-hints";
+import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import { TextInput } from "./text-input";
+import { Typeahead } from "./typeahead";
 
 const attributes = (field: HTMLElement) => ({
   inputmode: field.getAttribute("inputmode"),
@@ -62,4 +64,22 @@ it("closes the keyboard on a search field's search key, not on another field's R
   name.focus();
   fireEvent.keyDown(name, { key: "Enter" });
   expect(document.activeElement).toBe(name);
+});
+
+it("sets the preset on a Typeahead's input, which Astryx does not do from props", () => {
+  renderInApp(
+    <Typeahead
+      label="E-post"
+      searchSource={createStaticSource([{ id: "a", label: "anna@example.com" }])}
+      value={null}
+      onChange={() => {}}
+      {...KEYBOARD.email}
+    />
+  );
+  expect(attributes(screen.getByRole("combobox", { name: /E-post/ }))).toMatchObject({
+    inputmode: "email",
+    autocapitalize: "none",
+    autocorrect: "off",
+    spellcheck: "false"
+  });
 });
