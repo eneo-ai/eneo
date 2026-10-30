@@ -728,6 +728,30 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("admin user groups", { tag: "@vite" }, async ({ page }) => {
+      test.skip(!process.env.E2E_BASE_URL, "User-group administration has a Vite-only route.");
+      await scan(page, "/admin/user-groups", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Användargrupper|User Groups)$/ })
+        ).toBeVisible();
+        await expect(page).toHaveTitle(/^(Användargrupper|User Groups) · Eneo$/);
+        const create = page
+          .getByRole("button", { name: /^(Skapa användargrupp|Create user group)$/ })
+          .first();
+        await create.focus();
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", {
+          name: /^(Skapa en ny användargrupp|Create a new user group)$/
+        });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByRole("textbox", { name: /Gruppnamn|Group name/ })).toBeVisible();
+        await expectNoAxeViolations(page);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(create).toBeFocused();
+      });
+    });
+
     test("admin federation", { tag: "@vite" }, async ({ page }) => {
       test.skip(!process.env.E2E_BASE_URL, "Federation administration has a Vite-only route.");
       // A configured IdP is a UI fixture; this scan never contacts an IdP or saves credentials.

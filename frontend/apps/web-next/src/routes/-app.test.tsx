@@ -1498,16 +1498,39 @@ it("returns a signed-out account visit to login with its destination preserved",
   expect(document.getElementById("main-content")).toBeNull();
 });
 
-it.each(["/admin/users", "/admin/usage/users/missing", "/admin/roles"])(
+it.each(["/admin/users", "/admin/user-groups", "/admin/usage/users/missing", "/admin/roles"])(
   "denies an admin page before reading its data: %s",
   async (path) => {
     const { router } = await renderRoute(path);
     expect(router.state.location.pathname).toBe("/spaces/personal/chat");
     expect(
-      requestedPaths().some((entry) => /\/admin\/|\/token-usage\/|\/roles\//.test(entry))
+      requestedPaths().some((entry) =>
+        /\/admin\/|\/token-usage\/|\/roles\/|\/user-groups\//.test(entry)
+      )
     ).toBe(false);
   }
 );
+
+it("opens admin user groups with its title and one current admin link", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/user-groups/", {
+    items: [{ id: "group-1", name: "Kommunikation", users: [] }],
+    count: 1
+  });
+  await renderRoute("/admin/user-groups", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  const table = await screen.findByRole("table", { name: messages.user_groups });
+  expect(table.textContent).toContain("Kommunikation");
+  expect(document.title).toBe(`${messages.user_groups} · Eneo`);
+  const link = screen.getByRole("link", { name: messages.user_groups });
+  expect(link.getAttribute("href")).toBe("/admin/user-groups");
+  expect(link.getAttribute("aria-current")).toBe("page");
+  const navigation = screen.getByRole("navigation", { name: "Administration" });
+  expect(navigation.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  expect(requestedPaths().filter((path) => path === "/api/v1/user-groups/")).toHaveLength(1);
+});
 
 it("opens the admin users table with the feature's URL filters and one session read", async () => {
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);

@@ -70,6 +70,9 @@ export function adminNavGroups({
       labelKey: "admin_section_governance",
       items: [
         { href: "/admin/personal-assistant", icon: User, labelKey: "governance_title" },
+        ...(usingTemplates
+          ? [{ href: "/admin/templates", icon: LayoutTemplate, labelKey: "templates" }]
+          : []),
         { href: "/admin/prompt-library", icon: Library, labelKey: "governance_tab_prompts" },
         { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" },
         {
@@ -103,10 +106,8 @@ export function adminNavGroups({
       labelKey: "admin_section_organisation",
       items: [
         { href: "/admin/users", icon: Users, labelKey: "users" },
+        { href: "/admin/user-groups", icon: Users, labelKey: "user_groups" },
         { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
-        ...(usingTemplates
-          ? [{ href: "/admin/templates", icon: LayoutTemplate, labelKey: "templates" }]
-          : []),
         {
           href: "/admin/help-assistants",
           icon: LifeBuoy,

@@ -47,6 +47,7 @@ import { Route as AppAdminSkillsRouteImport } from "./routes/_app/admin/skills"
 import { Route as AppAdminStorageRouteImport } from "./routes/_app/admin/storage"
 import { Route as AppAdminTemplatesRouteImport } from "./routes/_app/admin/templates"
 import { Route as AppAdminToolsRouteImport } from "./routes/_app/admin/tools"
+import { Route as AppAdminUserGroupsRouteImport } from "./routes/_app/admin/user-groups"
 import { Route as AppAdminUsersRouteImport } from "./routes/_app/admin/users"
 import { Route as AppDashboardIndexRouteImport } from "./routes/_app/dashboard/index"
 import { Route as AppSpacesIndexRouteImport } from "./routes/_app/spaces/index"
@@ -278,6 +279,11 @@ const AppAdminTemplatesRoute = AppAdminTemplatesRouteImport.update({
 const AppAdminToolsRoute = AppAdminToolsRouteImport.update({
   id: "/tools",
   path: "/tools",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminUserGroupsRoute = AppAdminUserGroupsRouteImport.update({
+  id: "/user-groups",
+  path: "/user-groups",
   getParentRoute: () => AppAdminRouteRoute,
 } as any)
 const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
@@ -552,6 +558,7 @@ export interface FileRoutesByFullPath {
   "/admin/storage": typeof AppAdminStorageRoute
   "/admin/templates": typeof AppAdminTemplatesRoute
   "/admin/tools": typeof AppAdminToolsRoute
+  "/admin/user-groups": typeof AppAdminUserGroupsRoute
   "/admin/users": typeof AppAdminUsersRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/spaces/list": typeof AppSpacesListRoute
@@ -630,6 +637,7 @@ export interface FileRoutesByTo {
   "/admin/storage": typeof AppAdminStorageRoute
   "/admin/templates": typeof AppAdminTemplatesRoute
   "/admin/tools": typeof AppAdminToolsRoute
+  "/admin/user-groups": typeof AppAdminUserGroupsRoute
   "/admin/users": typeof AppAdminUsersRoute
   "/spaces/list": typeof AppSpacesListRoute
   "/integrations/callback/token": typeof IntegrationsCallbackTokenRoute
@@ -711,6 +719,7 @@ export interface FileRoutesById {
   "/_app/admin/storage": typeof AppAdminStorageRoute
   "/_app/admin/templates": typeof AppAdminTemplatesRoute
   "/_app/admin/tools": typeof AppAdminToolsRoute
+  "/_app/admin/user-groups": typeof AppAdminUserGroupsRoute
   "/_app/admin/users": typeof AppAdminUsersRoute
   "/_app/spaces/$spaceId": typeof AppSpacesSpaceIdRouteWithChildren
   "/_app/spaces/list": typeof AppSpacesListRoute
@@ -793,6 +802,7 @@ export interface FileRouteTypes {
     | "/admin/storage"
     | "/admin/templates"
     | "/admin/tools"
+    | "/admin/user-groups"
     | "/admin/users"
     | "/spaces/$spaceId"
     | "/spaces/list"
@@ -871,6 +881,7 @@ export interface FileRouteTypes {
     | "/admin/storage"
     | "/admin/templates"
     | "/admin/tools"
+    | "/admin/user-groups"
     | "/admin/users"
     | "/spaces/list"
     | "/integrations/callback/token"
@@ -951,6 +962,7 @@ export interface FileRouteTypes {
     | "/_app/admin/storage"
     | "/_app/admin/templates"
     | "/_app/admin/tools"
+    | "/_app/admin/user-groups"
     | "/_app/admin/users"
     | "/_app/spaces/$spaceId"
     | "/_app/spaces/list"
@@ -1279,6 +1291,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAdminToolsRouteImport
       parentRoute: typeof AppAdminRouteRoute
     }
+    "/_app/admin/user-groups": {
+      id: "/_app/admin/user-groups"
+      path: "/user-groups"
+      fullPath: "/admin/user-groups"
+      preLoaderRoute: typeof AppAdminUserGroupsRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
     "/_app/admin/users": {
       id: "/_app/admin/users"
       path: "/users"
@@ -1586,6 +1605,7 @@ interface AppAdminRouteRouteChildren {
   AppAdminStorageRoute: typeof AppAdminStorageRoute
   AppAdminTemplatesRoute: typeof AppAdminTemplatesRoute
   AppAdminToolsRoute: typeof AppAdminToolsRoute
+  AppAdminUserGroupsRoute: typeof AppAdminUserGroupsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
   AppAdminHelpAssistantsKindRoute: typeof AppAdminHelpAssistantsKindRoute
@@ -1615,6 +1635,7 @@ const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
   AppAdminStorageRoute: AppAdminStorageRoute,
   AppAdminTemplatesRoute: AppAdminTemplatesRoute,
   AppAdminToolsRoute: AppAdminToolsRoute,
+  AppAdminUserGroupsRoute: AppAdminUserGroupsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
   AppAdminHelpAssistantsKindRoute: AppAdminHelpAssistantsKindRoute,

@@ -405,6 +405,7 @@ describe("DesktopSideNav (admin)", () => {
     ]);
     expect(hrefsIn("Organisation")).toEqual([
       "/admin/users",
+      "/admin/user-groups",
       "/admin/roles",
       "/admin/help-assistants",
       "/admin/storage",
@@ -437,9 +438,9 @@ describe("DesktopSideNav (admin)", () => {
     });
     const navigation = screen.getByRole("navigation", { name: "Administration" });
     const connections = within(navigation).getByRole("group", { name: "Anslutningar" });
-    const organisation = within(navigation).getByRole("group", { name: "Organisation" });
+    const governance = within(navigation).getByRole("group", { name: "Styrning" });
     expect(within(connections).getByRole("link", { name: "Moduler" })).toBeTruthy();
-    expect(within(organisation).getByRole("link", { name: "Mallar" })).toBeTruthy();
+    expect(within(governance).getByRole("link", { name: "Mallar" })).toBeTruthy();
     for (const name of ["Översikt", "Styrning", "Anslutningar", "Organisation"]) {
       const group = within(navigation).getByRole("group", { name });
       expect(within(group).getAllByRole("link").length).toBeLessThanOrEqual(7);

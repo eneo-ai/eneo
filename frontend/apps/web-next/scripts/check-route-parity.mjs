@@ -22,7 +22,8 @@ export const VITE_ONLY = new Map([
   ["/logout", "Replaces the Next logout route handler."],
   ["/module-login", "Replaces the Next module-login route handler."],
   ["/login/switch-organisation", "Replaces the Next organisation-switch route handler."],
-  ["/admin/federation", "Federation administration is exposed only in Vite."]
+  ["/admin/federation", "Federation administration is exposed only in Vite."],
+  ["/admin/user-groups", "Ports Svelte user-group administration, which had no Next page."]
 ]);
 
 export function blobHash(bytes) {
