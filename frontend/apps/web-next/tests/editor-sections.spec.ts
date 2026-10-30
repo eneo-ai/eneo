@@ -86,6 +86,7 @@ test.describe("an editor on a small phone", () => {
     }) => {
       const { editor } = await assistantEditor(page, kind);
       await page.goto(editor);
+      await expect(page.locator("[data-editor-row]").first()).toBeVisible();
       const ids = await page
         .locator("[data-editor-row]")
         .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-editor-row")!));
