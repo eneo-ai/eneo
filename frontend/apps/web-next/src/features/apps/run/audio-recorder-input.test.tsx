@@ -130,7 +130,9 @@ it("warns before a reload loses a recording, until it is queued and uploaded", a
   const { rerender } = renderInApp(<AudioRecorderInput {...props} files={[]} />);
   expect(unloadIsGuarded()).toBe(false);
 
-  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  });
   const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
   expect(unloadIsGuarded()).toBe(true);
 
