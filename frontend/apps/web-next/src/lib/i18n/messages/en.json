@@ -935,6 +935,7 @@
   "no_results": "No results found",
   "no_results_found": "No results found",
   "not_found": "Not found",
+  "conversation_missing": "This conversation could not be found. It may have been deleted, or the link is out of date. You can start a new conversation here.",
   "nothing_selected": "Nothing selected",
   "notifications": "Notifications",
   "notifications_and_jobs": "Notifications and Jobs",
