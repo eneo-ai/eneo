@@ -18,9 +18,9 @@ export function SkillInstructionEditor({
   value,
   onChange,
   id,
+  describedBy = "",
   disabled,
   invalid,
-  describedBy,
   catalog,
   inlinePicker = false,
   ref
@@ -28,9 +28,9 @@ export function SkillInstructionEditor({
   value: string;
   onChange: (value: string) => void;
   id: string;
+  describedBy?: string;
   disabled: boolean;
   invalid: boolean;
-  describedBy?: string;
   catalog: ReferenceCatalog;
   inlinePicker?: boolean;
   ref?: Ref<{ focus: () => void }>;
@@ -64,7 +64,7 @@ export function SkillInstructionEditor({
       id,
       label,
       placeholder,
-      describedBy: [describedBy, `${id}-reference-hint`].filter(Boolean).join(" "),
+      describedBy: `${id}-reference-hint ${id}-reference-error ${describedBy}`.trim(),
       referenceTypeLabels: {
         skill: skillTypeLabel,
         function: functionTypeLabel,
@@ -74,7 +74,7 @@ export function SkillInstructionEditor({
       editorClass:
         "text-ax-text relative min-h-48 max-h-[50dvh] overflow-y-auto px-3 py-3 text-base sm:text-sm leading-7 whitespace-pre-wrap wrap-anywhere focus-visible:outline-2 focus-visible:outline-ax-focus focus-visible:-outline-offset-2 [--skill-placeholder:var(--color-text-secondary)] [&>p]:m-0",
       referenceClass:
-        "bg-ax-blue-muted text-ax-blue rounded-ax-element mx-0.5 inline cursor-pointer border-0 px-1.5 py-0.5 text-sm font-medium leading-normal whitespace-normal break-words hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline [&.ProseMirror-selectednode]:outline-ax-focus",
+        "bg-ax-blue-muted text-ax-blue rounded-ax-element mx-0.5 cursor-pointer border-0 px-1.5 py-0.5 text-sm font-medium leading-normal hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline [&.ProseMirror-selectednode]:outline-ax-focus",
       onChange,
       onReference: setSelection
     });
@@ -85,10 +85,10 @@ export function SkillInstructionEditor({
   }, [
     initialValue,
     id,
+    describedBy,
     label,
     onChange,
     placeholder,
-    describedBy,
     skillTypeLabel,
     functionTypeLabel,
     mcpTypeLabel,
@@ -135,7 +135,11 @@ export function SkillInstructionEditor({
       <p id={`${id}-reference-hint`} className="text-ax-text-secondary text-xs leading-5">
         {t("skills_reference_hint")}
       </p>
-      {malformed && <p className="text-ax-error text-sm">{t("skills_reference_invalid")}</p>}
+      {malformed && (
+        <p id={`${id}-reference-error`} className="text-ax-error text-sm">
+          {t("skills_reference_invalid")}
+        </p>
+      )}
       {selection && (
         <SkillReferencePicker
           catalog={catalog}

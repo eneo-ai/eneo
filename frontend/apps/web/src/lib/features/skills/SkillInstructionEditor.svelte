@@ -61,7 +61,7 @@
       editorClass:
         "text-foreground relative min-h-48 max-h-[50dvh] w-full overflow-y-auto px-3 py-3 text-base sm:text-sm leading-7 whitespace-pre-wrap wrap-anywhere outline-none [--skill-placeholder:var(--text-secondary)] [&>p]:m-0",
       referenceClass:
-        "bg-accent-dimmer text-accent-stronger mx-0.5 inline cursor-pointer rounded-md border-0 px-1.5 py-0.5 box-decoration-clone text-sm font-medium leading-normal whitespace-normal break-words hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline-2 [&.ProseMirror-selectednode]:outline-accent-stronger",
+        "bg-accent-dimmer text-accent-stronger mx-0.5 cursor-pointer rounded-md border-0 px-1.5 py-0.5 text-sm font-medium leading-normal hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline-2 [&.ProseMirror-selectednode]:outline-accent-stronger",
       onChange: (text) => {
         value = text;
       },

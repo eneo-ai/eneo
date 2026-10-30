@@ -2,6 +2,7 @@
 
 import re
 from bisect import bisect_right
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal
 from urllib.parse import quote, unquote
@@ -181,9 +182,16 @@ def parse_instruction_references(text: str) -> tuple[InstructionReference, ...]:
     return tuple(references)
 
 
-def reference_identity(target: InstructionTarget) -> str:
+def reference_identity(
+    target: InstructionTarget, skill_identities: Mapping[UUID, str]
+) -> str:
     if isinstance(target, SkillInstructionReference):
-        return f"Skill {target.skill_id}, revision {target.revision_id}"
+        identity = skill_identities.get(target.revision_id)
+        if identity is None:
+            raise BadRequestException(
+                "Referenced Skill revision is missing from the activation group"
+            )
+        return identity
     if isinstance(target, FunctionInstructionReference):
         return f"Function {target.purpose}"
     if isinstance(target, McpToolInstructionReference):
@@ -209,6 +217,7 @@ def target_matches_tool(target: InstructionTarget, tool: ModelToolIdentity) -> b
 def render_instruction_references(
     text: str,
     *,
+    skill_identities: Mapping[UUID, str],
     available_targets: frozenset[InstructionTarget] = frozenset(),
 ) -> str:
     parts: list[str] = []
@@ -224,7 +233,7 @@ def render_instruction_references(
         parts.extend(
             (
                 text[cursor : reference.start],
-                f"[{reference.label}] ({reference_identity(reference.target)}{availability})",
+                f"[{reference.label}] ({reference_identity(reference.target, skill_identities)}{availability})",
             )
         )
         cursor = reference.end

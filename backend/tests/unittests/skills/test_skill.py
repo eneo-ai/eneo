@@ -659,6 +659,33 @@ def test_referenced_helpers_activate_with_the_root_and_are_injected_once():
     assert [item.position for item in composition.provenance] == [0, 1, 2]
 
 
+def test_references_identify_the_exact_helper_section_despite_labels_and_shared_names():
+    first = _binding(position=0, name="Klartext")
+    second = _binding(position=0, name="Klartext")
+    root = replace(
+        _binding(position=0, name="Communication"),
+        instructions=(
+            f"Use [old label](eneo-skill:{first.skill_id}@{first.skill_revision_id})."
+        ),
+        dependencies=(first,),
+    )
+    other_root = replace(
+        _binding(position=1, name="Other guide"),
+        instructions=f"Use [another label](eneo-skill:{second.skill_id}@{second.skill_revision_id}).",
+        dependencies=(second,),
+    )
+
+    prompt = compose_skill_instructions(
+        base_instructions="", bindings=[root, other_root]
+    ).prompt
+
+    for helper, identity in [(first, "Skill 2"), (second, "Skill 4")]:
+        assert f"### Skill: Klartext (klartext, revision 1) [{identity}]\n" in prompt
+        assert f"({identity})" in prompt
+        assert str(helper.skill_revision_id) not in prompt
+        assert str(helper.skill_id) not in prompt
+
+
 def test_referenced_helper_versions_cannot_conflict_across_roots():
     helper = _binding(position=0, name="Klartext")
     other_version = replace(helper, skill_revision_id=uuid4())

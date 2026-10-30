@@ -373,6 +373,12 @@
   <section
     class="skill-authoring border-border bg-popover text-popover-foreground pointer-coarse:[&_button]:min-h-[44px] pointer-coarse:[&_button]:min-w-[44px] pointer-coarse:[&_[role=tab]]:min-h-[44px] flex max-h-[min(36rem,75dvh)] min-h-0 flex-col overflow-hidden rounded-xl border"
     aria-label={m.skills_reference_insert()}
+    onkeydowncapture={(event) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }}
   >
     <h3 class="px-4 pt-4 font-semibold">
       {selection.reference ? m.skills_reference_edit() : m.skills_reference_insert()}

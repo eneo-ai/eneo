@@ -145,8 +145,296 @@ export function SkillReferencePicker({
   }, [selected]);
 
   function select(item: ReferenceCandidate) {
-    if (item.target.kind === "function" || item.target.kind === "mcp_tool") onSelect(item);
+    if (item.target.kind === "function") onSelect(item);
     else setSelected(item);
+  }
+
+  const content = (
+    <div className="flex min-h-0 flex-col overflow-y-auto overscroll-contain">
+      {selected && (
+        <div className="border-ax-border flex shrink-0 flex-col gap-3 border-b px-4 pt-3 pb-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mr-auto pointer-coarse:min-h-[44px]"
+            label={t("skills_reference_back")}
+            icon={<ArrowLeft />}
+            onClick={() => {
+              setSelected(null);
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <h3
+              ref={previewHeading}
+              tabIndex={-1}
+              id={`${id}-preview`}
+              className="min-w-0 text-base font-semibold wrap-anywhere outline-none"
+            >
+              {selected.label}
+            </h3>
+            {selected.revisionNumber !== undefined && (
+              <Badge
+                variant="gray"
+                label={t("organization_skills_version", {
+                  version: String(selected.revisionNumber)
+                })}
+              />
+            )}
+          </div>
+          {selected.target.kind === "mcp_tool" && server && (
+            <p className="text-ax-text-secondary text-sm wrap-anywhere">{server.label}</p>
+          )}
+        </div>
+      )}
+      <div className="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4 [@media(max-height:30rem)]:shrink-0 [@media(max-height:30rem)]:overflow-visible">
+        {selected ? (
+          <>
+            <section aria-labelledby={`${id}-preview`} className="flex min-w-0 flex-col gap-3">
+              {selected.description &&
+                (selected.target.kind === "skill" ? (
+                  <details className="text-sm">
+                    <summary className="cursor-pointer py-1 font-medium">
+                      {t("skills_description_label")}
+                    </summary>
+                    <p className="mt-2 leading-relaxed wrap-anywhere whitespace-pre-wrap">
+                      {selected.description}
+                    </p>
+                  </details>
+                ) : (
+                  <p className="text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap">
+                    {selected.description}
+                  </p>
+                ))}
+              <p className="text-ax-text-secondary text-sm leading-relaxed">
+                {t(
+                  selected.target.kind === "skill"
+                    ? "skills_reference_fixed_version"
+                    : "skills_reference_tools_hint"
+                )}
+              </p>
+              {selected.target.kind === "skill" && (
+                <h4 className="text-sm font-medium">{t("skills_instructions_label")}</h4>
+              )}
+              {selected.target.kind === "skill" ? (
+                preview.isPending ? (
+                  <p>{t("loading")}</p>
+                ) : preview.error ? (
+                  <div>
+                    <p>{t("skills_reference_preview_failed")}</p>
+                    <p>{getErrorMessage(preview.error, t)}</p>
+                    <Button label={t("retry")} onClick={() => void preview.refetch()} />
+                  </div>
+                ) : (
+                  <div className="border-ax-border border-b pb-4 text-base leading-7 wrap-anywhere whitespace-pre-wrap">
+                    {readableInstructions(preview.data)}
+                  </div>
+                )
+              ) : selected.target.kind === "mcp_server" ? (
+                <>
+                  {selected.enabled === false && (
+                    <p className="text-ax-text-secondary text-sm">{t("skills_reference_off")}</p>
+                  )}
+                  <Button
+                    label={t("skills_reference_tools")}
+                    onClick={() => {
+                      setServer(selected);
+                      setSelected(null);
+                      setQuery("");
+                      setVisible(SKILL_CATALOG_PAGE_SIZE);
+                      requestAnimationFrame(() => inputRef.current?.focus());
+                    }}
+                  />
+                </>
+              ) : null}
+              <details className="text-ax-text-secondary text-xs">
+                <summary className="cursor-pointer py-1">{t("skills_reference_details")}</summary>
+                <code className="break-all">{referenceUri(selected.target)}</code>
+              </details>
+            </section>
+          </>
+        ) : (
+          <>
+            <SegmentedControl
+              value={category}
+              onChange={(value) => changeCategory(value as Category)}
+              label={t("skills_reference_insert")}
+              layout="fill"
+            >
+              <SegmentedControlItem value="skills" label={t("skills")} />
+              <SegmentedControlItem value="functions" label={t("skills_reference_functions")} />
+              <SegmentedControlItem value="mcp" label={t("skills_reference_mcps")} />
+            </SegmentedControl>
+            {server && (
+              <div className="flex min-w-0 flex-col gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mr-auto"
+                  label={t("skills_reference_back")}
+                  icon={<ArrowLeft />}
+                  onClick={() => {
+                    setServer(null);
+                    setQuery("");
+                  }}
+                />
+                <h3 className="text-sm font-semibold wrap-anywhere">{server.label}</h3>
+              </div>
+            )}
+            <TextInput
+              htmlName="reference-search"
+              autoComplete="off"
+              ref={inputRef}
+              label={t("skills_reference_search")}
+              value={query}
+              onChange={(value) => {
+                setQuery(value);
+                setVisible(SKILL_CATALOG_PAGE_SIZE);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  focusFirst();
+                }
+              }}
+            />
+            {loading ? (
+              <p className="text-ax-text-secondary text-sm">{t("loading")}</p>
+            ) : error ? (
+              <div>
+                <p>{getErrorMessage(error, t)}</p>
+                <Button
+                  label={t("retry")}
+                  onClick={() =>
+                    void (category === "skills" ? skills.refetch() : connections.refetch())
+                  }
+                />
+              </div>
+            ) : (
+              <section
+                role="group"
+                aria-label={t("skills_reference_search")}
+                className="flex max-h-64 flex-col gap-1 overflow-y-auto"
+                ref={listRef}
+              >
+                {items.length === 0 && (
+                  <p className="text-ax-text-secondary p-3 text-sm">
+                    {t("skills_reference_empty")}
+                  </p>
+                )}
+                {items.slice(0, category === "skills" ? items.length : visible).map((item) => {
+                  const Icon =
+                    item.target.kind === "function"
+                      ? getCapability(item.target.purpose)!.icon
+                      : item.target.kind === "skill"
+                        ? FileText
+                        : Plug;
+                  return (
+                    <Item
+                      key={referenceUri(item.target)}
+                      data-reference-option
+                      className="min-w-0 [overflow-wrap:anywhere]"
+                      label={item.label}
+                      description={
+                        item.enabled === false
+                          ? t("skills_reference_off")
+                          : item.description || undefined
+                      }
+                      labelLines={2}
+                      descriptionLines={2}
+                      density="balanced"
+                      startContent={<Icon className="size-4" aria-hidden="true" />}
+                      endContent={
+                        <span className="text-ax-text-secondary flex items-center gap-2 text-xs">
+                          {item.revisionNumber !== undefined && (
+                            <span>
+                              {t("skills_reference_version_short", {
+                                version: item.revisionNumber
+                              })}
+                            </span>
+                          )}
+                          {item.target.kind !== "function" && (
+                            <ChevronRight className="size-4" aria-hidden="true" />
+                          )}
+                        </span>
+                      }
+                      onKeyDown={handleKeyDown}
+                      onFocus={handleFocus}
+                      onClick={() => select(item)}
+                    />
+                  );
+                })}
+              </section>
+            )}
+            {category === "skills" && skills.hasNextPage && (
+              <Button
+                variant="ghost"
+                label={t("load_more")}
+                isLoading={skills.isFetchingNextPage}
+                isInterruptible
+                onClick={() => {
+                  if (!skills.isFetching) void skills.fetchNextPage();
+                }}
+              />
+            )}
+            {category !== "skills" && visible < items.length && (
+              <Button
+                variant="ghost"
+                label={t("load_more")}
+                onClick={() => setVisible((count) => count + SKILL_CATALOG_PAGE_SIZE)}
+              />
+            )}
+            <p className="text-ax-text-secondary text-xs leading-5">
+              {t(category === "skills" ? "skills_reference_scope" : "skills_reference_tools_hint")}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="border-ax-border flex shrink-0 flex-wrap justify-end gap-2 border-t p-3">
+        {selection.reference && (
+          <Button
+            label={t("skills_reference_remove")}
+            variant="ghost"
+            className="mr-auto"
+            onClick={onRemove}
+          />
+        )}
+        <Button label={t("cancel")} onClick={onClose} />
+        {selected && (
+          <Button
+            label={t(
+              selected.target.kind === "mcp_server"
+                ? "skills_reference_whole_mcp"
+                : "skills_reference_insert"
+            )}
+            variant="primary"
+            isDisabled={!canInsert}
+            onClick={() => {
+              if (canInsert) onSelect(selected);
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+
+  const title = t(selection.reference ? "skills_reference_edit" : "skills_reference_insert");
+  if (inline) {
+    return (
+      <section
+        aria-label={title}
+        className="border-ax-border bg-ax-background rounded-ax-element flex max-h-[min(36rem,75dvh)] min-h-0 flex-col overflow-hidden border"
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        <h3 className="px-4 pt-4 font-semibold">{title}</h3>
+        {content}
+      </section>
+    );
   }
 
   return (
@@ -155,279 +443,12 @@ export function SkillReferencePicker({
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
-      isInline={inline}
       width={selected?.target.kind === "skill" ? "42rem" : "32rem"}
       maxHeight="min(48rem, calc(100dvh - 2rem))"
       purpose="form"
     >
-      <DialogHeader
-        title={t(selection.reference ? "skills_reference_edit" : "skills_reference_insert")}
-        onOpenChange={onClose}
-      />
-      {/* At desktop zoom, the preview and actions scroll together so neither can collapse. */}
-      <div className="flex min-h-0 flex-col overflow-y-auto overscroll-contain">
-        {selected && (
-          <div className="border-ax-border flex shrink-0 flex-col gap-3 border-b px-4 pt-3 pb-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mr-auto pointer-coarse:min-h-[44px]"
-              label={t("skills_reference_back")}
-              icon={<ArrowLeft />}
-              onClick={() => {
-                setSelected(null);
-                requestAnimationFrame(() => inputRef.current?.focus());
-              }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <h3
-                ref={previewHeading}
-                tabIndex={-1}
-                id={`${id}-preview`}
-                className="min-w-0 text-base font-semibold wrap-anywhere outline-none"
-              >
-                {selected.label}
-              </h3>
-              {selected.revisionNumber !== undefined && (
-                <Badge
-                  variant="gray"
-                  label={t("organization_skills_version", {
-                    version: String(selected.revisionNumber)
-                  })}
-                />
-              )}
-            </div>
-          </div>
-        )}
-        <div className="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4 [@media(max-height:30rem)]:shrink-0 [@media(max-height:30rem)]:overflow-visible">
-          {selected ? (
-            <>
-              <section aria-labelledby={`${id}-preview`} className="flex min-w-0 flex-col gap-3">
-                {selected.description &&
-                  (selected.target.kind === "skill" ? (
-                    <details className="text-sm">
-                      <summary className="cursor-pointer py-1 font-medium">
-                        {t("skills_description_label")}
-                      </summary>
-                      <p className="mt-2 leading-relaxed wrap-anywhere whitespace-pre-wrap">
-                        {selected.description}
-                      </p>
-                    </details>
-                  ) : (
-                    <p className="text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap">
-                      {selected.description}
-                    </p>
-                  ))}
-                <p className="text-ax-text-secondary text-sm leading-relaxed">
-                  {t(
-                    selected.target.kind === "skill"
-                      ? "skills_reference_fixed_version"
-                      : "skills_reference_tools_hint"
-                  )}
-                </p>
-                {selected.target.kind === "skill" && (
-                  <h4 className="text-sm font-medium">{t("skills_instructions_label")}</h4>
-                )}
-                {selected.target.kind === "skill" ? (
-                  preview.isPending ? (
-                    <p>{t("loading")}</p>
-                  ) : preview.error ? (
-                    <div>
-                      <p>{t("skills_reference_preview_failed")}</p>
-                      <p>{getErrorMessage(preview.error, t)}</p>
-                      <Button label={t("retry")} onClick={() => void preview.refetch()} />
-                    </div>
-                  ) : (
-                    <div className="border-ax-border border-b pb-4 text-base leading-7 wrap-anywhere whitespace-pre-wrap">
-                      {readableInstructions(preview.data)}
-                    </div>
-                  )
-                ) : (
-                  <>
-                    {selected.enabled === false && (
-                      <p className="text-ax-text-secondary text-sm">{t("skills_reference_off")}</p>
-                    )}
-                    <Button
-                      label={t("skills_reference_tools")}
-                      onClick={() => {
-                        setServer(selected);
-                        setSelected(null);
-                        setQuery("");
-                        setVisible(SKILL_CATALOG_PAGE_SIZE);
-                        requestAnimationFrame(() => inputRef.current?.focus());
-                      }}
-                    />
-                  </>
-                )}
-                <details className="text-ax-text-secondary text-xs">
-                  <summary className="cursor-pointer py-1">{t("skills_reference_details")}</summary>
-                  <code className="break-all">{referenceUri(selected.target)}</code>
-                </details>
-              </section>
-            </>
-          ) : (
-            <>
-              <SegmentedControl
-                value={category}
-                onChange={(value) => changeCategory(value as Category)}
-                label={t("skills_reference_insert")}
-                layout="fill"
-              >
-                <SegmentedControlItem value="skills" label={t("skills")} />
-                <SegmentedControlItem value="functions" label={t("skills_reference_functions")} />
-                <SegmentedControlItem value="mcp" label={t("skills_reference_mcps")} />
-              </SegmentedControl>
-              {server && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mr-auto"
-                  label={server.label}
-                  icon={<ArrowLeft />}
-                  onClick={() => {
-                    setServer(null);
-                    setQuery("");
-                  }}
-                />
-              )}
-              <TextInput
-                htmlName="reference-search"
-                autoComplete="off"
-                ref={inputRef}
-                label={t("skills_reference_search")}
-                value={query}
-                onChange={(value) => {
-                  setQuery(value);
-                  setVisible(SKILL_CATALOG_PAGE_SIZE);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    focusFirst();
-                  }
-                }}
-              />
-              {loading ? (
-                <p className="text-ax-text-secondary text-sm">{t("loading")}</p>
-              ) : error ? (
-                <div>
-                  <p>{getErrorMessage(error, t)}</p>
-                  <Button
-                    label={t("retry")}
-                    onClick={() =>
-                      void (category === "skills" ? skills.refetch() : connections.refetch())
-                    }
-                  />
-                </div>
-              ) : (
-                <section
-                  role="group"
-                  aria-label={t("skills_reference_search")}
-                  className="flex max-h-64 flex-col gap-1 overflow-y-auto"
-                  ref={listRef}
-                >
-                  {items.length === 0 && (
-                    <p className="text-ax-text-secondary p-3 text-sm">
-                      {t("skills_reference_empty")}
-                    </p>
-                  )}
-                  {items.slice(0, category === "skills" ? items.length : visible).map((item) => {
-                    const Icon =
-                      item.target.kind === "function"
-                        ? getCapability(item.target.purpose)!.icon
-                        : item.target.kind === "skill"
-                          ? FileText
-                          : Plug;
-                    return (
-                      <Item
-                        key={referenceUri(item.target)}
-                        data-reference-option
-                        className="min-w-0 [overflow-wrap:anywhere]"
-                        label={item.label}
-                        description={
-                          item.enabled === false
-                            ? t("skills_reference_off")
-                            : item.description || undefined
-                        }
-                        labelLines={2}
-                        descriptionLines={2}
-                        density="balanced"
-                        startContent={<Icon className="size-4" aria-hidden="true" />}
-                        endContent={
-                          <span className="text-ax-text-secondary flex items-center gap-2 text-xs">
-                            {item.revisionNumber !== undefined && (
-                              <span>
-                                {t("skills_reference_version_short", {
-                                  version: item.revisionNumber
-                                })}
-                              </span>
-                            )}
-                            {(item.target.kind === "skill" ||
-                              item.target.kind === "mcp_server") && (
-                              <ChevronRight className="size-4" aria-hidden="true" />
-                            )}
-                          </span>
-                        }
-                        onKeyDown={handleKeyDown}
-                        onFocus={handleFocus}
-                        onClick={() => select(item)}
-                      />
-                    );
-                  })}
-                </section>
-              )}
-              {category === "skills" && skills.hasNextPage && (
-                <Button
-                  variant="ghost"
-                  label={t("load_more")}
-                  isLoading={skills.isFetchingNextPage}
-                  isInterruptible
-                  onClick={() => {
-                    if (!skills.isFetching) void skills.fetchNextPage();
-                  }}
-                />
-              )}
-              {category !== "skills" && visible < items.length && (
-                <Button
-                  variant="ghost"
-                  label={t("load_more")}
-                  onClick={() => setVisible((count) => count + SKILL_CATALOG_PAGE_SIZE)}
-                />
-              )}
-              <p className="text-ax-text-secondary text-xs leading-5">
-                {t(
-                  category === "skills" ? "skills_reference_scope" : "skills_reference_tools_hint"
-                )}
-              </p>
-            </>
-          )}
-        </div>
-        <div className="border-ax-border flex shrink-0 flex-wrap justify-end gap-2 border-t p-3">
-          {selection.reference && (
-            <Button
-              label={t("skills_reference_remove")}
-              variant="ghost"
-              className="mr-auto"
-              onClick={onRemove}
-            />
-          )}
-          <Button label={t("cancel")} onClick={onClose} />
-          {selected && (
-            <Button
-              label={t(
-                selected.target.kind === "mcp_server"
-                  ? "skills_reference_whole_mcp"
-                  : "skills_reference_insert"
-              )}
-              variant="primary"
-              isDisabled={!canInsert}
-              onClick={() => {
-                if (canInsert) onSelect(selected);
-              }}
-            />
-          )}
-        </div>
-      </div>
+      <DialogHeader title={title} onOpenChange={onClose} />
+      {content}
     </Dialog>
   );
 }

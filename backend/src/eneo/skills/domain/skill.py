@@ -1086,6 +1086,11 @@ def compose_skill_instructions(
     parts.append(_SKILL_BOUNDARY)
     provenance: list[SkillExecutionReference] = []
     effective = effective_skill_bindings(ordered, configured_order=configured_order)
+    # Prompt-local identities stay unambiguous even when layers reuse a name or slug.
+    skill_identities = {
+        binding.skill_revision_id: f"Skill {position + 1}"
+        for position, binding in enumerate(effective)
+    }
     if any(
         not isinstance(reference.target, SkillInstructionReference)
         for binding in effective
@@ -1096,10 +1101,15 @@ def compose_skill_instructions(
         )
     has_dependencies = any(binding.dependencies for binding in ordered)
     for position, binding in enumerate(effective):
+        identity = (
+            f" [{skill_identities[binding.skill_revision_id]}]"
+            if has_dependencies
+            else ""
+        )
         parts.append(
             f"### Skill: {binding.display_name} "
-            f"({binding.slug}, revision {binding.revision_number})\n"
-            f"{render_instruction_references(binding.instructions, available_targets=available_targets)}"
+            f"({binding.slug}, revision {binding.revision_number}){identity}\n"
+            f"{render_instruction_references(binding.instructions, skill_identities=skill_identities, available_targets=available_targets)}"
         )
         provenance.append(
             SkillExecutionReference(
