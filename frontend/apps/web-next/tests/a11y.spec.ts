@@ -726,7 +726,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin models", async ({ page }) => {
+    test("admin models", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/models", async () => {
         await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
         // The seeded provider's model table (e2e/seed.py).
@@ -734,7 +734,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin integrations", async ({ page }) => {
+    test("admin integrations", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/integrations", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
@@ -890,7 +890,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        test("admin overview and models", async ({ page }) => {
+        test("admin overview and models", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/admin", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
@@ -1082,7 +1082,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("admin models", async ({ page }) => {
+  test("admin models", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/admin/models");
     await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
     // A phone lists a provider's models as rows (decision 31).

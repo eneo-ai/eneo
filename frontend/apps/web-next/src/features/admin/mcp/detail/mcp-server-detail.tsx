@@ -49,7 +49,7 @@ function resolveTab(value: string | undefined): Tab {
 
 export function McpServerDetail({
   serverId,
-  initialTab
+  initialTab: requestedTab
 }: {
   serverId: string;
   initialTab?: string;
@@ -63,7 +63,7 @@ export function McpServerDetail({
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const server = servers.find((entry) => entry.id === serverId);
 
-  const [tab, setTab] = useState<Tab>(resolveTab(initialTab));
+  const tab = resolveTab(requestedTab);
   const [showDelete, setShowDelete] = useState(false);
 
   // The server can vanish if deleted in another tab; bounce back to the list.
@@ -112,7 +112,6 @@ export function McpServerDetail({
 
   function selectTab(next: string) {
     const value = resolveTab(next);
-    setTab(value);
     router.replace(value === "overview" ? pathname : `${pathname}?tab=${value}`, { scroll: false });
   }
 

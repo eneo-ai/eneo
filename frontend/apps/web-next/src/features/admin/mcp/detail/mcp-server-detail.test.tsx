@@ -51,6 +51,22 @@ describe("McpServerDetail", () => {
     expect(screen.getByRole("button", { name: "Fler åtgärder för Diariet" })).toBeTruthy();
   });
 
+  it("follows the route's current tab after back or forward navigation", async () => {
+    const view = renderInApp(<McpServerDetail serverId="diariet" initialTab="tools" />);
+    await screen.findByRole("heading", { level: 1, name: "Diariet" });
+    expect(
+      screen.getByRole("tab", { name: "MCP-serververktyg" }).getAttribute("aria-selected")
+    ).toBe("true");
+    view.rerender(<McpServerDetail serverId="diariet" initialTab="credentials" />);
+    expect(screen.getByRole("tab", { name: "Autentisering" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
+    view.rerender(<McpServerDetail serverId="diariet" initialTab="tools" />);
+    expect(
+      screen.getByRole("tab", { name: "MCP-serververktyg" }).getAttribute("aria-selected")
+    ).toBe("true");
+  });
+
   it("keeps focus on the switch while it saves, and saves the press once", async () => {
     remove.mockReturnValue(new Promise(() => {}));
     renderInApp(<McpServerDetail serverId="diariet" />);
