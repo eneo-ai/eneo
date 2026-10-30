@@ -181,6 +181,9 @@ for logger_name in sqlalchemy_loggers:
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):
+    # Logger creates this cache, but its type stub does not expose it.
+    _cache: dict[int, bool]
+
     FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s : %(message)s"
     ERROR = logging.ERROR
     WARN = logging.WARN
@@ -222,6 +225,7 @@ class SimpleLogger(logging.Logger):
         for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
+    @override
     def setLevel(self, level: int | str) -> None:
         super().setLevel(level)
         # These loggers are constructed outside the logging manager's registry,
