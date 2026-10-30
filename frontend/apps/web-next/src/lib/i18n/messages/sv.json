@@ -3119,7 +3119,7 @@
   "api_keys_notifications_aria_enabled": "Utgångspåminnelser aktiverade.",
   "api_keys_notifications_aria_disabled": "Utgångspåminnelser inaktiverade.",
   "api_keys_notifications_policy_disabled_error": "Utgångspåminnelser är inaktiverade av organisationens policy.",
-  "api_keys_notifications_days_validation": "Ange ett positivt antal dagar (1–365).",
+  "api_keys_notifications_days_validation": "Ange positiva heltal separerade med kommatecken, inom organisationens gräns.",
   "api_keys_notifications_auto_follow_assistants_policy_error": "Automatisk följning av publicerade assistenter är inaktiverad av organisationens policy.",
   "api_keys_notifications_auto_follow_apps_policy_error": "Automatisk följning av publicerade appar är inaktiverad av organisationens policy.",
   "api_keys_notifications_follow_action": "Följ utgångspåminnelser",
@@ -9560,5 +9560,11 @@
   "flow_runtime_input_mimetypes_custom": "Egna MIME-typer",
   "flow_runtime_input_mimetypes_custom_description": "Separera MIME-typer med kommatecken, till exempel application/pdf.",
   "flow_runtime_input_mimetypes_reset": "Använd standardtyper",
-  "flow_runtime_input_mimetypes_default": "Standardtyper för formatet"
+  "flow_runtime_input_mimetypes_default": "Standardtyper för formatet",
+  "api_keys_search_label": "Sök API-nycklar",
+  "api_keys_search_loaded_hint": "Söker i inlästa nycklar efter namn, beskrivning eller nyckelns sista tecken.",
+  "api_keys_no_search_matches": "Inga matchande API-nycklar",
+  "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
+  "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
+  "api_keys_notifications_add_day": "Lägg till {days} dagar"
 }

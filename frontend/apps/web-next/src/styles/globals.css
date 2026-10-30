@@ -20,7 +20,6 @@
 @import "../theme/eneo.css";
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
-@import "driver.js/dist/driver.css";
 
 /*
  * 2. Sources outside src/. Streamdown (MessageResponse markdown) styles its

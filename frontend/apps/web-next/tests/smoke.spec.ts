@@ -15,6 +15,26 @@ test("account shows the change-password card", { tag: "@vite" }, async ({ page }
   await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
 });
 
+test(
+  "starts a styled tour on first use and closes it with Escape",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/whats-new");
+    await page.getByRole("button", { name: /^2\.2\.0/ }).click();
+    await page
+      .locator("#copy-rich-text")
+      .getByRole("button", { name: /visa mig|show me/i })
+      .click();
+    await expect(page).toHaveURL(/\/account$/);
+    const popover = page.locator(".driver-popover.eneo-spotlight");
+    await expect(popover).toBeVisible();
+    await expect(popover).toHaveCSS("position", "fixed");
+    await expect(popover).toContainText(/kopiera svar|copy answers/i);
+    await page.keyboard.press("Escape");
+    await expect(popover).not.toBeVisible();
+  }
+);
+
 test("admin usage has a per-user tab", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/admin/usage");
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();

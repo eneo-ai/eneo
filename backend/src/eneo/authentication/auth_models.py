@@ -695,8 +695,9 @@ class ApiKeyListCursor(BaseModel):
 
 
 class ApiKeyCreationConstraints(BaseModel):
-    """Fields relevant to key creation UX, from tenant policy."""
+    """Tenant policy limits for key forms and notification preferences."""
 
+    notification_policy: ApiKeyNotificationPolicyResponse
     require_expiration: bool = False
     max_expiration_days: Optional[int] = None
     max_rate_limit: Optional[int] = None

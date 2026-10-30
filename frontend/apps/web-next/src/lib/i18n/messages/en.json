@@ -3086,7 +3086,7 @@
   "api_keys_notifications_aria_enabled": "Expiry reminders enabled.",
   "api_keys_notifications_aria_disabled": "Expiry reminders disabled.",
   "api_keys_notifications_policy_disabled_error": "Expiry reminders are disabled by tenant policy.",
-  "api_keys_notifications_days_validation": "Enter a positive number of days (1–365).",
+  "api_keys_notifications_days_validation": "Enter positive whole numbers separated by commas, within your organization's limit.",
   "api_keys_notifications_auto_follow_assistants_policy_error": "Auto-follow for published assistants is disabled by tenant policy.",
   "api_keys_notifications_auto_follow_apps_policy_error": "Auto-follow for published apps is disabled by tenant policy.",
   "api_keys_notifications_follow_action": "Follow expiry reminders",
@@ -9560,5 +9560,11 @@
   "flow_runtime_input_mimetypes_custom": "Custom MIME types",
   "flow_runtime_input_mimetypes_custom_description": "Separate MIME types with commas, for example application/pdf.",
   "flow_runtime_input_mimetypes_reset": "Use default types",
-  "flow_runtime_input_mimetypes_default": "Default types for the format"
+  "flow_runtime_input_mimetypes_default": "Default types for the format",
+  "api_keys_search_label": "Search API keys",
+  "api_keys_search_loaded_hint": "Searches loaded keys by name, description or the key's final characters.",
+  "api_keys_no_search_matches": "No matching API keys",
+  "api_keys_notifications_reminder_days_label": "Reminder days",
+  "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
+  "api_keys_notifications_add_day": "Add {days} days"
 }

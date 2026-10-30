@@ -1,13 +1,17 @@
 "use client";
 
-import { useTranslations } from "use-intl";
+import { useNow, useTranslations } from "use-intl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Button } from "@astryxdesign/core/Button";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -19,19 +23,20 @@ import {
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { ApiKeyActions } from "./api-key-actions";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATE_FILTERS,
   API_KEYS_KEY,
-  formatApiKeyDate,
+  rateLimitLabel,
   stateFilterLabelKey,
   type ApiKey,
   type ApiKeyStateFilter,
   type ResourceScopeType
 } from "./api-keys";
 import { expiringCounts } from "./expiration-utils";
+import { useScopeResourceNames } from "./scope-resource-picker";
 
 /**
  * The one-time secret dialog for a page's created and rotated keys:
@@ -76,6 +81,131 @@ function ExpiringInView({ keys }: { keys: ApiKey[] }) {
   );
 }
 
+function KeyRow({
+  apiKey,
+  scopeName,
+  now,
+  onRotated
+}: {
+  apiKey: ApiKey;
+  scopeName?: string;
+  now: number;
+  onRotated: (secret: string) => void;
+}) {
+  const t = useTranslations();
+  const stateChange =
+    apiKey.state === "suspended"
+      ? {
+          date: apiKey.suspended_at,
+          code: apiKey.suspended_reason_code,
+          text: apiKey.suspended_reason_text
+        }
+      : apiKey.state === "revoked"
+        ? {
+            date: apiKey.revoked_at,
+            code: apiKey.revoked_reason_code,
+            text: apiKey.revoked_reason_text
+          }
+        : null;
+  const reason = [
+    stateChange?.code ? t(`api_keys_reason_${stateChange.code}`) : null,
+    stateChange?.text
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const restrictions = apiKey.key_type === "pk_" ? apiKey.allowed_origins : apiKey.allowed_ips;
+  return (
+    <TableRow>
+      <TableCell className="max-w-64 wrap-anywhere whitespace-normal">
+        <div className="flex flex-col gap-1">
+          <span className="font-medium">{apiKey.name}</span>
+          <code className="text-ax-text-secondary font-mono text-xs">
+            {apiKey.key_prefix}…{apiKey.key_suffix}
+          </code>
+          {apiKey.description && (
+            <p className="text-ax-text-secondary text-xs">{apiKey.description}</p>
+          )}
+          {apiKey.ownership === "service" && (
+            <Badge variant="outline">{t("api_keys_ownership_service")}</Badge>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="max-w-56 wrap-anywhere whitespace-normal">
+        <div className="flex flex-col items-start gap-1">
+          <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
+            {t(`api_keys_status_${apiKey.state}`)}
+          </Badge>
+          {stateChange?.date && (
+            <span className="text-ax-text-secondary text-xs">
+              <ClientTime value={stateChange.date} format="date_time" />
+            </span>
+          )}
+          {reason && <p className="text-ax-text-secondary text-xs">{reason}</p>}
+          {apiKey.rotation_grace_until && new Date(apiKey.rotation_grace_until).getTime() > now && (
+            <span className="text-ax-text-secondary text-xs">
+              {t("api_keys_rotate_grace_period_label")}:{" "}
+              <ClientTime value={apiKey.rotation_grace_until} format="date_time" />
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="max-w-48 wrap-anywhere whitespace-normal">
+        {t(`api_keys_scope_${apiKey.scope_type}`)}
+        {apiKey.scope_id && (
+          <span className="text-ax-text-secondary block text-xs">
+            {scopeName ?? apiKey.scope_id}
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="max-w-64 wrap-anywhere whitespace-normal">
+        <div className="flex flex-col gap-1">
+          <span>{t(`api_keys_permission_${apiKey.permission}`)}</span>
+          <span className="text-ax-text-secondary text-xs">
+            {t("api_keys_rate_limit_label")}: <span>{rateLimitLabel(apiKey.rate_limit, t)}</span>
+          </span>
+          {restrictions && restrictions.length > 0 && (
+            <div className="text-ax-text-secondary text-xs">
+              {t(apiKey.key_type === "pk_" ? "api_keys_allowed_origins" : "api_keys_allowed_ips")}
+              <ul>
+                {restrictions.map((value) => (
+                  <li key={value} className="font-mono">
+                    {value}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        {apiKey.last_used_at ? (
+          <ClientTime value={apiKey.last_used_at} format="auto" />
+        ) : (
+          t("api_keys_never")
+        )}
+      </TableCell>
+      <TableCell>
+        {apiKey.expires_at ? (
+          <div className="flex flex-col gap-1">
+            <ClientTime value={apiKey.expires_at} format="date_time" />
+            <span className="text-ax-text-secondary text-xs">
+              <ClientTime value={apiKey.expires_at} format="relative" />
+            </span>
+          </div>
+        ) : (
+          t("api_keys_never")
+        )}
+      </TableCell>
+      <TableCell>
+        {apiKey.created_at ? <ClientTime value={apiKey.created_at} format="date" /> : "—"}
+      </TableCell>
+      <TableCell className="text-end">
+        <ApiKeyActions apiKey={apiKey} mode="user" scopeName={scopeName} onRotated={onRotated} />
+      </TableCell>
+    </TableRow>
+  );
+}
+
 /**
  * A user's keys, all of them or one resource's (`scope`): state tabs over a
  * paged table, which keys expire soon among those shown, and the shared
@@ -95,29 +225,43 @@ export function UserApiKeyList({
 }) {
   const t = useTranslations();
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
+  const now = useNow({ updateInterval: 60_000 });
+  const [search, setSearch] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const tabsId = useId();
   const panelId = `${tabsId}-panel`;
 
-  const keys = usePaginatedQuery({
-    queryKey: [...API_KEYS_KEY, scope?.type, scope?.id, stateFilter],
-    limit,
-    fetchPage: async ({ cursor, limit: pageSize }) => {
-      const page = await unwrap(
+  const keys = useInfiniteQuery({
+    queryKey: [...API_KEYS_KEY, "list", scope?.type, scope?.id, stateFilter, limit],
+    ...cursorPagination,
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
         browserApi.GET("/api/v1/api-keys", {
+          signal,
           params: {
             query: {
               scope_type: scope?.type,
               scope_id: scope?.id,
               state: stateFilter === "all" ? null : stateFilter,
-              cursor: cursor ?? null,
-              limit: pageSize
+              cursor: pageParam ?? null,
+              limit
             }
           }
         })
-      );
-      return { ...page, total_count: page.total_count ?? 0 };
-    }
+      )
+  });
+  const loadedKeys = flattenPages(keys.data?.pages);
+  const searchTerm = search.trim().toLocaleLowerCase();
+  const visibleKeys = loadedKeys.filter((key) =>
+    [key.name, key.description, key.key_suffix].some((value) =>
+      value?.toLocaleLowerCase().includes(searchTerm)
+    )
+  );
+  const scopeNames = useScopeResourceNames({
+    enabled: !scope && loadedKeys.some((key) => key.scope_type !== "tenant"),
+    withApplications: loadedKeys.some(
+      (key) => key.scope_type === "assistant" || key.scope_type === "app"
+    )
   });
 
   return (
@@ -141,8 +285,30 @@ export function UserApiKeyList({
             />
           ))}
         </TabList>
-        {toolbar}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            label={t("api_keys_refresh")}
+            variant="secondary"
+            isLoading={keys.isFetching}
+            isInterruptible
+            onClick={() => {
+              if (!keys.isFetching) void keys.refetch();
+            }}
+          />
+          {toolbar}
+        </div>
       </div>
+
+      {(loadedKeys.length > 3 || search !== "") && (
+        <TextInput
+          label={t("api_keys_search_label")}
+          value={search}
+          onChange={setSearch}
+          placeholder={t("api_keys_search_placeholder")}
+          description={t("api_keys_search_loaded_hint")}
+          width="100%"
+        />
+      )}
 
       {/* The keys in the selected state: the state tabs' panel. */}
       <div
@@ -154,79 +320,61 @@ export function UserApiKeyList({
         className="focus-visible:outline-ring flex flex-col gap-4 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         <RemovalFocusScope target={panelRef}>
-          {keys.items.length === 0 && !keys.isPending ? (
-            <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
-          ) : (
-            <>
-              <ExpiringInView keys={keys.items} />
-              <Table aria-label={t("api_keys")}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("name")}</TableHead>
-                    <TableHead>{t("status")}</TableHead>
-                    <TableHead>{t("api_keys_permission_level")}</TableHead>
-                    <TableHead>{t("api_keys_expires")}</TableHead>
-                    <TableHead>{t("api_keys_created")}</TableHead>
-                    <TableHead className="w-14 min-w-14" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {keys.items.map((apiKey) => (
-                    <TableRow key={apiKey.id}>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{apiKey.name}</span>
-                          <code className="text-muted-foreground font-mono text-xs">
-                            {apiKey.key_prefix}…{apiKey.key_suffix}
-                          </code>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                          {t(`api_keys_status_${apiKey.state}`)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                      <TableCell>
-                        {apiKey.expires_at
-                          ? formatApiKeyDate(apiKey.expires_at)
-                          : t("api_keys_never")}
-                      </TableCell>
-                      <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
-                      <TableCell className="text-end">
-                        <ApiKeyActions
-                          apiKey={apiKey}
-                          mode="user"
-                          scopeName={scope?.name}
-                          onRotated={onRotated}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {(keys.hasPreviousPage || keys.hasNextPage) && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasPreviousPage}
-                    onClick={keys.previousPage}
-                  >
-                    {t("previous")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasNextPage}
-                    onClick={keys.nextPage}
-                  >
-                    {t("next")}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
+          <QueryStateBoundary query={keys} errorTitle={t("api_keys")}>
+            {() =>
+              loadedKeys.length === 0 ? (
+                <EmptyState
+                  title={t("api_keys_no_keys")}
+                  description={t("api_keys_no_keys_desc")}
+                />
+              ) : (
+                <>
+                  <ExpiringInView keys={visibleKeys} />
+                  {searchTerm && (
+                    <p className="text-ax-text-secondary text-sm">
+                      {t("api_keys_filtered", {
+                        filtered: visibleKeys.length,
+                        total: loadedKeys.length
+                      })}
+                    </p>
+                  )}
+                  {visibleKeys.length === 0 ? (
+                    <EmptyState title={t("api_keys_no_search_matches")} />
+                  ) : (
+                    <Table aria-label={t("api_keys")} className="min-w-[52rem]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("name")}</TableHead>
+                          <TableHead>{t("status")}</TableHead>
+                          <TableHead>{t("api_keys_scope")}</TableHead>
+                          <TableHead>{t("api_keys_permission_level")}</TableHead>
+                          <TableHead>{t("api_keys_last_used")}</TableHead>
+                          <TableHead>{t("api_keys_expires")}</TableHead>
+                          <TableHead>{t("api_keys_created")}</TableHead>
+                          <TableHead className="w-14 min-w-14" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visibleKeys.map((apiKey) => (
+                          <KeyRow
+                            key={apiKey.id}
+                            apiKey={apiKey}
+                            now={now.getTime()}
+                            scopeName={
+                              scope?.name ??
+                              (apiKey.scope_id ? scopeNames.get(apiKey.scope_id) : undefined)
+                            }
+                            onRotated={onRotated}
+                          />
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  <LoadMore query={keys} label={t("load_more")} />
+                </>
+              )
+            }
+          </QueryStateBoundary>
         </RemovalFocusScope>
       </div>
     </div>

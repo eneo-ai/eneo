@@ -4058,5 +4058,12 @@
   "flow_runtime_input_mimetypes_custom": "Egna MIME-typer",
   "flow_runtime_input_mimetypes_custom_description": "Separera MIME-typer med kommatecken, till exempel application/pdf.",
   "flow_runtime_input_mimetypes_reset": "Använd standardtyper",
-  "flow_runtime_input_mimetypes_default": "Standardtyper för formatet"
+  "flow_runtime_input_mimetypes_default": "Standardtyper för formatet",
+  "api_keys_search_label": "Sök API-nycklar",
+  "api_keys_search_loaded_hint": "Söker i inlästa nycklar efter namn, beskrivning eller nyckelns sista tecken.",
+  "api_keys_no_search_matches": "Inga matchande API-nycklar",
+  "api_keys_notifications_days_validation": "Ange positiva heltal separerade med kommatecken, inom organisationens gräns.",
+  "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
+  "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
+  "api_keys_notifications_add_day": "Lägg till {days} dagar"
 }

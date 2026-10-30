@@ -392,11 +392,16 @@ function AnswerActions({
   // copy does not go through useClipboard, so it has no copied state to show.
   const copy = useCallback(
     async (format: AssistantCopyFormat) => {
-      const { text: plainText, html } = assistantClipboardContent(text, format);
-      const copied =
-        html !== null && canCopyRichText()
-          ? await copyRichText({ text: plainText, html })
-          : await copyText(plainText);
+      let copied = false;
+      try {
+        const { text: plainText, html } = assistantClipboardContent(text, format);
+        copied =
+          html !== null && canCopyRichText()
+            ? await copyRichText({ text: plainText, html })
+            : await copyText(typeof plainText === "string" ? plainText : await plainText);
+      } catch {
+        // A failed renderer import uses the same refusal feedback as a denied write.
+      }
       if (copied) toast.success(t("copied"));
       else toast.error(t("copy_failed"));
     },

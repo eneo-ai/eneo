@@ -544,6 +544,19 @@ async def test_creation_constraints_reflect_tenant_policy(
     )
     assert update_response.status_code == 200, update_response.text
 
+    notification_policy = await client.put(
+        "/api/v1/admin/api-keys/notification-policy",
+        json={
+            "enabled": False,
+            "default_days_before_expiry": [14, 7],
+            "max_days_before_expiry": 21,
+            "allow_auto_follow_published_assistants": True,
+            "allow_auto_follow_published_apps": False,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert notification_policy.status_code == 200, notification_policy.text
+
     admin_constraints = await client.get(
         "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {default_user_token}"},
@@ -553,6 +566,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert admin_payload["require_expiration"] is True
     assert admin_payload["max_expiration_days"] == 45
     assert admin_payload["max_rate_limit"] == 123
+    assert admin_payload["notification_policy"] == notification_policy.json()
 
     user_constraints = await client.get(
         "/api/v1/api-keys/policy-constraints",
@@ -561,6 +575,12 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert user_constraints.status_code == 200, user_constraints.text
     user_payload = user_constraints.json()
     assert user_payload == admin_payload
+
+    admin_only = await client.get(
+        "/api/v1/admin/api-keys/notification-policy",
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert admin_only.status_code == 403
 
 
 @pytest.mark.integration
