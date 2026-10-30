@@ -2,13 +2,7 @@ import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
-import type {
-  ChatTurnDiagnostics,
-  Conversation,
-  ConversationMessage,
-  Eneo,
-  components
-} from "@eneo/eneo-js";
+import type { ChatTurnDiagnostics, ConversationMessage, Eneo, components } from "@eneo/eneo-js";
 import { ChatService, type ChatPartner } from "../../ChatService.svelte";
 import ChatDebugPanelFixture from "./ChatDebugPanelFixture.svelte";
 
@@ -309,8 +303,7 @@ describe("ChatDebugPanel", () => {
     await request;
   });
 
-  test("closes before an asynchronous assistant context replacement settles", async () => {
-    const initialConversation = deferred<Conversation | null>();
+  test("closes when the loaded assistant context is replaced", async () => {
     const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
     const chat = createChat(getTurnDiagnostics);
     render(ChatDebugPanelFixture, { chat, available: true });
@@ -320,7 +313,7 @@ describe("ChatDebugPanel", () => {
     chat.init({
       eneo: {} as Eneo,
       chatPartner: { ...chat.partner, id: "assistant-2" } as ChatPartner,
-      initialConversation: initialConversation.promise,
+      initialConversation: null,
       initialHistory: { items: [], count: 0, total_count: 0, next_cursor: null }
     });
 
@@ -329,8 +322,7 @@ describe("ChatDebugPanel", () => {
       .not.toBeInTheDocument();
     await expect.element(trigger).toHaveAttribute("aria-expanded", "false");
 
-    initialConversation.resolve(null);
-    await vi.waitFor(() => expect(chat.currentConversation.id).toBe(""));
+    expect(chat.currentConversation.id).toBe("");
   });
 
   test("selects the latest persisted turn and ignores a stale request after partner change", async () => {

@@ -5,7 +5,13 @@ import type { Permission } from "@eneo/eneo-js";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { releases, releasesForVersion, visibleEntries, type Locale } from "@eneo/whats-new";
+import {
+  compareVersions,
+  releases,
+  releasesForVersion,
+  visibleEntries,
+  type Locale
+} from "@eneo/whats-new";
 import { getLocale, localizeHref, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 import { announcementSummary } from "$lib/features/whats-new/announcement";
@@ -67,15 +73,19 @@ vi.mock("$app/navigation", () => ({
 }));
 vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
   const { writable } = await import("svelte/store");
+  // A release image bundles notes up to its own version; develop may already
+  // carry the next release above the one these tests pin.
+  const bundled = (version: string) =>
+    releasesForVersion(version).filter((release) => compareVersions(release.version, version) <= 0);
   return {
     getWhatsNewStore: () => ({
-      releases: releasesForVersion(state.installedVersion),
+      releases: bundled(state.installedVersion),
       markLatestSeen: state.markSeen,
       seenVersion: writable(null),
       resetState: vi.fn(),
       enabled: writable(state.enabled),
       hasUnseen: writable(state.enabled),
-      pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
+      pendingAnnouncement: () => bundled(state.installedVersion)[0],
       markLatestAnnounced: state.markAnnounced,
       snoozeLatest: state.snooze
     })

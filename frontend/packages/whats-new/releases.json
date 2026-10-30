@@ -2,6 +2,98 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.4.0",
+      "entries": [
+        {
+          "id": "sharepoint-sync-status",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "See how each SharePoint source is doing",
+            "sv": "Se hur varje SharePoint-källa mår"
+          },
+          "body": {
+            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+          }
+        },
+        {
+          "id": "sharepoint-imported-documents",
+          "type": "new",
+          "area": "knowledge",
+          "title": {
+            "en": "See what a SharePoint import contains",
+            "sv": "Se vad en SharePoint-import innehåller"
+          },
+          "body": {
+            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
+            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
+          }
+        },
+        {
+          "id": "sharepoint-file-formats",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Read SharePoint files like uploads",
+            "sv": "Läs SharePoint-filer som uppladdningar"
+          },
+          "body": {
+            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
+            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
+          }
+        },
+        {
+          "id": "sharepoint-credential-health",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check SharePoint credentials and sign in again",
+            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
+          },
+          "body": {
+            "en": "Under Administration › Integrations, a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
+            "sv": "Under Administration › Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          },
+          "showMe": {
+            "href": "/admin/integrations",
+            "anchor": "admin-integrations"
+          }
+        },
+        {
+          "id": "sharepoint-webhook-recovery",
+          "type": "fixed",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep SharePoint webhooks working after a move",
+            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
+          },
+          "body": {
+            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
+            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
+          }
+        },
+        {
+          "id": "sharepoint-picker-keyboard",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Browse SharePoint folders with the keyboard",
+            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
+          },
+          "body": {
+            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
+            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.3.0",
       "entries": [
         {
@@ -36,8 +128,8 @@
             "sv": "Utforska CSV- och Excel-filer i chatten"
           },
           "body": {
-            "en": "When file analysis is enabled for your assistant, you can ask questions about CSV and Excel files and explore results in interactive tables with sorting and filtering. In the file preview, select a cell or row and choose Ask about selection to include it in your next message. Expand an analysis step to see which file was used and what was done.",
-            "sv": "När filanalys är aktiverat för din assistent kan du ställa frågor om CSV- och Excel-filer och utforska resultaten i interaktiva tabeller med sortering och filtrering. Markera en cell eller rad i filens förhandsvisning och välj Fråga om markeringen för att ta med den i nästa meddelande. Fäll ut ett analyssteg för att se vilken fil som användes och vad som gjordes."
+            "en": "When the Ask a file function is enabled for your assistant, you can ask questions about CSV and Excel files. In the file preview, select a cell or row and choose Ask about selection to include it in your next message. Expand an analysis step to see which file was used and what was done. If interactive views are turned on for your installation, results also appear in tables you can sort and filter.",
+            "sv": "När funktionen Fråga fil är aktiverad för din assistent kan du ställa frågor om CSV- och Excel-filer. Markera en cell eller rad i filens förhandsvisning och välj Fråga om markeringen för att ta med den i nästa meddelande. Fäll ut ett analyssteg för att se vilken fil som användes och vad som gjordes. Om interaktiva vyer är påslagna i er installation visas resultaten också i tabeller som du kan sortera och filtrera."
           }
         },
         {
@@ -50,12 +142,12 @@
           "area": "chat",
           "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
           "title": {
-            "en": "Calculate and explore interactive charts",
-            "sv": "Beräkna och utforska interaktiva diagram"
+            "en": "Calculate and create charts",
+            "sv": "Beräkna och skapa diagram"
           },
           "body": {
-            "en": "Assistants with the calculation and chart tools enabled can calculate from your figures and display interactive charts in chat. For calculations based on values you supplied, you can change the inputs and calculate again to compare outcomes. Charts can be included in Word and PDF reports without showing every intermediate table in chat.",
-            "sv": "Assistenter som har verktygen för beräkningar och diagram aktiverade kan räkna på dina siffror och visa interaktiva diagram i chatten. För beräkningar utifrån värden du själv angett kan du ändra indata och beräkna igen för att jämföra resultat. Diagram kan tas med i Word- och PDF-rapporter utan att varje mellantabell visas i chatten."
+            "en": "Assistants with the Compute and Charts functions enabled can calculate exactly from your figures and draw bar, line, pie and scatter charts, which can also be included in Word and PDF documents. If interactive views are turned on for your installation, charts are interactive, and for calculations based on values you supplied you can change the inputs and choose Run again.",
+            "sv": "Assistenter med funktionerna Beräkning och Diagram aktiverade kan räkna exakt på dina siffror och rita stapel-, linje-, cirkel- och punktdiagram, som också kan tas med i Word- och PDF-dokument. Om interaktiva vyer är påslagna i er installation är diagrammen interaktiva, och för beräkningar på värden du själv angett kan du ändra indata och välja Beräkna igen."
           }
         },
         {
@@ -107,93 +199,6 @@
           }
         },
         {
-          "id": "sharepoint-sync-status",
-          "type": "improved",
-          "area": "knowledge",
-          "title": {
-            "en": "See how each SharePoint source is doing",
-            "sv": "Se hur varje SharePoint-källa mår"
-          },
-          "body": {
-            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
-            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
-          }
-        },
-        {
-          "id": "sharepoint-imported-documents",
-          "type": "new",
-          "area": "knowledge",
-          "title": {
-            "en": "See what a SharePoint import contains",
-            "sv": "Se vad en SharePoint-import innehåller"
-          },
-          "body": {
-            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
-            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
-          }
-        },
-        {
-          "id": "sharepoint-file-formats",
-          "type": "fixed",
-          "area": "knowledge",
-          "title": {
-            "en": "Read SharePoint files like uploads",
-            "sv": "Läs SharePoint-filer som uppladdningar"
-          },
-          "body": {
-            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
-            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
-          }
-        },
-        {
-          "id": "sharepoint-credential-health",
-          "type": "new",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Check SharePoint credentials and sign in again",
-            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
-          },
-          "body": {
-            "en": "Under Admin > Integrations a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
-            "sv": "Under Administration > Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
-          },
-          "showMe": {
-            "href": "/admin/integrations",
-            "anchor": "admin-integrations"
-          }
-        },
-        {
-          "id": "sharepoint-webhook-recovery",
-          "type": "fixed",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Keep SharePoint webhooks working after a move",
-            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
-          },
-          "body": {
-            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
-            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
-          }
-        },
-        {
-          "id": "sharepoint-picker-keyboard",
-          "permissions": {
-            "allOf": ["integrations"]
-          },
-          "type": "improved",
-          "area": "knowledge",
-          "title": {
-            "en": "Browse SharePoint folders with the keyboard",
-            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
-          },
-          "body": {
-            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
-            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
-          }
-        },
-        {
           "id": "website-indexing",
           "permissions": {
             "allOf": ["websites"]
@@ -215,30 +220,31 @@
           "area": "spaces",
           "title": {
             "en": "Keep resources when changing a Space",
-            "sv": "Behåll resurser när du ändrar ett Space"
+            "sv": "Behåll resurser när du ändrar en yta"
           },
           "body": {
             "en": "Changing a Space or one of its resources preserves other assistants, group chat members and saved selections, including resources that are temporarily unavailable. Memberships also remain when a removed user is reactivated.",
-            "sv": "När du ändrar ett Space eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
+            "sv": "När du ändrar en yta eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
           }
         },
         {
           "id": "clearer-errors",
           "type": "fixed",
           "area": "platform",
-          "aliases": ["sign-in-behind-reverse-proxy"],
           "title": {
             "en": "Understand why a request failed",
             "sv": "Förstå varför en förfrågan misslyckades"
           },
           "body": {
-            "en": "When an assistant's reply fails, you get a clearer reason, such as an unavailable model or a usage limit. File uploads explain when your storage quota is exceeded, and sign-in distinguishes an unreachable service from an incorrect password. Password sign-in also works behind a reverse proxy without requiring a separately registered public address.",
-            "sv": "Om assistentens svar misslyckas får du en tydligare orsak, till exempel att modellen inte är tillgänglig eller att en användningsgräns nåtts. Filuppladdning visar när lagringsutrymmet är slut, och inloggning skiljer på en tjänst som inte kan nås och ett felaktigt lösenord. Lösenordsinloggning fungerar också bakom en omvänd proxy utan att den publika adressen måste registreras separat."
+            "en": "When an assistant's reply fails, you get a clearer reason, such as an unavailable model or a usage limit, and whether trying again can help. File uploads tell you which storage quota is full, and when an MCP tool refuses access you get a hint about permissions and credentials next to the original error.",
+            "sv": "Om assistentens svar misslyckas får du en tydligare orsak, till exempel att modellen inte är tillgänglig eller att en användningsgräns nåtts, och om ett nytt försök kan hjälpa. Filuppladdning visar vilket lagringsutrymme som är fullt, och när ett MCP-verktyg nekar åtkomst får du en ledtråd om behörigheter och inloggningsuppgifter bredvid det ursprungliga felet."
           }
         },
         {
           "id": "knowledge-moves-removed",
-          "permissions": { "allOf": ["assistants"] },
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "improved",
           "area": "spaces",
           "title": {
@@ -247,7 +253,7 @@
           },
           "body": {
             "en": "Collections and websites can no longer be moved between Spaces. When you move an assistant, its knowledge does not move with it; check and attach the knowledge it needs in the destination Space.",
-            "sv": "Samlingar och webbplatser kan inte längre flyttas mellan Spaces. När du flyttar en assistent följer kunskapen inte med; kontrollera och koppla den kunskap som assistenten behöver i det nya Spacet."
+            "sv": "Samlingar och webbplatser kan inte längre flyttas mellan ytor. När du flyttar en assistent följer kunskapen inte med; kontrollera och koppla den kunskap som assistenten behöver i den nya ytan."
           }
         },
         {
@@ -278,8 +284,8 @@
             "sv": "Aktivera och kontrollera inbyggda verktyg"
           },
           "body": {
-            "en": "Under Administration › Tools, you can enable file analysis, file creation, calculations and charts, and check the tool service status. Connection and version problems include guidance on what to do next. Users also need the corresponding role permissions to use the enabled tools.",
-            "sv": "Under Administration › Verktyg kan du aktivera filanalys, filskapande, beräkningar och diagram och kontrollera verktygstjänstens status. Vid anslutnings- och versionsproblem får du vägledning om nästa steg. Användare behöver även motsvarande rollbehörigheter för att använda de aktiverade verktygen."
+            "en": "On the Functions tab under Administration › Tools, you can turn on Ask a file, Create a file, Compute and Charts, and check the status of the tool service. Connection and version problems include guidance on what to do next. Users also need the corresponding role permissions, and the function must be turned on for the Space and the assistant.",
+            "sv": "På fliken Funktioner under Administration › Verktyg kan du slå på Fråga fil, Skapa fil, Beräkning och Diagram och kontrollera verktygstjänstens status. Vid anslutnings- och versionsproblem får du vägledning om nästa steg. Användare behöver även motsvarande rollbehörigheter, och funktionen måste slås på för ytan och assistenten."
           },
           "showMe": {
             "href": "/admin/tools",
@@ -296,8 +302,8 @@
             "sv": "Word- och PDF-filer följer er dokumentmall"
           },
           "body": {
-            "en": "Under Administration › Tools › File creation you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
-            "sv": "Under Administration › Verktyg › Filskapande kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
+            "en": "Under Administration › Tools › Functions › Create a file, in Document templates, you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
+            "sv": "Under Administration › Verktyg › Funktioner › Skapa fil, i Dokumentmallar, kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
           },
           "showMe": {
             "href": "/admin/tools",
@@ -342,15 +348,15 @@
         },
         {
           "id": "account-news-navigation",
-          "type": "improved",
+          "type": "new",
           "area": "account",
           "title": {
-            "en": "Browse news from your account sidebar",
-            "sv": "Läs nyheter från kontots sidomeny"
+            "en": "See what's new in Eneo",
+            "sv": "Se vad som är nytt i Eneo"
           },
           "body": {
-            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar, with release notes using the available width at /news. News and guided tours follow your feature permissions. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
-            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny, med nyheter över hela bredden på /news. Nyheter och guidade turer anpassas efter dina behörigheter. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+            "en": "Under What's new in the account menu you can read what has changed in each release, and Show me points out a new feature where you find it. After an update, a short announcement highlights the most important news: choose Later to see it again after 24 hours, or Not interested to dismiss it for this version. You only see news about features your role can use, and administrators can turn What's new off for the organisation.",
+            "sv": "Under Nyheter i kontomenyn kan du läsa vad som har ändrats i varje version, och Visa mig pekar ut en ny funktion där du hittar den. Efter en uppdatering lyfter ett kort meddelande fram de viktigaste nyheterna: välj Senare för att se det igen efter 24 timmar, eller Inte intresserad för att stänga det för den här versionen. Du ser bara nyheter om funktioner som din roll kan använda, och administratörer kan stänga av Nyheter för organisationen."
           }
         }
       ]
