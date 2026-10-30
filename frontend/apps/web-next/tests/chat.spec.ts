@@ -1,5 +1,5 @@
 import { expect, test } from "./csp";
-import { askChatQuestion, conversationLog, MOCK_REPLY, uniqueName } from "./helpers";
+import { apiPath, askChatQuestion, conversationLog, MOCK_REPLY, uniqueName } from "./helpers";
 
 test(
   "personal chat streams, reloads and returns focus after deleting the saved session",
@@ -40,7 +40,7 @@ test(
   { tag: "@vite" },
   async ({ page }) => {
     await page.goto("/dashboard");
-    const personal = await page.request.get("/api/eneo/api/v1/spaces/type/personal/");
+    const personal = await page.request.get(apiPath("/spaces/type/personal/"));
     expect(personal.ok()).toBe(true);
     const {
       default_assistant: { id }

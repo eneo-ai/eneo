@@ -127,13 +127,14 @@ export async function openCreateCollectionDialog(page: Page) {
   return dialog;
 }
 
-/**
- * A write through the app's API proxy, which accepts writes from the app's
- * own origin only; returns the created resource's id. The page must have
- * loaded an app page first (its URL is the origin).
- */
+/** Test API requests use the same transport as the selected app build. */
+export function apiPath(path: string): string {
+  return `${process.env.E2E_BASE_URL ? "" : "/api/eneo"}/api/v1${path}`;
+}
+
+/** A same-origin write returning the created resource's id; load an app page first. */
 export async function apiPost(page: Page, path: string, data: object): Promise<string> {
-  const response = await page.request.post(`/api/eneo/api/v1${path}`, {
+  const response = await page.request.post(apiPath(path), {
     data,
     headers: { origin: new URL(page.url()).origin }
   });
