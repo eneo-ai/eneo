@@ -1,13 +1,33 @@
+import logging
 from datetime import timedelta
 
 import pytest
 
+from eneo.main.logging import SimpleLogger
 from eneo.main.request_context import (
     clear_request_context,
     get_request_context,
     set_request_context,
 )
 from eneo.observability import debug_toggle, redaction
+
+
+def test_simple_logger_respects_level_changes_after_logging(
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level(logging.DEBUG)
+    logger = SimpleLogger("test.level_changes", level=logging.INFO, console=False)
+    logger.addHandler(caplog.handler)
+
+    logger.debug("disabled before")
+    logger.setLevel(logging.DEBUG)
+    logger.debug("enabled")
+    logger.setLevel(logging.INFO)
+    logger.debug("disabled after")
+
+    assert [
+        record.getMessage() for record in caplog.records if record.name == logger.name
+    ] == ["enabled"]
 
 
 class FakeRedisSuccess:
