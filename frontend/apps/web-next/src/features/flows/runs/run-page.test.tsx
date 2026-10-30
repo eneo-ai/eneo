@@ -139,6 +139,8 @@ describe("FlowRunPage", () => {
     const steps = screen.getByRole("heading", { level: 2, name: messages.flow_runs_steps_heading });
     expect(steps).toBeTruthy();
     const first = await screen.findByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(within(first).queryByText("Resultat från steg 1")).toBeNull();
+    fireEvent.click(within(first).getByRole("button", { name: messages.flow_runs_step_output }));
     expect(within(first).getByText("Resultat från steg 1")).toBeTruthy();
     expect(within(first).getByText(messages.flow_runs_step_status_completed)).toBeTruthy();
     expect(screen.getByText(/^1\s500 totalt \(1\s200 in, 300 ut\)/)).toBeTruthy();

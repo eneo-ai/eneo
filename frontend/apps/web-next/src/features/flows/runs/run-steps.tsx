@@ -1,7 +1,10 @@
 "use client";
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
+import { VStack } from "@astryxdesign/core/VStack";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -65,39 +68,56 @@ function stepDurationMs(result: RunStep): number | null {
 }
 
 /**
- * What a step produced, with a button that copies it: the speakers a
+ * What a step produced, expanded on demand beside a copy button: the speakers a
  * speaker-mapping step named, a structured value (marked as JSON), or text
  * (rendered as Markdown, its line breaks kept).
  */
 function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; result: RunStep }) {
   const t = useTranslations();
+  const [open, setOpen] = useState(false);
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
   const text = outputText(payload);
   if (structured === undefined && text === null) {
-    return <p className="text-ax-text-secondary text-sm">{t("flow_runs_output_none")}</p>;
+    return (
+      <Text type="supporting" as="p">
+        {t("flow_runs_output_none")}
+      </Text>
+    );
   }
   return (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        {speakerMapping(payload) ? (
-          <StepSpeakerMapping flowId={flowId} runId={runId} payload={payload} />
-        ) : structured !== undefined ? (
-          <div className="flex flex-col items-start gap-1">
-            <Token size="sm" label={t("flow_run_more_json")} />
-            <JsonValue value={structured} />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <RunText text={text ?? ""} />
-            {payload?.text_overflow ? (
-              <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
-            ) : null}
-          </div>
-        )}
-      </div>
+    <HStack gap={2} vAlign="start">
+      <Collapsible
+        className="min-w-0 flex-1"
+        isOpen={open}
+        onOpenChange={setOpen}
+        chevronPosition="start"
+        trigger={<Text type="label">{t("flow_runs_step_output")}</Text>}
+      >
+        {open ? (
+          <VStack gap={1} paddingBlockStart={2}>
+            {speakerMapping(payload) ? (
+              <StepSpeakerMapping flowId={flowId} runId={runId} payload={payload} />
+            ) : structured !== undefined ? (
+              <VStack gap={1} hAlign="start">
+                <Token size="sm" label={t("flow_run_more_json")} />
+                <JsonValue value={structured} />
+              </VStack>
+            ) : (
+              <>
+                <RunText text={text ?? ""} />
+                {payload?.text_overflow ? (
+                  <Text type="supporting" as="p">
+                    {t("flow_runs_output_overflow")}
+                  </Text>
+                ) : null}
+              </>
+            )}
+          </VStack>
+        ) : null}
+      </Collapsible>
       <CopyButton label={t("flow_run_more_copy_output")} value={structured ?? text} />
-    </div>
+    </HStack>
   );
 }
 

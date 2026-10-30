@@ -83,6 +83,33 @@ describe("RunSteps", () => {
 });
 
 describe("RunSteps output", () => {
+  it("keeps secondary output collapsed until opened and retains focus on its trigger", async () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1)]
+    );
+    const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(within(card).queryByText("Resultat från steg 1")).toBeNull();
+    const trigger = within(card).getByRole("button", { name: messages.flow_runs_step_output });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      within(card).getByRole("button", { name: messages.flow_run_more_copy_output })
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(await within(card).findByText("Resultat från steg 1")).toBeTruthy();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(trigger);
+    expect(within(card).queryByText("Resultat från steg 1")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("renders a step's text as Markdown and keeps its line breaks", async () => {
     const steps = runStepViews(
       makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
@@ -96,6 +123,7 @@ describe("RunSteps output", () => {
     );
     const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_runs_step_output }));
     expect(await within(card).findByRole("heading", { name: "Beslut" })).toBeTruthy();
     expect(within(card).getByText("beviljas").outerHTML).toMatch(/strong/);
     expect(
@@ -380,6 +408,7 @@ describe("RunSteps transcription and speakers", () => {
     const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />, {
       queryClient
     });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_step_output }));
     const speakers = screen.getByRole("list", { name: messages.flow_run_more_speakers });
     const rows = within(speakers).getAllByRole("listitem");
     expect(within(rows[0]!).getByText("Anna Lind")).toBeTruthy();
@@ -397,6 +426,7 @@ describe("RunSteps transcription and speakers", () => {
       makeRunStep(1, { output_payload_json: { structured: { mottagare: "Anna" } } })
     ]);
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_step_output }));
     expect(screen.getByText(messages.flow_run_more_json)).toBeTruthy();
     expect(screen.getByText("mottagare")).toBeTruthy();
   });

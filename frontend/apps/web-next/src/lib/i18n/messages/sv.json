@@ -8444,6 +8444,7 @@
   "flow_runs_step_failed_title": "Steget misslyckades",
   "flow_runs_step_files": "Filer från {step}",
   "flow_runs_step_input": "Vad steget fick",
+  "flow_runs_step_output": "Stegets resultat",
   "flow_runs_step_input_files": "Filer som steget fick",
   "flow_runs_input_file_download": "Ladda ned fil {number}",
   "flow_runs_input_file_short": "Fil {number}",

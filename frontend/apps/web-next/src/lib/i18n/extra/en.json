@@ -2942,6 +2942,7 @@
   "flow_runs_step_failed_title": "The step failed",
   "flow_runs_step_files": "Files from {step}",
   "flow_runs_step_input": "What the step received",
+  "flow_runs_step_output": "Step output",
   "flow_runs_step_input_files": "Files the step received",
   "flow_runs_input_file_download": "Download file {number}",
   "flow_runs_input_file_short": "File {number}",
