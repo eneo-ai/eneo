@@ -19,13 +19,15 @@ type ScopeSpace = { id: string; name: string; applications: Schema<"Applications
 const APPLICATIONS_CONCURRENCY = 4;
 
 /** The user's spaces, the personal and the organization's included. */
-function scopeSpacesQueryOptions(api: EneoClient) {
+function scopeSpacesQueryOptions(api: EneoClient, withApplications: boolean) {
   return queryOptions({
-    queryKey: ["api-key-scope-resources", "spaces"],
+    queryKey: ["api-key-scope-resources", "spaces", withApplications],
     queryFn: async ({ signal }): Promise<ScopeSpace[]> => {
       const listed = await unwrap(
         api.GET("/api/v1/spaces/", {
-          params: { query: { include_personal: true, include_applications: true } },
+          params: {
+            query: { include_personal: true, include_applications: withApplications }
+          },
           signal
         })
       );
@@ -85,7 +87,7 @@ function scopeApplicationsQueryOptions(api: EneoClient, spaces: ScopeSpace[]) {
  * assistants and apps (one request per space) only when `withApplications`.
  */
 function useScopeResources(withApplications: boolean, enabled = true) {
-  const spaces = useQuery({ ...scopeSpacesQueryOptions(browserApi), enabled });
+  const spaces = useQuery({ ...scopeSpacesQueryOptions(browserApi, withApplications), enabled });
   const applications = useQuery({
     ...scopeApplicationsQueryOptions(browserApi, spaces.data ?? []),
     enabled: enabled && withApplications && spaces.data !== undefined

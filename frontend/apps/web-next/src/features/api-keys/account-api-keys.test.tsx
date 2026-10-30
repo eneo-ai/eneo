@@ -60,8 +60,9 @@ vi.mock("@/lib/api/browser", () => ({
       state.writes.push(body);
       if (state.saveGate) await state.saveGate;
       if (state.failSave) return Promise.reject(new Error("Temporarily unavailable"));
+      state.preferences = Object.assign({}, state.preferences, body);
       return Promise.resolve({
-        data: { ...state.preferences, ...body },
+        data: { ...state.preferences },
         response: new Response("{}")
       });
     }
@@ -72,8 +73,12 @@ import { ApiKeys } from "./account-api-keys";
 
 afterEach(cleanup);
 beforeEach(() => {
-  state.preferences.enabled = true;
-  state.preferences.days_before_expiry = [30, 14, 7];
+  state.preferences = {
+    enabled: true,
+    days_before_expiry: [30, 14, 7],
+    auto_follow_published_assistants: false,
+    auto_follow_published_apps: false
+  };
   state.policy.enabled = true;
   state.failRead = false;
   state.failSave = false;
@@ -142,7 +147,7 @@ describe("ApiKeys (account)", () => {
     ).toBeTruthy();
   });
 
-  it("keeps a saving switch focused and suppresses another toggle until the write settles", async () => {
+  it("keeps a saving switch focused and queues a second choice", async () => {
     let finish!: () => void;
     state.saveGate = new Promise<void>((resolve) => {
       finish = resolve;
@@ -160,7 +165,9 @@ describe("ApiKeys (account)", () => {
       expect(toggle.hasAttribute("disabled")).toBe(false);
       expect(toggle.getAttribute("aria-disabled")).not.toBe("true");
       expect(document.activeElement).toBe(toggle);
+      expect((toggle as HTMLInputElement).checked).toBe(true);
       await act(async () => fireEvent.click(toggle));
+      await vi.waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(false));
       expect(state.writes).toEqual([{ auto_follow_published_assistants: true }]);
     } finally {
       await act(async () => finish());
@@ -168,8 +175,60 @@ describe("ApiKeys (account)", () => {
     await vi.waitFor(() =>
       expect(toggle.closest("section")?.getAttribute("aria-busy")).toBe("false")
     );
+    expect(state.writes).toEqual([
+      { auto_follow_published_assistants: true },
+      { auto_follow_published_assistants: false }
+    ]);
+    expect(state.preferences.auto_follow_published_assistants).toBe(false);
     expect(document.activeElement).toBe(toggle);
   });
+
+  it.each(["switch", "preset"] as const)(
+    "saves a dirty reminder field and the following %s activation in order",
+    async (control) => {
+      let finish!: () => void;
+      state.saveGate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const first = renderInApp(<ApiKeys />);
+      const days = await screen.findByRole("textbox", { name: "Påminnelsedagar" });
+      const target =
+        control === "switch"
+          ? screen.getByRole("switch", { name: "Följ automatiskt publicerade assistenter" })
+          : screen.getByRole("button", { name: "Lägg till 60 dagar" });
+      days.focus();
+      fireEvent.change(days, { target: { value: "21, 14, 7" } });
+      try {
+        await act(async () => target.focus());
+        await vi.waitFor(() => expect(state.writes).toHaveLength(1));
+        await act(async () => fireEvent.click(target));
+        expect(state.writes).toEqual([{ days_before_expiry: [21, 14, 7] }]);
+      } finally {
+        await act(async () => finish());
+      }
+      const nextWrite =
+        control === "switch"
+          ? { auto_follow_published_assistants: true }
+          : { days_before_expiry: [60, 21, 14, 7] };
+      await vi.waitFor(() =>
+        expect(state.writes).toEqual([{ days_before_expiry: [21, 14, 7] }, nextWrite])
+      );
+      first.unmount();
+      renderInApp(<ApiKeys />);
+      const reloaded = await screen.findByRole("textbox", { name: "Påminnelsedagar" });
+      expect((reloaded as HTMLInputElement).value).toBe(
+        control === "switch" ? "21, 14, 7" : "60, 21, 14, 7"
+      );
+      if (control === "switch")
+        expect(
+          (
+            screen.getByRole("switch", {
+              name: "Följ automatiskt publicerade assistenter"
+            }) as HTMLInputElement
+          ).checked
+        ).toBe(true);
+    }
+  );
 
   it("shows the tenant's disabled policy and prevents enabling reminders", async () => {
     state.policy.enabled = false;

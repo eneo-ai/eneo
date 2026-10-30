@@ -22,6 +22,11 @@ export type SettingSwitchOptions = {
   queue?: string;
 };
 
+/** Let other fields sharing a settings endpoint join the same mutation queue. */
+export function settingSwitchScope(id: string) {
+  return { id: `setting-switch:${id}` };
+}
+
 /**
  * An on/off setting behind a switch that saves on toggle. The switch shows the
  * latest press at once and stays enabled (and focused) while saving; presses
@@ -56,7 +61,7 @@ export function useSettingSwitch(
   }
   const mutation = useMutation({
     mutationFn: save,
-    scope: { id: `setting-switch:${queue ?? id}` },
+    scope: settingSwitchScope(queue ?? id),
     onSuccess: (_data, enabled) => {
       setSaved(enabled);
       return onSaved

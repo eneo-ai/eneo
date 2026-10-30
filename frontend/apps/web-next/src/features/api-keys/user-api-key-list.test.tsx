@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -10,12 +10,18 @@ const state = vi.hoisted(() => ({
   next: [] as Schema<"ApiKeyV2">[],
   failFirst: false,
   failNext: false,
-  requests: [] as { cursor?: string | null; state?: string | null }[]
+  requests: [] as { cursor?: string | null; state?: string | null }[],
+  spaceRequests: [] as { include_applications?: boolean }[]
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: (path: string, options?: { params?: { query?: { cursor?: string; state?: string } } }) => {
+    GET: (
+      path: string,
+      options?: {
+        params?: { query?: { cursor?: string; state?: string; include_applications?: boolean } };
+      }
+    ) => {
       let data: unknown = {};
       if (path === "/api/v1/api-keys") {
         const query = options?.params?.query ?? {};
@@ -27,11 +33,15 @@ vi.mock("@/lib/api/browser", () => ({
           next_cursor: !query.cursor && state.next.length > 0 ? "page-2" : null
         };
       } else if (path === "/api/v1/spaces/") {
+        state.spaceRequests.push(options?.params?.query ?? {});
         data = { items: [{ id: "space-1", name: "Upphandling" }] };
       } else if (path === "/api/v1/spaces/type/organization/") {
         data = { id: "space-1", name: "Upphandling" };
       } else if (path === "/api/v1/spaces/{id}/applications/") {
-        data = { assistants: { items: [] }, apps: { items: [] } };
+        data = {
+          assistants: { items: [{ id: "assistant-1", name: "Avtalsstöd" }] },
+          apps: { items: [] }
+        };
       }
       return Promise.resolve({ data, response: new Response("{}") });
     }
@@ -60,6 +70,7 @@ beforeEach(() => {
   state.failFirst = false;
   state.failNext = false;
   state.requests = [];
+  state.spaceRequests = [];
 });
 afterEach(cleanup);
 
@@ -84,6 +95,7 @@ describe("UserApiKeyList", () => {
     const { container } = renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
     const row = await screen.findByRole("row", { name: /Integration 1/ });
     expect(await within(row).findByText("Upphandling")).toBeTruthy();
+    expect(state.spaceRequests).toEqual([{ include_personal: true, include_applications: false }]);
     for (const text of [
       "Test integration description",
       "Tjänstenyckel",
@@ -98,6 +110,19 @@ describe("UserApiKeyList", () => {
     });
     expect(screen.getByText("https://example.test")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("requests application names when refreshed keys need them, with a distinct spaces response", async () => {
+    state.items = [key("1", { scope_type: "space", scope_id: "space-1" })];
+    const { queryClient } = renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    await screen.findByText("Upphandling");
+    state.items = [key("2", { scope_type: "assistant", scope_id: "assistant-1" })];
+    await act(async () => queryClient.invalidateQueries({ queryKey: ["api-keys"] }));
+    expect(await screen.findByText("Avtalsstöd")).toBeTruthy();
+    expect(state.spaceRequests).toEqual([
+      { include_personal: true, include_applications: false },
+      { include_personal: true, include_applications: true }
+    ]);
   });
 
   it("searches loaded names, descriptions and suffixes, retains pages and refreshes the selected filter", async () => {

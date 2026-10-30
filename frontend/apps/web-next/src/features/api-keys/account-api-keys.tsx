@@ -10,10 +10,10 @@ import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
+import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { toastApiError } from "@/lib/api/toast";
 import { CreateApiKeyDialog } from "./api-key-form";
 import {
   API_KEY_NOTIFICATION_PREFERENCES_KEY,
@@ -21,6 +21,8 @@ import {
   apiKeyPolicyConstraintsQueryOptions
 } from "./api-keys";
 import { UserApiKeyList, useSecretReveal } from "./user-api-key-list";
+
+const PREFERENCES_QUEUE = "api-key-notification-preferences";
 
 function NotificationPreferencesPanel() {
   const t = useTranslations();
@@ -65,33 +67,50 @@ function NotificationPreferences({
   const policyHintId = useId();
   const [daysVisited, setDaysVisited] = useState(false);
 
-  const updatePreferences = useMutation({
-    // Partial preferences share one write order, including an input blur followed by a toggle.
-    scope: { id: "api-key-notification-preferences" },
-    mutationFn: (body: Schema<"ApiKeyNotificationPreferencesUpdate">) =>
-      unwrap(browserApi.PUT("/api/v1/api-keys/notification-preferences", { body })),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(API_KEY_NOTIFICATION_PREFERENCES_KEY, updated);
-    }
+  async function savePreferences(body: Schema<"ApiKeyNotificationPreferencesUpdate">) {
+    const updated = await unwrap(
+      browserApi.PUT("/api/v1/api-keys/notification-preferences", { body })
+    );
+    queryClient.setQueryData(API_KEY_NOTIFICATION_PREFERENCES_KEY, updated);
+    return updated;
+  }
+  const switchOptions = {
+    queue: PREFERENCES_QUEUE,
+    // The shared write updates this resource's cache from the response.
+    onSaved: () => undefined
+  };
+  const [remindersEnabled, setRemindersEnabled, savingEnabled] = useSettingSwitch(
+    "api-key-reminders-enabled",
+    preferences.enabled ?? false,
+    (enabled) => savePreferences({ enabled }),
+    switchOptions
+  );
+  const [followAssistants, setFollowAssistants, savingAssistants] = useSettingSwitch(
+    "api-key-follow-assistants",
+    preferences.auto_follow_published_assistants ?? false,
+    (enabled) => savePreferences({ auto_follow_published_assistants: enabled }),
+    switchOptions
+  );
+  const [followApps, setFollowApps, savingApps] = useSettingSwitch(
+    "api-key-follow-apps",
+    preferences.auto_follow_published_apps ?? false,
+    (enabled) => savePreferences({ auto_follow_published_apps: enabled }),
+    switchOptions
+  );
+  const updateDays = useMutation({
+    scope: settingSwitchScope(PREFERENCES_QUEUE),
+    mutationFn: (days: number[]) => savePreferences({ days_before_expiry: days })
   });
   const days = useAutosaveField({
     key: "api-key-reminder-days",
     value: preferences.days_before_expiry?.join(", ") ?? "",
     normalize: (value) => reminderDays(value, policy.max_days_before_expiry)?.join(", ") ?? value,
     validate: (value) => reminderDays(value, policy.max_days_before_expiry) !== undefined,
-    save: (value) =>
-      updatePreferences.mutateAsync({
-        days_before_expiry: reminderDays(value, policy.max_days_before_expiry)!
-      })
+    save: (value) => updateDays.mutateAsync(reminderDays(value, policy.max_days_before_expiry)!)
   });
   const parsedDays = reminderDays(days.value, policy.max_days_before_expiry);
-  const enabled = policy.enabled !== false && (preferences.enabled ?? false);
-  const saving = updatePreferences.isPending;
-
-  function saveSwitch(body: Schema<"ApiKeyNotificationPreferencesUpdate">) {
-    if (saving) return;
-    updatePreferences.mutate(body, { onError: (error) => toastApiError(error, t) });
-  }
+  const enabled = policy.enabled !== false && remindersEnabled;
+  const saving = updateDays.isPending || savingEnabled || savingAssistants || savingApps;
 
   return (
     <section aria-busy={saving} className="rounded-xl border p-4">
@@ -114,7 +133,7 @@ function NotificationPreferences({
             disabledMessage={
               policy.enabled === false ? t("api_keys_notifications_policy_header_hint") : undefined
             }
-            onChange={(checked) => saveSwitch({ enabled: checked })}
+            onChange={setRemindersEnabled}
           />
         </div>
         {saving && <p className="text-ax-text-secondary text-sm">{t("saving")}</p>}
@@ -131,8 +150,8 @@ function NotificationPreferences({
                 description={t("api_keys_notifications_reminder_days_description")}
                 value={days.value}
                 onChange={days.setValue}
-                isReadOnly={saving}
-                aria-busy={saving}
+                isReadOnly={updateDays.isPending}
+                aria-busy={updateDays.isPending}
                 aria-describedby={policy.max_days_before_expiry != null ? policyHintId : undefined}
                 onBlur={() => {
                   setDaysVisited(true);
@@ -170,10 +189,9 @@ function NotificationPreferences({
                       size="sm"
                       variant="ghost"
                       isDisabled={!parsedDays}
-                      isLoading={saving}
+                      isLoading={updateDays.isPending}
                       isInterruptible
                       onClick={() => {
-                        if (saving) return;
                         const value = [...new Set([...(parsedDays ?? []), day])]
                           .sort((a, b) => b - a)
                           .join(", ");
@@ -187,14 +205,14 @@ function NotificationPreferences({
             <div className="flex flex-col gap-2 rounded-lg border p-3">
               <Switch
                 label={t("api_keys_notifications_auto_follow_assistants_title")}
-                value={preferences.auto_follow_published_assistants ?? false}
+                value={followAssistants}
                 isDisabled={!policy.allow_auto_follow_published_assistants}
                 disabledMessage={
                   !policy.allow_auto_follow_published_assistants
                     ? t("api_keys_notifications_auto_follow_assistants_locked_hint")
                     : undefined
                 }
-                onChange={(checked) => saveSwitch({ auto_follow_published_assistants: checked })}
+                onChange={setFollowAssistants}
               />
               {!policy.allow_auto_follow_published_assistants && (
                 <p className="text-ax-text-secondary text-sm">
@@ -205,14 +223,14 @@ function NotificationPreferences({
             <div className="flex flex-col gap-2 rounded-lg border p-3">
               <Switch
                 label={t("api_keys_notifications_auto_follow_apps_title")}
-                value={preferences.auto_follow_published_apps ?? false}
+                value={followApps}
                 isDisabled={!policy.allow_auto_follow_published_apps}
                 disabledMessage={
                   !policy.allow_auto_follow_published_apps
                     ? t("api_keys_notifications_auto_follow_apps_locked_hint")
                     : undefined
                 }
-                onChange={(checked) => saveSwitch({ auto_follow_published_apps: checked })}
+                onChange={setFollowApps}
               />
               {!policy.allow_auto_follow_published_apps && (
                 <p className="text-ax-text-secondary text-sm">

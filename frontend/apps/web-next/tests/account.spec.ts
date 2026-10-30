@@ -71,17 +71,53 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
     if (!(await toggle.isChecked())) await toggle.click();
     const days = page.getByRole("textbox", { name: "Påminnelsedagar" });
     await expect(days).toBeVisible();
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let heldFirstWrite = false;
+    await page.route("**/api/v1/api-keys/notification-preferences", async (route) => {
+      if (
+        route.request().method() === "PUT" &&
+        route.request().postDataJSON().days_before_expiry &&
+        !heldFirstWrite
+      ) {
+        heldFirstWrite = true;
+        await firstWrite;
+      }
+      await route.continue();
+    });
+    const started = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/api/v1/api-keys/notification-preferences") &&
+        request.method() === "PUT" &&
+        request.postDataJSON().days_before_expiry?.join(",") === "14,7"
+    );
     const saved = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/v1/api-keys/notification-preferences") &&
         response.request().method() === "PUT" &&
         response.status() === 200
     );
+    const queuedPresetSaved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/api-keys/notification-preferences") &&
+        response.request().method() === "PUT" &&
+        response.request().postDataJSON().days_before_expiry?.join(",") === "60,14,7" &&
+        response.status() === 200
+    );
     await days.fill("14, 7");
-    await days.press("Enter");
+    try {
+      await days.press("Tab");
+      await started;
+      await page.getByRole("button", { name: "Lägg till 60 dagar" }).click();
+    } finally {
+      releaseFirstWrite();
+    }
     await saved;
+    await queuedPresetSaved;
     await page.reload();
-    await expect(days).toHaveValue("14, 7");
+    await expect(days).toHaveValue("60, 14, 7");
     const presetSaved = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/v1/api-keys/notification-preferences") &&
@@ -91,7 +127,7 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
     await page.getByRole("button", { name: "Lägg till 30 dagar" }).click();
     await presetSaved;
     await page.reload();
-    await expect(days).toHaveValue("30, 14, 7");
+    await expect(days).toHaveValue("60, 30, 14, 7");
 
     const name = uniqueName("Påminnelseintegration");
     for (let index = 0; index < 4; index += 1) {
