@@ -511,6 +511,9 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.goto("/spaces/organization/skills");
         await page.getByRole("link", { name: /^(Skapa skill|Create skill)$/i }).click();
         await expect(page).toHaveURL(/\/spaces\/organization\/skills\/new$/);
+        await expect(
+          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+        ).toBeVisible();
         await expectNoAxeViolations(page);
         await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
         await page
