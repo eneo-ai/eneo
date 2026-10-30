@@ -6,6 +6,46 @@ describe("client error privacy", () => {
   const password = "secret password for test";
   const endpoint = "/api/v1/admin/users/test-user/";
 
+  for (const status of [403, 503]) {
+    it(`keeps a specific HTTP ${status} message without a numeric category`, async () => {
+      const message = "This operation is unavailable for the selected resource.";
+      const client = createClient({
+        baseUrl: "https://eneo.example",
+        fetch: async () => Response.json({ message, code: `http_${status}` }, { status })
+      });
+
+      await assert.rejects(client.fetch(endpoint, { method: "get" }), (error) => {
+        assert.ok(error instanceof EneoError);
+        assert.equal(error.status, status);
+        assert.equal(error.code, 0);
+        assert.equal(error.getReadableMessage(), message);
+        return true;
+      });
+    });
+  }
+
+  it("keeps an unexpected server failure generic and preserves its reference", async () => {
+    const body = {
+      message:
+        "An unexpected error occurred. Please try again or contact support with the error_id.",
+      code: "internal_error",
+      eneo_error_code: 9024,
+      error_id: "8bc91e0a"
+    };
+    const client = createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () => Response.json(body, { status: 500 })
+    });
+
+    await assert.rejects(client.fetch(endpoint, { method: "get" }), (error) => {
+      assert.ok(error instanceof EneoError);
+      assert.equal(error.getReadableMessage(), "Upstream server error");
+      assert.equal(error.code, 9024);
+      assert.equal(error.response.error_id, body.error_id);
+      return true;
+    });
+  });
+
   for (const failure of ["connection", "response"]) {
     it(`excludes a submitted password from ${failure} errors`, async () => {
       const client = createClient({

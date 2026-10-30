@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
+from eneo.server import exception_handlers
 from eneo.server.main import get_application
 from eneo.server.middleware import cors as cors_module
 
@@ -41,6 +44,7 @@ def test_http_exception_string_detail_answers_in_the_envelope():
     payload = response.json()
     assert payload == {
         "message": "Temporary outage",
+        "code": "http_503",
         "request_id": "req-1",
         "detail": "Temporary outage",
     }
@@ -347,6 +351,31 @@ def test_unhandled_error_carries_cors_trace_and_error_id(monkeypatch):
     assert response.headers["x-trace-id"]
     expose = response.headers["access-control-expose-headers"].lower()
     assert "x-trace-id" in expose and "x-correlation-id" in expose
+
+
+def test_raised_server_error_preserves_correlation_without_exposing_detail(monkeypatch):
+    monkeypatch.setattr(
+        exception_handlers,
+        "get_settings",
+        lambda: SimpleNamespace(is_development=False),
+    )
+    _origin_checks(monkeypatch, True, True)
+    response = _build_client_for_exception(
+        "private backend failure",
+        status_code=500,
+        headers={"X-Correlation-ID": "exception-correlation-id"},
+    ).get("/_test-http-exc", headers={"Origin": "https://app.example.com"})
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["code"] == "internal_error"
+    assert payload["eneo_error_code"] == ErrorCodes.INTERNAL_SERVER_ERROR
+    assert len(payload["error_id"]) == 8
+    assert "private backend failure" not in response.text
+    assert "detail" not in payload
+    assert response.headers["x-correlation-id"] == "exception-correlation-id"
+    assert response.headers["x-trace-id"]
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"
 
 
 def test_unhandled_error_keeps_its_json_body_when_the_origin_check_fails(monkeypatch):

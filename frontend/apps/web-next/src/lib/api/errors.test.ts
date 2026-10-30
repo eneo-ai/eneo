@@ -199,6 +199,22 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, t)).toBe("Crawl already running");
   });
 
+  it.each([403, 503])("keeps a specific HTTP %i message without a numeric category", (status) => {
+    const error = apiErrorFromResponse(errorResponse(status), {
+      message: "This operation is unavailable for the selected resource.",
+      code: `http_${status}`
+    });
+
+    expect(error.code).toBeUndefined();
+    expect(error.reason).toBe(`http_${status}`);
+    for (const [locale, messages] of [
+      ["sv", sv],
+      ["en", en]
+    ] as const) {
+      expect(getErrorMessage(error, translator(locale, messages))).toBe(error.message);
+    }
+  });
+
   it.each([9056, 9057])("keeps resource refusals (%i) distinct from file errors", (code) => {
     const error = new EneoApiError("Resource refusal", { status: 409, code });
     expect(getErrorMessage(error, t)).toBe("Resource refusal");
@@ -264,18 +280,21 @@ describe("getErrorMessage", () => {
     expect(refused(9064)).toBe("Det nuvarande lösenordet är felaktigt.");
   });
 
-  it("words an unexpected failure in the user's language instead of the backend's English", () => {
-    // The 500 body: `{ error, error_id, message }` with no eneo_error_code.
+  it.each([undefined, 9024])("localizes an unexpected failure with category %s", (code) => {
     const error = apiErrorFromResponse(errorResponse(500), {
       error: "Internal server error",
       error_id: "8bc91e0a",
+      ...(code === undefined ? {} : { eneo_error_code: code, code: "internal_error" }),
       message:
         "An unexpected error occurred. Please try again or contact support with the error_id."
     });
 
     expect(getErrorMessage(error, translator("sv", sv))).toBe(
-      "Vi upplever vissa svårigheter, försök igen senare."
+      code === undefined
+        ? "Vi upplever vissa svårigheter, försök igen senare."
+        : "Ett internt fel uppstod. Försök igen senare."
     );
+    expect(errorReference(error)?.errorId).toBe("8bc91e0a");
   });
 
   it("words a taken name for every resource that answers with it, not only models", () => {

@@ -16,16 +16,17 @@ Most errors answer with a common JSON envelope:
 }
 ```
 
-`message` is always present in that envelope. `eneo_error_code`, a coarse
-numeric category kept for older clients, is present unless the route refused
-with a plain message and no code; `code`, `context`, `details` and `request_id`
-are optional. Branch on the string `code` where an operation documents one, and
-otherwise on the status code together with `eneo_error_code`. `message` is
-written for people and may be reworded. Quote `request_id`, or `error_id` on a
-`500`, when you contact support.
+`message` and `code` are always present in that envelope. A refusal without a
+domain code uses `http_<status>`, for example `http_403`. `eneo_error_code`, a
+coarse numeric category kept for older clients, is absent for those refusals.
+`context`, `details` and `request_id` are optional. Branch on the string `code`
+where an operation documents one, and otherwise on the HTTP status. `message`
+is written for people and may be reworded. Quote `request_id`, or `error_id`
+on a `500`, when you contact support.
 
-Request validation is the one exception: it answers `422` with
-`{"detail": [...]}`. An HTTP refusal raised by a route also carries a
+Request validation answers `422` with code `request_validation_error` and
+field diagnostics in `details.errors`; the legacy `detail` list remains for
+older clients, with submitted values removed. An HTTP refusal also carries a
 deprecated `detail` with its raw value, a string or an object; it is kept for
 one release, so read the top-level fields. An object without a `code`, such as
 the report `/api/healthz` returns with `503`, is also in `details`. An

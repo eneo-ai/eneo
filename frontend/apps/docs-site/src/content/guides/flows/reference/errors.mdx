@@ -26,9 +26,9 @@ Errors that Eneo's own handlers answer for the Flow runtime API, including reque
 - **`error_id` appears on unexpected server errors** and points support at the originating exception log. Log it whenever it is present.
 - **`eneo_error_code` is a legacy numeric category, not an identifier.** It is derived from the exception class rather than from `code`, so it is many-to-one: most of the catalog below shares a single value, while a few codes carry a different one. It cannot distinguish two failures and must not drive control flow.
 
-`message`, `code`, and `eneo_error_code` are required. The optional `context`, `request_id`, `error_id`, and `details` fields are omitted when they carry no value.
+`message` and `code` are required. Flow domain failures also provide `eneo_error_code`; the common envelope allows it to be absent. The optional `context`, `request_id`, `error_id`, and `details` fields are omitted when they carry no value.
 
-A few refusals are answered before a Flow handler runs, such as an unknown route or an endpoint-access check that carries no code, and use the framework's `{"detail": ...}` body instead. [API Reference: Errors](/docs/api#errors) lists those shapes.
+Refusals without a domain code, including unknown routes, use the same envelope with a generic `http_<status>` code and no numeric category. Request validation uses `request_validation_error` with field diagnostics. [API Reference: Errors](/docs/api#errors) describes the common envelope and the deprecated `detail` field retained for older clients.
 
 For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 2000 pages, 134217728 extracted UTF-8 bytes (128 MiB, including page markers and separators), and 900 seconds. See the [Flow limits table](/guides/flows/integrating-flows#execution-and-pdf-extraction). These defaults are provisional pending measurement and have no tenant overrides. They apply only to flow runtime uploads; other PDF uploads keep their existing extraction behavior. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process, whose own deadline remains active if the request worker exits.
 

@@ -29502,8 +29502,11 @@ export interface components {
     };
     /** GeneralError */
     GeneralError: {
-      /** Code */
-      code?: string | null;
+      /**
+       * Code
+       * @description Stable error identifier for client and LLM tool control flow. Plain HTTP refusals use http_<status> when no domain code is supplied.
+       */
+      code: string;
       /** Context */
       context?: {
         [key: string]: unknown;
@@ -29514,16 +29517,25 @@ export interface components {
        * @description Deprecated: the raised HTTPException detail (a string or an object), kept for one release for clients that read it. Read the top-level fields instead.
        */
       detail?: unknown;
-      /** Details */
+      /**
+       * Details
+       * @description Optional code-specific machine-readable data.
+       */
       details?: {
         [key: string]: unknown;
       } | null;
       eneo_error_code?: components["schemas"]["ErrorCodes"] | null;
       /** Error Id */
       error_id?: string | null;
-      /** Message */
+      /**
+       * Message
+       * @description Human-readable explanation. Clients should branch on `code`, not parse this message.
+       */
       message: string;
-      /** Request Id */
+      /**
+       * Request Id
+       * @description Correlation id for matching requests with server logs.
+       */
       request_id?: string | null;
     };
     /** GetModelsResponse */

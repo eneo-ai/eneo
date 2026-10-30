@@ -561,7 +561,11 @@ def _http_exception_body(
     # a generic "Forbidden". A structured refusal without a code (the healthz
     # report) moves to `details`, so nothing lives only in the deprecated copy.
     return GeneralError(
-        message=message, request_id=request_id, details=structured, detail=detail
+        message=message,
+        code=f"http_{exc.status_code}",
+        request_id=request_id,
+        details=structured,
+        detail=detail,
     ).model_dump(exclude_none=True)
 
 
@@ -574,7 +578,9 @@ def add_exception_handlers(app: FastAPI):
         # id like the canonical handlers do, so the header matches the logs.
         headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
         if http_exc.status_code == 500:
-            return await unhandled_exception_handler(request, http_exc)
+            response = await unhandled_exception_handler(request, http_exc)
+            response.headers.update(http_exc.headers or {})
+            return response
         if http_exc.status_code == 422:
             return JSONResponse(
                 status_code=422,

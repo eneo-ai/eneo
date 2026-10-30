@@ -157,15 +157,30 @@ class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Gener
 
 
 class GeneralError(BaseModel):
-    message: str
+    message: str = Field(
+        description=(
+            "Human-readable explanation. Clients should branch on `code`, "
+            "not parse this message."
+        )
+    )
     # Absent when a route raised a plain-text HTTPException: a status-default
     # category would make clients replace its specific message with generic text.
     eneo_error_code: ErrorCodes | None = None
-    code: str | None = None
+    code: str = Field(
+        description=(
+            "Stable error identifier for client and LLM tool control flow. "
+            "Plain HTTP refusals use http_<status> when no domain code is supplied."
+        )
+    )
     context: dict[str, object] | None = None
-    request_id: str | None = None
+    request_id: str | None = Field(
+        default=None,
+        description="Correlation id for matching requests with server logs.",
+    )
     error_id: str | None = None
-    details: dict[str, Any] | None = None
+    details: dict[str, Any] | None = Field(
+        default=None, description="Optional code-specific machine-readable data."
+    )
     detail: Any = Field(
         default=None,
         description=(

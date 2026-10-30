@@ -307,9 +307,9 @@ Errors are JSON. Every error except request validation answers in one envelope:
 }
 ```
 
-`message` is always present. `eneo_error_code` is absent when the route refused with a plain message and no code; `code`, `context`, `details` and `request_id` are optional. A route may add fields next to `code`, such as `retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown routes (`404`) and unsupported methods (`405`) use the same envelope.
+`message` and `code` are always present. A refusal without a domain code uses `http_<status>`, for example `http_403`, and omits `eneo_error_code` so clients can display its specific message. `context`, `details` and `request_id` are optional. A route may add fields next to `code`, such as `retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown routes (`404`) and unsupported methods (`405`) use the same envelope.
 
-`422` request validation errors keep FastAPI's shape: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
+`422` request validation errors use `code` `request_validation_error` and field diagnostics in `details.errors`. The legacy `detail` list keeps FastAPI's shape for older clients, with submitted values removed: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
 
 A refusal raised as an HTTP exception also carries `detail`, its raw value (a string or an object). It is deprecated and kept for one release so existing clients keep working; read the top-level fields instead. An object without a `code`, such as the `/api/healthz` report, is also in `details`.
 
