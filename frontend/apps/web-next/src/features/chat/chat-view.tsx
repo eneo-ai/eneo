@@ -164,6 +164,8 @@ type ChatViewProps = {
   onStartedChange?: (started: boolean) => void;
   /** Interactive model picker shown in the composer (default-assistant only). */
   modelSelector?: ReactNode;
+  /** The personal chat's Skills control, beside Verktyg in the composer. */
+  skills?: ReactNode;
   /** Start state for the personal assistant: the assistant selector inside the composer. */
   partnerToken?: ReactNode;
   activity: ActivityState | null;
@@ -195,6 +197,7 @@ function ConversationView({
   onTitle,
   onStartedChange,
   modelSelector,
+  skills,
   partnerToken,
   activity,
   onActivityChange
@@ -808,6 +811,7 @@ function ConversationView({
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
     tools,
+    skills,
     mention,
     modelSelector,
     quote: composerQuote,

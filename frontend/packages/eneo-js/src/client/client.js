@@ -20,6 +20,7 @@ import { xhr } from "./xhr.js";
  * @param  {string} [args.apiKeyHeaderName] API-key header configured by the backend, defaults to X-API-Key
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
+ * @param {(error: EneoError) => void} [args.onError] Observe normalized request failures before they are thrown, across all transports.
  * @returns {Client}
  */
 
@@ -58,7 +59,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` }, args.onError);
       }
     },
 
@@ -89,7 +90,7 @@ export function createClient(args) {
           onMessage
         });
       } catch (error) {
-        EneoError.throw(error, { endpoint: `STREAM@${url}` });
+        EneoError.throw(error, { endpoint: `STREAM@${url}` }, args.onError);
       }
     },
 
@@ -116,7 +117,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` }, args.onError);
       }
     },
 
@@ -141,7 +142,7 @@ export function createClient(args) {
         const file = await response.blob();
         return file;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` }, args.onError);
       }
     },
 
@@ -400,16 +401,17 @@ export class EneoError extends Error {
    * Rethrow an error as an EneoError
    * @param {unknown} error
    * @param {{endpoint: string;}} requestInfo
+   * @param {(error: EneoError) => void} [onError]
    */
-  static throw(error, requestInfo) {
+  static throw(error, requestInfo, onError) {
+    let normalized;
     // A stream callback reports a failed answer as an EneoError already;
     // wrapping it again would drop its reason code.
     if (error instanceof EneoError) {
       if (!error.request.endpoint) error.request = { endpoint: requestInfo.endpoint };
-      throw error;
-    }
-    if (error instanceof PartialError) {
-      throw new EneoError(
+      normalized = error;
+    } else if (error instanceof PartialError) {
+      normalized = new EneoError(
         error.message,
         error.stage,
         error.status,
@@ -418,10 +420,19 @@ export class EneoError extends Error {
         requestInfo,
         error.headers
       );
+    } else if (error instanceof Error) {
+      normalized = new EneoError(
+        error.message,
+        "CONNECTION",
+        0,
+        0,
+        "No response text",
+        requestInfo
+      );
+    } else {
+      normalized = new EneoError("UNKNOWN ERROR", "UNKNOWN", 0, 0, "No response text", requestInfo);
     }
-    if (error instanceof Error) {
-      throw new EneoError(error.message, "CONNECTION", 0, 0, "No response text", requestInfo);
-    }
-    throw new EneoError("UNKNOWN ERROR", "UNKNOWN", 0, 0, "No response text", requestInfo);
+    onError?.(normalized);
+    throw normalized;
   }
 }

@@ -17,6 +17,8 @@ Assistant, App, or Personal Chat.
 
 - **New to Skills:** read [The mental model](#the-mental-model) and
   [When to use a Skill](#when-to-use-a-skill).
+- **Shaping your own Personal Chat:** read
+  [Your own Skills in Personal Chat](#your-own-skills-in-personal-chat).
 - **Building an Assistant or App:** follow
   [Create and attach a Skill](#create-and-attach-a-skill), then read
   [Versions and adoption](#versions-and-adoption). If the Skill describes an
@@ -269,6 +271,7 @@ changed back to **Always**.
 | Surface       | Selection owner                                              | Runtime effect                                      |
 | ------------- | ------------------------------------------------------------ | --------------------------------------------------- |
 | Personal Chat | Tenant admin in Personal Chat settings                       | Ordered versions apply to every user's new requests |
+| Personal Chat | Each user with **Own Skills**, for their own chat            | Their own versions run after the organisation's     |
 | Assistant     | Builder with **Use Skills** and edit access to the Assistant | Exact versions run always or load on demand         |
 | App           | Builder with **Use Skills** and edit access to the App       | Exact versions apply when that App runs             |
 
@@ -321,11 +324,57 @@ set. Saving rechecks the selected models, prompt, MCP configuration, and every
 existing Personal Chat baseline. If any candidate cannot fit, the save is
 rejected and the previous policy remains active.
 
+### Your own Skills in Personal Chat
+
+A user with the **Own Skills** permission can write Skills in their personal
+Space and choose which of them their Personal Chat uses, for example "answer
+briefly, in bullet points". No Assistant is needed.
+
+- **Library.** In their own personal Space the user can create, edit and delete
+  Skills without **Use Skills** or **Manage Skills**. The permission gives no
+  access to Skills in shared Spaces or to the organisation catalogue, and does
+  not let the user attach Skills to their other Assistants or Apps.
+- **Choosing.** In the Personal Chat composer, **Skills** sits next to
+  **Tools** and shows how many Skills run. It lists the organisation's Skills
+  read-only, with a lock and their mode, and each of the user's own Skills
+  with **Off**, **On demand** and **Always**. On a phone the same choices open
+  in a bottom sheet. The choice applies to all of the user's personal chats.
+- **Saving.** A choice is saved at once. A question sent right after it is
+  answered with the saved choice. If Eneo refuses the change, the choice goes
+  back to what it was and the reason is shown next to it.
+- **Order.** The organisation's Skills always run first, then the user's own.
+  The user's Skills never change what the organisation's Skills do.
+
+The user's own Skills run exactly as chosen, or not at all. When they cannot,
+the composer says **Your skills are paused** with the reason, the
+organisation's Skills keep running and the user's choices are kept:
+
+| Reason                         | What the user can do                                                        |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| Permission removed             | Nothing; the choices return if an administrator grants **Own Skills** again |
+| Too many Skills                | Turn some of their own Skills off                                           |
+| Does not fit the model         | Turn a Skill off or choose another model                                    |
+| On demand unavailable          | Choose **Always**, or a model that supports tool calling                    |
+| A Skill is too large on demand | Choose **Always** for it, or turn it off                                    |
+| Crowds out the organisation's  | Turn one of their own Skills off                                            |
+
+Turning a Skill off is always accepted, so a user can recover from a paused
+state themselves. A model switch that would pause Skills that were running is
+refused.
+
+Personal Chat pins the exact version the user chose. After a Skill is edited,
+its page says which version Personal Chat uses and offers **Use the latest
+version**; the composer offers the same on the Skill's row. The personal
+Space's Skills list marks each Skill Personal Chat uses, for example
+**Personal chat · Always**. A Skill that Personal Chat uses cannot be deleted;
+turn it off first.
+
 ### Default roles
 
-The predefined **Owner** role receives **Use Skills** and **Manage Skills** by
-default. The predefined User and AI Configurator roles do not. Owners can
-delegate either permission through custom roles. Administrators should review
+The predefined **Owner** role receives **Use Skills**, **Manage Skills** and
+**Own Skills** by default. The predefined User and AI Configurator roles do
+not. Owners can delegate these permissions through custom roles; give
+**Own Skills** to the roles whose users should shape their own Personal Chat. Administrators should review
 custom roles after an upgrade because earlier releases did not record why each
 grant was assigned.
 
@@ -455,6 +504,8 @@ configuration limit rather than a conflict, described in
 - Skills do not grant models, tools, knowledge, or permissions.
 - Assistant and Personal Chat bindings can be **always** or **on demand**.
   Apps remain eager.
+- A user's own Personal Chat Skills come from their personal Space only.
+  Organisation Skills reach Personal Chat through the administrator's policy.
 - Organisation approval and exact pins do not update existing resources
   automatically.
 - This release has no external Skill marketplace or package installation flow.

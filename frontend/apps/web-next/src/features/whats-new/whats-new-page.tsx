@@ -1,6 +1,6 @@
 "use client";
 
-import { releases, visibleEntries } from "@eneo/whats-new";
+import { isUnreleased, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Sparkles } from "lucide-react";
@@ -32,9 +32,8 @@ export function WhatsNewPage({ title }: { title: string }) {
   const t = useTranslations();
   const locale = useLocale() as Locale;
   const { can, settings } = useAppContext();
-  const { seenVersion, markLatestSeen, resetState } = useWhatsNew();
+  const { releases, seenVersion, markLatestSeen, resetState } = useWhatsNew();
   const { running, start } = useTour();
-  const isAdmin = can("admin");
   const [seenAtOpen] = useState<string | null>(() => seenVersion ?? null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(
     releases[0]?.version ?? null
@@ -45,9 +44,10 @@ export function WhatsNewPage({ title }: { title: string }) {
   // Its button shows the tour is running (aria-busy) and keeps focus; while a
   // tour runs, starting another is ignored.
   const [tourFrom, setTourFrom] = useState<string | null>(null);
-  const current = releases.find((release) => release.version === selectedVersion) ?? null;
-  const entries = current ? filterEntries(current, filters, isAdmin) : [];
-  const total = current ? visibleEntries(current, isAdmin).length : 0;
+  const current =
+    releases.find((release) => release.version === selectedVersion) ?? releases[0] ?? null;
+  const entries = current ? filterEntries(current, filters, can) : [];
+  const total = current ? visibleEntries(current, can).length : 0;
   const countText = t("whats_new_count", { shown: entries.length, total });
   const announce = useAnnounce();
   const announcedCount = useRef<string | null>(null);
@@ -58,7 +58,7 @@ export function WhatsNewPage({ title }: { title: string }) {
     }
     announcedCount.current = countText;
   }, [countText, announce]);
-  const areas = current ? areasPresent(current, isAdmin) : [];
+  const areas = current ? areasPresent(current, can) : [];
 
   useEffect(() => {
     void markLatestSeen();
@@ -66,7 +66,7 @@ export function WhatsNewPage({ title }: { title: string }) {
 
   function selectRelease(release: Release) {
     setSelectedVersion(release.version);
-    if (filters.area && !areasPresent(release, isAdmin).includes(filters.area)) {
+    if (filters.area && !areasPresent(release, can).includes(filters.area)) {
       setFilters((previous) => ({ ...previous, area: null }));
     }
   }
@@ -124,18 +124,24 @@ export function WhatsNewPage({ title }: { title: string }) {
                 <button
                   key={release.version}
                   type="button"
-                  aria-pressed={release.version === selectedVersion}
+                  aria-pressed={release.version === current.version}
                   onClick={() => selectRelease(release)}
                   className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
                 >
-                  {release.version}
-                  {!release.date && (
-                    <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
-                  )}
-                  {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
+                  {isUnreleased(release) ? (
+                    t("whats_new_upcoming")
+                  ) : (
                     <>
-                      <span aria-hidden="true" className="bg-success size-2 rounded-full" />
-                      <span className="sr-only">{t("whats_new_new_for_you")}</span>
+                      {release.version}
+                      {!release.date && (
+                        <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
+                      )}
+                      {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
+                        <>
+                          <span aria-hidden="true" className="bg-success size-2 rounded-full" />
+                          <span className="sr-only">{t("whats_new_new_for_you")}</span>
+                        </>
+                      )}
                     </>
                   )}
                 </button>
@@ -146,12 +152,19 @@ export function WhatsNewPage({ title }: { title: string }) {
           <section aria-labelledby={`release-${current.version}`} className="space-y-5">
             <div className="flex flex-wrap items-center gap-3">
               <h2 id={`release-${current.version}`} className="text-xl font-semibold">
-                {t("whats_new_release", { version: current.version })}
+                {isUnreleased(current)
+                  ? t("whats_new_unreleased")
+                  : t("whats_new_release", { version: current.version })}
               </h2>
               <span className="text-muted-foreground text-sm">
-                {current.date ? formatDate(current.date) : t("whats_new_upcoming")}
+                {isUnreleased(current)
+                  ? t("whats_new_unreleased_hint")
+                  : current.date
+                    ? formatDate(current.date)
+                    : t("whats_new_upcoming")}
               </span>
               {seenAtOpen !== null &&
+                !isUnreleased(current) &&
                 (isReadRelease(current, seenAtOpen) ? (
                   <span className="text-muted-foreground text-xs">{t("whats_new_read")}</span>
                 ) : (
@@ -159,14 +172,14 @@ export function WhatsNewPage({ title }: { title: string }) {
                     {t("whats_new_new_for_you")}
                   </Badge>
                 ))}
-              {tourEntries(current, isAdmin).length > 0 && (
+              {tourEntries(current, can).length > 0 && (
                 <Button
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
                   className="ml-auto"
                   aria-busy={(running && tourFrom === "release") || undefined}
                   onClick={() =>
-                    void startEntries("release", tourEntries(current, isAdmin), current.version)
+                    void startEntries("release", tourEntries(current, can), current.version)
                   }
                 >
                   {t("whats_new_tour_start")}
@@ -209,9 +222,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                 </div>
               </div>
             )}
-            {total === 0 ? (
-              <p className="text-muted-foreground">{t("whats_new_empty")}</p>
-            ) : entries.length === 0 ? (
+            {entries.length === 0 ? (
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground">{t("whats_new_no_match")}</span>
                 <Button

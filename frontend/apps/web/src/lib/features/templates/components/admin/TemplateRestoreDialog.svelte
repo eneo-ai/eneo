@@ -1,12 +1,10 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Undo } from "@lucide/svelte";
+  import Undo from "@lucide/svelte/icons/undo";
   import { invalidate } from "$app/navigation";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo.js";

@@ -57,7 +57,7 @@ Backflow (patches):
 #### `develop`
 - Integration branch for new features
 - Always deployable to dev environment
-- Protected: requires PR with approval
+- Protected: requires a PR approved by a member of `@eneo-ai/core-maintainers`, merged through the merge queue
 
 #### `release/v1.X`
 - Created from `develop` when ready to release or stabilize a minor version
@@ -65,6 +65,7 @@ Backflow (patches):
 - All version tags (`v1.X.Y`) live here
 - Test via RC tags (`:v1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
+- Protected: only members of `@eneo-ai/core-maintainers` can create, push to or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
 
 ### Supporting Branches
 
@@ -121,12 +122,18 @@ Once merged to develop:
 
 Every release goes through at least one RC tag for testing. See [Release Stabilization (RC Process)](#release-stabilization-rc-process) for the full flow.
 
-Before tagging, make sure the user-facing release notes are on the release branch: `frontend/packages/whats-new/releases.json` must have an entry for the version with `date` set, reviewed by the release owner. The entry is drafted from the `## User-facing` sections of merged PRs — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md). It ships inside the frontend image as the in-app **What's new** page and is published on docs.eneo.ai; the GitHub release notes below remain the developer/operator-facing changelog.
+Before tagging, make sure the user-facing release notes are on the release branch and dated, reviewed by the release owner. Nobody types the version or the date into `frontend/packages/whats-new/releases.json`: on `develop` new entries go into the `next` block, `cut` names it when the release branch is created, and `finalize` dates it (see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md)). The notes ship inside the frontend image as the in-app **What's new** page and are published on docs.eneo.ai; the GitHub release notes below remain the developer/operator-facing changelog.
 
-Run the tag rule locally before creating the release, so a missing date is caught before a GitHub release exists whose image build then fails:
+On a branch from `release/vX.Y`, date the notes and run the tag rule the image build will run, then merge the change before creating the release:
 
 ```bash
-python3 scripts/check_whats_new.py --repo-root . --release-tag vX.Y.Z
+python3 scripts/release_notes.py finalize X.Y.Z
+```
+
+After the final release is published, bring its notes to `develop` in a pull request, which also moves its entries out of `next`:
+
+```bash
+python3 scripts/release_notes.py port X.Y.Z --from origin/release/vX.Y
 ```
 
 Once the RC is stable, create the final release via GitHub UI:
@@ -171,8 +178,12 @@ develop ──► create release/v1.8
 ```bash
 git checkout develop && git pull
 git checkout -b release/v1.8
+python3 scripts/release_notes.py cut 1.8   # the "next" What's new block becomes 1.8.0
+git commit -am "docs(whats-new): name the release notes for v1.8.0"
 git push origin release/v1.8
 ```
+
+CI rejects a `next` block on a release branch and an undated release block on `develop`, so the cut cannot be forgotten and notes for an unreleased version cannot land on `develop` under a version number.
 
 **2. Create the first RC via GitHub UI:**
 

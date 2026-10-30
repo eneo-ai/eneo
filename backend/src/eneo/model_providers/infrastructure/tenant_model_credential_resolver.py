@@ -59,6 +59,16 @@ class TenantModelCredentialResolver:
                     "Encryption key may be incorrect or data corrupted."
                 )
 
+        # Rows written before keys were trimmed on save may hold "sk-abc\n"
+        # or whitespace only; neither is a header value a server accepts.
+        api_key = str(api_key).strip()
+        if not api_key:
+            if not required:
+                return None
+            raise ValueError(
+                f"No API key found in credentials for provider {self.provider_id}"
+            )
+
         logger.debug(
             "Tenant model credential resolved",
             extra={

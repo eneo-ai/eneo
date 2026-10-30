@@ -1,11 +1,9 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
-  import { Paperclip } from "@lucide/svelte";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
   import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { m } from "$lib/paraglide/messages";

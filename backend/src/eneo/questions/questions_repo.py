@@ -29,7 +29,7 @@ from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillExecutionReference,
 )
 
@@ -40,11 +40,13 @@ if TYPE_CHECKING:
 
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
-_SKILL_ACTIVATION_ADAPTER = TypeAdapter(SkillActivationEvidenceV1)
+_SKILL_ACTIVATION_ADAPTER: TypeAdapter[SkillActivationEvidence] = TypeAdapter(
+    SkillActivationEvidence
+)
 
 
 class StoredSkillActivation(NamedTuple):
-    evidence: SkillActivationEvidenceV1 | None
+    evidence: SkillActivationEvidence | None
 
 
 class QuestionSessionPartner(NamedTuple):
@@ -304,7 +306,7 @@ class QuestionRepository:
         logging_details: "LoggingDetails | None" = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
         """Update an existing placeholder Question row with the final or partial answer.
 
@@ -383,7 +385,7 @@ class QuestionRepository:
     def _serialize_skill_runtime_state(
         *,
         skill_provenance: Sequence[SkillExecutionReference] | None,
-        skill_activation: SkillActivationEvidenceV1 | None,
+        skill_activation: SkillActivationEvidence | None,
     ) -> dict[str, object]:
         values: dict[str, object] = {}
         if skill_provenance is not None:
@@ -404,7 +406,7 @@ class QuestionRepository:
         question_id: UUID,
         tenant_id: UUID,
         skill_provenance: Sequence[SkillExecutionReference],
-        skill_activation: SkillActivationEvidenceV1,
+        skill_activation: SkillActivationEvidence,
     ) -> None:
         """Persist final Skill state when provider work fails before an answer."""
 

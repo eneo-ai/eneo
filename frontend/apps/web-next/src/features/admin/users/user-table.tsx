@@ -110,10 +110,15 @@ export function UserTable({
                 )}
               </TableCell>
               <TableCell>
-                <StatusLabel
-                  status={STATE_TONE[user.state] ?? "neutral"}
-                  label={stateLabel(user.state)}
-                />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusLabel
+                    status={STATE_TONE[user.state] ?? "neutral"}
+                    label={stateLabel(user.state)}
+                  />
+                  {user.password_change_required && (
+                    <Badge label={t("admin_password_change_required_badge")} />
+                  )}
+                </div>
               </TableCell>
               <TableCell className="text-end">
                 <UserActions user={user} onRemoved={onRemoved} />

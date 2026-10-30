@@ -18,6 +18,9 @@
     "format": "prettier --write .",
     "test": "bun test src"
   },
+  "dependencies": {
+    "@eneo/eneo-js": "workspace:*"
+  },
   "devDependencies": {
     "prettier": "^3.9.4"
   },

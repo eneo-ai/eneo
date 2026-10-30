@@ -2623,6 +2623,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/password-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get tenant password lifecycle policy
+     * @description Get when local Eneo passwords in the current tenant must be replaced: after an administrator sets one, and after a maximum age.
+     */
+    get: operations["get_password_policy_api_v1_admin_password_policy_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update tenant password lifecycle policy
+     * @description Update when local Eneo passwords in the current tenant must be replaced. Only the given fields change; a null max_age_days disables rotation.
+     */
+    patch: operations["update_password_policy_api_v1_admin_password_policy_patch"];
+    trace?: never;
+  };
   "/api/v1/admin/api-key-policy": {
     parameters: {
       query?: never;
@@ -4677,7 +4701,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon by ID. Requires authentication and ownership.
+     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;
@@ -5590,6 +5614,23 @@ export interface paths {
     };
     /** Get Info Blob Page */
     get: operations["get_info_blob_page_api_v1_websites__id__info_blobs_page__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/content-folders/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Content Folders */
+    get: operations["get_content_folders_api_v1_websites__id__content_folders__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -11428,6 +11469,9 @@ export interface components {
       /** Bindings */
       bindings: components["schemas"]["AssistantSkillBindingSummary"][];
       runtime: components["schemas"]["AssistantSkillRuntimeSummary"] | null;
+      /** Organisation Bindings */
+      organisation_bindings?: components["schemas"]["AssistantSkillBindingSummary"][];
+      personal_layer?: components["schemas"]["PersonalChatSkillLayerPublic"] | null;
     };
     /** AssistantSkillRuntimeSummary */
     AssistantSkillRuntimeSummary: {
@@ -12180,7 +12224,11 @@ export interface components {
        * Format: uuid
        */
       message_id: string;
-      skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
+      /** Skill Activation */
+      skill_activation:
+        | components["schemas"]["SkillActivationEvidenceV1"]
+        | components["schemas"]["SkillActivationEvidenceV2"]
+        | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -14487,7 +14535,11 @@ export interface components {
       | 9062
       | 9063
       | 9064
-      | 9069;
+      | 9069
+      | 9070
+      | 9075
+      | 9076
+      | 9080;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -19176,6 +19228,46 @@ export interface components {
       new_password: string;
     };
     /**
+     * PasswordLifecyclePolicy
+     * @description Tenant policy for when a local password must be replaced.
+     *
+     *     Stored as ``tenants.password_policy`` (JSONB). Missing keys fall back to
+     *     these defaults, so rows written before a key existed keep working.
+     *
+     *     A password someone else set is always one-time and is not a tenant
+     *     choice; only the sysadmin API and the deployment seed may opt a single
+     *     account out (``password_change_required``).
+     */
+    PasswordLifecyclePolicy: {
+      /**
+       * Max Age Days
+       * @description Days a local password stays valid before the account must choose a new one at its next password login. Unset disables rotation.
+       */
+      max_age_days?: number | null;
+    };
+    /** PasswordLifecyclePolicyUpdate */
+    PasswordLifecyclePolicyUpdate: {
+      /** Max Age Days */
+      max_age_days?: number | null;
+    };
+    /**
+     * PasswordStatusPublic
+     * @description Where a local password stands against the tenant lifecycle policy.
+     *
+     *     ``change_required`` is true only when the current session is blocked
+     *     until the password is replaced; the dates are reported regardless.
+     */
+    PasswordStatusPublic: {
+      /** Change Required */
+      change_required: boolean;
+      /** Reason */
+      reason?: ("admin_set" | "expired") | null;
+      /** Changed At */
+      changed_at?: string | null;
+      /** Expires At */
+      expires_at?: string | null;
+    };
+    /**
      * PatchFederationRequest
      * @description Request model for partially updating the current tenant federation config.
      */
@@ -19263,6 +19355,7 @@ export interface components {
       | "assistants"
       | "skills"
       | "skills_management"
+      | "personal_skills"
       | "personal_chat"
       | "group_chats"
       | "apps"
@@ -19318,6 +19411,56 @@ export interface components {
        */
       expected_published_revision_id: string;
     };
+    /**
+     * PersonalChatSkillLayerPublic
+     * @description Whether the person's own Skills run in their personal chat, and why not.
+     */
+    PersonalChatSkillLayerPublic: {
+      status: components["schemas"]["PersonalSkillLayerStatus"];
+      reason: components["schemas"]["PersonalSkillLayerReason"] | null;
+      /** Detail */
+      detail:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+    };
+    /**
+     * PersonalSkillLayerEvidence
+     * @description What happened to the personal chat's own Skills on one turn.
+     */
+    PersonalSkillLayerEvidence: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "applied" | "suspended";
+      reason?: components["schemas"]["PersonalSkillLayerReason"] | null;
+      /** Detail */
+      detail?:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+      /** References */
+      references: components["schemas"]["SkillActivationReference"][];
+    };
+    /**
+     * PersonalSkillLayerReason
+     * @description Why a personal layer is suspended; the first failing check wins.
+     * @enum {string}
+     */
+    PersonalSkillLayerReason:
+      | "permission_missing"
+      | "attachment_limit_exceeded"
+      | "model_context_exceeded"
+      | "on_demand_unavailable"
+      | "personal_skill_does_not_fit"
+      | "organisation_skill_crowded_out";
+    /**
+     * PersonalSkillLayerStatus
+     * @description Whether the personal chat's own Skills run (see personal_chat_skill_layers).
+     * @enum {string}
+     */
+    PersonalSkillLayerStatus: "empty" | "applied" | "suspended";
     /**
      * PolicyActor
      * @enum {string}
@@ -20009,6 +20152,10 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Candidate Factor */
+      candidate_factor: number;
+      /** Max Candidates */
+      max_candidates: number;
     };
     /** RerankModelSecurityStatus */
     RerankModelSecurityStatus: {
@@ -20072,6 +20219,10 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Candidate Factor */
+      candidate_factor: number;
+      /** Max Candidates */
+      max_candidates: number;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -20481,7 +20632,7 @@ export interface components {
       autocut_cutoff?: number | null;
       /**
        * Rerank
-       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores, chunks beyond the model's max_candidates follow in vector order, and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
        * @default false
        */
       rerank?: boolean;
@@ -21145,17 +21296,8 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
-    /**
-     * SkillActivationEvidenceV1
-     * @description Strict, versioned, body-free facts retained with one Question.
-     */
+    /** SkillActivationEvidenceV1 */
     SkillActivationEvidenceV1: {
-      /**
-       * Version
-       * @default 1
-       * @constant
-       */
-      version?: 1;
       effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
       fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
       /** Available */
@@ -21205,6 +21347,74 @@ export interface components {
        * @default 0
        */
       selection_latency_ms?: number;
+      /**
+       * Version
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+    };
+    /**
+     * SkillActivationEvidenceV2
+     * @description V1 plus the personal layer; written only for turns that have one.
+     */
+    SkillActivationEvidenceV2: {
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      /** Initially Active */
+      initially_active: string[];
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+      /**
+       * Version
+       * @default 2
+       * @constant
+       */
+      version?: 2;
+      personal_layer: components["schemas"]["PersonalSkillLayerEvidence"];
     };
     /**
      * SkillActivationFallbackReason
@@ -22950,7 +23160,7 @@ export interface components {
       provider_id: string;
       /**
        * Name
-       * @description Model identifier as served by the provider (e.g. 'rerank-v3.5', 'jina-reranker-v2-base-multilingual', or the name a TEI endpoint serves)
+       * @description Model identifier as served by the provider, without a provider prefix (e.g. 'rerank-v3.5', 'Qwen/Qwen3-Reranker-4B')
        */
       name: string;
       /**
@@ -22988,6 +23198,18 @@ export interface components {
       description?: string | null;
       /** @description Security classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       * @default 5
+       */
+      candidate_factor?: number;
+      /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       * @default 100
+       */
+      max_candidates?: number;
     };
     /** TenantRerankModelUpdate */
     TenantRerankModelUpdate: {
@@ -23023,6 +23245,16 @@ export interface components {
       is_default?: boolean | null;
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Candidate Factor
+       * @description Candidates scored per requested chunk, up to max_candidates.
+       */
+      candidate_factor?: number | null;
+      /**
+       * Max Candidates
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
+       */
+      max_candidates?: number | null;
     };
     /**
      * TenantSharePointAppCreate
@@ -23314,6 +23546,10 @@ export interface components {
       };
       /** Api Key Policy */
       api_key_policy?: {
+        [key: string]: unknown;
+      };
+      /** Password Policy */
+      password_policy?: {
         [key: string]: unknown;
       };
       /** Favorite Providers */
@@ -23909,6 +24145,11 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /**
+       * Password Change Required
+       * @description Whether the account must replace the given password at its first password login. Unset follows the tenant password policy; false skips this initial change. The tenant's max_age_days still applies.
+       */
+      password_change_required?: boolean | null;
     };
     /** UserAdminView */
     UserAdminView: {
@@ -23948,6 +24189,13 @@ export interface components {
       /** Is Active */
       is_active: boolean;
       state: components["schemas"]["UserState"];
+      /** Password Changed At */
+      password_changed_at?: string | null;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
@@ -24116,6 +24364,8 @@ export interface components {
       password_change:
         | components["schemas"]["EneoPasswordChangeCapabilityPublic"]
         | components["schemas"]["ExternalPasswordChangeCapabilityPublic"];
+      /** @description Lifecycle of the local Eneo password against the tenant policy. Absent for accounts without a local password. */
+      password_status?: components["schemas"]["PasswordStatusPublic"] | null;
     };
     /** UserPublicBase */
     UserPublicBase: {
@@ -24245,6 +24495,13 @@ export interface components {
       /** Is Active */
       is_active: boolean;
       state: components["schemas"]["UserState"];
+      /** Password Changed At */
+      password_changed_at?: string | null;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
@@ -24302,6 +24559,13 @@ export interface components {
       /** Is Active */
       is_active: boolean;
       state: components["schemas"]["UserState"];
+      /** Password Changed At */
+      password_changed_at?: string | null;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
@@ -24564,6 +24828,25 @@ export interface components {
       | "crawl_stop_requested"
       | "crawl_active"
       | "crawl_cleanup_pending";
+    /**
+     * WebsiteContentFolderPublic
+     * @description A directory prefix in indexed resource URLs; counts include descendants.
+     */
+    WebsiteContentFolderPublic: {
+      /** Path */
+      path: string;
+      /** Count */
+      count: number;
+      /** Has Children */
+      has_children: boolean;
+    };
+    /** WebsiteContentFoldersPublic */
+    WebsiteContentFoldersPublic: {
+      /** Items */
+      items: components["schemas"]["WebsiteContentFolderPublic"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
     /** WebsiteCreate */
     WebsiteCreate: {
       /** Name */
@@ -27534,6 +27817,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -35375,6 +35667,104 @@ export interface operations {
       };
     };
   };
+  get_password_policy_api_v1_admin_password_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordLifecyclePolicy"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_password_policy_api_v1_admin_password_policy_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordLifecyclePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordLifecyclePolicy"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_api_key_policy_api_v1_admin_api_key_policy_get: {
     parameters: {
       query?: never;
@@ -42182,12 +42572,32 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Not found */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -42224,6 +42634,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -44836,6 +45255,8 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        q?: string;
+        prefix?: string;
       };
       header?: never;
       path: {
@@ -44853,6 +45274,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_content_folders_api_v1_websites__id__content_folders__get: {
+    parameters: {
+      query?: {
+        prefix?: string;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteContentFoldersPublic"];
         };
       };
       /** @description Bad Request */

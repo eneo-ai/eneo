@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
@@ -9,7 +7,8 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import type { Snippet } from "svelte";
-  import { TriangleAlert, ChevronRight } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";

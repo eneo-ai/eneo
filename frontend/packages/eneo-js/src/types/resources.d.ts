@@ -100,6 +100,8 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type PasswordStatus = components["schemas"]["PasswordStatusPublic"];
+export type PasswordLifecyclePolicy = components["schemas"]["PasswordLifecyclePolicy"];
 export type StorageKind = components["schemas"]["StorageKind"];
 export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
 export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
@@ -146,6 +148,8 @@ export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type WebsiteInfoBlobPage =
   components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+export type WebsiteContentFolder = components["schemas"]["WebsiteContentFolderPublic"];
+export type WebsiteContentFolders = components["schemas"]["WebsiteContentFoldersPublic"];
 export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];

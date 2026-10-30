@@ -21,15 +21,16 @@
     isReadRelease,
     type WhatsNewFilters
   } from "$lib/features/whats-new/filters";
+  import { isUnreleased } from "@eneo/whats-new";
   import type { EntryArea, Localized, Release, ReleaseEntry } from "@eneo/whats-new";
-  import { Sparkles } from "@lucide/svelte";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import { get } from "svelte/store";
 
   const { user, settings } = getAppContext();
   const { releases, markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
   const { start, running } = getWhatsNewTour();
   const developerTools = settings.developer_tools_available === true;
-  const isAdmin = user.hasPermission("admin");
+  const can = user.hasPermission;
   const locale = getLocale();
 
   // Snapshot before this visit marks the newest release as seen, so "read"
@@ -40,18 +41,21 @@
   let selectedVersion = $state<string | null>(releases[0]?.version ?? null);
   const current = $derived(releases.find((r) => r.version === selectedVersion) ?? null);
   const currentRead = $derived(current ? isReadRelease(current, seenAtOpen) : false);
-  const areas = $derived(current ? areasPresent([current], isAdmin) : []);
-  const total = $derived(current ? countEntries([current], isAdmin) : 0);
+  // Development builds carry merged changes that no release has yet; they have
+  // no version to show and nothing to mark as read.
+  const currentUnreleased = $derived(current ? isUnreleased(current) : false);
+  const areas = $derived(current ? areasPresent([current], can) : []);
+  const total = $derived(current ? countEntries([current], can) : 0);
 
   let filters = $state<WhatsNewFilters>({ area: null, showMeOnly: false });
-  const entries = $derived(current ? filterEntries(current, filters, isAdmin) : []);
+  const entries = $derived(current ? filterEntries(current, filters, can) : []);
 
   function selectRelease(version: string) {
     selectedVersion = version;
     // An area from the previous release may not exist in this one.
     if (
       filters.area &&
-      !areasPresent([releases.find((r) => r.version === version)!], isAdmin).includes(filters.area)
+      !areasPresent([releases.find((r) => r.version === version)!], can).includes(filters.area)
     ) {
       filters.area = null;
     }
@@ -77,6 +81,12 @@
     );
   }
 
+  function tourVersion(release: Release): string {
+    return isUnreleased(release)
+      ? m.whats_new_upcoming()
+      : m.whats_new_tour_version({ version: release.version });
+  }
+
   // Both navigate away; when an anchor is missing on its page the user
   // still lands on the right screen, which is the documented fallback.
   async function handleShowMe(release: Release, entry: ReleaseEntry) {
@@ -86,7 +96,7 @@
         [{ ...entry.showMe, title: text(entry.title), description: text(entry.body) }],
         {
           done: m.whats_new_spotlight_done(),
-          version: m.whats_new_tour_version({ version: release.version })
+          version: tourVersion(release)
         }
       );
       if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
@@ -96,12 +106,12 @@
   }
 
   function handleTour(release: Release) {
-    start(tourSteps(release, isAdmin, locale), {
+    start(tourSteps(release, can, locale), {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
       progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" }),
-      version: m.whats_new_tour_version({ version: release.version })
+      version: tourVersion(release)
     })
       .then((outcome) => {
         if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
@@ -110,7 +120,7 @@
   }
 
   function tourLength(release: Release): number {
-    return tourSteps(release, isAdmin, locale).length;
+    return tourSteps(release, can, locale).length;
   }
 
   let resetting = $state(false);
@@ -168,13 +178,18 @@
                   onclick={() => selectRelease(release.version)}
                   class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
                 >
-                  {release.version}
-                  {#if !release.date}
-                    <span class="text-xs opacity-80">{m.whats_new_upcoming()}</span>
-                  {/if}
-                  {#if seenAtOpen !== null && !isReadRelease(release, seenAtOpen)}
-                    <span class="bg-positive-default size-2 rounded-full" aria-hidden="true"></span>
-                    <span class="sr-only">{m.whats_new_new_for_you()}</span>
+                  {#if isUnreleased(release)}
+                    {m.whats_new_upcoming()}
+                  {:else}
+                    {release.version}
+                    {#if !release.date}
+                      <span class="text-xs opacity-80">{m.whats_new_upcoming()}</span>
+                    {/if}
+                    {#if seenAtOpen !== null && !isReadRelease(release, seenAtOpen)}
+                      <span class="bg-positive-default size-2 rounded-full" aria-hidden="true"
+                      ></span>
+                      <span class="sr-only">{m.whats_new_new_for_you()}</span>
+                    {/if}
                   {/if}
                 </button>
               {/each}
@@ -184,16 +199,20 @@
           <section aria-labelledby="release-{current.version}" class="flex flex-col gap-5">
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 id="release-{current.version}" class="text-primary text-xl font-semibold">
-                {m.whats_new_release({ version: current.version })}
+                {currentUnreleased
+                  ? m.whats_new_unreleased()
+                  : m.whats_new_release({ version: current.version })}
               </h2>
               <span class="text-muted text-sm">
-                {#if current.date}
+                {#if currentUnreleased}
+                  {m.whats_new_unreleased_hint()}
+                {:else if current.date}
                   {formatDate(current.date)}
                 {:else}
                   {m.whats_new_upcoming()}
                 {/if}
               </span>
-              {#if seenAtOpen !== null}
+              {#if seenAtOpen !== null && !currentUnreleased}
                 {#if currentRead}
                   <span class="text-muted text-xs">{m.whats_new_read()}</span>
                 {:else}

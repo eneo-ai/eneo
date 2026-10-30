@@ -156,6 +156,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9059: "eneo_error_9059", // PASSWORD_POLICY_VIOLATION
   9060: "eneo_error_9060", // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
   9061: "eneo_error_9061", // CURRENT_PASSWORD_INCORRECT
+  9070: "eneo_error_9070", // PASSWORD_CHANGE_REQUIRED
   // Model & provider issues
   9002: "eneo_error_9002", // UNSUPPORTED_MODEL
   9020: "eneo_error_9020", // NO_MODEL_SELECTED
@@ -176,6 +177,9 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Model lifecycle
   9039: "eneo_error_9039", // MODEL_IN_USE
+  // Icons
+  9075: "eneo_error_9075", // ICON_IN_USE
+  9076: "eneo_error_9076", // ICON_NOT_ATTACHABLE
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle

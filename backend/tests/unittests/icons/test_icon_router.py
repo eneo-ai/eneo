@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.database.database import get_session
 from eneo.icons.api import icon_router
 from eneo.icons.icon_service import IconDownload
@@ -131,8 +132,12 @@ def test_icon_upload_returns_and_documents_object_store_503() -> None:
         for route in icon_router.router.routes
         if isinstance(route, APIRoute) and route.endpoint is icon_router.create_icon
     )
-    assert len(route.dependant.dependencies) == 1
-    app.dependency_overrides[route.dependant.dependencies[0].call] = Container
+    container_dependency, creation_gate = (
+        dependency.call for dependency in route.dependant.dependencies
+    )
+    assert creation_gate is require_user_for_creation
+    app.dependency_overrides[container_dependency] = Container
+    app.dependency_overrides[creation_gate] = lambda: None
 
     response = TestClient(app, raise_server_exceptions=False).post(
         "/icons/",

@@ -58,8 +58,10 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
+from eneo.main.config import get_settings
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
+from eneo.main.stream_lifecycle import close_provider_stream
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -493,6 +495,7 @@ def _get_supported_openai_params(model: str) -> list[str] | None:
 
 
 async def _acompletion_call(**kwargs: Any) -> Any:
+    kwargs.setdefault("timeout", get_settings().completion_request_timeout_seconds)
     return await litellm_transport.acompletion(**kwargs)
 
 
@@ -596,7 +599,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         - Anthropic: "anthropic/claude-3-5-sonnet-20241022"
     """
 
-    MAX_TOOL_ROUNDS = 10
+    # From this many rounds before the cap, the model is told how many remain
+    # so it can finish on its own instead of being cut off mid-task.
+    TOOL_ROUNDS_LEFT_WARNING = 2
 
     # Class-level default so adapters built without __init__ (tests) send none.
     outbound_headers: ProviderOutboundHeaders | None = None
@@ -915,6 +920,32 @@ class TenantModelAdapter(CompletionModelAdapter):
             context_prompt_tokens=new.context_prompt_tokens,
             context_completion_tokens=new.context_completion_tokens,
         )
+
+    def _note_tool_rounds_left(
+        self, messages: list[dict[str, Any]], *, rounds_left: int
+    ) -> None:
+        """Tell the model how many tool rounds remain once few are left.
+
+        The note rides on the round's last tool result, the one message
+        every provider accepts at this point of the exchange.
+        """
+        if rounds_left > self.TOOL_ROUNDS_LEFT_WARNING or not messages:
+            return
+        last = messages[-1]
+        if last.get("role") != "tool" or not isinstance(last.get("content"), str):
+            return
+        if rounds_left == 0:
+            note = (
+                "No tool rounds remain in this turn. Answer now using the "
+                "information already gathered."
+            )
+        else:
+            note = (
+                f"{rounds_left} tool round(s) remain in this turn. Use them for "
+                "what the answer still needs; if the task cannot be finished, "
+                "say what is left."
+            )
+        last["content"] = f"{last['content']}\n\n[{note}]"
 
     def _append_tool_round_limit_refusal(
         self,
@@ -1395,6 +1426,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 tool_round = 0
+                max_rounds = get_settings().max_tool_rounds
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
                 captured_images: list[GeneratedFile] = []
@@ -1483,7 +1515,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     return True
 
                 while msg.tool_calls and (mcp_proxy or activation_available):
-                    if tool_round >= self.MAX_TOOL_ROUNDS:
+                    if tool_round >= max_rounds:
                         if forced_final:
                             # The provider ignored tool_choice="none" and asked
                             # for tools again; end with what we have.
@@ -1495,7 +1527,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         forced_final = True
                         logger.warning(
                             f"[MCP] Reached max tool rounds "
-                            f"({self.MAX_TOOL_ROUNDS}); forcing a final answer "
+                            f"({max_rounds}); forcing a final answer "
                             "without tools"
                         )
                         self._append_tool_round_limit_refusal(
@@ -1669,6 +1701,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             litellm_kwargs=litellm_kwargs,
                             skill_runtime=skill_runtime,
                         )
+                    self._note_tool_rounds_left(
+                        messages, rounds_left=max_rounds - tool_round
+                    )
                     if not await _follow_up_completion():
                         break
 
@@ -1839,6 +1874,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         Yields:
             Completion: Chunks of completion (yields error events for mid-stream failures)
         """
+        # The provider stream currently being read. Each tool round replaces
+        # it; whichever one is active when the loop ends is closed below.
+        active_provider_stream: AsyncIterator[_LiteLLMStreamChunk] | None = None
         try:
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration"
@@ -1850,6 +1888,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 if prepared
                 else cast(AsyncIterator[_LiteLLMStreamChunk], stream)
             )
+            active_provider_stream = source_stream
             mcp_proxy = prepared.mcp_proxy if prepared else None
             skill_runtime = prepared.skill_runtime if prepared else None
             activation_available = (
@@ -2173,7 +2212,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 litellm_kwargs = prepared.kwargs
                 eneo_tools: list[dict[str, Any]] = prepared.eneo_tools
 
-                max_rounds = self.MAX_TOOL_ROUNDS
+                max_rounds = get_settings().max_tool_rounds
                 tool_round = 0
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
@@ -2278,6 +2317,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 **litellm_kwargs,
                             ),
                         )
+                        active_provider_stream = follow_up
                         async for comp in _drain_stream(
                             follow_up,
                             result,
@@ -2695,6 +2735,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                         skill_runtime=skill_runtime,
                     )
 
+                    self._note_tool_rounds_left(
+                        messages, rounds_left=max_rounds - tool_round
+                    )
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(
                         AsyncIterator[_LiteLLMStreamChunk],
@@ -2709,6 +2752,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                     # Drain follow-up stream
+                    active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,
                         result,
@@ -2789,6 +2833,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             **litellm_kwargs,
                         ),
                     )
+                    active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,
                         result,
@@ -2867,6 +2912,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
+        finally:
+            # A finished stream is already exhausted; an aborted one still holds
+            # the provider's HTTP response until it is closed.
+            await close_provider_stream(active_provider_stream)
 
     @override
     def get_model_route(self) -> str:

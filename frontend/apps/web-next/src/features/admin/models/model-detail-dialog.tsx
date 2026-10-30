@@ -59,7 +59,7 @@ export function ModelDetailDialog({
         <DialogHeader>
           <DialogTitle>{modelDisplayName(model)}</DialogTitle>
         </DialogHeader>
-        {kind === "image" ? (
+        {kind === "image" || kind === "rerank" ? (
           <InfoTab model={model} kind={kind} t={t} />
         ) : (
           <Tabs defaultValue="info">
@@ -136,6 +136,11 @@ function InfoTab({
               </dd>
             </div>
           )}
+        </>
+      ) : kind === "rerank" ? (
+        <>
+          <Field label={t("rerank_candidate_factor")} value={String(get("candidate_factor"))} />
+          <Field label={t("rerank_max_candidates")} value={String(get("max_candidates"))} />
         </>
       ) : (
         <div>

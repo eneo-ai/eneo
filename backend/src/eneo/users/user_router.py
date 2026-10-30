@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import aiohttp
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,11 +51,12 @@ from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import validate_public_origin
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
-from eneo.main.logging import get_logger
+from eneo.main.logging import get_logger, redact_values
 from eneo.main.models import CursorPaginatedResponse
-from eneo.main.request_context import set_request_context
+from eneo.main.request_context import get_request_context, set_request_context
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import has_registered_handler
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
 from eneo.users.password import (
@@ -62,6 +64,7 @@ from eneo.users.password import (
     LocalPasswordPolicy,
     PasswordChangeError,
 )
+from eneo.users.password_lifecycle import password_status_for
 from eneo.users.user import (
     EneoPasswordChangeCapabilityPublic,
     ExternalPasswordChangeCapabilityPublic,
@@ -248,12 +251,24 @@ async def _resolve_single_tenant_redirect_uri(
     return resolved_redirect_uri
 
 
+# ``UserLogin`` validates the OAuth2 form, whose field for the email is
+# ``username``. Report locations the way FastAPI reports the form itself.
+_LOGIN_FORM_FIELDS = {"email": "username"}
+
+
+def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
+    if not loc:
+        return ("body",)
+    first, *rest = loc
+    return ("body", _LOGIN_FORM_FIELDS.get(str(first), first), *rest)
+
+
 @router.post(
     "/login/token/",
     response_model=AccessToken,
     name="Login",
     description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401, 429, 500]),
+    responses=responses.get_responses([401, 403, 429, 500]),
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -267,8 +282,12 @@ async def user_login_with_email_and_password(
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
 
-    # Generate correlation ID for request tracking
-    correlation_id = secrets.token_hex(8)
+    # Logs, the correlation header and support lookups share one id: the
+    # request context's (the trace id when a span is active, otherwise the
+    # caller's legacy header). Generate one only when the middleware had none.
+    correlation_id = cast(
+        str | None, get_request_context().get("correlation_id")
+    ) or secrets.token_hex(8)
     set_request_context(correlation_id=correlation_id)
 
     # Capture source IP (proxy-aware)
@@ -279,7 +298,25 @@ async def user_login_with_email_and_password(
     email = form_data.username
     password = form_data.password
 
-    # Log login attempt
+    # The shared request-validation handler owns the public 422 contract.
+    # Do not pass credentials into its exception or into structured logs.
+    try:
+        UserLogin(email=email, password=password)
+    except ValidationError as e:
+        errors = e.errors(include_input=False, include_context=False, include_url=False)
+        logger.warning(
+            "Login failed: validation error",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "source_ip": source_ip,
+                "validation_types": [error["type"] for error in errors],
+            },
+        )
+        raise RequestValidationError(
+            [{**error, "loc": _login_form_location(error["loc"])} for error in errors]
+        ) from None
+
     logger.info(
         "Username/password login initiated",
         extra={
@@ -289,26 +326,6 @@ async def user_login_with_email_and_password(
             "source_ip": source_ip,
         },
     )
-
-    # Validate input format
-    try:
-        UserLogin(email=email, password=password)
-    except ValidationError as e:
-        logger.error(
-            "Login failed: validation error",
-            extra={
-                "correlation_id": correlation_id,
-                "auth_method": "password",
-                "email": email,
-                "source_ip": source_ip,
-                "errors": e.errors(),
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.errors(),
-            headers={"X-Correlation-ID": correlation_id},
-        )
 
     redis_client = container.redis_client()
     attempt: LoginAttempt | None
@@ -374,7 +391,7 @@ async def user_login_with_email_and_password(
 
         return result
 
-    except AuthenticationException as e:
+    except AuthenticationException:
         # Expected authentication failure - use warning level (not error)
         logger.warning(
             "Login failed: invalid credentials",
@@ -383,7 +400,6 @@ async def user_login_with_email_and_password(
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
-                "error": str(e),
             },
         )
         detail: dict[str, object] = {
@@ -398,27 +414,52 @@ async def user_login_with_email_and_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,
             headers={"X-Correlation-ID": correlation_id},
-        )
+        ) from None
 
     except Exception as e:
-        # Unexpected system error - use error level with full traceback
+        if has_registered_handler(request.app, e):
+            # A denial with a canonical response (inactive user, suspended
+            # organisation, ...). The password was verified before it was
+            # raised, so keep the origin on record.
+            logger.warning(
+                "Login refused after credential verification",
+                extra={
+                    "correlation_id": correlation_id,
+                    "auth_method": "password",
+                    "email": email,
+                    "source_ip": source_ip,
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise
+
+        # Exception values and chained tracebacks may quote the submitted
+        # password; redact it rather than drop the diagnostics.
+        redacted_traceback = redact_values(
+            "".join(traceback.format_exception(e)), password
+        )
         logger.error(
-            "Login failed: unexpected error",
-            exc_info=True,  # Include stack trace
+            # Plain-text logging only renders the message, not extra fields.
+            "Login failed: unexpected error\n%s",
+            redacted_traceback,
             extra={
                 "correlation_id": correlation_id,
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
                 "error_type": type(e).__name__,
-                "error": str(e),
+                "error": redact_values(str(e), password),
+                "traceback": redacted_traceback,
             },
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during login",
+            detail={
+                "code": "login_unavailable",
+                "message": "An unexpected error occurred during login",
+            },
             headers={"X-Correlation-ID": correlation_id},
-        )
+        ) from None
 
 
 @router.post(
@@ -862,6 +903,7 @@ async def get_tenant_users(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+    reachable_before_password_change=True,
 )
 async def get_local_password_policy() -> LocalPasswordPolicy:
     return LOCAL_PASSWORD_POLICY
@@ -877,6 +919,7 @@ async def get_local_password_policy() -> LocalPasswordPolicy:
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+    reachable_before_password_change=True,
 )
 async def get_currently_authenticated_user(
     current_user: Annotated[
@@ -899,6 +942,7 @@ async def get_currently_authenticated_user(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
         password_change=password_change,
+        password_status=password_status_for(current_user),
     )
 
 
@@ -950,6 +994,7 @@ async def _audit_password_change(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+    reachable_before_password_change=True,
 )
 async def change_current_user_password(
     password_change: PasswordChangeRequest,
@@ -1034,6 +1079,7 @@ async def change_current_user_password(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+    reachable_before_password_change=True,
 )
 async def invalidate_current_user_sessions(
     container: Annotated[

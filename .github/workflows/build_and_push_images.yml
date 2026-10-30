@@ -37,7 +37,7 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           branch="release/$(echo "$tag" | grep -oE '^v[0-9]+\.[0-9]+')"
           git merge-base --is-ancestor HEAD "origin/$branch"
-          python3 scripts/check_whats_new.py --repo-root . --release-tag "$tag"
+          python3 scripts/check_whats_new.py --repo-root . --branch "$branch" --release-tag "$tag"
       - name: Release and deployment contract tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_release_*.py'
   checks:

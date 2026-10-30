@@ -54,6 +54,7 @@ import { initModules } from "./endpoints/modules.js";
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
+ * @param {(error: import("./client/client.js").EneoError) => void} [args.onError] Observe normalized request failures before they are thrown.
  */
 export function createEneo(args) {
   const client = createClient(args);

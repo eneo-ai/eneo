@@ -40,9 +40,13 @@ space) — `href` must be a fixed path.
 When an assistant opens the PR it fills this in from the diff; the author
 corrects it. Context is cheap at PR time and expensive at release time.
 
-## 2. Draft the release entry (assistant, at release time)
+## 2. Draft the entries (assistant, on develop)
 
-Run this when the release branch is cut or the tag is about to be pushed.
+Entries for merged changes go into the `next` block at the top of
+`releases.json` on `develop`, at the latest right before the release branch
+is cut. Never write a version number or a date: the release flow below
+assigns both, so a feature that misses a release cannot be announced as part
+of it.
 
 1. Collect the raw material — every `## User-facing` section merged since the
    previous final release, grouped into described / No / missing:
@@ -59,20 +63,22 @@ Run this when the release branch is cut or the tag is about to be pushed.
    say in the PR that adds the entry which ones you used.
 
 2. Write one entry per change (merge PRs that describe the same feature) into
-   a new release object at the **top** of `releases` in `releases.json`:
+   the `next` block (`{ "version": "next", "entries": [...] }`, always first;
+   create it when it is missing):
 
-   | Field      | Rule                                                                                                                                       |
-   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                 |
-   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                           |
-   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                          |
-   | `aliases`  | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release. |
-   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                               |
-   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                            |
-   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                    |
-   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                              |
-   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                     |
-   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                 |
+   | Field         | Rule                                                                                                                                                     |
+   | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `version`     | `next` on `develop`. Release branches carry the semver that `cut` gave it, matching the tag (`v2.3.0` → `2.3.0`).                                        |
+   | `date`        | Never by hand: `finalize` sets it before the final tag.                                                                                                  |
+   | `id`          | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                                        |
+   | `aliases`     | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release.               |
+   | `type`        | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                                             |
+   | `area`        | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                                          |
+   | `audience`    | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                                  |
+   | `permissions` | Optional `{ "allOf": [...], "anyOf": [...] }` using actual Eneo permission names. Both groups must pass when present. See Permission requirements below. |
+   | `title`       | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                                            |
+   | `body`        | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                                   |
+   | `showMe`      | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                               |
 
 3. Editorial rules — the check script enforces the mechanical ones:
 
@@ -87,15 +93,48 @@ Run this when the release branch is cut or the tag is about to be pushed.
      first four, so put the biggest changes first.
    - Do not claim what you cannot see in the PR. If unsure, ask the author.
 
-4. Validate and open a PR:
+4. Validate and open a PR to `develop`:
 
    ```bash
-   python3 scripts/check_whats_new.py --repo-root .
+   python3 scripts/check_whats_new.py --repo-root . --branch develop
    cd frontend && bun run --filter @eneo/whats-new format
    ```
 
-   Title the PR `docs(whats-new): draft release notes for vX.Y.Z`. The
+   Title the PR `docs(whats-new): draft upcoming release notes`. The
    reviewer is the release owner.
+
+## Release flow: versions and dates follow from git
+
+`scripts/release_notes.py` edits only `releases.json`, runs the check with
+the rules of the branch it is meant for, restores the file when they fail
+and prints the git steps. It never commits, tags or pushes.
+
+| When                                 | Where                  | Command                                                                  | Result                                                                                                |
+| ------------------------------------ | ---------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Creating `release/vX.Y` from develop | the new release branch | `python3 scripts/release_notes.py cut X.Y`                               | `next` becomes `X.Y.0`; develop keeps its `next` until the final                                      |
+| Before a final tag (also hotfixes)   | a PR to `release/vX.Y` | `python3 scripts/release_notes.py finalize X.Y.Z [--date]`               | sets the date (default today) and runs the tag rule the image build runs                              |
+| After the final release is published | a PR to `develop`      | `python3 scripts/release_notes.py port X.Y.Z --from origin/release/vX.Y` | copies the dated release, takes its text, keeps develop-only fields and drops its entries from `next` |
+
+During stabilisation, correct the text of the release on its branch only;
+`port` brings the final wording to `develop`. An entry that a release branch
+dropped stays in develop's `next` for the following release. If develop has
+changed a feature since the cut, `port` names the entries whose text it
+replaced: describe the newer behaviour in a new `next` entry.
+
+Porting matches entries by their ids and aliases, preserving develop-only
+fields even after a rename or merge. Former ids and aliases remain aliases
+of the ported entry. If several matching entries disagree on another field
+absent from the release entry, the command stops without writing the file.
+Reconcile that metadata explicitly before running it again; permission
+requirements are never combined automatically.
+
+CI enforces the split (`--branch`, from the pull request's target branch):
+on `develop` every block except `next` must be a dated, final release; a
+`release/vX.Y` branch cannot carry `next` or notes for a later line; and no
+tag ships `next`. A `next` block is never announced, never lights the dot and
+never becomes a seen or announced marker: development builds list it as the
+**Upcoming release**, and docs.eneo.ai shows it under `/dev/` with the anchor
+`#upcoming`.
 
 ## 3. Review (release owner, 15–30 minutes)
 
@@ -107,16 +146,14 @@ titles of PRs marked No as well; the presence check cannot judge correctness.
 Repeat this reconciliation for commits added since the previous RC, especially
 late UI changes. A passing schema check proves shape and links, not coverage.
 
-Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge to the
-release branch before the tag is pushed so the release image ships with its
-own notes, and run the tag rule before creating the GitHub release:
+Read it as a user would. Cut, reorder, sharpen. Before the final tag, run
+`finalize` (above) and merge the result to the release branch, so the release
+image ships with its own dated notes.
 
-```bash
-python3 scripts/check_whats_new.py --repo-root . --release-tag vX.Y.Z
-```
-
-The image build runs the same command on every `v*` tag: a **final** tag
-requires a `date` on every bundled release entry, including older history.
+The image build runs the same check on every `v*` tag
+(`--branch release/vX.Y --release-tag vX.Y.Z`): no tag ships `next`, and a
+**final** tag requires a `date` on every bundled release entry, including
+older history.
 An RC tag accepts undated entries; an entry whose core version is newer than
 the tag fails (notes for a later version must not ship in an older release).
 A hotfix tag needs no entry of its own, but all the notes it does ship must be
@@ -125,8 +162,8 @@ then fails.
 
 ### RC notification identity
 
-Author one content entry for the final core version, such as `2.3.0`.
-The tag validator rejects an RC with no matching release content, so a new
+There is one content entry for the final core version, such as `2.3.0`
+(`cut` creates it). The tag validator rejects an RC with no matching release content, so a new
 candidate cannot silently reuse an older version's notification identity.
 The primary web app uses the installed frontend version from `APP_VERSION`
 to resolve that content as `2.3.0-rc.1` while running that candidate. The page,
@@ -141,23 +178,70 @@ RC backend ignores future markers sent by stale clients, so an old tab cannot
 pre-record the final release. The 2.3 migration corrects RC0's already stored
 `2.3.0` markers to `2.3.0-rc.0` and must ship before the first 2.3 final.
 
+### Permission requirements
+
+`visibleEntries(release, can)` is the canonical app visibility rule. Pass the
+app's existing permission checker, never a role name or an admin boolean.
+`audience: "admin"` requires `admin`; `permissions` adds requirements that even
+administrators must meet. Omit requirements for general news. An omitted group
+places no constraint; a present group must be non-empty. The schema and the CI
+validator reject unknown permissions, empty groups and misspelled keys. Types
+reuse the SDK's `Permission` contract.
+
+When adding or renaming a backend permission, update the permission enum in
+`releases.schema.json` too. The contract test compares it with
+`backend/src/eneo/roles/permissions.py`; CI runs that test when either file
+changes. Assign requirements to relevant news entries explicitly: a new
+permission does not classify news automatically.
+
+Check the actual feature owner before assigning requirements, not the entry's
+area. Current examples:
+
+- Assistant editing needs `assistants`; personal chat has its separate
+  `personal_chat` permission. General chat entries also apply to assistant and
+  group chats (`anyOf: personal_chat, assistants, group_chats`).
+- Capability use additionally needs its capability permission (`file_creation`,
+  `file_analysis`, `image_generation`, `compute`, `charts`). The combined
+  calculation-and-chart workflow needs both `compute` and `charts`.
+- Creating/editing Skills needs both `skills` and `skills_management`.
+- Website crawling needs `websites`; SharePoint import needs `integrations`.
+  Reading websites and integration knowledge has no tenant permission gate
+  (`SpaceActor.tenant_permits`), so read-only status/sync news stays general.
+- Module administration needs both the admin audience and `modules`. Storage,
+  model and organisation Skill administration use their actual `admin` gate;
+  do not infer extra permissions from a feature's name.
+
+Requirements filter relevance to tenant permissions. Resource membership,
+provider availability and tenant feature settings still belong to their feature
+owners; news is not an authorization boundary. Tour preloading continues to
+skip inaccessible resources. The public docs render all entries.
+
+The app hides releases with no visible entries from its picker and computes
+unread state from visible news. The latest bundled release is announced only
+when it has visible entries; an empty latest release does not announce an older
+release instead. Reading visible history still advances the installed release
+marker. Empty news does not write progress or consume reminders, so a later
+permission grant can make that release available. Version/RC ordering and
+per-account reminder keys are unchanged.
+
 ## Maintenance
 
 **Single sources.** `releases.schema.json` owns the shape and the closed
 vocabularies (`type`, `area`, `audience`, locales, patterns). Everything
 else derives from it or is checked against it:
 
-| What                                  | Where                                            | Guarded by                                                       |
-| ------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
-| Vocabularies at runtime               | `src/index.js` (`ENTRY_TYPES`, `ENTRY_AREAS`, …) | read from the schema                                             |
-| TypeScript unions                     | `src/index.d.ts`                                 | `apps/web/.../labels.test.ts` (label maps == schema enums)       |
-| Labels in the app (sv/en)             | `apps/web/src/lib/features/whats-new/labels.ts`  | typed exhaustively + the same test                               |
-| Labels on docs.eneo.ai (en)           | `apps/docs-site/src/components/ReleaseNotes.tsx` | typed exhaustively; unknown values render raw, never crash       |
-| Content rules                         | `scripts/check_whats_new.py`                     | CI (frontend job) + `scripts/tests/test_check_whats_new.py`      |
-| Raw material at release time          | `scripts/collect_user_facing.mjs`                | `--self-test` in the script-tests CI job                         |
-| The `## User-facing` section on PRs   | `.github/scripts/check-user-facing.mjs`          | `--self-test` in the script-tests CI job; shared parser          |
-| Version ordering (all three runtimes) | `version-order.cases.json`                       | package, backend and script tests consume the same ordered cases |
-| Backend version pattern               | `backend/src/eneo/whats_new/whats_new_models.py` | mirrors the schema's `version` pattern; unit test                |
+| What                                   | Where                                            | Guarded by                                                       |
+| -------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| Vocabularies at runtime                | `src/index.js` (`ENTRY_TYPES`, `ENTRY_AREAS`, …) | read from the schema                                             |
+| TypeScript unions                      | `src/index.d.ts`                                 | `apps/web/.../labels.test.ts` (label maps == schema enums)       |
+| Labels in the app (sv/en)              | `apps/web/src/lib/features/whats-new/labels.ts`  | typed exhaustively + the same test                               |
+| Labels on docs.eneo.ai (en)            | `apps/docs-site/src/components/ReleaseNotes.tsx` | typed exhaustively; unknown values render raw, never crash       |
+| Content and branch rules               | `scripts/check_whats_new.py`                     | CI (frontend job) + `scripts/tests/test_check_whats_new.py`      |
+| Versions and dates (cut/finalize/port) | `scripts/release_notes.py`                       | `scripts/tests/test_whats_new_release_notes.py`                  |
+| Raw material at release time           | `scripts/collect_user_facing.mjs`                | `--self-test` in the CI scope job                                |
+| The `## User-facing` section on PRs    | `.github/scripts/check-user-facing.mjs`          | `--self-test` in the CI scope job; shared parser                 |
+| Version ordering (all three runtimes)  | `version-order.cases.json`                       | package, backend and script tests consume the same ordered cases |
+| Backend version pattern                | `backend/src/eneo/whats_new/whats_new_models.py` | mirrors the schema's `releaseVersion` pattern; unit test         |
 
 **Adding an area or type.** Edit the enum in `releases.schema.json`, add the
 member to the union in `src/index.d.ts`, add a label to `labels.ts` (+ the
@@ -214,15 +298,17 @@ when their layout data reloads. New tenants follow the global default (on).
   **seen** (`PUT …/seen/`), the newest release the user has opened the page
   for, and **announced** (`PUT …/announced/`), the newest release they have
   been shown the one-time announcement dialog for. The profile menu shows a
-  dot while `releases[0].version` is newer than the seen marker, and the dot
-  clears when the user opens `/news`.
+  dot while the newest released version (`latestRelease()`, which skips
+  `next`) is newer than the seen marker, and the dot clears when the user
+  opens `/news`.
 - **Announcement.** On the first app load after a release reaches the user,
   a dialog shows the first four visible entries and the total entry count.
   Its primary action starts the walkthrough, or opens the page if there are
   no stops. It is recorded as announced when shown; closing it leaves the
   seen marker alone, so the dot stays until the user opens the page. Accounts
   created after a dated release are marked announced without opening the
-  dialog. Undated development releases announce to all existing accounts.
+  dialog. Undated release candidates announce to all existing accounts; the
+  `next` block is never announced.
 - **Reminder.** "Later" saves a local-storage deadline scoped to the
   user id and installed version. It may announce again in that browser on an app
   load after 24 hours, only while unread. Showing it consumes the reminder; "Not
@@ -230,10 +316,10 @@ when their layout data reloads. New tenants follow the global default (on).
   its reminder. A newer version announces immediately; older clients cannot
   overwrite another version's local reminder. The developer reset clears the
   current local reminder along with the server's seen/announced markers.
-- "Unseen" means `releases[0].version` is **newer** (semver) than the seen
-  version, so a rollback or an older frontend pod during a rolling deploy
-  does not re-light the dot. No coupling to the deployed version number:
-  whatever `releases[0]` is in the shipped bundle is "current". A hotfix
+- "Unseen" means the newest released version is **newer** (semver) than the
+  seen version, so a rollback or an older frontend pod during a rolling
+  deploy does not re-light the dot. No coupling to the deployed version
+  number: whatever is newest in the shipped bundle is "current". A hotfix
   release without user-facing changes therefore needs no entry.
 - **Show me** and **Walk me through** share one app-scoped tour controller.
   Before each navigation it uses SvelteKit's `preloadData` to run that page's
@@ -261,9 +347,12 @@ when their layout data reloads. New tenants follow the global default (on).
 
 ## Backports
 
-A patch release cut from `release/vX.Y` carries its own notes on that
-branch. Cherry-pick the `releases.json` change to `develop` in the same PR
-flow so the file stays a complete history.
+A patch release from `release/vX.Y` carries its own notes on that branch, in
+a new `X.Y.Z` block above the previous release. When the backported change
+already has an entry in develop's `next`, reuse its id. After the patch
+release is published, `port X.Y.Z --from origin/release/vX.Y` places it in
+develop's history and drops the reused entry from `next`, so the file stays a
+complete history without hand-merging.
 
 ## Checks in CI
 
@@ -272,21 +361,25 @@ flow so the file stays a complete history.
   `ci.yml`, so the existing required **CI** check covers it during rollout.
   Once the standalone check is added to the develop ruleset's required
   status checks, remove the `user-facing` caller from `ci.yml` together with
-  its `needs`, `USER_FACING_RESULT` and `check_result` references.
+  its entry in the `ci` job's `needs`, the `user-facing` entry of
+  `expected_jobs` in `.github/scripts/ci-change-scope.mjs`, and the
+  references in `.github/scripts/ci-contract.test.mjs`.
   Merge-queue candidates report it as skipped; each PR was checked before it
   entered the queue.
-- **Frontend job.** `scripts/check_whats_new.py` against the real file (also
-  when only the script changes) and the package's `bun test`.
-- **Script tests job.** `scripts/tests/test_check_whats_new.py` plus the
-  `--self-test` runs of `check-user-facing.mjs` and `collect_user_facing.mjs`.
-- **Image build.** The `--release-tag` rule on every `v*` tag.
+- **Frontend job.** `scripts/check_whats_new.py --branch <target>` against
+  the real file (also when only the script changes) and the package's
+  `bun test`.
+- **Scope and repository checks job.** `scripts/tests/test_check_whats_new.py`
+  and `test_whats_new_release_notes.py`, plus the `--self-test` runs of `check-user-facing.mjs` and
+  `collect_user_facing.mjs`, when `scripts/` or `.github/scripts/` change.
+- **Image build.** The `--branch` and `--release-tag` rules on every `v*` tag.
 
 Focused local runs:
 
 - Backend: `pytest tests/unit/whats_new/test_whats_new_models.py tests/integration/test_whats_new_state.py`
   (the shared version contract and real concurrent PostgreSQL writes).
 - Package: `bun test frontend/packages/whats-new/src/index.test.js`.
-- Scripts: `python3 -m unittest discover -s scripts/tests -p test_check_whats_new.py`,
+- Scripts: `python3 -m unittest discover -s scripts/tests -p 'test_*whats_new*.py'`,
   `node .github/scripts/check-user-facing.mjs --self-test`,
   `node scripts/collect_user_facing.mjs --self-test`.
 - Web, in `frontend/apps/web`: `vitest run --project server src/lib/features/whats-new/`

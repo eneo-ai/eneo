@@ -20,22 +20,41 @@ unbounded recursion this mitigates.
 `node --test scripts/security-patches.test.mjs` exercises the installed copy
 through Nextra → fast-glob → micromatch, including ordinary patterns, excessive
 brace/parenthesis nesting, direct AST inputs and cyclic parents. CI runs it
-before allowing exactly this advisory in the version-based audit. All other
-advisories still fail. Container scans retain the unmodified findings for review;
+before allowing exactly this advisory in the version-based audit. Other high or
+critical advisories still fail; lower severities produce warnings. Container
+scans retain the unmodified findings for review;
 the same tested patch is installed by the frozen Bun install in both Dockerfiles.
 
 The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes
 where upstream parents still pin vulnerable versions. Revisit those overrides
 when the parents accept the fixed releases; do not widen them across API majors.
 
-## katex 0.16.x — GHSA-238p-pmpm-9mq7
+## KaTeX resolution — GHSA-238p-pmpm-9mq7
 
-Reviewed 2026-10-13. Exception expires 2026-12-01 (CI fails after that date).
-Low severity (CVSS 2.1): KaTeX reads inherited `Object.prototype` properties as
-settings, so it only matters on a page that already has prototype pollution.
-The fixed release is 0.18.2, but every dependent (rehype-katex, @streamdown/math,
-mermaid, nextra, micromark-extension-math) still pins `^0.16`, so a root
-resolution would run them against a version they have not released for.
-No patch is installed; `scripts/audit-dependencies.mjs` accepts exactly this
-advisory until the dependents move or the date passes. All other advisories
-still fail.
+Reviewed 2026-10-22. The root resolution selects KaTeX 0.18.11 for both apps
+and the transitive renderers (rehype-katex, Mermaid, Nextra and
+micromark-extension-math). This includes the upstream 0.18.2 fix for inherited
+settings, setting metadata and namespace entries. There is no audit exception.
+
+The resolution overrides the parents' older `^0.16` ranges; remove it once
+those parents require a fixed version. The beta's math and clipboard tests
+cover rendering, size limits and untrusted formulas, including inherited
+`trust` and `processor` properties. Both apps retain the shared
+`@eneo/markdown-math` options. KaTeX 0.18 prefixes internal CSS classes;
+application styles use the stable outer `.katex` and `.katex-display` classes.
+
+## Seroval resolution — CVE-2026-116582 / CVE-2026-116583
+
+Reviewed 2026-10-29. The root resolution selects Seroval 1.6.11, including the
+upstream fixes for [RegExp script injection](https://github.com/advisories/GHSA-9wx9-5pv9-3349)
+and [typed array constructor injection](https://github.com/advisories/GHSA-f86p-h4j2-7qgj).
+There is no audit exception. The installed chain is the beta's
+`@tanstack/react-query-devtools` → `@tanstack/query-devtools` → `solid-js` →
+`seroval`. Remove the override once the parents require a fixed version.
+
+The existing `scripts/security-patches.test.mjs` suite resolves Seroval through
+that chain. It checks synchronous and asynchronous serialization of typed
+arrays with an untrusted own `constructor`, with and without compact buffer
+views, and prevents RegExp sources from ending an HTML script element. It also
+checks typed array contents, RegExp flags, named groups and lookbehinds survive
+the round trip. CI runs these regressions before the dependency audit.

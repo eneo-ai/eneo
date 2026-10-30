@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import ForeignKey, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import (
@@ -110,6 +110,11 @@ class Spaces(BasePublic):
             "tenant_id",
             "id",
             unique=True,
+        ),
+        Index(
+            "ix_spaces_icon_id",
+            "icon_id",
+            postgresql_where=text("icon_id IS NOT NULL"),
         ),
     )
 

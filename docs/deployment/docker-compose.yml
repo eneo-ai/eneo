@@ -237,6 +237,13 @@ services:
     image: pgvector/pgvector:pg16
     container_name: eneo_db
     restart: unless-stopped
+    # PostgreSQL places parallel-query and per-connection shared memory in
+    # /dev/shm, which Docker limits to 64 MB by default. This is an upper
+    # bound, not reserved RAM.
+    shm_size: 1gb
+    # Time for a clean shutdown checkpoint before the container is killed;
+    # the default 10 s can force crash recovery on the next start.
+    stop_grace_period: 2m
     env_file:
       - env_db.env
     volumes:

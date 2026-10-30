@@ -18,6 +18,26 @@ def attachment_token_ceiling(max_input_tokens: int) -> int:
     return max(max_input_tokens - reserve, 0)
 
 
+def _attachment_tokens(files: Sequence[File], model_name: str) -> int:
+    return count_attachment_tokens(
+        text_files=[file for file in files if file.file_type == FileType.TEXT],
+        image_files=[file for file in files if file.file_type == FileType.IMAGE],
+        model_name=model_name,
+    )
+
+
+def prompt_and_files_fit_context(
+    *,
+    max_input_tokens: int,
+    model_name: str,
+    prompt_text: str,
+    files: Sequence[File],
+) -> bool:
+    """The same check as ``assert_prompt_and_files_fit_context``, as a value."""
+    used = count_tokens(prompt_text, model_name) + _attachment_tokens(files, model_name)
+    return used <= attachment_token_ceiling(max_input_tokens)
+
+
 def assert_prompt_and_files_fit_context(
     *,
     max_input_tokens: int,
@@ -28,11 +48,7 @@ def assert_prompt_and_files_fit_context(
 ) -> None:
     """Check the baseline first, then each named alternative against one ceiling."""
     ceiling = attachment_token_ceiling(max_input_tokens)
-    attachment_tokens = count_attachment_tokens(
-        text_files=[file for file in files if file.file_type == FileType.TEXT],
-        image_files=[file for file in files if file.file_type == FileType.IMAGE],
-        model_name=model_name,
-    )
+    attachment_tokens = _attachment_tokens(files, model_name)
     baseline_used = count_tokens(prompt_text, model_name) + attachment_tokens
     if baseline_used > ceiling:
         raise BadRequestException(

@@ -1,52 +1,58 @@
 {
   "exceptions": [
     {
-      "id": "GHSA-p4wg-p73j-c528",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112940",
+      "package": "filelock",
+      "rationale": "Affects only filelock's SQLite-backed ReadWriteLock/AsyncReadWriteLock, exploitable by a local user who can write to the lock directory. Nothing in the backend uses them: huggingface-hub takes FileLock/SoftFileLock and litellm FileLock in its proxy CLI. The fix (4.2.1) is blocked because every current litellm (1.104-1.107 pre-releases) requires filelock<4.0; bump once litellm allows 4.x.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-65qm-jvmh-6pqg",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112913",
+      "package": "filelock",
+      "rationale": "Windows-only denial of service on the SQLite-backed ReadWriteLock/AsyncReadWriteLock by a local account; the backend runs on Linux and uses neither class. Fix (4.2.1) blocked by litellm's filelock<4.0 requirement, as for CVE-2026-112940.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-58r4-6rv3-gfh8",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112907",
+      "package": "filelock",
+      "rationale": "Windows-only: a local account holding an oplock on a soft-lock marker stalls acquire(). The backend runs on Linux, where FileLock uses fcntl and the soft-lock oplock path does not exist. Fix (4.2.1) blocked by litellm's filelock<4.0 requirement, as for CVE-2026-112940.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-pchr-8j38-3x4p",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112936",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. The symlink-to-SQLite flaw requires ReadWriteLock/AsyncReadWriteLock. Eneo has no filelock calls; its locked runtime dependents (huggingface-hub 1.21.0 and litellm 1.104.7) use only FileLock/SoftFileLock, never those SQLite classes. Fixed in 4.0.9, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess if dependency versions or lock call sites change.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-q45j-58j2-45rg",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112910",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. WindowsFileLock ignores mode and inherits directory ACLs. The packaged backend/worker use the Debian Linux image in backend/Dockerfile, so the affected Windows lock implementation is not selected. This exception does not cover a native Windows deployment. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess before changing the production platform.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-462x-pgg6-55fp",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112915",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. A crafted SQLite lock database can stall ReadWriteLock/AsyncReadWriteLock beyond its timeout. Eneo has no filelock calls; its locked runtime dependents (huggingface-hub 1.21.0 and litellm 1.104.7) use FileLock/SoftFileLock and do not open SQLite lock databases. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0. Remove when a compatible fixed version can be installed; reassess if dependency versions or lock call sites change.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-c6hw-5grf-ff96",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112909",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. UnixFileLock can truncate/chmod a file another local account renames or hard-links onto the lock path. Hugging Face's FileLock path is reachable, but the operator confirmed Linux containers with the cache accessible only to Eneo backend/worker, not shared with unrelated users or processes. Uploads use server-generated staging filenames; the bundled tool runtime has a separate filesystem. The required attacker-controlled cache entry is therefore absent in this deployment. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
     },
     {
-      "id": "GHSA-vx6w-vv9f-6gvg",
-      "package": "pillow",
-      "rationale": "Fixed only in pillow 13.0.0 and pyproject.toml pins pillow<13; the major bump needs its own review.",
-      "expires": "2026-11-20"
+      "id": "CVE-2026-112939",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. SoftFileLock can accept a forged PID in a writable marker and remove a live lock. Hugging Face's FileLock uses mode 0664 and may fall back to a soft lock, so Linux alone does not exclude this flaw. The operator confirmed that only Eneo backend/worker can access the cache in the Linux deployment; unrelated users/processes cannot rewrite its markers. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
+    },
+    {
+      "id": "CVE-2026-112935",
+      "package": "filelock",
+      "rationale": "Reviewed 2026-10-29; owner: @eneo-ai/core-maintainers. A local attacker able to create/remove soft-lock markers can exploit inode reuse during stale-lock cleanup to admit two holders. Hugging Face's soft-lock fallback remains possible, but the operator confirmed Linux containers with the cache accessible only to Eneo backend/worker, not shared with unrelated users or processes. The attacker cannot plant or remove cache markers, including when backend/worker contend for the same lock. Reassess before sharing the cache, widening access, or executing untrusted code in backend/worker. Fixed in 4.2.1, blocked by litellm 1.104.7 requiring filelock<4.0; remove once a compatible fixed release is installable.",
+      "expires": "2026-11-24"
     }
   ]
 }

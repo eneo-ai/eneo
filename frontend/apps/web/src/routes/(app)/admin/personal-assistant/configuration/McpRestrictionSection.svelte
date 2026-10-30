@@ -1,14 +1,15 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { CircleAlert, ChevronRight, Info, Plug } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Info from "@lucide/svelte/icons/info";
+  import Plug from "@lucide/svelte/icons/plug";
   import { isCapabilityPurpose, type CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";

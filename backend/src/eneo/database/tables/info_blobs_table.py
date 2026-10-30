@@ -8,8 +8,11 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    Text,
     and_,
+    case,
     func,
+    literal_column,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -80,6 +83,14 @@ class InfoBlobs(BasePublic):
                 "version_state = 'active' AND website_source_url IS NOT NULL"
             ),
         ),
+        # Serves a user's active-size sum (`/users/me` quota) as an
+        # index-only scan instead of a bitmap scan over every version.
+        Index(
+            "ix_info_blobs_active_user_size",
+            "user_id",
+            postgresql_include=["size"],
+            postgresql_where=text("version_state = 'active'"),
+        ),
     )
 
     text: Mapped[str] = mapped_column()
@@ -137,7 +148,11 @@ class InfoBlobs(BasePublic):
 
 
 def active_info_blob_version() -> ColumnElement[bool]:
-    return InfoBlobs.version_state == InfoBlobVersionState.ACTIVE.value
+    # A constant in the SQL text, not a bound parameter: PostgreSQL can then
+    # prove the partial indexes' predicate even in generic prepared plans.
+    return InfoBlobs.version_state == literal_column(
+        f"'{InfoBlobVersionState.ACTIVE.value}'", String(16)
+    )
 
 
 def website_source_url_equals(url: str | ColumnElement[str]) -> ColumnElement[bool]:
@@ -147,3 +162,52 @@ def website_source_url_equals(url: str | ColumnElement[str]) -> ColumnElement[bo
         func.md5(InfoBlobs.website_source_url) == func.md5(url),
         InfoBlobs.website_source_url == url,
     )
+
+
+def website_navigation_path() -> ColumnElement[str]:
+    """A website resource's address as URL directories see it.
+
+    Query and fragment are dropped and a bare origin gets its slash; rows from
+    before ``website_source_url`` use their public URL. The migration of
+    ``ix_info_blobs_active_website_path`` freezes this expression, and the
+    planner uses that index only for an identical one. Its constants are
+    literals, as in the index, rather than bound parameters.
+    """
+    address = func.split_part(
+        func.split_part(
+            func.coalesce(InfoBlobs.website_source_url, InfoBlobs.url),
+            literal_column("'?'"),
+            literal_column("1"),
+            type_=Text,
+        ),
+        literal_column("'#'"),
+        literal_column("1"),
+        type_=Text,
+    )
+    return case(
+        (
+            address.op("~")(literal_column("'^https?://[^/]+$'")),
+            address.concat(literal_column("'/'")),
+        ),
+        else_=address,
+    )
+
+
+def website_path_below(prefix: str) -> ColumnElement[bool]:
+    """The navigation path starts with ``prefix``, as an index range.
+
+    In byte order every string that starts with ``prefix`` sorts from it up to
+    its last character's successor, so the range is exact and needs no LIKE
+    escaping.
+    """
+    path = website_navigation_path().collate("C")
+    return and_(path >= prefix, path < prefix[:-1] + chr(ord(prefix[-1]) + 1))
+
+
+# Directory listings and prefix filters range over one website's active paths.
+Index(
+    "ix_info_blobs_active_website_path",
+    InfoBlobs.website_id,
+    website_navigation_path().collate("C"),
+    postgresql_where=text("version_state = 'active'"),
+)

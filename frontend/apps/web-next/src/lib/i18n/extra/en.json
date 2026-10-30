@@ -302,6 +302,7 @@
   "admin_model_type_embedding": "Embedding",
   "admin_model_type_transcription": "Transcription",
   "admin_model_type_image": "Image generation",
+  "admin_model_type_rerank": "Reranking",
   "provider_capability_image": "Image generation",
   "admin_models_delete_blocked_title": "{name} cannot be deleted yet",
   "admin_models_delete_blocked_description": "The model is used by {names}. Change the image model in the source under Tools, or delete the source, then delete the model.",
@@ -1611,7 +1612,15 @@
   "file_preview_next_version": "Next version",
   "integration_activity_reconcile_warning": "<label>Reconciliation warning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}",
+  "integration_source_collapse_folder": "Collapse {name}",
+  "integration_source_expand_folder": "Expand {name}",
+  "duration": "Duration",
+  "pages_succeeded": "{count} pages succeeded",
+  "files_succeeded": "{count} files succeeded",
+  "pages_and_files_succeeded": "{pages} pages and {files} files succeeded",
+  "pages_unchanged_count": "{count} pages unchanged",
   "chat_md_formula_label": "Formula",
   "chat_md_download_diagram_format": "Download diagram as {format}",
-  "chat_md_diagram_label": "Diagram"
+  "chat_md_diagram_label": "Diagram",
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
 }

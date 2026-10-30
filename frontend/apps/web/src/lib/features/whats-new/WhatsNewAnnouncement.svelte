@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
   import type { Localized, Release } from "@eneo/whats-new";
-  import { ArrowRight } from "@lucide/svelte";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import { announcementSummary } from "./announcement";
   import { areaIcon, labelFor, typeClass, typeLabel } from "./labels";
   import { getWhatsNewTour, tourSteps } from "./tour";
@@ -20,14 +20,14 @@
   const { enabled, pendingAnnouncement, markLatestAnnounced, snoozeLatest } = getWhatsNewStore();
   const { start, running } = getWhatsNewTour();
   const locale = getLocale();
-  const isAdmin = user.hasPermission("admin");
+  const can = user.hasPermission;
 
   let release = $state<Release | null>(null);
   let open = $state(false);
   let postponing = $state(false);
 
-  const summary = $derived(release ? announcementSummary(release, isAdmin) : null);
-  const steps = $derived(release ? tourSteps(release, isAdmin, locale) : []);
+  const summary = $derived(release ? announcementSummary(release, can) : null);
+  const steps = $derived(release ? tourSteps(release, can, locale) : []);
 
   function text(value: Localized): string {
     return value[locale] ?? value.en;
@@ -43,7 +43,7 @@
     }
     const pending = pendingAnnouncement();
     if (!pending) return;
-    if (announcementSummary(pending, isAdmin).entries.length === 0) return;
+    if (announcementSummary(pending, can).entries.length === 0) return;
     // An account created after the release shipped was never "here" before
     // it: record the release as announced without showing "since you were
     // last here". Undated (upcoming) releases announce to everyone.

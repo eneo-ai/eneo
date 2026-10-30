@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 import asyncio
 import re
 from dataclasses import dataclass
@@ -16,7 +14,7 @@ from eneo.group_chat.domain.entities.group_chat import (
 )
 from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.questions.question import ToolAssistant, UseTools
 
 if TYPE_CHECKING:
@@ -117,12 +115,10 @@ class GroupChatService:
             )
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
-        icon_id = group_chat.icon_id
-
-        await self.group_chat_repo.delete(group_chat_id, group_chat.space_id)
+        icon_id = await self.group_chat_repo.delete(group_chat_id, group_chat.space_id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def update_group_chat(
         self,
@@ -157,6 +153,20 @@ class GroupChatService:
                 raise UnauthorizedException("Only admins can toggle insights")
 
         group_chat = space.get_group_chat(group_chat_id=id)
+        if is_provided(icon_id):
+            # Read the icon to release under the lock, or a concurrent change leaks one.
+            await self.group_chat_repo.lock(
+                id, group_chat.space_id, members=current_assistants is not None
+            )
+            space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
+            group_chat = space.get_group_chat(group_chat_id=id)
+        previous_icon_id = group_chat.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
         # If current_assistants is explicitly None, don't update assistants
         # If current_assistants is an empty list, set assistants to empty list (clear all)
         # If current_assistants has items, convert them to GroupChatAssistant objects
@@ -198,6 +208,7 @@ class GroupChatService:
                 else None
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         updated_space = await self.space_service.get_space(group_chat.space_id)
 
         updated_group_chat = updated_space.get_group_chat(group_chat_id=id)

@@ -302,6 +302,7 @@
   "admin_model_type_embedding": "Inbäddning",
   "admin_model_type_transcription": "Transkription",
   "admin_model_type_image": "Bildgenerering",
+  "admin_model_type_rerank": "Rerankning",
   "provider_capability_image": "Bildgenerering",
   "admin_models_delete_blocked_title": "{name} kan inte tas bort än",
   "admin_models_delete_blocked_description": "Modellen används av {names}. Byt bildmodell i källan under Verktyg, eller ta bort källan, och ta sedan bort modellen.",
@@ -1611,7 +1612,15 @@
   "file_preview_next_version": "Nästa version",
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}",
+  "integration_source_collapse_folder": "Fäll ihop {name}",
+  "integration_source_expand_folder": "Fäll ut {name}",
+  "duration": "Varaktighet",
+  "pages_succeeded": "{count} sidor lyckades",
+  "files_succeeded": "{count} filer lyckades",
+  "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
+  "pages_unchanged_count": "{count} sidor oförändrade",
   "chat_md_formula_label": "Formel",
   "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
-  "chat_md_diagram_label": "Diagram"
+  "chat_md_diagram_label": "Diagram",
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
 }

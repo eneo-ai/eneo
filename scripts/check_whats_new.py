@@ -7,20 +7,26 @@ this script reads them from there so a vocabulary change is one edit. It is
 the CI backstop (stdlib only, no jsonschema dependency) and also enforces what
 a schema cannot express:
 
-  * releases are ordered newest first with unique versions
+  * releases are ordered newest first with unique versions; the unreleased
+    "next" block, if any, comes first and has no date
   * entry ids and aliases are unique within a release
   * texts are user-facing: no PR/issue numbers, GitHub URLs, code-like tokens
   * every showMe href resolves to a page under the web app's (app) routes
   * every showMe anchor exists as data-tour="..." in the web app
 
+With --branch (CI passes the branch a change lands on) it adds the rules of
+that branch: develop keeps unreleased notes only in "next", so every other
+block is a final release with a date; release/vX.Y has no "next" and nothing
+newer than its own line.
+
 With --release-tag vX.Y.Z (the image build runs this on every tag) it also
 checks that the newest entry fits the release being built: it may not be
 newer than the tag (notes for a future version leaking into an older release
-branch), every bundled entry must carry a date on final tags (no "Upcoming"
-in production), and a hotfix without user-facing changes needs no entry of
-its own.
+branch), "next" never ships, every bundled entry must carry a date on final
+tags (no "Upcoming" in production), and a hotfix without user-facing changes
+needs no entry of its own.
 
-Run locally:  python3 scripts/check_whats_new.py [--release-tag v2.2.0]
+Run locally:  python3 scripts/check_whats_new.py [--branch develop] [--release-tag v2.2.0]
 """
 
 from __future__ import annotations
@@ -51,9 +57,19 @@ class Vocabulary:
         self.types: set[str] = set(entry["type"]["enum"])
         self.areas: set[str] = set(entry["area"]["enum"])
         self.audiences: set[str] = set(entry["audience"]["enum"])
+        self.permissions: set[str] = set(defs["permission"]["enum"])
+        self.permission_keys: set[str] = set(defs["permissions"]["properties"])
         self.entry_keys: set[str] = set(entry)
         self.release_keys: set[str] = set(defs["release"]["properties"])
-        self.version_re = re.compile(defs["release"]["properties"]["version"]["pattern"])
+        self.entry_order: list[str] = list(entry)
+        version = defs["release"]["properties"]["version"]
+        # Release branches cut before "next" existed keep the pattern on the
+        # version itself; release_notes.py still runs against them.
+        self.version_re = re.compile(defs.get("releaseVersion", version)["pattern"])
+        self.unreleased: str = next(
+            (option["const"] for option in version.get("anyOf", []) if "const" in option),
+            "next",
+        )
         self.date_re = re.compile(defs["release"]["properties"]["date"]["pattern"])
         self.id_re = re.compile(entry["id"]["pattern"])
         self.href_re = re.compile(show_me["href"]["pattern"])
@@ -138,6 +154,29 @@ def _check_entry(
         errors.append(f"{where}.area: must be one of {sorted(vocab.areas)}")
     if "audience" in entry and entry["audience"] not in vocab.audiences:
         errors.append(f"{where}.audience: must be one of {sorted(vocab.audiences)}")
+
+    if "permissions" in entry:
+        requirements = entry["permissions"]
+        if (
+            not isinstance(requirements, dict)
+            or not requirements
+            or set(requirements) - vocab.permission_keys
+        ):
+            errors.append(f"{where}.permissions: must contain allOf and/or anyOf")
+        else:
+            for mode, permissions in requirements.items():
+                if (
+                    not isinstance(permissions, list)
+                    or not permissions
+                    or any(
+                        not isinstance(p, str) or p not in vocab.permissions
+                        for p in permissions
+                    )
+                    or len(permissions) != len(set(permissions))
+                ):
+                    errors.append(
+                        f"{where}.permissions.{mode}: must be a non-empty array of unique known permissions"
+                    )
 
     _require_localized(entry.get("title"), f"{where}.title", errors, vocab)
     _require_localized(entry.get("body"), f"{where}.body", errors, vocab)
@@ -236,8 +275,20 @@ def validate(
             errors.append(f"{where}: unexpected keys {sorted(extra)}")
 
         version = release.get("version")
-        if not isinstance(version, str) or not vocab.version_re.match(version):
-            errors.append(f"{where}.version: must be semver without a leading v")
+        if version == vocab.unreleased:
+            where = f"release {version}"
+            if index != 0:
+                errors.append(f"{where}: must be the first block (it is newer than every release)")
+            if "date" in release:
+                errors.append(
+                    f"{where}.date: unreleased notes have no date; "
+                    "scripts/release_notes.py cut turns them into a release"
+                )
+            version = None
+        elif not isinstance(version, str) or not vocab.version_re.match(version):
+            errors.append(
+                f"{where}.version: must be semver without a leading v, or {vocab.unreleased!r}"
+            )
             version = None
         elif version in seen_versions:
             errors.append(f"{where}.version: {version} appears more than once")
@@ -301,12 +352,52 @@ def _core_version(version: str) -> str:
     return version.partition("-")[0]
 
 
-def check_release_tag(data: dict, tag: str) -> list[str]:
+RELEASE_BRANCH_RE = re.compile(r"^release/v(\d+)\.(\d+)$")
+
+
+def check_branch(data: dict, branch: str, unreleased: str) -> list[str]:
+    """Rules for the branch a change lands on (``develop``, ``release/v2.3``)."""
+    branch = branch.removeprefix("refs/heads/")
+    releases = [r for r in data.get("releases") or [] if isinstance(r, dict)]
+    if branch == "develop":
+        return [
+            f"release {release.get('version')} has no date; on develop, notes that no "
+            f"final release includes yet belong in {unreleased!r} "
+            "(scripts/release_notes.py port brings a final release over)"
+            for release in releases
+            if release.get("version") != unreleased and not release.get("date")
+        ]
+    line = RELEASE_BRANCH_RE.match(branch)
+    if not line:
+        return []
+    errors: list[str] = []
+    major, minor = int(line.group(1)), int(line.group(2))
+    for release in releases:
+        version = release.get("version")
+        if version == unreleased:
+            errors.append(
+                f"{branch} cannot carry {unreleased!r}; run "
+                f"scripts/release_notes.py cut {major}.{minor} when the branch is created"
+            )
+        elif isinstance(version, str) and _semver_key(_core_version(version))[:2] > (major, minor):
+            errors.append(
+                f"release {version} is newer than {branch}; "
+                "notes for a later line must not land on this release branch"
+            )
+    return errors
+
+
+def check_release_tag(data: dict, tag: str, unreleased: str) -> list[str]:
     """Rules for the release identified by a git tag (``v2.2.0``, ``v2.2.0-rc.1``)."""
     version = tag.removeprefix("v")
     if not VERSION_RE_LOOSE.match(version):
         return [f"release tag {tag!r} is not vMAJOR.MINOR.PATCH[-prerelease]"]
     releases = data.get("releases") or []
+    if any(release.get("version") == unreleased for release in releases):
+        return [
+            f"{tag} would ship the {unreleased!r} block; tags are built from release "
+            "branches, where scripts/release_notes.py cut has named it"
+        ]
     if re.fullmatch(r"\d+\.\d+\.\d+-rc\.\d+", version) and not any(
         release.get("version") in {version, _core_version(version)}
         for release in releases
@@ -337,45 +428,59 @@ def check_release_tag(data: dict, tag: str) -> list[str]:
     return []
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", default=".", type=Path)
-    parser.add_argument(
-        "--release-tag",
-        help="git tag being built (vX.Y.Z or vX.Y.Z-rc.N); adds the release rules",
-    )
-    args = parser.parse_args()
-    root: Path = args.repo_root.resolve()
-
+def check(
+    root: Path, branch: str | None = None, release_tag: str | None = None
+) -> tuple[object, list[str]]:
+    """Run every rule that applies; no errors means the notes may land."""
     loaded: dict[Path, object] = {}
     for path in (SCHEMA_PATH, RELEASES_PATH):
         try:
             loaded[path] = json.loads((root / path).read_text(encoding="utf-8"))
         except FileNotFoundError:
-            print(f"{path}: not found")
-            return 1
+            return None, [f"{path}: not found"]
         except json.JSONDecodeError as error:
-            print(f"{path}: invalid JSON: {error}")
-            return 1
+            return None, [f"{path}: invalid JSON: {error}"]
     try:
         vocab = Vocabulary(loaded[SCHEMA_PATH])  # type: ignore[arg-type]
     except (KeyError, TypeError) as error:
-        print(f"{SCHEMA_PATH}: missing a definition this check relies on: {error}")
-        return 1
+        return None, [f"{SCHEMA_PATH}: missing a definition this check relies on: {error!r}"]
     data = loaded[RELEASES_PATH]
 
     errors = validate(data, vocab, _collect_anchors(root / WEB_SRC), root / APP_ROUTES)
-    if not errors and args.release_tag and isinstance(data, dict):
-        errors = check_release_tag(data, args.release_tag)
+    if not errors and branch and isinstance(data, dict):
+        errors = check_branch(data, branch, vocab.unreleased)
+    if not errors and release_tag and isinstance(data, dict):
+        errors = check_release_tag(data, release_tag, vocab.unreleased)
+    return data, errors
+
+
+def report(errors: list[str]) -> None:
+    print(f"{RELEASES_PATH}: {len(errors)} problem(s)")
+    for error in errors:
+        print(f"  - {error}")
+    print("See frontend/packages/whats-new/PLAYBOOK.md for the rules.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", default=".", type=Path)
+    parser.add_argument(
+        "--branch",
+        help="branch the change lands on (develop, release/vX.Y); adds that branch's rules",
+    )
+    parser.add_argument(
+        "--release-tag",
+        help="git tag being built (vX.Y.Z or vX.Y.Z-rc.N); adds the release rules",
+    )
+    args = parser.parse_args()
+
+    data, errors = check(args.repo_root.resolve(), args.branch, args.release_tag)
     if errors:
-        print(f"{RELEASES_PATH}: {len(errors)} problem(s)")
-        for error in errors:
-            print(f"  - {error}")
-        print("See frontend/packages/whats-new/PLAYBOOK.md for the rules.")
+        report(errors)
         return 1
 
-    count = sum(len(r["entries"]) for r in data["releases"])
-    print(f"{RELEASES_PATH}: OK ({len(data['releases'])} release(s), {count} entries)")
+    count = sum(len(r["entries"]) for r in data["releases"])  # type: ignore[index]
+    print(f"{RELEASES_PATH}: OK ({len(data['releases'])} release(s), {count} entries)")  # type: ignore[index]
     return 0
 
 

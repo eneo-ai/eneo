@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     AI Elements-style model selector for the chat input toolbar: a command
     palette grouped by model vendor with provider logos and text search.
     Policy-filtered models, a locked label when the policy pins a single model,
@@ -17,7 +15,8 @@
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
   import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { m } from "$lib/paraglide/messages";
-  import { Cpu, Lock } from "@lucide/svelte";
+  import Cpu from "@lucide/svelte/icons/cpu";
+  import Lock from "@lucide/svelte/icons/lock";
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
   const {

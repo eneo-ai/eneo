@@ -7,6 +7,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bandRows, type Band, type BandSegment } from "./html";
+import { imageDimensions } from "./images";
 import {
   headerFooterParts,
   openWordTemplate,
@@ -67,12 +68,22 @@ const MONO = /courier|consolas|mono/i;
 /** A CSS font-family list: the Word font, its substitute, and a generic family. */
 export function fontStack(font: string | undefined): string {
   if (!font) return '"Carlito", "Calibri", "Liberation Sans", sans-serif';
-  const substitute = SUBSTITUTES[font.toLowerCase()];
+  const key = font.toLowerCase();
+  const substitute = Object.hasOwn(SUBSTITUTES, key) ? SUBSTITUTES[key] : undefined;
   const generic = MONO.test(font) ? "monospace" : SERIF.test(font) ? "serif" : "sans-serif";
-  return [font, substitute, generic]
+  // A Word face is one CSS string, including quotes, escapes and control characters.
+  const faces = [font, substitute]
     .filter((name): name is string => !!name)
-    .map((name) => (name.includes(" ") || /[A-Z]/.test(name) ? `"${name}"` : name))
+    .map((name) => {
+      const escaped = name.replace(/[\u0000-\u001f\u007f"\\]/g, (char) => {
+        // CSS replaces NUL with the replacement character.
+        const codePoint = char.charCodeAt(0) || 0xfffd;
+        return `\\${codePoint.toString(16)} `;
+      });
+      return `"${escaped}"`;
+    })
     .join(", ");
+  return `${faces}, ${generic}`;
 }
 
 function themeFonts(theme: Element | undefined): { major?: string; minor?: string } {
@@ -89,7 +100,8 @@ function themeColors(theme: Element | undefined): Map<string, string> {
   for (const entry of children(scheme)) {
     if (!entry.name) continue;
     const value = attr(find(entry, "a:srgbClr"), "val") ?? attr(find(entry, "a:sysClr"), "lastClr");
-    if (value) colors.set(entry.name.replace(/^a:/, ""), value.toLowerCase());
+    if (value && /^[0-9a-f]{6}$/i.test(value))
+      colors.set(entry.name.replace(/^a:/, ""), value.toLowerCase());
   }
   // Word's names for the scheme's first four colours.
   for (const [alias, name] of [
@@ -370,13 +382,15 @@ async function logoOf(
   });
   if (!found) return undefined;
   const relsName = partName.replace(/^word\/(.+)$/, "word/_rels/$1.rels");
-  const target = relationTargets(await parsedPart(zip, relsName)).get(found.id);
-  if (!target) return undefined;
+  const relation = relationEntries(await parsedPart(zip, relsName)).get(found.id);
+  if (!relation || relation.external) return undefined;
+  const target = relation.target;
   const mediaName = target.startsWith("/") ? target.slice(1) : `word/${target}`;
   const extension = /\.(png|jpe?g)$/i.exec(mediaName)?.[1]?.toLowerCase();
   const bytes = extension && (await zip.file(mediaName)?.async("nodebuffer"));
   if (!bytes) return undefined;
-  const file = `logo.${extension === "jpeg" ? "jpg" : extension}`;
+  const { type } = imageDimensions(bytes);
+  const file = `logo.${type}`;
   await writeFile(join(assetsDir, file), bytes, { mode: 0o600 });
   return { file, widthPt: found.cx / EMU_PER_PT, heightPt: found.cy / EMU_PER_PT };
 }

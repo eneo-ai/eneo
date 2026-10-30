@@ -1,7 +1,5 @@
 /*
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";

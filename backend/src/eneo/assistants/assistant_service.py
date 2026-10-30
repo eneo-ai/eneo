@@ -76,6 +76,11 @@ from eneo.main.models import (
     ResourcePermission,
     is_provided,
 )
+from eneo.main.stream_lifecycle import (
+    OwnedAsyncGenerator,
+    aclose_if_possible,
+    finalizing,
+)
 from eneo.mcp_servers.application.bundled_tools import with_live_bundled_tools
 from eneo.mcp_servers.application.capability_resolver import (
     general_servers_for_space,
@@ -103,18 +108,25 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.skills.domain.personal_chat_skill_layers import (
+    PersonalSkillLayerSave,
+    assert_personal_skill_layer_save,
+)
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     AssistantSkillConfigurationProjection,
     AssistantSkillRuntimeProjection,
     PersonalChatPinOverride,
+    PersonalSkillLayerDecision,
     ResolvedSkillBinding,
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillActivationRejectionReason,
     SkillActivationUnavailableException,
     SkillBindingIntent,
+    SkillBindingProjection,
+    SkillBindingSource,
     SkillComposition,
     SkillExecutionReference,
     SkillRuntimePolicy,
@@ -281,7 +293,7 @@ class _PreparedAssistantTurn:
     skill_plan: SkillTurnPlan
     skill_runtime: "SkillActivationRuntime"
     skill_composition: SkillComposition
-    skill_activation: SkillActivationEvidenceV1
+    skill_activation: SkillActivationEvidence
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
@@ -373,6 +385,30 @@ def filter_mcp_tool_references(
         get_id_func=lambda ref: ref.id,
     )
     return cited + display_only
+
+
+def _organisation_binding_projections(
+    effective_config: "EffectiveConfig | None",
+) -> tuple[SkillBindingProjection, ...]:
+    """The personal chat policy's Skills, in run order, blocked ones flagged."""
+    if effective_config is None:
+        return ()
+    resolution = effective_config.governance_skill_resolution
+    return tuple(
+        sorted(
+            (
+                *(
+                    SkillBindingProjection(binding=binding, execution_blocked=False)
+                    for binding in resolution.eligible
+                ),
+                *(
+                    SkillBindingProjection(binding=binding, execution_blocked=True)
+                    for binding in resolution.blocked
+                ),
+            ),
+            key=lambda projection: projection.binding.position,
+        )
+    )
 
 
 class AssistantService:
@@ -640,31 +676,15 @@ class AssistantService:
             return effective_config.enforced_prompt_text
         return assistant.get_prompt_text()
 
-    async def _resolve_assistant_skill_runtime(
-        self,
-        *,
-        assistant: Assistant,
-        effective_config: "EffectiveConfig | None",
-        space_is_personal: bool,
+    async def _direct_skill_resolution(
+        self, assistant: Assistant
     ) -> SkillRuntimeResolution:
         assistant_id = cast(UUID | None, assistant.id)
-        direct_resolution = (
-            await self.skill_service.resolve_assistant_bindings_for_runtime(
-                assistant_id=assistant_id
-            )
-            if assistant_id is not None
-            else SkillRuntimeResolution(eligible=(), blocked=())
-        )
-
-        if not (space_is_personal and assistant.is_default):
-            return direct_resolution
-        if direct_resolution.eligible or direct_resolution.blocked:
-            raise BadRequestException(
-                "Personal default Assistant has invalid direct Skill bindings"
-            )
-        if effective_config is None:
+        if assistant_id is None:
             return SkillRuntimeResolution(eligible=(), blocked=())
-        return effective_config.governance_skill_resolution
+        return await self.skill_service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant_id
+        )
 
     async def _create_skill_turn_plan(
         self,
@@ -673,7 +693,16 @@ class AssistantService:
         effective_config: "EffectiveConfig | None",
         space_is_personal: bool,
         base_instructions_override: str | None = None,
+        model: "CompletionModel | None" = None,
+        prompt_files: Sequence[File] | None = None,
     ) -> SkillTurnPlan:
+        """The turn's Skill plan; the personal chat adds its own layer.
+
+        The personal chat runs the organisation layer (the personal chat
+        policy) and then the person's own Skills, when the layer assessment
+        admits them. Without a model nothing can be measured, and no turn can
+        run, so the plan then covers the organisation layer alone.
+        """
         base_instructions = (
             base_instructions_override
             if base_instructions_override is not None
@@ -682,14 +711,84 @@ class AssistantService:
                 effective_config,
             )
         )
-        resolution = await self._resolve_assistant_skill_runtime(
+        if not (space_is_personal and assistant.is_default):
+            return await self.skill_service.create_turn_plan(
+                base_instructions=base_instructions,
+                resolution=await self._direct_skill_resolution(assistant),
+            )
+        organisation = (
+            effective_config.governance_skill_resolution
+            if effective_config is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        )
+        personal = await self._direct_skill_resolution(assistant)
+        # Fail closed if anything stored other than the person's own
+        # personal-space Skills; only those may form the own layer.
+        if any(
+            binding.source is SkillBindingSource.ORGANIZATION
+            or binding.skill_space_id != assistant.space_id
+            for binding in (*personal.eligible, *personal.blocked)
+        ):
+            raise BadRequestException(
+                "Personal default Assistant has invalid direct Skill bindings"
+            )
+        if model is None:
+            return await self.skill_service.create_turn_plan(
+                base_instructions=base_instructions,
+                resolution=organisation,
+            )
+        if prompt_files is None:
+            # Only the own layer's assessment reads attachments, so a turn
+            # without own Skills skips loading them.
+            prompt_files = (
+                await self._persistent_prompt_files(assistant, model)
+                if personal.eligible or personal.blocked
+                else ()
+            )
+        return await self.skill_service.create_personal_chat_turn_plan(
+            base_instructions=base_instructions,
+            organisation=organisation,
+            personal=personal,
+            model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+            prompt_files=prompt_files,
+        )
+
+    async def _personal_layer_decision(
+        self, *, space: "Space", assistant: Assistant
+    ) -> PersonalSkillLayerDecision | None:
+        """The personal chat's own-Skill decision for its stored state."""
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        model = self._context_model(assistant, effective_config=effective_config)
+        if model is None:
+            return None
+        plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
-            space_is_personal=space_is_personal,
+            space_is_personal=True,
+            model=model,
         )
-        return await self.skill_service.create_turn_plan(
-            base_instructions=base_instructions,
-            resolution=resolution,
+        return plan.personal_layer
+
+    async def _persistent_prompt_files(
+        self, assistant: Assistant, model: "CompletionModel"
+    ) -> list[File]:
+        """Persistent attachments exactly as a request inlines them for ``model``.
+
+        Attachments marked "open with tool" are sent as signed URLs and cost
+        nothing; the same predicate decides what ask() inlines.
+        """
+        url_only_attachments = assistant.url_only_attachment_ids(model)
+        return inlined_attachments(
+            await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+                url_only_ids=url_only_attachments,
+            ),
+            url_only_attachments,
         )
 
     async def _ensure_governance_policy_allows_update(
@@ -1061,6 +1160,7 @@ class AssistantService:
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
         validate_all_on_demand_candidates: bool = False,
         mcp_servers_override: list["MCPServer"] | None = None,
+        personal_layer_save: PersonalSkillLayerSave | None = None,
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -1079,21 +1179,29 @@ class AssistantService:
         baseline, including the activation transcript and configured MCP schemas.
         Combinations and live per-user MCP narrowing remain turn-time decisions.
         Skipped only when no model is resolved."""
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
+        model = self._context_model(assistant, effective_config=effective_config)
+        completion_prompt_files = (
+            await self._persistent_prompt_files(assistant, model)
+            if model is not None
+            else []
+        )
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=model,
+            prompt_files=completion_prompt_files,
         )
+        if personal_layer_save is not None:
+            assert_personal_skill_layer_save(
+                personal_layer_save, skill_plan.personal_layer
+            )
         validation_plan = (
             skill_plan.for_full_save_validation()
             if validate_all_on_demand_candidates
@@ -1107,25 +1215,23 @@ class AssistantService:
                 if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
             )
         candidate_skill_ids = frozenset(candidate_ids)
-        model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
+            # Without a model the personal layer cannot be assessed, so only
+            # removing own Skills (recovery) may proceed.
+            if (
+                personal_layer_save is not None
+                and personal_layer_save.bindings_changed
+                and not personal_layer_save.removal_only
+            ):
+                raise BadRequestException(
+                    "Choose a completion model before choosing your own Skills"
+                )
             if candidate_skill_ids:
                 raise BadRequestException(
                     "Choose a completion model before enabling on-demand Skills"
                 )
             return
 
-        # Attachments marked "open with tool" are sent as signed URLs and cost
-        # nothing here; the same predicate decides what ask() inlines.
-        url_only_attachments = assistant.url_only_attachment_ids(model)
-        completion_prompt_files = inlined_attachments(
-            await self._completion_prompt_files_for_model(
-                persistent_attachments=assistant.attachments,
-                completion_model=model,
-                url_only_ids=url_only_attachments,
-            ),
-            url_only_attachments,
-        )
         if effective_config is not None and effective_config.mcp_enforced:
             effective_mcp_servers = effective_config.available_mcp_servers
         elif mcp_servers_override is not None:
@@ -1265,6 +1371,42 @@ class AssistantService:
                 "contact admin"
             )
         return resolved_model
+
+    async def _acquire_personal_default_fit_lock(self, *, shared: bool) -> None:
+        """Take the tenant fit token in the protocol's lock order.
+
+        Every token request in this service goes through here, so none can
+        forget that the runtime-policy row must exist before the token is
+        requested (see ``SkillService.ensure_runtime_policy``).
+        """
+        await self.skill_service.ensure_runtime_policy()
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=shared,
+        )
+
+    async def confirm_personal_default_governance_fit(self) -> None:
+        """Validate a staged personal chat policy save against every personal chat.
+
+        The caller already holds the policy row. The fleet walk first runs
+        without the fit token, so Assistant saves are not blocked while it runs.
+        The exclusive token then drains in-flight Assistant saves and makes new
+        ones wait until this transaction commits, so they validate against the
+        new policy. The walk repeats, now under the token, only when a personal
+        chat or the runtime policy changed meanwhile. Lock order: policy row,
+        fit token, then other rows (the same order as pin confirmation).
+        """
+        snapshot = await self.skill_service.personal_defaults_fit_snapshot(
+            lock_runtime_policy=False
+        )
+        await self.assert_personal_default_governance_context_fit()
+        await self._acquire_personal_default_fit_lock(shared=False)
+        confirmed = await self.skill_service.personal_defaults_fit_snapshot(
+            lock_runtime_policy=True
+        )
+        if confirmed != snapshot:
+            await self.assert_personal_default_governance_context_fit()
 
     async def assert_personal_default_governance_context_fit(
         self,
@@ -1591,11 +1733,7 @@ class AssistantService:
         # Partial writes must validate against the latest committed model,
         # prompt and attachments. Take the fit token before the parent row lock,
         # matching governance lock order, and hold both until the request commits.
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         assert space.id is not None
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -1618,6 +1756,7 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        previous_icon_id = assistant.icon_id
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -1669,7 +1808,7 @@ class AssistantService:
                 insight_enabled,
                 inline_file_text,
                 knowledge_mode,
-                skill_binding_intents,
+                None if is_personal_default else skill_binding_intents,
             )
         ) or any(
             is_provided(value)
@@ -1697,6 +1836,36 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
+
+        # The person's own Skills in the personal chat are authorized by
+        # PERSONAL_SKILLS alone; broad Assistant editing never stands in for it.
+        if (
+            is_personal_default
+            and skill_binding_intents is not None
+            and Permission.PERSONAL_SKILLS not in self.user.permissions
+        ):
+            raise UnauthorizedException(
+                "Choosing your own Skills for the personal chat needs the "
+                "Own Skills permission",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        # The save transition rule compares against the stored personal layer.
+        personal_layer_before = (
+            await self._personal_layer_decision(space=space, assistant=assistant)
+            if is_personal_default
+            else None
+        )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if is_personal_default and reasoning_effort_only_update:
@@ -2015,6 +2184,8 @@ class AssistantService:
         )
 
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset()
+        removal_only = False
+        bindings_changed = False
         if skill_binding_intents is not None:
             replacement = await self.skill_service.replace_assistant_bindings(
                 space_id=assistant.space_id,
@@ -2024,6 +2195,8 @@ class AssistantService:
             on_demand_skill_ids_requiring_validation = (
                 replacement.on_demand_skill_ids_requiring_validation
             )
+            removal_only = replacement.removal_only
+            bindings_changed = not replacement.unchanged
 
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
@@ -2053,6 +2226,15 @@ class AssistantService:
                     or mcp_tools is not None
                 ),
                 mcp_servers_override=mcp_servers_for_validation,
+                personal_layer_save=(
+                    PersonalSkillLayerSave(
+                        before=personal_layer_before,
+                        bindings_changed=bindings_changed,
+                        removal_only=removal_only,
+                    )
+                    if is_personal_default
+                    else None
+                ),
             )
 
         await self.repo.apply_update(
@@ -2094,6 +2276,7 @@ class AssistantService:
                 document_template=document_template,
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
@@ -2190,13 +2373,14 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
+        model = self._context_model(assistant, effective_config=effective_config)
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
             base_instructions_override=prompt_override,
+            model=model,
         )
-        model = self._context_model(assistant, effective_config=effective_config)
         prompt_tokens = 0
         skill_context_tokens = 0
         if model is not None:
@@ -2255,27 +2439,30 @@ class AssistantService:
         )
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
-        if space.is_personal() and assistant.is_default:
-            return AssistantSkillConfigurationProjection(
-                bindings=tuple(bindings),
-                runtime=None,
-            )
+        personal_chat = space.is_personal() and assistant.is_default
 
         effective_config = await self._resolve_effective_config(
             space=space,
             assistant=assistant,
+        )
+        # The personal chat also shows the organisation's Skills, which run
+        # first and which the person cannot change.
+        organisation_bindings = (
+            _organisation_binding_projections(effective_config) if personal_chat else ()
         )
         model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
             return AssistantSkillConfigurationProjection(
                 bindings=tuple(bindings),
                 runtime=None,
+                organisation_bindings=organisation_bindings,
             )
 
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=model,
         )
         runtime = skill_plan.to_activation_runtime(
             selected_model_route=model.get_model_route(),
@@ -2288,6 +2475,8 @@ class AssistantService:
                 effective_model_id=model.id,
                 snapshot=runtime.snapshot(),
             ),
+            organisation_bindings=organisation_bindings,
+            personal_layer=skill_plan.personal_layer,
         )
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
@@ -2397,7 +2586,6 @@ class AssistantService:
             )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
-        icon_id = assistant.icon_id
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
@@ -2416,10 +2604,10 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        await self.repo.delete(assistant_id, space.id)
+        icon_id = await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -2462,7 +2650,7 @@ class AssistantService:
 
         def _final_skill_runtime_state() -> tuple[
             tuple[SkillExecutionReference, ...],
-            SkillActivationEvidenceV1,
+            SkillActivationEvidence,
         ]:
             assert completion_model is not None
             snapshot = skill_runtime.snapshot()
@@ -2889,7 +3077,17 @@ class AssistantService:
                             f"answer_chars={len(response_string)}"
                         )
 
-            return response_stream()
+                    # An abort leaves the completion stream suspended; closing
+                    # it releases the model request and the tool connections
+                    # behind it on this task.
+                    with finalizing("completion stream"):
+                        await aclose_if_possible(response.completion)
+
+            async def release_unstarted() -> None:
+                with finalizing("completion stream"):
+                    await aclose_if_possible(response.completion)
+
+            return OwnedAsyncGenerator(response_stream(), release=release_unstarted)
         else:
             reasoning_token_count = 0
             final_answer = ""
@@ -3332,6 +3530,7 @@ class AssistantService:
             assistant=assistant_to_ask,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=effective_completion_model,
         )
         model_route = effective_completion_model.get_model_route()
         skill_runtime = skill_plan.to_activation_runtime(
@@ -3899,11 +4098,7 @@ class AssistantService:
         assert space.id is not None
         # Incremental additions share the update path's fit/row lock order.
         # Reload after waiting so combined tool schemas are validated together.
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assert space.id is not None

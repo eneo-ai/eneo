@@ -1,14 +1,13 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import * as Chart from "$lib/components/chart/index.js";
-  import { Info, ChartColumn } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import ChartColumn from "@lucide/svelte/icons/chart-column";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { getConfig, prepareData } from "./prepareData";
   import { m } from "$lib/paraglide/messages";

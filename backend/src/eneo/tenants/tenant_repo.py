@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.module_table import Modules
@@ -167,21 +167,46 @@ class TenantRepository:
         tenant_id: UUID,
         policy_updates: dict[str, Any],
     ) -> TenantInDB:
-        tenant = await self.get(tenant_id)
-        if tenant is None:
-            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
-        policy = dict(tenant.api_key_policy or {})
-        policy.update(policy_updates)
+        return await self._merge_policy_column(
+            tenant_id, Tenants.api_key_policy, policy_updates
+        )
 
+    async def update_password_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        return await self._merge_policy_column(
+            tenant_id, Tenants.password_policy, policy_updates
+        )
+
+    async def _merge_policy_column(
+        self,
+        tenant_id: UUID,
+        column: InstrumentedAttribute[dict[str, Any]],
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        """Shallow-merge updates into one JSONB policy column.
+
+        The merge happens inside the UPDATE (``column || updates``) so two
+        admins patching disjoint keys at once both land; a Python-side merge of
+        a pre-read snapshot would let the later writer undo the earlier one.
+        An explicit JSON null in ``policy_updates`` is kept as a null value.
+        """
+        merged = column.op("||", return_type=JSONB)(
+            sa.literal(policy_updates, type_=JSONB)
+        )
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
-            .values(api_key_policy=policy, updated_at=datetime.now(timezone.utc))
+            .values({column: merged, Tenants.updated_at: datetime.now(timezone.utc)})
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
         model = await self.delegate.get_model_from_query(stmt)
-        return cast(TenantInDB, model)
+        if model is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        return model
 
     async def update_show_model_pricing(
         self,

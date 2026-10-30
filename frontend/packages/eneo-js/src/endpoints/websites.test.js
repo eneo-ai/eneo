@@ -106,6 +106,27 @@ test("indexed content page exposes its bounded cursor response", async () => {
   ]);
 });
 
+test("website browsing preserves literal search and case-sensitive URL prefixes", async () => {
+  const calls = [];
+  const websites = initWebsites({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { items: [], next_cursor: null };
+    }
+  });
+  const prefix = "https://example.test/År%20A_100%25/";
+  await websites.indexedBlobs.listPage({ id: "website", q: "50%_pdf", prefix });
+  await websites.indexedBlobs.folders({ id: "website", prefix, cursor: prefix + "B/", limit: 20 });
+  assert.deepEqual(
+    calls.map((call) => call.request.params.query),
+    [
+      { limit: 100, cursor: undefined, q: "50%_pdf", prefix },
+      { prefix, cursor: prefix + "B/", limit: 20 }
+    ]
+  );
+  assert.equal(calls[1].endpoint, "/api/v1/websites/{id}/content-folders/");
+});
+
 test("bulk stop sends website IDs to the bounded stop endpoint", async () => {
   const calls = [];
   const websites = initWebsites({

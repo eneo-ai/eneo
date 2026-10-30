@@ -2,27 +2,44 @@
 # vite itself runs under Node, as it does in CI and on developer machines.
 # Without a Node binary, Bun runs vite on its own JavaScript runtime, which
 # has crashed (1.3.0) or starved the CI runner (1.3.14) on this build.
-FROM node:22-bookworm-slim AS builder
-COPY --from=oven/bun:1.3.14-slim /usr/local/bin/bun /usr/local/bin/bun
+FROM node:22.23.4-bookworm-slim AS builder
+COPY --from=oven/bun:1.4.4-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
+# Bun validates every workspace member under --frozen-lockfile, so each
+# member's manifest must be present; nothing else is needed to install. Keep
+# source and release identity out of the expensive dependency layer.
+COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/web-next/package.json apps/web-next/package.json
+COPY apps/docs-site/package.json apps/docs-site/package.json
+COPY packages/eneo-js/package.json packages/eneo-js/package.json
+COPY packages/eslint-plugin/package.json packages/eslint-plugin/package.json
+COPY packages/markdown-math/package.json packages/markdown-math/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/whats-new/package.json packages/whats-new/package.json
+# The root package.json "patchedDependencies" are applied during install.
+COPY patches ./patches
+# The two workspace prepare hooks need app source. Run them below, after COPY.
+RUN bun install --frozen-lockfile --ignore-scripts
+
+COPY . .
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
-COPY . .
-
 ENV NODE_OPTIONS=--max-old-space-size=8192
-
-# Install dependencies with Bun (uses frozen lockfile)
-RUN bun install --frozen-lockfile
-
+RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
 # This image ships apps/web; web-next has its own Dockerfile and build context.
 RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM node:20-bullseye-slim AS runner
+FROM node:22.23.4-bookworm-slim AS runner
+# The runtime only executes node. Drop the bundled package managers: their vendored
+# dependencies lag behind advisories and would fail the release image vulnerability gate.
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,

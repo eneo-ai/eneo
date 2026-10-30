@@ -1,6 +1,4 @@
 # Copyright (c) 2026 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 
 from typing import Annotated, Iterable
@@ -274,7 +272,7 @@ async def update_governance_policy(
         or mcp_restriction is not None
     ):
         assistant_service = container.assistant_service()
-        await assistant_service.assert_personal_default_governance_context_fit()
+        await assistant_service.confirm_personal_default_governance_fit()
     assert policy.id is not None
     after_skills = await service.get_skill_bindings(policy)
     changes = _policy_changes(

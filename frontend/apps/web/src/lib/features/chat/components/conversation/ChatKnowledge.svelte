@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     Read-only knowledge indicator for the chat input toolbar: shows which
     knowledge sources (collections, websites, integrations) are attached to
     the current partner, mirroring how MCP servers are surfaced. Unlike MCP
@@ -14,7 +12,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { BookOpen } from "@lucide/svelte";
+  import BookOpen from "@lucide/svelte/icons/book-open";
 
   type KnowledgeSource = {
     id: string;

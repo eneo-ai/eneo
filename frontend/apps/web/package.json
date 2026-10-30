@@ -29,7 +29,7 @@
     "test:all": "bun run test:unit && bun run test:e2e",
     "pretest:coverage": "bun run test:browsers",
     "test:coverage": "vitest run --coverage",
-    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
+    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules"
   },
   "devDependencies": {
     "@eneo/eneo-js": "workspace:*",
@@ -58,14 +58,14 @@
     "@tiptap/starter-kit": "3.32.0",
     "@types/node": "^22.20.0",
     "@types/wicg-file-system-access": "^2023.10.6",
-    "@vitest/browser": "4.1.11",
-    "@vitest/browser-playwright": "4.1.11",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/browser": "4.1.12",
+    "@vitest/browser-playwright": "4.1.12",
+    "@vitest/coverage-v8": "4.1.12",
     "axe-core": "4.13.0",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.4.1",
-    "dompurify": "^3.4.16",
+    "dompurify": "^3.4.17",
     "driver.js": "^1.8.0",
     "echarts": "^6.1.0",
     "esbuild": "^0.28.1",
@@ -90,7 +90,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^6.4.4",
-    "vitest": "4.1.11",
+    "vitest": "4.1.12",
     "vitest-browser-svelte": "^1.1.0"
   },
   "dependencies": {

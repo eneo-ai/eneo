@@ -1,9 +1,19 @@
 // Render the actual route with its real translations, release data and controls.
 // Only the authenticated shell/persistence/navigation boundaries are replaced.
+import { hasPermission } from "$lib/core/hasPermission";
+import type { Permission } from "@eneo/eneo-js";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { releases, releasesForVersion, visibleEntries, type Locale } from "@eneo/whats-new";
+import {
+  UNRELEASED,
+  compareVersions,
+  latestRelease,
+  releases,
+  visibleEntries,
+  type Locale,
+  type Release
+} from "@eneo/whats-new";
 import { getLocale, localizeHref, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 import { announcementSummary } from "$lib/features/whats-new/announcement";
@@ -12,17 +22,38 @@ import "../../../app.css";
 
 const state = vi.hoisted(() => ({
   admin: false,
+  permissions: [
+    "personal_chat",
+    "assistants",
+    "file_creation",
+    "file_analysis",
+    "compute",
+    "charts",
+    "modules"
+  ] as Permission[],
   enabled: true,
   installedVersion: "2.3.0",
+  seen: null as string | null,
   markSeen: vi.fn().mockResolvedValue(undefined),
   markAnnounced: vi.fn().mockResolvedValue(undefined),
   snooze: vi.fn().mockResolvedValue(undefined),
   start: vi.fn().mockResolvedValue("completed")
 }));
 
+const can = (required: Parameters<ReturnType<typeof hasPermission>>[0]) =>
+  hasPermission({
+    roles: [
+      {
+        id: "role",
+        name: "Custom",
+        permissions: [...state.permissions, ...(state.admin ? ["admin" as const] : [])]
+      }
+    ]
+  })(required);
+
 vi.mock("$lib/core/AppContext", () => ({
   getAppContext: () => ({
-    user: { id: "test-user", email: "user@example.com", hasPermission: () => state.admin },
+    user: { id: "test-user", email: "user@example.com", hasPermission: can },
     settings: { developer_tools_available: false },
     featureFlags: { showHelpCenter: false },
     environment: {},
@@ -47,13 +78,13 @@ vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
   const { writable } = await import("svelte/store");
   return {
     getWhatsNewStore: () => ({
-      releases: releasesForVersion(state.installedVersion),
+      releases: bundled(state.installedVersion),
       markLatestSeen: state.markSeen,
-      seenVersion: writable(null),
+      seenVersion: writable(state.seen),
       resetState: vi.fn(),
       enabled: writable(state.enabled),
       hasUnseen: writable(state.enabled),
-      pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
+      pendingAnnouncement: () => bundled(state.installedVersion)[0],
       markLatestAnnounced: state.markAnnounced,
       snoozeLatest: state.snooze
     })
@@ -68,7 +99,21 @@ vi.mock("$lib/features/whats-new/tour", async (importOriginal) => {
 import WhatsNewPage from "./+page.svelte";
 import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
 
-const release = releases.find((release) => release.version === "2.3.0")!;
+// These tests pin the 2.3 notes. On develop they sit in the unreleased block
+// until the final 2.3 release is ported, so find them by content and bundle
+// them the way a 2.3 image does: under the installed identity, above history.
+const pinned = releases.find((release) =>
+  release.entries.some((entry) => entry.id === "assistant-attachment-modes")
+)!;
+const release: Release = { ...pinned, version: "2.3.0" };
+function bundled(installed: string): Release[] {
+  const history = releases.filter(
+    (other) => other.date && compareVersions(other.version, release.version) < 0
+  );
+  const { date: _date, ...notes } = release;
+  if (installed.startsWith("develop-")) return [{ ...notes, version: UNRELEASED }, ...history];
+  return [installed === release.version ? release : { ...notes, version: installed }, ...history];
+}
 
 const resolveLocale = getLocale;
 afterEach(() => {
@@ -78,7 +123,18 @@ afterEach(() => {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  state.admin = false;
+  state.permissions = [
+    "personal_chat",
+    "assistants",
+    "file_creation",
+    "file_analysis",
+    "compute",
+    "charts",
+    "modules"
+  ];
   state.installedVersion = "2.3.0";
+  state.seen = null;
   state.enabled = true;
   document.documentElement.dataset.theme = "light";
   await page.viewport(1280, 900);
@@ -153,6 +209,39 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
       expect(content.getBoundingClientRect().width).toBeGreaterThanOrEqual(319);
     });
 
+    it("shows only permitted features on the page and in the dialog", async () => {
+      state.permissions = ["personal_chat", "file_creation"];
+      overwriteGetLocale(() => locale);
+      const screen = render(WhatsNewPage);
+      const assistant = release.entries.find((entry) => entry.id === "assistant-attachment-modes")!;
+      const documents = release.entries.find((entry) => entry.id === "file-creation-progress")!;
+      const analysis = release.entries.find((entry) => entry.id === "file-analysis-trace")!;
+      await expect
+        .element(page.getByRole("heading", { name: documents.title[locale], exact: true }))
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("heading", { name: assistant.title[locale], exact: true }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("heading", { name: analysis.title[locale], exact: true }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: m.whats_new_area_assistants(), exact: true }))
+        .not.toBeInTheDocument();
+      await screen.unmount();
+      render(WhatsNewAnnouncement);
+      const dialog = page.getByRole("dialog");
+      await expect.element(dialog).toBeVisible();
+      expect([...dialog.element().querySelectorAll("h3")].map((node) => node.textContent)).toEqual(
+        announcementSummary(release, can).entries.map((entry) => entry.title[locale])
+      );
+      expect(dialog.element().textContent).not.toContain(assistant.title[locale]);
+      expect(dialog.element().textContent).not.toContain(analysis.title[locale]);
+      await page
+        .getByRole("button", { name: m.whats_new_announcement_dismiss(), exact: true })
+        .click();
+    });
+
     it("announces the four main workflows in a usable dialog", async () => {
       state.admin = false;
       overwriteGetLocale(() => locale);
@@ -160,7 +249,7 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
       const dialog = page.getByRole("dialog");
       await expect.element(dialog).toBeVisible();
       expect([...dialog.element().querySelectorAll("h3")].map((node) => node.textContent)).toEqual(
-        announcementSummary(release, false).entries.map((entry) => entry.title[locale])
+        announcementSummary(release, can).entries.map((entry) => entry.title[locale])
       );
       expect(state.markAnnounced).toHaveBeenCalledOnce();
       for (const width of [1280, 320]) {
@@ -182,7 +271,7 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
         overwriteGetLocale(() => locale);
         const screen = render(WhatsNewPage);
         await page.getByRole("button", { name: /^2\.3\.0/ }).click();
-        const entries = visibleEntries(release, admin);
+        const entries = visibleEntries(release, can);
         await expect
           .element(page.getByRole("heading", { name: entries[0].title[locale], exact: true }))
           .toBeVisible();
@@ -195,7 +284,7 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
             expect(screen.container.querySelector(`#${alias}`)?.closest("li")?.id).toBe(entry.id);
           }
         }
-        const summary = announcementSummary(release, admin);
+        const summary = announcementSummary(release, can);
         expect(summary.entries.map((entry) => entry.id)).toEqual([
           "file-creation-progress",
           "file-analysis-trace",
@@ -218,14 +307,14 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
             .first()
             .click();
           expect(state.start).toHaveBeenLastCalledWith(
-            [tourSteps(release, true, locale)[0]],
+            [tourSteps(release, can, locale)[0]],
             expect.objectContaining({
               version: m.whats_new_tour_version({ version: release.version })
             })
           );
           await page.getByRole("button", { name: m.whats_new_tour_start() }).click();
           expect(state.start).toHaveBeenLastCalledWith(
-            tourSteps(release, true, locale),
+            tourSteps(release, can, locale),
             expect.any(Object)
           );
         } else {
@@ -240,19 +329,22 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
 
     it("filters by area and fits a narrow screen", async () => {
       state.admin = true;
+      const entries = visibleEntries(release, can);
       overwriteGetLocale(() => locale);
       await page.viewport(320, 800);
       const screen = render(WhatsNewPage);
       await page.getByRole("button", { name: /^2\.3\.0/ }).click();
       await page.getByRole("button", { name: m.whats_new_area_admin(), exact: true }).click();
       expect(screen.container.querySelectorAll("h3")).toHaveLength(
-        release.entries.filter((entry) => entry.area === "admin").length
+        entries.filter((entry) => entry.area === "admin").length
       );
       const content = screen.container.querySelector<HTMLElement>("#content")!;
       expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
       await page.screenshot({ path: `__screenshots__/whats-new-${locale}-narrow.png` });
       await page.getByRole("button", { name: m.whats_new_filter_all(), exact: true }).click();
-      expect(screen.container.querySelectorAll("h3")).toHaveLength(release.entries.length);
+      expect(
+        Array.from(screen.container.querySelectorAll("h3"), (heading) => heading.textContent)
+      ).toEqual(entries.map((entry) => entry.title[locale]));
       await page.getByRole("button", { name: /^2\.2\.0/ }).click();
       expect(screen.container.querySelector("#release-2\\.2\\.0")).not.toBeNull();
     });
@@ -284,4 +376,23 @@ it("shows the installed RC in both the announcement and release picker", async (
     .element(page.getByRole("heading", { name: "Version 2.3.0-rc.1", exact: true }))
     .toBeVisible();
   await expect.element(page.getByRole("button", { name: /^2\.3\.0-rc\.1/ })).toBeVisible();
+});
+
+it("shows unreleased notes on development builds as the upcoming release", async () => {
+  state.installedVersion = "develop-0123456789ab";
+  state.seen = latestRelease()!.version;
+  overwriteGetLocale(() => "en");
+  render(WhatsNewPage);
+  await expect
+    .element(page.getByRole("heading", { name: m.whats_new_unreleased(), exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(m.whats_new_unreleased_hint(), { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: m.whats_new_upcoming(), exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect.element(page.getByText(m.whats_new_new_for_you())).not.toBeInTheDocument();
+  await expect.element(page.getByText(m.whats_new_read(), { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByText(UNRELEASED, { exact: true })).not.toBeInTheDocument();
 });

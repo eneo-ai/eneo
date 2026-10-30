@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 from datetime import datetime
 from typing import Literal, Optional
@@ -13,7 +11,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.questions.question import UseTools
-from eneo.skills.domain.skill import SkillActivationEvidenceV1
+from eneo.skills.domain.skill import SkillActivationEvidence
 
 
 class _ConversationTarget(BaseModel):
@@ -189,7 +187,7 @@ class ChatTurnDiagnostics(BaseModel):
 
     session_id: UUID
     message_id: UUID
-    skill_activation: SkillActivationEvidenceV1 | None
+    skill_activation: SkillActivationEvidence | None
 
 
 class RecentConversationPartner(BaseModel):

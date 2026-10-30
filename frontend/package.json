@@ -36,11 +36,12 @@
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "engines": {
     "node": ">=18"
   },
   "resolutions": {
+    "katex": "0.18.11",
     "cookie": "0.7.2",
     "esbuild": ">0.25.0",
     "prettier": "3.9.4",
@@ -48,7 +49,7 @@
     "postcss": "8.5.28",
     "mermaid": "11.16.1",
     "sharp": "0.35.5",
-    "seroval": "1.6.9",
+    "seroval": "1.6.11",
     "vite": "^6.4.4",
     "@modelcontextprotocol/client": "^2.3.1"
   },

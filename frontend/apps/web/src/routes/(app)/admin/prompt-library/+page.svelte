@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
@@ -15,7 +13,9 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Plus, Trash2, Search } from "@lucide/svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Search from "@lucide/svelte/icons/search";
 
   const { data } = $props();
 

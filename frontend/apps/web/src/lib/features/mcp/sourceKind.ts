@@ -4,7 +4,9 @@
  * MCP server. One glyph and label per kind, shared by every admin surface
  * that names a source.
  */
-import { Package, Server, Sparkles } from "@lucide/svelte";
+import Package from "@lucide/svelte/icons/package";
+import Server from "@lucide/svelte/icons/server";
+import Sparkles from "@lucide/svelte/icons/sparkles";
 import { m } from "$lib/paraglide/messages";
 
 export type SourceKind = "internal" | "bundled" | "external";

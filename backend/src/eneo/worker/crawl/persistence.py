@@ -211,12 +211,12 @@ async def _publish_prepared_pages(
                         )
                     )
                 ).one()
-                quota_repo = InfoBlobRepository(session)
-                tenant_usage = await quota_repo.get_retained_size_of_tenant(
+                info_blob_repo = InfoBlobRepository(session)
+                tenant_usage = await info_blob_repo.get_retained_size_of_tenant(
                     ctx.tenant_id
                 )
                 user_usage = (
-                    await quota_repo.get_retained_size_of_user(ctx.user_id)
+                    await info_blob_repo.get_retained_size_of_user(ctx.user_id)
                     if user_limit is not None
                     else 0
                 )
@@ -290,29 +290,30 @@ async def _publish_prepared_pages(
                         stored_size = len(prepared.content.encode("utf-8")) + sum(
                             chunk_sizes
                         )
+                        # Replacing a page releases its old chunks, so quota
+                        # is checked against the size the tenant ends up with.
+                        releasable = (
+                            await info_blob_repo.releasable_search_bytes([existing.id])
+                            if existing is not None
+                            else {}
+                        )
+                        tenant_released = sum(releasable.values())
+                        user_released = releasable.get(ctx.user_id, 0)
                         ensure_quota_capacity(
-                            tenant_usage=tenant_usage,
+                            tenant_usage=tenant_usage - tenant_released,
                             tenant_limit=tenant_limit,
-                            user_usage=user_usage,
+                            user_usage=user_usage - user_released,
                             user_limit=user_limit,
                             size_in_bytes=stored_size,
                         )
                         source_id = (
                             existing.source_id if existing is not None else uuid4()
                         )
-                        if existing is not None:
-                            await session.execute(
-                                sa.update(InfoBlobs)
-                                .where(
-                                    InfoBlobs.id == existing.id,
-                                    InfoBlobs.tenant_id == prepared.tenant_id,
-                                    active_info_blob_version(),
-                                )
-                                .values(
-                                    version_state=(
-                                        InfoBlobVersionState.SUPERSEDED.value
-                                    )
-                                )
+                        if existing is not None and not await info_blob_repo.supersede(
+                            existing.id
+                        ):
+                            raise RuntimeError(
+                                "The active website version changed during publish"
                             )
 
                         result = await session.execute(
@@ -362,6 +363,10 @@ async def _publish_prepared_pages(
                         await session.execute(
                             sa.insert(InfoBlobChunks).values(chunk_values)
                         )
+                        if existing is not None:
+                            await info_blob_repo.release_replaced_search_data(
+                                [existing.id]
+                            )
 
                         await savepoint.commit()
                         enforce_quota_on_commit(
@@ -369,8 +374,8 @@ async def _publish_prepared_pages(
                             tenant_id=prepared.tenant_id,
                             user_id=prepared.user_id,
                         )
-                        tenant_usage += stored_size
-                        user_usage += stored_size
+                        tenant_usage += stored_size - tenant_released
+                        user_usage += stored_size - user_released
                         successful_identities.append(source_url)
                     except (
                         TenantQuotaExceededException,

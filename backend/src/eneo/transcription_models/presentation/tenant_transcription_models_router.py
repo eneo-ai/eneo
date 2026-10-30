@@ -1,5 +1,3 @@
-# MIT License
-
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID

@@ -1,14 +1,12 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
   import { page } from "$app/stores";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
-  import { SlidersHorizontal } from "@lucide/svelte";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
 
   let { children } = $props();
 

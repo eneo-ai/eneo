@@ -17,8 +17,24 @@ export const ENTRY_AUDIENCES = schema.$defs.entry.properties.audience.enum;
 /** @type {readonly import("./index").Locale[]} */
 export const LOCALES = schema.$defs.localized.required;
 
-export function latestRelease() {
-  return releases[0];
+/**
+ * The version of the block that collects merged changes before any final
+ * release includes them. It never ships in a tagged build (CI enforces it),
+ * so it is shown as upcoming and never announced or recorded as seen.
+ * @type {"next"}
+ */
+export const UNRELEASED = schema.$defs.release.properties.version.anyOf.find(
+  (option) => "const" in option
+).const;
+
+/** @param {import("./index").Release} release */
+export function isUnreleased(release) {
+  return release.version === UNRELEASED;
+}
+
+/** @param {import("./index").Release[]} [list] */
+export function latestRelease(list = releases) {
+  return list.find((release) => !isUnreleased(release));
 }
 
 /**
@@ -46,11 +62,15 @@ export function releasesForVersion(installedVersion) {
  * Semver order for release ids as written in releases.json ("2.2.0",
  * "2.3.0-rc.1"). A pre-release sorts before its final release; pre-release
  * identifiers compare numerically when both are numeric, otherwise as text.
+ * The unreleased block sorts after every release.
  * @param {string} a
  * @param {string} b
  * @returns {number} negative when a < b, 0 when equal, positive when a > b
  */
 export function compareVersions(a, b) {
+  if (a === UNRELEASED || b === UNRELEASED) {
+    return (a === UNRELEASED ? 1 : 0) - (b === UNRELEASED ? 1 : 0);
+  }
   const pa = parseVersion(a);
   const pb = parseVersion(b);
   for (let i = 0; i < 3; i++) {
@@ -94,20 +114,24 @@ function parseVersion(version) {
 /**
  * True while the newest bundled release is newer than what the user has
  * seen. Comparing by order (not equality) keeps the dot off after a
- * rollback or when an older frontend serves a request mid-deploy.
+ * rollback or when an older frontend serves a request mid-deploy. The
+ * unreleased block never counts: it has no version to record.
  * @param {string | null | undefined} seenVersion
  * @param {import("./index").Release | undefined} latest
  */
 export function hasUnseenRelease(seenVersion, latest = latestRelease()) {
-  if (!latest) return false;
+  if (!latest || isUnreleased(latest)) return false;
   if (!seenVersion) return true;
   return compareVersions(latest.version, seenVersion) > 0;
 }
 
 /**
  * @param {import("./index").Release} release
- * @param {boolean} isAdmin
+ * @param {import("./index").PermissionCheck} can
  */
-export function visibleEntries(release, isAdmin) {
-  return release.entries.filter((entry) => isAdmin || (entry.audience ?? "all") === "all");
+export function visibleEntries(release, can) {
+  return release.entries.filter(
+    (entry) =>
+      (entry.audience !== "admin" || can("admin")) && (!entry.permissions || can(entry.permissions))
+  );
 }

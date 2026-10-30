@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     MCP server controls for the chat input toolbar: pick which of the partner's
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. State is owned by the parent
@@ -23,7 +21,10 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
-  import { BookOpen, Paperclip, Plug, ShieldCheck } from "@lucide/svelte";
+  import BookOpen from "@lucide/svelte/icons/book-open";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
+  import Plug from "@lucide/svelte/icons/plug";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import type { SvelteSet } from "svelte/reactivity";
