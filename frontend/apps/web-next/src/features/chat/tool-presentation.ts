@@ -108,6 +108,7 @@ const FLOW_TOOLS = new Set([
   "update_flow_settings",
   "read_step_assistant",
   "update_step",
+  "update_steps",
   "add_step",
   "move_step",
   "remove_step",

@@ -9327,6 +9327,8 @@
   "tool_flows_read_step_assistant_done": "Läste steg",
   "tool_flows_update_step": "Ändrar steg",
   "tool_flows_update_step_done": "Ändrade steg",
+  "tool_flows_update_steps": "Ändrar flera steg",
+  "tool_flows_update_steps_done": "Ändrade flera steg",
   "tool_flows_add_step": "Lägger till steg",
   "tool_flows_add_step_done": "Lade till steg",
   "tool_flows_move_step": "Flyttar steg",

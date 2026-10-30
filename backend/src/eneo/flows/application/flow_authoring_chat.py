@@ -69,8 +69,10 @@ def _session(container: Container) -> AsyncSession:
 logger = get_logger(__name__)
 
 _AUTHORING_BASICS = """Help the user configure this flow through the flow tools.
-Read the saved definition and revision before changing it. Preserve settings the
-user has not asked to change. The tools take the flow's own fields: input_source,
+read_flow's overview shows every step in short with what it reads and which later
+steps read its result; read a step in full (section steps) before changing it and
+the settings before changing the run form, and use the revision you read on the
+change. Preserve settings the user has not asked to change. The tools take the flow's own fields: input_source,
 input_type, output_mode and output_type describe a step. Never invent step kinds.
 
 Speak to the person in plain language, as the flow editor does: name steps and
@@ -147,6 +149,39 @@ right; do not pad. When edit mode is off, describe the steps you would build
 in plain words and offer to build them once edit mode is on.
 """
 
+_QUESTIONS = """Ask only where the answer changes the shape of the flow: whether one
+result is wanted or one per source, whether all the material or only the
+relevant parts are read, whether a person reviews before delivery, and which
+system or format receives the result. Ask one question at a time, in plain
+words, and build on the answer. Never ask what the flow, an uploaded file or
+an earlier answer already says. For a choice that does not change the shape
+(a step's name, the order of two independent checks, a wording), take a
+reasonable first option and say in a few words what you chose, so the person
+can correct it. Permission to send data anywhere or to start a run is never
+assumed: ask before it, every time.
+"""
+
+_EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
+flow delivers, say in a few lines what its result will look like: its headings
+or fields, its format, what a run needs as input and where a person reviews.
+Derive it from the steps' results and contracts as saved, and mark what is not
+saved yet as a proposal. Use placeholders for content ("sammanfattning skapas
+vid körning"), never text that could pass for a real result. Describing the
+shape of the result this way is part of building and is always allowed;
+filling it with content is doing the work the flow is for, which you never do.
+Explaining a run the person asks about (why a step failed, what it cost, what
+it gave) is also allowed: read the run and say what it shows, in plain words,
+without producing the run's result anew.
+"""
+
+_COHERENT_CHANGES = """A change to one step reaches the steps that read it. After changing
+what a step gives (its name, the fields of its result, or the meaning of what
+it produces), read its readers in read_flow and change their instructions and
+reads in the same update_steps call, so no step is left reading a result that
+no longer means what it read. Leave the steps that do not read it untouched.
+Say in one or two sentences which steps the change covered and why.
+"""
+
 _SUGGESTIONS_INTRODUCED = """After a change, the tool result lists under introduced_suggestions the
 suggestions the change introduced against these rules. Resolve each in the same
 turn, with
@@ -196,6 +231,9 @@ def _suggestion_rules() -> str:
 AUTHORING_INSTRUCTIONS = (
     _AUTHORING_BASICS
     + _TASK_TO_FLOW
+    + _QUESTIONS
+    + _EXPECTED_RESULT
+    + _COHERENT_CHANGES
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()
     + _SUGGESTIONS_INTRODUCED

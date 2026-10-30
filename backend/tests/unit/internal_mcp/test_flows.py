@@ -493,7 +493,12 @@ def _changing_chat(
         if fail
         else AsyncMock(side_effect=[prompts for _, prompts in drafts])
     )
-    saved_step = SimpleNamespace(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
+    saved_step = SimpleNamespace(
+        id=_DRAFT_IDS[1],
+        assistant_id=_DRAFT_IDS[3],
+        step_order=2,
+        user_description="Steg 2",
+    )
     read = MagicMock(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
     read.model_dump.return_value = {}
     monkeypatch.setattr(
@@ -611,8 +616,223 @@ def test_every_draft_changing_tool_reports_introduced_suggestions():
     assert changing == {
         "update_flow_settings",
         "update_step",
+        "update_steps",
         "add_step",
         "move_step",
         "remove_step",
         "apply_flow_suggestions",
     }
+
+
+# --- Reading the flow by section ---------------------------------------------
+
+
+_STEP_2_PROMPT = "Sammanfatta {{ step_1.output.text }}."
+
+
+def _reading_chat(monkeypatch):
+    """A view-mode chat over the example flow: step 2 reads step 1 as its
+    input and again in its prompt."""
+    from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
+    from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
+    from tests.unit.flows.application.test_flow_suggestion_service import (
+        _flow,
+        _step,
+    )
+
+    public = FlowPublic.model_validate(FLOW_PUBLIC_EXAMPLE)
+    saved = _flow(
+        [
+            _step(
+                step.step_order,
+                id=step.id,
+                assistant_id=step.assistant_id,
+                user_description=step.user_description,
+                input_source=step.input_source.value,
+                input_type=step.input_type.value,
+                output_mode=step.output_mode.value,
+                output_type=step.output_type.value,
+            )
+            for step in public.steps
+        ]
+    )
+    prompts = {
+        public.steps[1].assistant_id: StoredAssistantPrompt(
+            text=_STEP_2_PROMPT, description=None
+        )
+    }
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=public.id, space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    service = container.flow_service.return_value
+    service.get_flow = AsyncMock(return_value=saved)
+    service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
+    monkeypatch.setattr(
+        flow_authoring_operations, "get_flow", AsyncMock(return_value=public)
+    )
+    return public
+
+
+async def _read(**kwargs):
+    result = await flows.read_flow(MagicMock(), **kwargs)
+    assert result.isError is not True, result.content[0].text
+    page = json.loads(result.content[0].text)
+    assert page["next_offset"] is None
+    return page, json.loads(page["content"])
+
+
+async def test_the_overview_lists_every_step_with_its_reads_and_readers(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    page, content = await _read()
+
+    assert page["draft_revision"] == public.draft_revision
+    assert content["name"] == public.name
+    assert "run_form_fields" in content
+    first, second = content["steps"]
+    assert first["step_order"] == 1 and first["id"] == str(public.steps[0].id)
+    assert first["output_fields"] is None and first["review"] is False
+    # Short: no prompt and no configuration columns in the overview.
+    assert "prompt" not in second and "input_config" not in second
+    assert [(read["step_order"], read["value"]) for read in second["reads"]] == [
+        (1, "{{step_1.output.text}}"),
+        (1, "{{step_1.output.text}}"),
+    ]
+    assert second["reads"][1]["where"] == "in its prompt ({{ step_1.output.text }})"
+    assert [reader["step_order"] for reader in first["readers"]] == [2, 2]
+    assert first["readers"][0]["name"] == public.steps[1].user_description
+    assert second["readers"] == []
+
+
+async def test_the_steps_section_gives_the_chosen_steps_in_full_with_prompts(
+    monkeypatch,
+):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="steps", steps=[2])
+
+    (step,) = content["steps"]
+    assert step["id"] == str(public.steps[1].id)
+    assert step["prompt"] == _STEP_2_PROMPT
+    assert "input_bindings" in step and "output_config" in step
+    assert len(step["reads"]) == 2
+
+
+async def test_a_step_number_the_flow_lacks_is_refused(monkeypatch):
+    _reading_chat(monkeypatch)
+
+    result = await flows.read_flow(MagicMock(), steps=[2, 7])
+
+    assert result.isError is True
+    assert "No step 7" in json.loads(result.content[0].text)["message"]
+
+
+async def test_the_settings_section_leaves_the_steps_out(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="settings")
+
+    assert "steps" not in content
+    assert content["permissions"] == public.permissions.model_dump(mode="json")
+    assert content["draft_revision"] == public.draft_revision
+
+
+async def test_the_all_section_is_the_whole_definition(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="all")
+
+    assert content == public.model_dump(mode="json")
+
+
+# --- Several steps in one change -----------------------------------------------
+
+
+async def test_update_steps_saves_every_edit_and_the_settings_in_one_revision(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT)
+
+    result = await flows.update_steps(
+        MagicMock(),
+        expected_revision=4,
+        edits=[
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "changes": {"user_description": "Steg 2"},
+                "assistant_changes": {"prompt": {"text": _DUPLICATE_PROMPT}},
+            }
+        ],
+        settings={"description": "Ny beskrivning"},
+    )
+
+    assert result.isError is not True, result.content[0].text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert request.expected_revision == 4
+    assert [edit.step_id for edit in request.step_edits] == [_DRAFT_IDS[1]]
+    assert request.step_edits[0].changes.user_description == "Steg 2"
+    assert [(a.assistant_id, a.step_id) for a in request.assistants] == [
+        (_DRAFT_IDS[3], _DRAFT_IDS[1])
+    ]
+    assert request.definition.description == "Ny beskrivning"
+    page = json.loads(result.content[0].text)
+    assert page["draft_revision"] == 5
+    assert json.loads(page["content"]) == {
+        "saved": True,
+        "steps": [
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "step_order": 2,
+                "name": "Steg 2",
+                "assistant_id": str(_DRAFT_IDS[3]),
+            }
+        ],
+    }
+    # A batch reports what it introduced like any other change.
+    assert [item["code"] for item in page["introduced_suggestions"]] == [
+        "duplicate_read"
+    ]
+
+
+@pytest.mark.parametrize(
+    "edits,settings",
+    [
+        ([], None),
+        ([{"step_id": str(_DRAFT_IDS[1])}], None),
+        (
+            [
+                {"step_id": str(_DRAFT_IDS[1]), "changes": {"user_description": "a"}},
+                {"step_id": str(_DRAFT_IDS[1]), "changes": {"user_description": "b"}},
+            ],
+            None,
+        ),
+        ([{"step_id": str(_DRAFT_IDS[1]), "edits": {}}], None),
+        ([{"step_id": str(uuid4()), "changes": {"user_description": "a"}}], None),
+        ([{"step_id": str(_DRAFT_IDS[1]), "changes": {"step_order": 1}}], None),
+        (
+            [
+                {
+                    "step_id": str(_DRAFT_IDS[1]),
+                    "changes": {"output_config": {"auth": {"token": "secret"}}},
+                }
+            ],
+            None,
+        ),
+        ([], {"published_version": 2}),
+    ],
+)
+async def test_update_steps_refuses_a_bad_batch_without_saving(
+    monkeypatch, edits, settings
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.update_steps(
+        MagicMock(), expected_revision=4, edits=edits, settings=settings
+    )
+
+    assert result.isError is True
+    save.assert_not_awaited()

@@ -36,6 +36,11 @@ Read the current saved revision and configuration before editing; use that revis
 on every change. Keep unchanged fields. Every change goes through the flow's own
 validation, permissions, classification and audit. The user must enter edit mode in
 the editor.
+read_flow's overview (the default) lists every step in short with what it reads and
+which later steps read it; section "steps" with steps=[...] gives those steps in
+full with their prompts, section "settings" the flow without its steps. Read a step
+in full before changing it. A change that reaches several steps goes in one
+update_steps call.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
 A completion step whose input may exceed its model's window can set
@@ -301,19 +306,94 @@ def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolRe
     return result
 
 
+FlowSection = Literal["overview", "steps", "settings", "all"]
+
+# What the overview says of a step besides its reads.
+_OVERVIEW_STEP_FIELDS = frozenset(
+    {
+        "id",
+        "step_order",
+        "assistant_id",
+        "user_description",
+        "input_source",
+        "input_type",
+        "output_mode",
+        "output_type",
+    }
+)
+
+
 @mcp.tool()
-async def read_flow(ctx: Context, offset: int = 0) -> CallToolResult:
-    """Read a page of the current flow definition; follow next_offset to read all settings."""
+async def read_flow(
+    ctx: Context,
+    section: FlowSection = "overview",
+    steps: list[int] | None = None,
+    offset: int = 0,
+) -> CallToolResult:
+    """Read the saved draft. The overview (default) is short: the flow's name,
+    its run form fields and every step with its kind, the fields its result
+    declares (output_fields), whether a person reviews it, what it reads
+    (reads: each earlier result as the reference the flow resolves and
+    where the read is written), which later steps read its result (readers,
+    the same way) and the run form fields it reads. Section "steps" gives
+    the steps in full with their assistants' prompts and the same reads;
+    section "settings" the flow without its steps (description,
+    metadata_json with the run form, retention, permissions); section "all"
+    everything, paged. steps=[5, 8] limits the overview or the steps section
+    to those step numbers (1 is first). A step marked unreadable has a
+    configuration the flow cannot read; read it in full and fix it. Follow
+    next_offset until it is null."""
 
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
+        from eneo.flows.application.flow_authoring_reads import (
+            output_fields,
+            run_form_fields,
+            step_reads_summary,
+        )
 
         flow = await get_flow(chat.flow_id, request, container)
+        if section == "all":
+            value: Any = flow.model_dump(mode="json")
+        elif section == "settings":
+            value = flow.model_dump(mode="json", exclude={"steps"})
+        else:
+            orders = {step.step_order for step in flow.steps}
+            if steps is not None and (missing := sorted(set(steps) - orders)):
+                raise BadRequestException(
+                    f"No step {', '.join(map(str, missing))}; the flow has "
+                    f"{len(orders)} step(s), numbered from 1."
+                )
+            chosen = [
+                step for step in flow.steps if steps is None or step.step_order in steps
+            ]
+            saved = await container.flow_service().get_flow(chat.flow_id)
+            prompts = await container.flow_service().get_flow_assistant_prompts(saved)
+            reads = step_reads_summary(saved, prompts)
+            items: list[dict[str, Any]] = []
+            for step in chosen:
+                if section == "overview":
+                    item = step.model_dump(
+                        mode="json", include=set(_OVERVIEW_STEP_FIELDS)
+                    )
+                    item["output_fields"] = output_fields(step.output_contract)
+                    item["review"] = step.review_policy is not None
+                else:
+                    item = step.model_dump(mode="json")
+                    prompt = prompts.get(step.assistant_id)
+                    item["prompt"] = prompt.text if prompt is not None else None
+                item.update(reads.get(step.step_order, {}))
+                items.append(item)
+            value = {
+                "name": flow.name,
+                "published_version": flow.published_version,
+                "steps": items,
+            }
+            if section == "overview":
+                value["description"] = flow.description
+                value["run_form_fields"] = run_form_fields(flow.metadata_json)
         return page_result(
-            flow.model_dump(mode="json"),
-            flow_id=flow.id,
-            offset=offset,
-            revision=flow.draft_revision,
+            value, flow_id=flow.id, offset=offset, revision=flow.draft_revision
         )
 
     return await _call(ctx, operation)
@@ -479,44 +559,18 @@ async def update_step(
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
-    keep theirs; the result names the step's assistant_id."""
+    keep theirs; the result names the step's assistant_id. A change that
+    reaches several steps goes in one update_steps call instead."""
 
     async def operation(container, chat, request):
-        from eneo.flows.api.flow_models import (
-            FlowEditorUpdateRequest,
-            FlowStepUpdateRequest,
-        )
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
         from eneo.flows.application.flow_authoring_operations import (
             apply_editor_update,
             get_flow,
         )
 
         flow = await get_flow(chat.flow_id, request, container)
-        step = next((item for item in flow.steps if item.id == step_id), None)
-        if step is None:
-            raise NotFoundException("Step not found.")
-        if set(changes) - (
-            set(FlowStepUpdateRequest.model_fields)
-            - {"id", "assistant_id", "step_order"}
-        ):
-            raise BadRequestException(
-                "Use a step configuration field; step identity and order cannot be changed here."
-            )
-        saved = step.model_dump(
-            mode="json", include=set(FlowStepUpdateRequest.model_fields)
-        )
-        require_safe_model_configuration(changes, saved)
-        assistants = (
-            []
-            if assistant_changes is None
-            else [
-                {
-                    "assistant_id": str(step.assistant_id),
-                    "step_id": str(step_id),
-                    "changes": assistant_changes,
-                }
-            ]
-        )
+        edit = _step_edit(flow, step_id, changes, assistant_changes)
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -524,8 +578,8 @@ async def update_step(
                 {
                     "expected_revision": expected_revision,
                     "definition": {},
-                    "step_edits": [{"step_id": str(step_id), "changes": changes}],
-                    "assistants": assistants,
+                    "step_edits": edit.step_edits,
+                    "assistants": edit.assistants,
                 }
             ),
             container,
@@ -536,6 +590,151 @@ async def update_step(
                 "saved": True,
                 "step_id": str(step_id),
                 "assistant_id": str(saved_step.assistant_id),
+            },
+            flow_id=chat.flow_id,
+            revision=updated.draft_revision,
+        )
+
+    return await _call(ctx, operation, changes_draft=True)
+
+
+class _StepEdit:
+    """One step's part of an editor update, checked as update_step checks
+    it: the step exists, only configuration fields change, and no
+    credential is sent or retargeted."""
+
+    def __init__(
+        self, step_edits: list[dict[str, Any]], assistants: list[dict[str, Any]]
+    ):
+        self.step_edits = step_edits
+        self.assistants = assistants
+
+
+def _step_edit(
+    flow: Any,
+    step_id: UUID,
+    changes: dict[str, Any] | None,
+    assistant_changes: dict[str, Any] | None,
+) -> _StepEdit:
+    from eneo.flows.api.flow_models import FlowStepUpdateRequest
+
+    step = next((item for item in flow.steps if item.id == step_id), None)
+    if step is None:
+        raise NotFoundException("Step not found.")
+    changes = changes or {}
+    if set(changes) - (
+        set(FlowStepUpdateRequest.model_fields) - {"id", "assistant_id", "step_order"}
+    ):
+        raise BadRequestException(
+            "Use a step configuration field; step identity and order cannot be changed here."
+        )
+    saved = step.model_dump(
+        mode="json", include=set(FlowStepUpdateRequest.model_fields)
+    )
+    require_safe_model_configuration(changes, saved)
+    return _StepEdit(
+        step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
+        assistants=(
+            []
+            if assistant_changes is None
+            else [
+                {
+                    "assistant_id": str(step.assistant_id),
+                    "step_id": str(step_id),
+                    "changes": assistant_changes,
+                }
+            ]
+        ),
+    )
+
+
+_SETTINGS_FIELDS = frozenset(
+    {"name", "description", "metadata_json", "form_field_renames"}
+)
+
+
+@mcp.tool()
+async def update_steps(
+    ctx: Context,
+    expected_revision: int,
+    edits: list[dict[str, Any]],
+    settings: dict[str, Any] | None = None,
+) -> CallToolResult:
+    """Change several saved steps, and optionally the flow's settings, in one
+    revision: everything is saved or nothing. Each edit is {"step_id": ...,
+    "changes": {...}, "assistant_changes": {...}} with the fields update_step
+    takes (either part may be left out); a step appears once. settings takes
+    what update_flow_settings takes. Use it when one change reaches several
+    steps: when a step's result changes, the steps that read it (readers in
+    read_flow) get their new instructions in the same call, so the flow is
+    never saved half-changed. A refusal names what to fix and saves nothing.
+    The result lists the saved steps with their assistant ids."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
+
+        if not edits and not settings:
+            raise BadRequestException("Send at least one edit or a settings change.")
+        if settings and set(settings) - _SETTINGS_FIELDS:
+            raise BadRequestException(
+                "Only name, description, metadata_json and form_field_renames "
+                "can be changed in settings."
+            )
+        flow = await get_flow(chat.flow_id, request, container)
+        step_edits: list[dict[str, Any]] = []
+        assistants: list[dict[str, Any]] = []
+        edited: list[UUID] = []
+        for edit in edits:
+            if set(edit) - {"step_id", "changes", "assistant_changes"}:
+                raise BadRequestException(
+                    "An edit has step_id, changes and assistant_changes only."
+                )
+            try:
+                step_id = UUID(str(edit.get("step_id")))
+            except ValueError:
+                raise BadRequestException("Each edit needs a step_id.") from None
+            if step_id in edited:
+                raise BadRequestException("A step appears once per call.")
+            if not edit.get("changes") and edit.get("assistant_changes") is None:
+                raise BadRequestException(
+                    f"The edit of step {step_id} changes nothing."
+                )
+            part = _step_edit(
+                flow, step_id, edit.get("changes"), edit.get("assistant_changes")
+            )
+            step_edits.extend(part.step_edits)
+            assistants.extend(part.assistants)
+            edited.append(step_id)
+        updated = await apply_editor_update(
+            chat.flow_id,
+            request,
+            FlowEditorUpdateRequest.model_validate(
+                {
+                    "expected_revision": expected_revision,
+                    "definition": settings or {},
+                    "step_edits": step_edits,
+                    "assistants": assistants,
+                }
+            ),
+            container,
+        )
+        by_id = {step.id: step for step in updated.steps}
+        return page_result(
+            {
+                "saved": True,
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": by_id[step_id].step_order,
+                        "name": by_id[step_id].user_description,
+                        "assistant_id": str(by_id[step_id].assistant_id),
+                    }
+                    for step_id in edited
+                ],
             },
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
