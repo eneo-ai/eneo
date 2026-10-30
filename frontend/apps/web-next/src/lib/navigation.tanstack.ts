@@ -13,7 +13,7 @@ import {
   type AnyRouter,
   type ParsedLocation
 } from "@tanstack/react-router";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useEffectEvent, useMemo, useSyncExternalStore } from "react";
 import type * as Seam from "./navigation";
 import { stringifySearch } from "./router/search";
 
@@ -137,7 +137,7 @@ export const readUrlState: typeof Seam.readUrlState = () => {
 };
 
 /** The router keeps the pending transition, including its history action and fragment. */
-export const useLeaveConfirmation: typeof Seam.useLeaveConfirmation = (active) => {
+export const useLeaveConfirmation: typeof Seam.useLeaveConfirmation = (active, onLeave) => {
   const blocker = useBlocker({
     shouldBlockFn: ({ current, next }) =>
       active &&
@@ -146,15 +146,22 @@ export const useLeaveConfirmation: typeof Seam.useLeaveConfirmation = (active) =
     withResolver: true,
     enableBeforeUnload: active
   });
-  // Saving can clear dirty state or replace a keyed editor while its dialog is open.
-  // Cancel that outstanding decision so native Back restores the current address.
+  const leave = () => {
+    if (blocker.proceed) {
+      onLeave?.();
+      blocker.proceed();
+    }
+  };
+  const releasePending = useEffectEvent(leave);
+  // Saved or removed editors no longer need a decision about their edits.
+  // Release the latest native transition, including on actual guard teardown.
   useEffect(() => {
-    if (!active) blocker.reset?.();
-  }, [active, blocker.reset]);
-  useEffect(() => () => blocker.reset?.(), [blocker.reset]);
+    if (!active) releasePending();
+  }, [active, blocker.proceed]);
+  useEffect(() => () => releasePending(), []);
   return {
     blocked: blocker.status === "blocked",
-    leave: () => blocker.proceed?.(),
+    leave,
     stay: () => blocker.reset?.()
   };
 };

@@ -102,19 +102,19 @@ it("settles a pending Back when saving replaces the actual revision editor", asy
     await act(async () => router.history.back());
     await screen.findByRole("alertdialog");
     await act(async () => finish());
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Namn" })).not.toBe(input));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    await waitFor(() => expect(window.location.pathname).toBe("/edit"));
+    await screen.findByRole("heading", { name: "Done" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(router.state.location.pathname).toBe("/done");
+    expect(window.location.pathname).toBe("/done");
+    await act(async () => router.history.forward());
+    await screen.findByRole("textbox", { name: "Namn" });
     expect(router.state.location.pathname).toBe("/edit");
+    expect(window.location.pathname).toBe("/edit");
     expect((screen.getByRole("textbox", { name: "Namn" }) as HTMLInputElement).value).toBe(
       "Changed"
     );
     await act(async () => router.history.back());
     await screen.findByRole("heading", { name: "Done" });
-    await act(async () => router.history.forward());
-    await screen.findByRole("textbox", { name: "Namn" });
-    expect(router.state.location.pathname).toBe("/edit");
-    expect(window.location.pathname).toBe("/edit");
   } finally {
     unmount();
     history.destroy();

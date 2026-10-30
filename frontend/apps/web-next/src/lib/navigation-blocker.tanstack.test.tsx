@@ -181,3 +181,42 @@ it("keeps browser unload protection only while edits are unsaved and removes it 
     history.destroy();
   }
 });
+
+it.each(["Stay", "Leave"])(
+  "keeps the latest decision reachable after two native Back presses: %s",
+  async (decision) => {
+    window.history.replaceState(null, "", "/a");
+    const history = createBrowserHistory();
+    const { router, unmount } = await renderWithRouter(<Editor initialDirty={false} />, {
+      history,
+      routes
+    });
+    try {
+      await click("Push");
+      await waitFor(() => expect(router.state.location.pathname).toBe("/b"));
+      await act(() => router.navigate({ href: "/a?later=true" }));
+      await click("Toggle dirty");
+      await act(async () => router.history.back());
+      await waitFor(() => expect(blocked()).toBe("Blocked"));
+      await act(async () => router.history.back());
+      await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/a"));
+      expect(blocked()).toBe("Blocked");
+      await click(decision);
+      const destination = decision === "Stay" ? "/a?later=true" : "/a";
+      await waitFor(() => expect(router.state.location.href).toBe(destination));
+      await waitFor(() =>
+        expect(window.location.pathname + window.location.search).toBe(destination)
+      );
+      await act(async () =>
+        decision === "Stay" ? router.history.back() : router.history.forward()
+      );
+      await waitFor(() => expect(blocked()).toBe("Blocked"));
+      await click("Leave");
+      await waitFor(() => expect(router.state.location.pathname).toBe("/b"));
+      expect(window.location.pathname).toBe("/b");
+    } finally {
+      unmount();
+      history.destroy();
+    }
+  }
+);

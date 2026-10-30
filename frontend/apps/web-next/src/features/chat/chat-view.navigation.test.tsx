@@ -109,9 +109,10 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
   fireEvent.click(screen.getByRole("link", { name: "Leave conversation" }));
   await screen.findByRole("alertdialog");
   await act(async () => finishSave());
+  await screen.findByRole("heading", { name: "Done" });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Spara" })).toBeNull());
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  expect(router.state.location.pathname).toBe("/chat");
+  expect(router.state.location.pathname).toBe("/done");
   expect(post).toHaveBeenLastCalledWith(
     "/api/v1/conversations/{session_id}/documents/{file_id}/versions/",
     {
@@ -119,9 +120,5 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
       body: { content: "Changed document.\n" }
     }
   );
-  await act(async () => {
-    fireEvent.click(screen.getByRole("link", { name: "Leave conversation" }));
-  });
-  await screen.findByRole("heading", { name: "Done" });
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });

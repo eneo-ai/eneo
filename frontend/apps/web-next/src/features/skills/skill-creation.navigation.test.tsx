@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createRoute } from "@tanstack/react-router";
+import { createBrowserHistory, createRoute } from "@tanstack/react-router";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import Link from "@/lib/link.tanstack";
@@ -112,5 +112,68 @@ it.each(
     await act(async () => releaseDestination());
     await screen.findByRole("heading", { name: "Left editor" });
     expect(router.state.location.pathname).toBe("/left");
+  }
+);
+
+it.each([
+  { scope: "space-1", component: SpaceSkillNewPage },
+  { scope: "organization", component: OrganizationSkillNewPage }
+])(
+  "keeps browser history usable when creation in $scope completes during an undecided Back",
+  async ({ scope, component }) => {
+    let finish!: () => void;
+    post.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve({ data: { id: "skill-1" }, response: new Response() });
+      })
+    );
+    const base = `/spaces/${scope}/skills`;
+    window.history.replaceState(null, "", "/left");
+    const history = createBrowserHistory();
+    const { router, unmount } = await renderWithRouter(null, {
+      history,
+      routes: (root) => [
+        createRoute({
+          getParentRoute: () => root,
+          path: "/left",
+          component: () => <h1>Left editor</h1>
+        }),
+        createRoute({ getParentRoute: () => root, path: `${base}/new`, component }),
+        createRoute({
+          getParentRoute: () => root,
+          path: `${base}/skill-1`,
+          component: () => <h1>Saved Skill</h1>
+        })
+      ]
+    });
+    try {
+      await act(() => router.navigate({ href: `${base}/new` }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Namn" }), {
+        target: { value: "Reports" }
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Beskrivning" }), {
+        target: { value: "Find reports" }
+      });
+      await act(async () =>
+        replaceInstructionText(screen.getByLabelText("Instruktioner"), "Search the archive")
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Skapa Skill" }));
+      await act(async () => router.history.back());
+      await screen.findByRole("alertdialog");
+      await act(async () => finish());
+      await screen.findByRole("heading", { name: "Left editor" });
+      expect(router.state.location.pathname).toBe("/left");
+      expect(window.location.pathname).toBe("/left");
+      await act(async () => router.history.forward());
+      await screen.findByRole("textbox", { name: "Namn" });
+      expect(router.state.location.pathname).toBe(`${base}/new`);
+      expect(window.location.pathname).toBe(`${base}/new`);
+      await act(async () => router.history.back());
+      await screen.findByRole("heading", { name: "Left editor" });
+      expect(window.location.pathname).toBe("/left");
+    } finally {
+      unmount();
+      history.destroy();
+    }
   }
 );
