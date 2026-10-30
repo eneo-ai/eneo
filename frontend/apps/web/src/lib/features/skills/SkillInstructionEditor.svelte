@@ -16,6 +16,7 @@
   let {
     value = $bindable(),
     id,
+    describedBy = "",
     disabled,
     invalid,
     catalog,
@@ -23,6 +24,7 @@
   }: {
     value: string;
     id: string;
+    describedBy?: string;
     disabled: boolean;
     invalid: boolean;
     catalog: ReferenceCatalog;
@@ -49,11 +51,17 @@
       id,
       label: m.skills_instructions_label(),
       placeholder: m.skills_reference_placeholder(),
-      describedBy: `${id}-reference-hint`,
+      describedBy: `${id}-reference-hint ${id}-reference-error ${describedBy}`.trim(),
+      referenceTypeLabels: {
+        skill: m.skills_reference_kind_skill(),
+        function: m.skills_reference_kind_function(),
+        mcp_server: m.skills_reference_kind_mcp(),
+        mcp_tool: m.skills_reference_kind_tool()
+      },
       editorClass:
         "text-foreground relative min-h-48 max-h-[50dvh] w-full overflow-y-auto px-3 py-3 text-base sm:text-sm leading-7 whitespace-pre-wrap wrap-anywhere outline-none [--skill-placeholder:var(--text-secondary)] [&>p]:m-0",
       referenceClass:
-        "bg-accent-dimmer text-accent-stronger mx-0.5 inline cursor-pointer rounded-md border-0 px-1.5 py-0.5 text-sm font-medium leading-normal whitespace-normal break-words hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline [&.ProseMirror-selectednode]:outline-ring",
+        "bg-accent-dimmer text-accent-stronger mx-0.5 inline cursor-pointer rounded-md border-0 px-1.5 py-0.5 box-decoration-clone text-sm font-medium leading-normal whitespace-normal break-words hover:underline underline-offset-2 [&.ProseMirror-selectednode]:outline-2 [&.ProseMirror-selectednode]:outline-accent-stronger",
       onChange: (text) => {
         value = text;
       },
@@ -77,7 +85,10 @@
 <div class="flex min-w-0 flex-col gap-2">
   <InputGroup.Root>
     <div bind:this={mount} class="w-full min-w-0"></div>
-    <InputGroup.Addon align="block-end" class="flex-wrap justify-between gap-2 border-t">
+    <InputGroup.Addon
+      align="block-end"
+      class="text-foreground flex-wrap justify-between gap-2 border-t"
+    >
       <InputGroup.Button size="sm" {disabled} onclick={() => editor?.openReference()}
         ><AtSign data-icon="inline-start" />{m.skills_reference_insert()}</InputGroup.Button
       >
@@ -98,7 +109,9 @@
   <p id={`${id}-reference-hint`} class="text-muted-foreground text-xs leading-5">
     {m.skills_reference_hint()}
   </p>
-  {#if malformed}<p class="text-destructive text-sm">{m.skills_reference_invalid()}</p>{/if}
+  {#if malformed}<p id={`${id}-reference-error`} class="text-destructive text-sm">
+      {m.skills_reference_invalid()}
+    </p>{/if}
   <p class="sr-only" role="status">{announcement}</p>
   {#if selection}
     <SkillReferencePicker

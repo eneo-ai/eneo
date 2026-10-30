@@ -39,6 +39,7 @@ type EditorOptions = {
   invalid?: boolean;
   editorClass: string;
   referenceClass: string;
+  referenceTypeLabels?: Record<InstructionTarget["kind"], string>;
   onChange: (value: string) => void;
   onReference: (selection: ReferenceSelection | null) => void;
 };
@@ -58,7 +59,7 @@ const schema = new Schema({
       inline: true,
       atom: true,
       selectable: true,
-      attrs: { raw: {}, label: {} },
+      attrs: { raw: {}, label: {}, kind: {} },
       toDOM: (node) => [
         "span",
         { "data-skill-reference": "", contenteditable: "false" },
@@ -96,6 +97,7 @@ function documentFor(value: string, source: boolean): ProseMirrorNode {
       schema.nodes.reference.create({
         raw: reference.text,
         label: reference.label,
+        kind: reference.target.kind,
       }),
     );
     cursor = reference.end;
@@ -333,7 +335,28 @@ export function createInstructionEditor(options: EditorOptions) {
         button.tabIndex = -1;
         button.contentEditable = "false";
         button.className = options.referenceClass;
-        button.textContent = node.attrs.label;
+        button.dataset.skillReference = "";
+        const typeLabel =
+          options.referenceTypeLabels?.[
+            node.attrs.kind as InstructionTarget["kind"]
+          ];
+        const fullName = typeLabel
+          ? `${typeLabel}: ${node.attrs.label}`
+          : node.attrs.label;
+        button.title = fullName;
+        button.setAttribute("aria-label", fullName);
+        if (typeLabel) {
+          const kind = document.createElement("span");
+          kind.dataset.skillReferenceKind = "";
+          kind.setAttribute("aria-hidden", "true");
+          kind.textContent = `${typeLabel}:`;
+          button.append(kind);
+        }
+        const label = document.createElement("span");
+        label.dataset.skillReferenceLabel = "";
+        label.setAttribute("aria-hidden", "true");
+        label.textContent = node.attrs.label;
+        button.append(label);
         button.addEventListener("click", () => {
           const pos = getPos();
           if (pos === undefined || disabled) return;

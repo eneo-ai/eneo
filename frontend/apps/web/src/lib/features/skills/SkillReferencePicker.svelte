@@ -21,6 +21,7 @@
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { SkillCatalogQuery } from "./skillCatalogQuery.svelte";
+  import "./skillAuthoring.css";
 
   let {
     catalog,
@@ -116,6 +117,11 @@
     previewError = null;
     query.reset({ items: [] });
     void query.reload();
+  }
+
+  async function showConnections(nextServer: ReferenceCandidate | null = null) {
+    changeCategory("mcp", nextServer);
+    await tick();
     searchInput?.focus();
   }
 
@@ -128,7 +134,7 @@
   }
 
   async function select(item: ReferenceCandidate) {
-    if (item.target.kind === "function" || item.target.kind === "mcp_tool") {
+    if (item.target.kind === "function") {
       onSelect(item);
       return;
     }
@@ -174,6 +180,9 @@
               >{m.organization_skills_version({ version: String(selected.revisionNumber) })}</Badge
             >{/if}
         </div>
+        {#if selected.target.kind === "mcp_tool" && server}
+          <p class="text-muted-foreground text-sm wrap-anywhere">{server.label}</p>
+        {/if}
       </div>
     {/if}
     <div
@@ -215,11 +224,11 @@
               >
                 {readableInstructions(preview)}
               </div>{/if}
-          {:else}
+          {:else if selected.target.kind === "mcp_server"}
             {#if selected.enabled === false}<p class="text-muted-foreground text-sm">
                 {m.skills_reference_off()}
               </p>{/if}
-            <Button type="button" variant="outline" onclick={() => changeCategory("mcp", selected)}
+            <Button type="button" variant="outline" onclick={() => showConnections(selected)}
               >{m.skills_reference_tools()}<ChevronRight data-icon="inline-end" /></Button
             >
           {/if}
@@ -240,16 +249,17 @@
             <Tabs.Trigger value="functions">{m.skills_reference_functions()}</Tabs.Trigger>
             <Tabs.Trigger value="mcp">{m.skills_reference_mcps()}</Tabs.Trigger>
           </Tabs.List>
-          <Tabs.Content value={category} class="mt-1 flex min-h-0 flex-col gap-3">
+          <Tabs.Content value={category} tabindex={-1} class="mt-1 flex min-h-0 flex-col gap-3">
             {#if server}
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 class="mr-auto"
-                onclick={() => changeCategory("mcp")}
-                ><ArrowLeft data-icon="inline-start" />{server.label}</Button
+                onclick={() => showConnections()}
+                ><ArrowLeft data-icon="inline-start" />{m.skills_reference_back()}</Button
               >
+              <h3 class="text-sm font-medium wrap-anywhere">{server.label}</h3>
             {/if}
             <Command.Root label={m.skills_reference_search()} shouldFilter={false}>
               <Command.Input
@@ -314,7 +324,7 @@
                               version: item.revisionNumber
                             })}</span
                           >{/if}
-                        {#if item.target.kind === "skill" || item.target.kind === "mcp_server"}<ChevronRight
+                        {#if item.target.kind !== "function"}<ChevronRight
                             aria-hidden="true"
                             class="text-muted-foreground"
                           />{/if}
@@ -361,7 +371,7 @@
 
 {#if inline}
   <section
-    class="border-border bg-popover text-popover-foreground pointer-coarse:[&_button]:min-h-[44px] pointer-coarse:[&_button]:min-w-[44px] pointer-coarse:[&_[role=tab]]:min-h-[44px] flex max-h-[min(36rem,75dvh)] min-h-0 flex-col overflow-hidden rounded-xl border"
+    class="skill-authoring border-border bg-popover text-popover-foreground pointer-coarse:[&_button]:min-h-[44px] pointer-coarse:[&_button]:min-w-[44px] pointer-coarse:[&_[role=tab]]:min-h-[44px] flex max-h-[min(36rem,75dvh)] min-h-0 flex-col overflow-hidden rounded-xl border"
     aria-label={m.skills_reference_insert()}
   >
     <h3 class="px-4 pt-4 font-semibold">
@@ -378,7 +388,7 @@
   >
     <Dialog.Content
       class={[
-        "pointer-coarse:[&_button]:min-h-[44px] pointer-coarse:[&_button]:min-w-[44px] pointer-coarse:[&_[role=tab]]:min-h-[44px] flex min-h-0 flex-col gap-0 overflow-hidden p-0",
+        "skill-authoring pointer-coarse:[&_button]:min-h-[44px] pointer-coarse:[&_button]:min-w-[44px] pointer-coarse:[&_[role=tab]]:min-h-[44px] flex min-h-0 flex-col gap-0 overflow-hidden p-0",
         selected?.target.kind === "skill"
           ? "max-h-[min(48rem,calc(100dvh-4rem))] sm:max-w-2xl"
           : "max-h-[min(36rem,calc(100dvh-2rem))] sm:max-w-lg"

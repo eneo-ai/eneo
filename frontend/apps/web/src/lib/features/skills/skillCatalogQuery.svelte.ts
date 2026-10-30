@@ -44,7 +44,9 @@ export class SkillCatalogQuery<T extends CatalogItem> {
 
     this.query = value;
     this.#requestId += 1;
-    this.loading = false;
+    // Choices from the previous search must not remain selectable during debounce.
+    this.#applyPage({ items: [] }, false);
+    this.loading = true;
     this.loadingMore = false;
     this.error = null;
     clearTimeout(this.#debounceTimer);

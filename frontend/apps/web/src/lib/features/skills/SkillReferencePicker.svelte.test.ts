@@ -1,4 +1,4 @@
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import type { ReferenceCandidate, ReferenceCatalog } from "@eneo/skill-instructions";
@@ -36,6 +36,33 @@ function setup(overrides: Partial<ReferenceCatalog> = {}) {
 }
 
 describe("reference selection", () => {
+  it("exposes the active search result to assistive technology as arrow selection changes", async () => {
+    setup();
+    await page.getByRole("tab", { name: m.skills_reference_functions() }).click();
+    const search = page.getByRole("combobox");
+    await search.click();
+    await expect.poll(() => search.element().getAttribute("aria-activedescendant")).toBeTruthy();
+    const first = search.element().getAttribute("aria-activedescendant");
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.poll(() => search.element().getAttribute("aria-activedescendant")).not.toBe(first);
+    expect(search.element().getAttribute("aria-activedescendant")).toBe(
+      document.querySelector('[role="option"][aria-selected="true"]')?.id
+    );
+  });
+
+  it("keeps arrow navigation on the tabs and reaches search with Tab", async () => {
+    setup();
+    await page.getByRole("tab", { name: m.skills(), exact: true }).click();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect
+      .element(page.getByRole("tab", { name: m.skills_reference_functions() }))
+      .toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.element(page.getByRole("tab", { name: m.skills_reference_mcps() })).toHaveFocus();
+    await userEvent.keyboard("{Tab}");
+    await expect.element(page.getByRole("combobox")).toHaveFocus();
+  });
+
   it("reviews an exact Skill version, recovers a failed preview, and keeps list and preview separate", async () => {
     const preview = vi
       .fn()
@@ -102,7 +129,7 @@ describe("reference selection", () => {
     };
     const tool: ReferenceCandidate = {
       label: "Today",
-      description: "",
+      description: "Tool details. ".repeat(60) + "Does not fetch external data.",
       target: {
         kind: "mcp_tool",
         server_id: "33333333-3333-4333-8333-333333333333",
@@ -119,7 +146,16 @@ describe("reference selection", () => {
       .element(page.getByRole("button", { name: m.skills_reference_whole_mcp() }))
       .toBeEnabled();
     await page.getByRole("button", { name: m.skills_reference_tools() }).click();
-    await page.getByRole("option", { name: "Today", exact: true }).click();
+    await expect.element(page.getByRole("combobox")).toHaveFocus();
+    await page.getByRole("combobox").fill("Today");
+    await page.getByRole("option", { name: /^Today/ }).click();
+    await expect.element(page.getByText(tool.description!, { exact: true })).toBeVisible();
+    expect(onSelect).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: m.skills_reference_back() }).click();
+    await expect.element(page.getByRole("combobox")).toHaveValue("Today");
+    await expect.element(page.getByRole("combobox")).toHaveFocus();
+    await page.getByRole("option", { name: /^Today/ }).click();
+    await page.getByRole("button", { name: m.skills_reference_insert(), exact: true }).click();
     expect(catalog.tools).toHaveBeenCalledWith(
       "33333333-3333-4333-8333-333333333333",
       expect.any(AbortSignal)

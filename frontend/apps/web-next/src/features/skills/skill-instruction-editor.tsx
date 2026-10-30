@@ -61,6 +61,12 @@ export function SkillInstructionEditor({
       label,
       placeholder,
       describedBy: [describedBy, `${id}-reference-hint`].filter(Boolean).join(" "),
+      referenceTypeLabels: {
+        skill: t("skills_reference_kind_skill"),
+        function: t("skills_reference_kind_function"),
+        mcp_server: t("skills_reference_kind_mcp"),
+        mcp_tool: t("skills_reference_kind_tool")
+      },
       editorClass:
         "text-ax-text relative min-h-48 max-h-[50dvh] overflow-y-auto px-3 py-3 text-base sm:text-sm leading-7 whitespace-pre-wrap wrap-anywhere focus-visible:outline-2 focus-visible:outline-ax-focus focus-visible:-outline-offset-2 [--skill-placeholder:var(--color-text-secondary)] [&>p]:m-0",
       referenceClass:
@@ -72,7 +78,7 @@ export function SkillInstructionEditor({
       editor.current?.destroy();
       editor.current = null;
     };
-  }, [initialValue, id, label, onChange, placeholder, describedBy]);
+  }, [initialValue, id, label, onChange, placeholder, describedBy, t]);
   useEffect(() => editor.current?.setValue(value), [value]);
   useEffect(
     () => editor.current?.setState({ disabled, invalid: invalid || malformed }),
