@@ -31,7 +31,8 @@ function AppLayout() {
         helpCenter: config.help_center_url
       },
       frontendVersion: packageJson.version,
-      backendVersion: config.version
+      backendVersion: config.version,
+      federationEnabled: config.federation_enabled
     }),
     [config]
   );

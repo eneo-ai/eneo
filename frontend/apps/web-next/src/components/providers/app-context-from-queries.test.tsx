@@ -124,6 +124,7 @@ it("server-renders and hydrates the loaded context without a request", async () 
 
   expect(html).toContain("Anna Lind");
   expect(screen.getByTestId("user").textContent).toBe("Anna Lind");
+  expect(contextValues.at(-1)?.featureFlags.federation).toBe(false);
   await settle();
   expect(browserGet).not.toHaveBeenCalled();
 });

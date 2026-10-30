@@ -9,6 +9,7 @@ export type AppContextData = {
   tenant: Schema<"TenantPublic">;
   settings: Schema<"SettingsPublic">;
   federationStatus: Schema<"FederationStatusResponse">;
+  featureFlags: { federation: boolean };
   limits: Schema<"Limits">;
   /** Deployment-configured links (env). `null` when not configured: hide the link. */
   links: {
