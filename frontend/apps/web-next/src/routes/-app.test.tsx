@@ -11,6 +11,7 @@ import {
   type ReactNode
 } from "react";
 import { makeFlow } from "@/features/flows/flow-fixtures";
+import { flowSettingsFixture } from "@/features/admin/flow-settings/flow-settings-fixtures";
 import type { ChatPage } from "@/features/chat/chat-page";
 import type { Schema } from "@/lib/api/models";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -1568,16 +1569,96 @@ it("loads the Flows list using the personal space's real id", async () => {
   expect(request?.searchParams.get("space_id")).toBe("space-1");
 });
 
-it.each(["/admin/users", "/admin/usage/users/missing", "/admin/roles"])(
+it.each(["/admin/users", "/admin/usage/users/missing", "/admin/roles", "/admin/flow-settings"])(
   "denies an admin page before reading its data: %s",
   async (path) => {
     const { router } = await renderRoute(path);
     expect(router.state.location.pathname).toBe("/spaces/personal/chat");
     expect(
-      requestedPaths().some((entry) => /\/admin\/|\/token-usage\/|\/roles\//.test(entry))
+      requestedPaths().some((entry) =>
+        /\/admin\/|\/token-usage\/|\/roles\/|\/settings\/flow-/.test(entry)
+      )
     ).toBe(false);
   }
 );
+
+function serveFlowSettings() {
+  const enabled = testAppContext({ permissions: ["admin"], settings: { flows_enabled: true } });
+  replies.set("/api/v1/users/me/", enabled.user);
+  replies.set("/api/v1/settings/", enabled.settings);
+  const settings = flowSettingsFixture();
+  replies.set("/api/v1/settings/flow-input-limits", settings.inputLimits);
+  replies.set("/api/v1/settings/flow-runtime-policy", settings.runtime);
+  replies.set("/api/v1/settings/flow-mapped-execution-policy", settings.mapped);
+  replies.set("/api/v1/settings/flow-rag-evidence-policy", settings.ragEvidence);
+  replies.set("/api/v1/settings/flow-document-render-limits", settings.documentRender);
+  replies.set("/api/v1/settings/flow-evidence-policy", settings.evidence);
+  replies.set("/api/v1/settings/flow-authoring-chat-policy", settings.authoringChat);
+  replies.set("/api/v1/ai-models/", {
+    completion_models: [],
+    embedding_models: [],
+    transcription_models: [],
+    image_models: []
+  });
+}
+
+it("opens Flow settings with their title and one shared settings query", async () => {
+  serveFlowSettings();
+  await renderRoute("/admin/flow-settings", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  await screen.findByLabelText("Antal filer per körning");
+  expect(document.title).toBe(`${messages.flow_admin_title} · Eneo`);
+  expect(
+    requestedPaths().filter((path) => path === "/api/v1/settings/flow-input-limits")
+  ).toHaveLength(1);
+  expect(requestedPaths().filter((path) => path === "/api/v1/users/me/")).toHaveLength(1);
+});
+
+it("uses not-found when the Flow settings feature is disabled on the server", async () => {
+  serveFlowSettings();
+  replies.set(
+    "/api/v1/settings/flow-input-limits",
+    new Response("Unavailable", {
+      status: 404,
+      headers: { [GENERATION]: "document-session" }
+    })
+  );
+  await renderRoute("/admin/flow-settings");
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths()).toContain("/api/v1/settings/flow-input-limits");
+  expect(screen.queryByLabelText("Antal filer per körning")).toBeNull();
+});
+
+it("keeps a failed Flow settings read in the page and retries it", async () => {
+  serveFlowSettings();
+  replies.set(
+    "/api/v1/settings/flow-input-limits",
+    new Response("Unavailable", {
+      status: 500,
+      headers: { [GENERATION]: "document-session" }
+    })
+  );
+  await renderRoute("/admin/flow-settings");
+  await screen.findByRole("heading", { name: messages.flow_admin_title, level: 1 });
+  const retry = await screen.findByRole("button", { name: messages.retry });
+  serveFlowSettings();
+  fireEvent.click(retry);
+  await screen.findByLabelText("Antal filer per körning");
+  expect(document.title).toBe(`${messages.flow_admin_title} · Eneo`);
+});
+
+it.each([
+  ["flow-data-retention", ""],
+  ["flow-input-limits", "flow-files"],
+  ["flow-knowledge-evidence", "flow-evidence-text"]
+])("redirects legacy admin/%s to its Flow settings section", async (path, hash) => {
+  serveFlowSettings();
+  const { router } = await renderRoute(`/admin/${path}`);
+  await screen.findByLabelText("Antal filer per körning");
+  expect(router.state.location.pathname).toBe("/admin/flow-settings");
+  expect(router.state.location.hash).toBe(hash);
+});
 
 it("opens the admin users table with the feature's URL filters and one session read", async () => {
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);

@@ -54,6 +54,13 @@ describe("AdminPageBar on a phone", () => {
     expect(back("Användning").getAttribute("href")).toBe("/admin/usage");
   });
 
+  it("names the Flow settings area in its mobile bar", () => {
+    setViewport("phone");
+    renderAdminPage("/admin/flow-settings");
+    expect(back("Administration").getAttribute("href")).toBe("/admin");
+    expect(screen.getByText("Flöden")).toBeTruthy();
+  });
+
   it("takes an MCP server back to Verktyg, where the servers are listed", () => {
     setViewport("phone");
     renderAdminPage("/admin/mcp-servers/server-1");

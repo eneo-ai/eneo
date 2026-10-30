@@ -12,7 +12,7 @@ const LISTED_UNDER: Record<string, { href: string; labelKey: string }> = {
 };
 
 // Every area, whatever the tenant shows: only the labels are read.
-const AREAS = adminNavGroups({ usingTemplates: true, canManageModules: true })
+const AREAS = adminNavGroups({ usingTemplates: true, canManageModules: true, flowsEnabled: true })
   .flatMap((group) => group.items)
   .filter((item) => item.href !== "/admin");
 

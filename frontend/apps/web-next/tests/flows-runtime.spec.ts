@@ -39,7 +39,7 @@ test(
             this.addEventListener("load", () => {
               if (new URL(this.responseURL).pathname !== path) return;
               XMLHttpRequest.prototype.send = send;
-              resolve((JSON.parse(this.responseText) as { size: number }).size);
+              resolve((JSON.parse(this.responseText) as Schema<"FilePublic">).size);
             });
             send.call(this, body);
           };

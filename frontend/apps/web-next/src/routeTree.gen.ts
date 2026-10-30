@@ -34,6 +34,10 @@ import { Route as AppAdminIndexRouteImport } from "./routes/_app/admin/index"
 import { Route as AppAdminApiKeysRouteImport } from "./routes/_app/admin/api-keys"
 import { Route as AppAdminAuditLogsRouteImport } from "./routes/_app/admin/audit-logs"
 import { Route as AppAdminCrawlerRouteImport } from "./routes/_app/admin/crawler"
+import { Route as AppAdminFlowDataRetentionRouteImport } from "./routes/_app/admin/flow-data-retention"
+import { Route as AppAdminFlowInputLimitsRouteImport } from "./routes/_app/admin/flow-input-limits"
+import { Route as AppAdminFlowKnowledgeEvidenceRouteImport } from "./routes/_app/admin/flow-knowledge-evidence"
+import { Route as AppAdminFlowSettingsRouteImport } from "./routes/_app/admin/flow-settings"
 import { Route as AppAdminRolesRouteImport } from "./routes/_app/admin/roles"
 import { Route as AppAdminSettingsRouteImport } from "./routes/_app/admin/settings"
 import { Route as AppAdminStorageRouteImport } from "./routes/_app/admin/storage"
@@ -200,6 +204,28 @@ const AppAdminAuditLogsRoute = AppAdminAuditLogsRouteImport.update({
 const AppAdminCrawlerRoute = AppAdminCrawlerRouteImport.update({
   id: "/crawler",
   path: "/crawler",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminFlowDataRetentionRoute =
+  AppAdminFlowDataRetentionRouteImport.update({
+    id: "/flow-data-retention",
+    path: "/flow-data-retention",
+    getParentRoute: () => AppAdminRouteRoute,
+  } as any)
+const AppAdminFlowInputLimitsRoute = AppAdminFlowInputLimitsRouteImport.update({
+  id: "/flow-input-limits",
+  path: "/flow-input-limits",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminFlowKnowledgeEvidenceRoute =
+  AppAdminFlowKnowledgeEvidenceRouteImport.update({
+    id: "/flow-knowledge-evidence",
+    path: "/flow-knowledge-evidence",
+    getParentRoute: () => AppAdminRouteRoute,
+  } as any)
+const AppAdminFlowSettingsRoute = AppAdminFlowSettingsRouteImport.update({
+  id: "/flow-settings",
+  path: "/flow-settings",
   getParentRoute: () => AppAdminRouteRoute,
 } as any)
 const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
@@ -472,6 +498,10 @@ export interface FileRoutesByFullPath {
   "/admin/api-keys": typeof AppAdminApiKeysRoute
   "/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/flow-data-retention": typeof AppAdminFlowDataRetentionRoute
+  "/admin/flow-input-limits": typeof AppAdminFlowInputLimitsRoute
+  "/admin/flow-knowledge-evidence": typeof AppAdminFlowKnowledgeEvidenceRoute
+  "/admin/flow-settings": typeof AppAdminFlowSettingsRoute
   "/admin/roles": typeof AppAdminRolesRoute
   "/admin/settings": typeof AppAdminSettingsRoute
   "/admin/storage": typeof AppAdminStorageRoute
@@ -539,6 +569,10 @@ export interface FileRoutesByTo {
   "/admin/api-keys": typeof AppAdminApiKeysRoute
   "/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/flow-data-retention": typeof AppAdminFlowDataRetentionRoute
+  "/admin/flow-input-limits": typeof AppAdminFlowInputLimitsRoute
+  "/admin/flow-knowledge-evidence": typeof AppAdminFlowKnowledgeEvidenceRoute
+  "/admin/flow-settings": typeof AppAdminFlowSettingsRoute
   "/admin/roles": typeof AppAdminRolesRoute
   "/admin/settings": typeof AppAdminSettingsRoute
   "/admin/storage": typeof AppAdminStorageRoute
@@ -607,6 +641,10 @@ export interface FileRoutesById {
   "/_app/admin/api-keys": typeof AppAdminApiKeysRoute
   "/_app/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/_app/admin/crawler": typeof AppAdminCrawlerRoute
+  "/_app/admin/flow-data-retention": typeof AppAdminFlowDataRetentionRoute
+  "/_app/admin/flow-input-limits": typeof AppAdminFlowInputLimitsRoute
+  "/_app/admin/flow-knowledge-evidence": typeof AppAdminFlowKnowledgeEvidenceRoute
+  "/_app/admin/flow-settings": typeof AppAdminFlowSettingsRoute
   "/_app/admin/roles": typeof AppAdminRolesRoute
   "/_app/admin/settings": typeof AppAdminSettingsRoute
   "/_app/admin/storage": typeof AppAdminStorageRoute
@@ -678,6 +716,10 @@ export interface FileRouteTypes {
     | "/admin/api-keys"
     | "/admin/audit-logs"
     | "/admin/crawler"
+    | "/admin/flow-data-retention"
+    | "/admin/flow-input-limits"
+    | "/admin/flow-knowledge-evidence"
+    | "/admin/flow-settings"
     | "/admin/roles"
     | "/admin/settings"
     | "/admin/storage"
@@ -745,6 +787,10 @@ export interface FileRouteTypes {
     | "/admin/api-keys"
     | "/admin/audit-logs"
     | "/admin/crawler"
+    | "/admin/flow-data-retention"
+    | "/admin/flow-input-limits"
+    | "/admin/flow-knowledge-evidence"
+    | "/admin/flow-settings"
     | "/admin/roles"
     | "/admin/settings"
     | "/admin/storage"
@@ -812,6 +858,10 @@ export interface FileRouteTypes {
     | "/_app/admin/api-keys"
     | "/_app/admin/audit-logs"
     | "/_app/admin/crawler"
+    | "/_app/admin/flow-data-retention"
+    | "/_app/admin/flow-input-limits"
+    | "/_app/admin/flow-knowledge-evidence"
+    | "/_app/admin/flow-settings"
     | "/_app/admin/roles"
     | "/_app/admin/settings"
     | "/_app/admin/storage"
@@ -1049,6 +1099,34 @@ declare module "@tanstack/react-router" {
       path: "/crawler"
       fullPath: "/admin/crawler"
       preLoaderRoute: typeof AppAdminCrawlerRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/flow-data-retention": {
+      id: "/_app/admin/flow-data-retention"
+      path: "/flow-data-retention"
+      fullPath: "/admin/flow-data-retention"
+      preLoaderRoute: typeof AppAdminFlowDataRetentionRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/flow-input-limits": {
+      id: "/_app/admin/flow-input-limits"
+      path: "/flow-input-limits"
+      fullPath: "/admin/flow-input-limits"
+      preLoaderRoute: typeof AppAdminFlowInputLimitsRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/flow-knowledge-evidence": {
+      id: "/_app/admin/flow-knowledge-evidence"
+      path: "/flow-knowledge-evidence"
+      fullPath: "/admin/flow-knowledge-evidence"
+      preLoaderRoute: typeof AppAdminFlowKnowledgeEvidenceRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/flow-settings": {
+      id: "/_app/admin/flow-settings"
+      path: "/flow-settings"
+      fullPath: "/admin/flow-settings"
+      preLoaderRoute: typeof AppAdminFlowSettingsRouteImport
       parentRoute: typeof AppAdminRouteRoute
     }
     "/_app/admin/roles": {
@@ -1359,6 +1437,10 @@ interface AppAdminRouteRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
   AppAdminAuditLogsRoute: typeof AppAdminAuditLogsRoute
   AppAdminCrawlerRoute: typeof AppAdminCrawlerRoute
+  AppAdminFlowDataRetentionRoute: typeof AppAdminFlowDataRetentionRoute
+  AppAdminFlowInputLimitsRoute: typeof AppAdminFlowInputLimitsRoute
+  AppAdminFlowKnowledgeEvidenceRoute: typeof AppAdminFlowKnowledgeEvidenceRoute
+  AppAdminFlowSettingsRoute: typeof AppAdminFlowSettingsRoute
   AppAdminRolesRoute: typeof AppAdminRolesRoute
   AppAdminSettingsRoute: typeof AppAdminSettingsRoute
   AppAdminStorageRoute: typeof AppAdminStorageRoute
@@ -1372,6 +1454,10 @@ const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
   AppAdminApiKeysRoute: AppAdminApiKeysRoute,
   AppAdminAuditLogsRoute: AppAdminAuditLogsRoute,
   AppAdminCrawlerRoute: AppAdminCrawlerRoute,
+  AppAdminFlowDataRetentionRoute: AppAdminFlowDataRetentionRoute,
+  AppAdminFlowInputLimitsRoute: AppAdminFlowInputLimitsRoute,
+  AppAdminFlowKnowledgeEvidenceRoute: AppAdminFlowKnowledgeEvidenceRoute,
+  AppAdminFlowSettingsRoute: AppAdminFlowSettingsRoute,
   AppAdminRolesRoute: AppAdminRolesRoute,
   AppAdminSettingsRoute: AppAdminSettingsRoute,
   AppAdminStorageRoute: AppAdminStorageRoute,
