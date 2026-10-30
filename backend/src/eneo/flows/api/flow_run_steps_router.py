@@ -40,6 +40,7 @@ from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.application.flow_trace_audit import (
+    FLOW_EVIDENCE_READ_ON_GET,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
@@ -175,6 +176,7 @@ def _raise_run_file_access_audit_unavailable(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.VIEW),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def list_flow_run_steps(
     id: Annotated[

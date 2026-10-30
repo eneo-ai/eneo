@@ -16,6 +16,12 @@ from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
+FLOW_EVIDENCE_READ_ON_GET = (
+    "Audited read: appends an audit entry after authorized access to flow-run "
+    "evidence. Recording that access is the purpose of the audit trail; it "
+    "changes no flow or run state and returns the evidence only to the caller."
+)
+
 
 async def log_flow_trace_audit_or_raise(
     *,

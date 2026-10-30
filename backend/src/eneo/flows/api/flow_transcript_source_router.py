@@ -26,6 +26,7 @@ from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.application.flow_trace_audit import (
+    FLOW_EVIDENCE_READ_ON_GET,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
@@ -288,6 +289,7 @@ TranscriptSourcePage = Annotated[
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.VIEW),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def get_flow_run_transcript_source(
     flow_id: UUID,

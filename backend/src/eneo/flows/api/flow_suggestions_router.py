@@ -52,6 +52,7 @@ from eneo.flows.application.flow_suggestion_service import (
     list_measured_flow_suggestions,
 )
 from eneo.flows.application.flow_trace_audit import (
+    FLOW_EVIDENCE_READ_ON_GET,
     raise_flow_evidence_read_audit_unavailable,
 )
 from eneo.flows.domain.flow_suggestion_evidence import MAX_MEASURED_RUNS
@@ -229,6 +230,7 @@ _SUGGESTIONS_DESCRIPTION = (
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.EDIT),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def get_flow_suggestions(
     id: Annotated[UUID, Path(description="Identifier of the draft flow.")],

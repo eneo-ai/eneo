@@ -44,6 +44,7 @@ from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.application.flow_trace_audit import (
+    FLOW_EVIDENCE_READ_ON_GET,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
@@ -159,6 +160,7 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.VIEW),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def get_flow_run_evidence(
     id: Annotated[
@@ -300,6 +302,7 @@ async def get_flow_run_evidence(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.VIEW),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def list_flow_run_provider_calls(
     id: Annotated[
@@ -472,6 +475,7 @@ async def list_flow_run_provider_calls(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=flow_action_access_reason(FlowApiAction.VIEW),
+    effect_on_get=FLOW_EVIDENCE_READ_ON_GET,
 )
 async def export_flow_run_evidence(
     id: Annotated[
