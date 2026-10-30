@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import type { ChatReferences } from "./chat-references";
+import type { AskedQuestion } from "./questions";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
@@ -166,16 +167,22 @@ function QuestionQuote({
   );
 }
 
-/** A question as sent: a filled bubble on the right, its files (`children`) below. */
+/**
+ * A question as sent: a filled bubble on the right, its files (`children`)
+ * below. `caption` is the assistant's question this message answers, in
+ * small print above the answer.
+ */
 function Question({
   text: sent,
   conversationFiles,
   references,
+  caption = null,
   children
 }: {
   text: string;
   conversationFiles: readonly PreviewFile[];
   references?: ChatReferences;
+  caption?: string | null;
   children?: ReactNode;
 }) {
   const t = useTranslations();
@@ -190,6 +197,7 @@ function Question({
       {(text || quote) && (
         <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
+          {caption && <span className="text-ax-text-secondary text-xs">{caption}</span>}
           {references ? (
             <ChatTokenizedText tokens={references.tokens(text)}>{text}</ChatTokenizedText>
           ) : (
@@ -206,11 +214,13 @@ function Question({
 function UserMessage({
   message,
   conversationFiles,
-  references
+  references,
+  answersQuestion
 }: {
   message: EneoUIMessage;
   conversationFiles: readonly PreviewFile[];
   references?: ChatReferences;
+  answersQuestion?: AskedQuestion | null;
 }) {
   const files = message.metadata?.files ?? [];
   return (
@@ -218,6 +228,7 @@ function UserMessage({
       text={messageText(message)}
       conversationFiles={conversationFiles}
       references={references}
+      caption={answersQuestion?.question ?? null}
     >
       {files.length > 0 && <MessageFiles files={files} />}
     </Question>
@@ -673,7 +684,8 @@ export function ChatMessage({
   documents = NO_DOCUMENTS,
   draft = null,
   references,
-  toolCards
+  toolCards,
+  answersQuestion = null
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -700,6 +712,8 @@ export function ChatMessage({
   references?: ChatReferences;
   /** A page's own card for a tool call of an answer (the flow chat's run card), drawn above the text. */
   toolCards?: ToolCards;
+  /** The assistant's question this message answers, shown above the answer. */
+  answersQuestion?: AskedQuestion | null;
 }) {
   if (message.role === "user") {
     return (
@@ -707,6 +721,7 @@ export function ChatMessage({
         message={message}
         conversationFiles={conversationFiles}
         references={references}
+        answersQuestion={answersQuestion}
       />
     );
   }

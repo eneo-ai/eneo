@@ -9360,5 +9360,17 @@
   "tool_flows_review_run": "Svarar på granskningen",
   "tool_flows_review_run_done": "Svarade på granskningen",
   "flows_chat_settings": "Chattinställningar",
-  "flows_chat_settings_hint": "Gäller bara den här chatten."
+  "flows_chat_settings_hint": "Gäller bara den här chatten.",
+  "chat_question_from_assistant": "Assistenten frågar",
+  "chat_question_pick_several": "Välj en eller flera",
+  "chat_question_answer_freely": "Svara fritt i stället",
+  "chat_question_other": "Annat svar",
+  "chat_question_other_placeholder": "Annat: skriv ett eget svar",
+  "chat_question_send": "Svara",
+  "chat_question_hint_single": "Ett val skickar svaret · siffrorna 1–{count} väljer",
+  "chat_question_hint_multi": "Siffrorna 1–{count} växlar · Svara skickar",
+  "chat_announce_question": "Assistenten frågar: {question}",
+  "tool_ask_user": "Frågar dig",
+  "tool_ask_user_done": "Ställde en fråga",
+  "questions_server": "Frågor"
 }

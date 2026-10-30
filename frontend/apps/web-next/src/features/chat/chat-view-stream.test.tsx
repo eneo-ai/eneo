@@ -154,18 +154,21 @@ function Harness({
   onTitle,
   onToolCallFinished,
   onAnswerFinished,
-  chatPartner = partner
+  chatPartner = partner,
+  initialMessages
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
   onToolCallFinished?: (call: ToolCallRecord) => void;
   onAnswerFinished?: () => void;
   chatPartner?: ChatPartner;
+  initialMessages?: EneoUIMessage[];
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
     <ChatView
       partner={chatPartner}
+      initialMessages={initialMessages}
       activity={activity}
       onActivityChange={setActivity}
       onSessionCreated={onSessionCreated}
@@ -181,6 +184,63 @@ function ask(question: string) {
   typeIntoComposer(textarea, question);
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 }
+
+/** A saved conversation whose last answer ends with a question to the person. */
+const askedForRecipient: EneoUIMessage[] = [
+  { id: "q1", role: "user", parts: [{ type: "text", text: "Skriv en PM" }] },
+  {
+    id: "a1",
+    role: "assistant",
+    parts: [
+      { type: "text", text: "En sak först.", state: "done" },
+      {
+        type: "dynamic-tool",
+        toolName: "ask_user",
+        toolCallId: "ask-1",
+        state: "output-available",
+        input: {},
+        output: { status: "succeeded" },
+        providerMetadata: {
+          eneo: {
+            server_name: "questions",
+            is_internal: true,
+            result_status: "succeeded",
+            structured_content: {
+              question: "Vem ska läsa PM:et?",
+              header: "Mottagare",
+              options: [
+                { label: "Nämnden", description: "Beslutsunderlag." },
+                { label: "Ledningen", description: null }
+              ],
+              multi_select: false
+            }
+          }
+        }
+      } as EneoUIMessage["parts"][number]
+    ]
+  }
+];
+
+describe("ChatView with a question to answer", () => {
+  it("shows the last answer's question above the composer and sends the pick as the next message", async () => {
+    spies.mode = "answer";
+    renderInApp(<Harness initialMessages={askedForRecipient} />);
+    expect(spies.announce).toHaveBeenCalledWith("Assistenten frågar: Vem ska läsa PM:et?");
+    expect(screen.getByRole("heading", { name: "Vem ska läsa PM:et?" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Nämnden/ }));
+
+    await waitFor(() => expect(spies.sent[0]?.text).toBe("Nämnden"));
+    expect(spies.sent[0]?.body).toMatchObject({ allow_questions: true });
+    // Answered: the prompt is gone and the answer carries the question.
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Vem ska läsa PM:et?" })).toBeNull()
+    );
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Vem ska läsa PM:et?")).toBeTruthy();
+    expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
+  });
+});
 
 describe("ChatView streaming an answer", () => {
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {

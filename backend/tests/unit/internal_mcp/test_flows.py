@@ -624,6 +624,35 @@ def test_every_draft_changing_tool_reports_introduced_suggestions():
     }
 
 
+def test_every_tool_that_needs_edit_mode_is_withheld_while_the_chat_asks():
+    import inspect
+
+    needs_edit = {
+        name
+        for name, tool in vars(flows).items()
+        if inspect.iscoroutinefunction(tool)
+        and (
+            "changes_draft=True" in inspect.getsource(tool)
+            or "editing=True" in inspect.getsource(tool)
+        )
+    }
+
+    assert needs_edit == flows.EDIT_MODE_TOOLS
+
+
+async def test_a_turn_in_ask_mode_gets_no_tool_that_changes_the_flow():
+    asking = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=False
+    )
+    editing = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=True
+    )
+    offered = {tool.name for tool in asking.tools}
+    assert offered.isdisjoint(flows.EDIT_MODE_TOOLS)
+    assert {"read_flow", "run_flow", "read_flow_suggestions"} <= offered
+    assert {tool.name for tool in editing.tools} - offered == flows.EDIT_MODE_TOOLS
+
+
 # --- Reading the flow by section ---------------------------------------------
 
 

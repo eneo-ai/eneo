@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import (
@@ -56,6 +57,16 @@ from eneo.completion_models.domain.skill_activation import (
     SkillActivationRuntime,
     SkillPromptOwnershipError,
     SkillToolCallApplication,
+)
+from eneo.completion_models.domain.user_questions import (
+    ASK_USER_TOOL_NAME,
+    QUESTION_TOOL_NAME,
+    QUESTIONS_SERVER_NAME,
+    InvalidQuestionError,
+    asked_question_result,
+    parse_asked_question,
+    pending_question_result,
+    refused_question_result,
 )
 from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
@@ -575,6 +586,28 @@ def _is_provider_unavailable_error(exc: BaseException) -> bool:
     return litellm_transport.is_provider_unavailable_error(exc)
 
 
+@dataclass(frozen=True)
+class _InternalToolRound:
+    """What a tool round leaves after the calls Eneo answers itself."""
+
+    activation: SkillToolCallApplication | None
+    # The calls for the MCP servers; empty when the round ends the turn or
+    # the model must read a refusal first.
+    tool_calls: "list[_AccumulatedToolCall]"
+    metadata: list[ToolCallMetadata]
+    # The model asked the person a question: the turn ends here.
+    ends_turn: bool
+
+
+@dataclass(frozen=True)
+class _UserQuestionRound:
+    """A tool round in which the model asked the person a question."""
+
+    # Whether a question is shown: the turn ends with it.
+    asked: bool
+    metadata: list[ToolCallMetadata]
+
+
 def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
@@ -939,6 +972,191 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return metadata
 
+    def _close_internal_tool_calls(
+        self,
+        *,
+        skill_runtime: SkillActivationRuntime | None,
+        calls: list[_AccumulatedToolCall],
+        messages: list[dict[str, Any]],
+        provider_tools: list[dict[str, object]],
+        assistant_content: str | None,
+        resolve_tool_names: Callable[[str], tuple[str, str, str | None]],
+        tool_purpose: Callable[[str], str | None],
+        tool_is_internal: Callable[[str], bool],
+        tool_is_bundled: Callable[[str], bool],
+    ) -> _InternalToolRound:
+        """Answers the calls of a streamed tool round that never reach a
+        server: Skill activations, then the question to the person. Returns
+        the steps to show for them and the calls left for the MCP servers."""
+        provider_calls = tuple(
+            ProviderToolCall(
+                call_id=cast(str, tool_call["id"]),
+                name=tool_call["function"]["name"],
+                arguments=tool_call["function"]["arguments"],
+            )
+            for tool_call in calls
+        )
+        activation = self._apply_skill_activation_tool_calls(
+            runtime=skill_runtime,
+            calls=provider_calls,
+            messages=cast("list[dict[str, object]]", messages),
+            provider_tools=provider_tools,
+            assistant_content=assistant_content,
+        )
+        external_calls = (
+            activation.external_calls if activation is not None else provider_calls
+        )
+        external_call_ids = {call.call_id for call in external_calls}
+        tool_calls = [
+            tool_call for tool_call in calls if tool_call["id"] in external_call_ids
+        ]
+        metadata = self._skill_activation_metadata(activation)
+        question_round = self._apply_user_question_calls(
+            calls=tool_calls,
+            messages=messages,
+            assistant_content=assistant_content,
+            activation=activation,
+            resolve_tool_names=resolve_tool_names,
+            tool_purpose=tool_purpose,
+            tool_is_internal=tool_is_internal,
+            tool_is_bundled=tool_is_bundled,
+        )
+        ends_turn = False
+        if question_round is not None:
+            metadata = [*metadata, *question_round.metadata]
+            # A shown question ends the turn; a refused one goes back to the
+            # model, which reads why from the transcript and answers or
+            # asks again before any other call runs.
+            tool_calls = []
+            ends_turn = question_round.asked
+        return _InternalToolRound(
+            activation=activation,
+            tool_calls=tool_calls,
+            metadata=metadata,
+            ends_turn=ends_turn,
+        )
+
+    def _apply_user_question_calls(
+        self,
+        *,
+        calls: list[_AccumulatedToolCall],
+        messages: list[dict[str, Any]],
+        assistant_content: str | None,
+        activation: SkillToolCallApplication | None,
+        resolve_tool_names: Callable[[str], tuple[str, str, str | None]],
+        tool_purpose: Callable[[str], str | None],
+        tool_is_internal: Callable[[str], bool],
+        tool_is_bundled: Callable[[str], bool],
+    ) -> _UserQuestionRound | None:
+        """Closes a round in which the model asked the person a question.
+
+        The first well-formed ``eneo_ask_user`` call becomes the turn's
+        question: a step on the built-in ``questions`` server carrying the
+        question as structured content, with a tool result telling the
+        model that the answer is the next user message. A second question
+        in the same round, or one the client could not show, is refused
+        with the reason as its result. Every other call of the round is
+        deferred, since the turn ends with the question. None when the
+        round asked nothing.
+        """
+        if not any(tc["function"]["name"] == ASK_USER_TOOL_NAME for tc in calls):
+            return None
+        if activation is None or not activation.assistant_message_appended:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_content,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                "arguments": tc["function"]["arguments"],
+                            },
+                        }
+                        for tc in calls
+                    ],
+                }
+            )
+        asked = False
+        metadata: list[ToolCallMetadata] = []
+        for tc in calls:
+            name = tc["function"]["name"]
+            try:
+                arguments = self._parse_tool_arguments(tc["function"]["arguments"])
+            except OpenAIException:
+                arguments = None
+            if name != ASK_USER_TOOL_NAME:
+                server_name, tool_name, title = resolve_tool_names(name)
+                result_text = pending_question_result()
+                metadata.append(
+                    ToolCallMetadata(
+                        server_name=server_name,
+                        tool_name=tool_name,
+                        title=title,
+                        arguments=arguments,
+                        tool_call_id=tc["id"],
+                        result_status="deferred",
+                        result=result_text,
+                        mcp_tool_name=name,
+                        purpose=tool_purpose(name),
+                        is_internal=tool_is_internal(name),
+                        is_bundled=tool_is_bundled(name),
+                    )
+                )
+            else:
+                structured_content: dict[str, Any] | None = None
+                result_status = "failed"
+                if asked:
+                    result_text = refused_question_result(
+                        "one question per turn: the earlier call of this round "
+                        "is the question"
+                    )
+                elif arguments is None:
+                    result_text = refused_question_result(
+                        "the arguments are not valid JSON"
+                    )
+                else:
+                    try:
+                        question = parse_asked_question(arguments)
+                    except InvalidQuestionError as error:
+                        result_text = refused_question_result(str(error))
+                    else:
+                        asked = True
+                        result_status = "succeeded"
+                        result_text = asked_question_result()
+                        structured_content = question.structured_content()
+                metadata.append(
+                    ToolCallMetadata(
+                        server_name=QUESTIONS_SERVER_NAME,
+                        tool_name=QUESTION_TOOL_NAME,
+                        arguments=arguments,
+                        tool_call_id=tc["id"],
+                        approved=True,
+                        result_status=result_status,
+                        result=result_text,
+                        mcp_tool_name=ASK_USER_TOOL_NAME,
+                        is_internal=True,
+                        structured_content=structured_content,
+                    )
+                )
+            messages.append(
+                {"role": "tool", "tool_call_id": tc["id"], "content": result_text}
+            )
+        return _UserQuestionRound(asked=asked, metadata=metadata)
+
+    @staticmethod
+    def _offers_questions(prepared: PreparedModelStream | None) -> bool:
+        """Whether the turn offers the question tool among Eneo's own tools."""
+        if prepared is None:
+            return False
+        return any(
+            isinstance(tool.get("function"), dict)
+            and tool["function"].get("name") == ASK_USER_TOOL_NAME
+            for tool in prepared.eneo_tools
+        )
+
     @staticmethod
     def _always_active_skill_metadata(
         runtime: SkillActivationRuntime | None,
@@ -1228,7 +1446,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 isinstance(tool.get("function"), dict)
                 and (
                     tool["function"].get("name") in built_in_names
-                    or tool["function"].get("name") == SKILL_ACTIVATION_TOOL_NAME
+                    or tool["function"].get("name")
+                    in (SKILL_ACTIVATION_TOOL_NAME, ASK_USER_TOOL_NAME)
                 )
             )
         ]
@@ -2303,6 +2522,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             activation_available = (
                 skill_runtime is not None and skill_runtime.tool_definition is not None
             )
+            questions_available = self._offers_questions(prepared)
             always_active_metadata = self._always_active_skill_metadata(skill_runtime)
             if always_active_metadata:
                 yield Completion(
@@ -2625,7 +2845,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 result.has_tool_calls
                 and prepared
                 and prepared.has_tools
-                and (mcp_proxy or activation_available)
+                and (mcp_proxy or activation_available or questions_available)
             ):
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
@@ -2654,41 +2874,32 @@ class TenantModelAdapter(CompletionModelAdapter):
                             code="invalid_tool_call",
                         )
 
-                    provider_calls = tuple(
-                        ProviderToolCall(
-                            call_id=cast(str, tool_call["id"]),
-                            name=tool_call["function"]["name"],
-                            arguments=tool_call["function"]["arguments"],
-                        )
-                        for tool_call in tool_calls
-                    )
-                    activation = self._apply_skill_activation_tool_calls(
-                        runtime=skill_runtime,
-                        calls=provider_calls,
-                        messages=cast("list[dict[str, object]]", messages),
+                    internal_round = self._close_internal_tool_calls(
+                        skill_runtime=skill_runtime,
+                        calls=tool_calls,
+                        messages=messages,
                         provider_tools=cast(
                             "list[dict[str, object]]",
                             litellm_kwargs.get("tools") or [],
                         ),
                         assistant_content="".join(result.assistant_content) or None,
+                        resolve_tool_names=_resolve_tool_names,
+                        tool_purpose=_tool_purpose,
+                        tool_is_internal=_tool_is_internal,
+                        tool_is_bundled=_tool_is_bundled,
                     )
-                    external_calls = (
-                        activation.external_calls
-                        if activation is not None
-                        else provider_calls
-                    )
-                    external_call_ids = {call.call_id for call in external_calls}
-                    tool_calls = [
-                        tool_call
-                        for tool_call in tool_calls
-                        if tool_call["id"] in external_call_ids
-                    ]
-                    activation_metadata = self._skill_activation_metadata(activation)
-                    if activation_metadata:
+                    activation = internal_round.activation
+                    tool_calls = internal_round.tool_calls
+                    if internal_round.metadata:
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=activation_metadata,
+                            tool_calls_metadata=internal_round.metadata,
                         )
+                    if internal_round.ends_turn:
+                        # The person answers the question in their next
+                        # message: the turn ends with it as its last step.
+                        result.has_tool_calls = False
+                        break
                     if tool_calls and mcp_proxy is None:
                         break
 

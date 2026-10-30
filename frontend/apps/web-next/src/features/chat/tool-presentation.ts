@@ -173,6 +173,9 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
   if (ownServer && serverName === "files" && part.toolName === "read_file") {
     return { label: t(`tool_read_file${suffix}`), server: t("internal_files_server") };
   }
+  if (ownServer && serverName === "questions" && part.toolName === "ask_user") {
+    return { label: t(`tool_ask_user${suffix}`), server: t("questions_server") };
+  }
   if (ownServer && serverName === "flows" && FLOW_TOOLS.has(part.toolName)) {
     const runs = part.toolName === "read_flow_suggestions" && args.include_runs === true;
     return {

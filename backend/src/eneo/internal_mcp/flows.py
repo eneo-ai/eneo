@@ -34,8 +34,10 @@ mcp = FastMCP(
     instructions="""Configure the flow bound to this chat. Tools cannot be pointed at another flow.
 Read the current saved revision and configuration before editing; use that revision
 on every change. Keep unchanged fields. Every change goes through the flow's own
-validation, permissions, classification and audit. The user must enter edit mode in
-the editor.
+validation, permissions, classification and audit. The tools that change the flow
+are offered only while the chat is in edit mode (Redigera); when they are absent,
+say what you would change and that the person can switch the mode beside the send
+button.
 read_flow's overview (the default) lists every step in short with what it reads and
 which later steps read it; section "steps" with steps=[...] gives those steps in
 full with their prompts, section "settings" the flow without its steps. Read a step
@@ -1256,11 +1258,32 @@ async def review_run(
     return await _call_runtime(ctx, operation)
 
 
-async def build_flows_mcp_server(*, token: str, tenant_id: UUID):
+EDIT_MODE_TOOLS = frozenset(
+    {
+        "update_flow_settings",
+        "update_step",
+        "update_steps",
+        "add_step",
+        "move_step",
+        "remove_step",
+        "publish_flow",
+        "unpublish_flow",
+        "apply_flow_suggestions",
+        "dismiss_flow_suggestion",
+    }
+)
+"""The tools ``_call`` refuses outside edit mode. A turn in Fråga mode does not
+offer them, so the model never calls what would be refused."""
+
+
+async def build_flows_mcp_server(*, token: str, tenant_id: UUID, editing: bool = True):
+    """The flows server for one turn: every tool in edit mode, the reading and
+    run tools alone while the chat only asks."""
     return await build_ephemeral_server(
         mcp,
         name=FLOWS_SERVER_NAME,
         description="Configure the flow bound to this chat.",
         token=token,
         tenant_id=tenant_id,
+        exclude_tools=() if editing else EDIT_MODE_TOOLS,
     )

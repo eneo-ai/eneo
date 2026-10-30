@@ -23,7 +23,7 @@ on their throwaway ids never accumulates (by design).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 from uuid import UUID, uuid4
@@ -186,6 +186,7 @@ async def build_ephemeral_server(
     token: str,
     tenant_id: UUID,
     tool_description_suffixes: Mapping[str, str] | None = None,
+    exclude_tools: Collection[str] = (),
 ) -> MCPServer:
     """Build the ephemeral MCPServer entity a completion attaches for ``mcp``.
 
@@ -194,6 +195,7 @@ async def build_ephemeral_server(
     mirror what the endpoint actually exposes. ``tool_description_suffixes``
     appends per-completion enrichment to the named tools' descriptions
     (enrichment only appends; the shared docstring always leads).
+    ``exclude_tools`` names tools the completion does not get at all.
     """
     server_id = uuid4()
     suffixes = tool_description_suffixes or {}
@@ -211,6 +213,7 @@ async def build_ephemeral_server(
             is_enabled_by_default=True,
         )
         for tool in await mcp.list_tools()
+        if tool.name not in exclude_tools
     ]
     return MCPServer(
         id=server_id,

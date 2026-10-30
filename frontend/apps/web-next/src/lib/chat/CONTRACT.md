@@ -426,6 +426,29 @@ and ordinary tool parts.
 
 Several approvals can occur in one turn (one part each, distinct ids).
 
+## Questions to the person
+
+An assistant may end a turn by asking the person one question (the
+backend's built-in `eneo_ask_user` function tool, offered when the request
+carries `allow_questions: true`; ignored for group chats and without
+streaming). The question is an ordinary tool part, so no new part type is
+involved:
+
+- `toolName: "ask_user"`, `providerMetadata.eneo.server_name: "questions"`,
+  `is_internal: true`, `result_status: "succeeded"` and
+  `structured_content: { question, header, options: [{ label, description }],
+multi_select }`. A question the backend refused (fewer than two options,
+  a second question in the same round) has `result_status: "failed"` and no
+  structured content.
+- The turn then finishes normally (`finish`); the backend does not wait.
+- The client shows the question above its composer while the last message
+  is that answer. Any message the person sends next is the answer (the
+  client sends the picked labels as plain text); the backend replays the
+  call and its result before it, so the model reads the answer in context.
+- In history the part keeps the same metadata (`structured_content` is
+  persisted for internal calls), so a reload shows an unanswered question
+  again and an answered one as the message that answered it.
+
 ## What the client treats as failure
 
 Never shown as a finished answer (`status: "error"`, `onFinish.isError`):

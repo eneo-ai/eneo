@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
     CompletionModelResponse,
     Context,
+    FunctionDefinition,
     ModelKwargs,
     ResponseType,
     sends_strict_tool_schemas,
@@ -35,6 +36,9 @@ from eneo.completion_models.domain.request_preflight import (
     CompletionRequestPreflight,
 )
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+from eneo.completion_models.domain.user_questions import (
+    ask_user_function_definition,
+)
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
@@ -856,6 +860,23 @@ class CompletionService:
             refusal=refusal,
         )
 
+    @staticmethod
+    def _built_in_tools(
+        skill_runtime: SkillActivationRuntime | None,
+        *,
+        model: CompletionModel,
+        allow_questions: bool,
+    ) -> list[FunctionDefinition] | None:
+        """Eneo's own function tools for the turn: Skill activation when the
+        turn has one, and the question to the person when the client can show
+        it. The adapter drops every tool for a model without tool calling."""
+        tools: list[FunctionDefinition] = []
+        if skill_runtime is not None and skill_runtime.tool_definition is not None:
+            tools.append(skill_runtime.tool_definition)
+        if allow_questions and model.supports_tool_calling:
+            tools.append(ask_user_function_definition())
+        return tools or None
+
     async def get_response(
         self,
         model: CompletionModel,
@@ -872,6 +893,7 @@ class CompletionService:
         version: int = 1,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
+        allow_questions: bool = False,
         reject_context_over_limit: bool = False,
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
@@ -1013,11 +1035,10 @@ class CompletionService:
                     prompt_files=prompt_files,
                     transcription_inputs=transcription_inputs,
                     version=version,
-                    mcp_tools=(
-                        [skill_runtime.tool_definition]
-                        if skill_runtime is not None
-                        and skill_runtime.tool_definition is not None
-                        else None
+                    mcp_tools=self._built_in_tools(
+                        skill_runtime,
+                        model=model,
+                        allow_questions=allow_questions and stream,
                     ),
                     knowledge_catalog=knowledge_catalog,
                     vision=model.vision,

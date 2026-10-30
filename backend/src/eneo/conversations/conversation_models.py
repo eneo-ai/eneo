@@ -162,6 +162,11 @@ class ConversationRequest(_ConversationTarget):
     stream: bool = False
     tools: Optional[UseTools] = None
     require_tool_approval: bool = False
+    # The client can show a question the assistant asks (the built-in
+    # eneo_ask_user tool): the model may end a turn by asking, and the
+    # answer comes as the next message. Ignored for group chats and
+    # without streaming.
+    allow_questions: bool = False
     # MCP servers the user turned off in the composer for this message. Narrows
     # the otherwise-active set (assistant's own servers, or policy-granted ones
     # for a personal assistant); it can never enable a server that isn't active.

@@ -276,8 +276,8 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
 ):
     turn.assistant.hidden = True
     flow_id = uuid4()
-    bound = AsyncMock(return_value=flow_id)
-    turn.service._authoring_chat_flow_id = bound
+    bound = AsyncMock(return_value=(flow_id, True))
+    turn.service._authoring_chat_binding = bound
 
     with pytest.raises(NotFoundException):
         await turn.service._prepare_turn(
@@ -295,6 +295,7 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
         session_id=turn.session.id, assistant_id=turn.assistant.id
     )
     assert prepared.authoring_flow_id == flow_id
+    assert prepared.authoring_editing is True
 
 
 async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixture):

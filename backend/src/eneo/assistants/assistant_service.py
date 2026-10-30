@@ -309,8 +309,10 @@ class _PreparedAssistantTurn:
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
-    # The flow a hidden assistant's chat edits; its turns get the flows tools.
+    # The flow a hidden assistant's chat edits; its turns get the flows tools,
+    # the changing ones only while the chat is in edit mode.
     authoring_flow_id: UUID | None = None
+    authoring_editing: bool = False
 
 
 @dataclass(frozen=True)
@@ -3651,12 +3653,13 @@ class AssistantService:
         )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         authoring_flow_id: UUID | None = None
+        authoring_editing = False
         if active_assistant.hidden:
             # A hidden assistant answers only in the flow authoring chat it was
             # made for, continued by the person the chat belongs to.
             if session_id is None or tool_assistant_id is not None:
                 raise NotFoundException("Assistant not found.")
-            authoring_flow_id = await self._authoring_chat_flow_id(
+            authoring_flow_id, authoring_editing = await self._authoring_chat_binding(
                 session_id=session_id, assistant_id=assistant_id
             )
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -3911,12 +3914,14 @@ class AssistantService:
             initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
             is_personal_default=is_personal_default,
             authoring_flow_id=authoring_flow_id,
+            authoring_editing=authoring_editing,
         )
 
-    async def _authoring_chat_flow_id(
+    async def _authoring_chat_binding(
         self, *, session_id: UUID, assistant_id: UUID
-    ) -> UUID:
-        """The flow the chat edits, after the binding's own access checks."""
+    ) -> tuple[UUID, bool]:
+        """The flow the chat edits and whether it is in edit mode, after the
+        binding's own access checks."""
         from dependency_injector import providers
 
         from eneo.flows.application.flow_authoring_chat import load_authoring_chat
@@ -3928,7 +3933,7 @@ class AssistantService:
         chat = await load_authoring_chat(
             container, session_id=session_id, assistant_id=assistant_id
         )
-        return chat.flow_id
+        return chat.flow_id, chat.editing
 
     async def _execute_turn(
         self,
@@ -3939,6 +3944,7 @@ class AssistantService:
         stream: bool,
         version: int,
         require_tool_approval: bool,
+        allow_questions: bool,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Run the existing assistant engine; the caller owns response persistence."""
         mcp_servers_override = prepared.mcp_servers_override
@@ -4012,7 +4018,9 @@ class AssistantService:
             from eneo.internal_mcp.flows import build_flows_mcp_server
 
             flows_mcp_server = await build_flows_mcp_server(
-                token=mint_scoped_token(), tenant_id=self.user.tenant_id
+                token=mint_scoped_token(),
+                tenant_id=self.user.tenant_id,
+                editing=prepared.authoring_editing,
             )
 
         # Referenced attachments: whenever signed reference URLs render in the
@@ -4116,6 +4124,7 @@ class AssistantService:
             capability_mcp_servers=capability_mcp_servers,
             document_template=document_template,
             require_tool_approval=require_tool_approval,
+            allow_questions=allow_questions,
             completion_model_override=prepared.completion_model_override,
             model_kwargs_override=prepared.model_kwargs_override,
             mcp_servers_override=mcp_servers_override,
@@ -4144,6 +4153,7 @@ class AssistantService:
         version: int = 1,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
+        allow_questions: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
@@ -4258,6 +4268,7 @@ class AssistantService:
                 stream=stream,
                 version=version,
                 require_tool_approval=require_tool_approval,
+                allow_questions=allow_questions,
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()

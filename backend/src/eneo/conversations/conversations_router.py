@@ -433,6 +433,7 @@ async def chat(
             tool_assistant_id=tool_assistant_id,
             version=version,
             require_tool_approval=request.require_tool_approval,
+            allow_questions=request.allow_questions,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
             disabled_capabilities=request.disabled_capabilities,
         )

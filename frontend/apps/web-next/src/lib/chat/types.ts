@@ -205,5 +205,7 @@ export type ConversationBody = {
   stream: true;
   disabled_capabilities?: Schema<"ConversationRequest">["disabled_capabilities"];
   require_tool_approval?: boolean;
+  /** The chat shows a question the assistant asks (its `ask_user` step) above the composer. */
+  allow_questions?: boolean;
   disabled_mcp_server_ids?: string[];
 };

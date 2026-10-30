@@ -15609,6 +15609,11 @@ export interface components {
      *     - If no assistant is targeted, the most appropriate assistant will be selected.
      */
     ConversationRequest: {
+      /**
+       * Allow Questions
+       * @default false
+       */
+      allow_questions?: boolean;
       /** Assistant Id */
       assistant_id?: string | null;
       /** Disabled Capabilities */

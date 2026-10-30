@@ -9360,5 +9360,17 @@
   "tool_flows_review_run": "Responding to the review",
   "tool_flows_review_run_done": "Responded to the review",
   "flows_chat_settings": "Chat settings",
-  "flows_chat_settings_hint": "Applies to this chat only."
+  "flows_chat_settings_hint": "Applies to this chat only.",
+  "chat_question_from_assistant": "The assistant asks",
+  "chat_question_pick_several": "Pick one or more",
+  "chat_question_answer_freely": "Answer in your own words instead",
+  "chat_question_other": "Other answer",
+  "chat_question_other_placeholder": "Other: write your own answer",
+  "chat_question_send": "Answer",
+  "chat_question_hint_single": "A choice sends the answer · keys 1–{count} pick",
+  "chat_question_hint_multi": "Keys 1–{count} toggle · Answer sends",
+  "chat_announce_question": "The assistant asks: {question}",
+  "tool_ask_user": "Asking you",
+  "tool_ask_user_done": "Asked a question",
+  "questions_server": "Questions"
 }
