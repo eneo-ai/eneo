@@ -1,4 +1,3 @@
-import { renderAnswerForClipboard } from "@/components/ai-elements/answer-markdown";
 import { stripInrefs } from "@/lib/chat/inref";
 import type { Schema } from "@/lib/api/models";
 
@@ -27,25 +26,26 @@ export function setPreferredAssistantCopyFormat(
   };
 }
 
-export function assistantRichTextClipboardPayload(answer: string): {
-  html: () => Promise<string>;
-  plainText: string;
-} {
+export async function assistantRichTextClipboardPayload(answer: string) {
+  const { renderAnswerForClipboard } = await import("@/components/ai-elements/answer-clipboard");
   return renderAnswerForClipboard(stripInrefs(answer));
 }
 
 /**
  * What copying an answer puts on the clipboard: the markdown as plain text,
- * or rich text as a plain-text twin and HTML, rendered on demand (its formulas
- * wait for KaTeX).
+ * or rich text as a plain-text twin and HTML. Both rich-text representations
+ * wait for the clipboard renderer; formulas also wait for KaTeX.
  */
 export function assistantClipboardContent(
   answer: string,
   format: AssistantCopyFormat
-): { text: string; html: (() => Promise<string>) | null } {
+): { text: string | Promise<string>; html: (() => Promise<string>) | null } {
   if (format === "markdown") return { text: stripInrefs(answer), html: null };
-  const { html, plainText } = assistantRichTextClipboardPayload(answer);
-  return { text: plainText, html };
+  const payload = assistantRichTextClipboardPayload(answer);
+  return {
+    text: payload.then(({ plainText }) => plainText),
+    html: () => payload.then(({ html }) => html())
+  };
 }
 
 /** Whether the browser can put HTML on the clipboard. */
@@ -57,22 +57,30 @@ export function canCopyRichText(): boolean {
  * Puts HTML and its plain-text twin on the clipboard; resolves false when the
  * browser refuses or the HTML cannot be made. Astryx useClipboard writes
  * text/plain only, so rich text needs its own ClipboardItem write. The write
- * starts at once, inside the click (Safari requires it), and the HTML follows
- * as a promise when it is ready.
+ * starts at once, inside the click (Safari requires it), and both representations
+ * follow as promises when the renderer is ready.
  */
 export async function copyRichText({
   text,
   html
 }: {
-  text: string;
+  text: string | Promise<string>;
   html: () => Promise<string>;
 }): Promise<boolean> {
   try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        "text/plain": new Blob([text], { type: "text/plain" }),
-        "text/html": html().then((value) => new Blob([value], { type: "text/html" }))
-      })
+    const representations = {
+      "text/plain": Promise.resolve(text).then(
+        (value) => new Blob([value], { type: "text/plain" })
+      ),
+      "text/html": html().then((value) => new Blob([value], { type: "text/html" }))
+    };
+    await Promise.all([
+      ...Object.values(representations),
+      // The executor starts the write synchronously and captures constructor errors.
+      // Observe the representations even if the browser refuses before reading them.
+      new Promise<void>((resolve) =>
+        resolve(navigator.clipboard.write([new ClipboardItem(representations)]))
+      )
     ]);
     return true;
   } catch {

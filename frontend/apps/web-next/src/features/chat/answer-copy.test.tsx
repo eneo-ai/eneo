@@ -103,6 +103,8 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
+    // Safari requires this call during the click, before the renderer import settles.
+    expect(clipboard.write).toHaveBeenCalledOnce();
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(Object.keys(item!.items)).toEqual(["text/plain", "text/html"]);
